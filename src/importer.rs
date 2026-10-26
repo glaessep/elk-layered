@@ -20,8 +20,6 @@ use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
     LayeredOptions, LayeringStrategy, NodeLabelPlacement, OrderingStrategy, PortConstraints,
 };
-use crate::random::RandomSeedAuthority;
-use crate::{GraphSeedScope, OperationSeed};
 
 // `org.eclipse.elk.edge.thickness` defaults to 1 in the pinned elkjs 0.9.3 CoreOptions.
 const ELK_DEFAULT_EDGE_THICKNESS: f64 = 1.0;
@@ -134,8 +132,12 @@ pub enum ImportError {
         edge_id: String,
         graph_parent: String,
     },
+    /// The caller's segment depth plus the depth inside this scope does not fit a `usize`.
     #[error("ELK scoped edge `{edge_id}` has a segment depth that overflows once rebased")]
-    SegmentDepthOverflow { edge_id: String },
+    SegmentDepthOverflow {
+        /// Id of the scoped edge.
+        edge_id: String,
+    },
 }
 
 pub type ImportResult<T> = Result<T, ImportError>;
@@ -146,101 +148,22 @@ pub type ImportResult<T> = Result<T, ImportError>;
 /// transform nodes into `layerless_nodes`, create nested graphs for hierarchy-enabled compound
 /// nodes, transform edges with synthetic ports, and mark graph properties discovered during import.
 pub fn import_graph(input: &ElkInputGraph) -> ImportResult<LGraph> {
-    import_graph_at_scope_and_segments(input, &[input.id.as_str()], &[])
-}
-
-pub fn import_graph_at_scope_and_segments(
-    input: &ElkInputGraph,
-    root_scope: &[&str],
-    segments: &[ElkInputEdgeSegment],
-) -> ImportResult<LGraph> {
-    let graph_scope = graph_seed_scope(input, root_scope);
-    import_graph_at_seed_scope_and_segments(input, &graph_scope, segments)
-}
-
-pub fn import_graph_at_seed_scope_and_segments(
-    input: &ElkInputGraph,
-    graph_scope: &GraphSeedScope,
-    segments: &[ElkInputEdgeSegment],
-) -> ImportResult<LGraph> {
-    import_graph_with_random_seed_authority(
-        input,
-        RandomSeedAuthority::require_explicit(),
-        graph_scope.clone(),
-        segments,
-    )
-}
-
-/// Imports an adapter graph using the seed captured by its owning layout operation.
-///
-/// The operation seed is retained by the root and every nested graph using stable graph-id paths.
-/// Execution resolves the upstream `randomSeed = 0` sentinel at GraphConfigurator boundaries; it
-/// never reads a clock, random device, environment variable, or process-global state. Raw callers
-/// that do not own an operation must use [`import_graph`], which fails closed for the sentinel.
-pub fn import_graph_with_operation_seed(
-    input: &ElkInputGraph,
-    operation_seed: OperationSeed,
-) -> ImportResult<LGraph> {
-    import_graph_with_operation_seed_at_scope(input, operation_seed, &[input.id.as_str()])
-}
-
-/// Like [`import_graph_with_operation_seed`], but anchors the graph at a caller-supplied absolute
-/// hierarchy path. Recursive layout wrappers use this to keep separately laid-out child graphs
-/// distinct from same-named roots.
-pub fn import_graph_with_operation_seed_at_scope(
-    input: &ElkInputGraph,
-    operation_seed: OperationSeed,
-    root_scope: &[&str],
-) -> ImportResult<LGraph> {
-    import_graph_with_operation_seed_at_scope_and_segments(input, operation_seed, root_scope, &[])
+    import_graph_with_segments(input, &[])
 }
 
 /// Imports a separately materialized hierarchy scope and its boundary edge pieces.
-pub fn import_graph_with_operation_seed_at_scope_and_segments(
+///
+/// Each segment is one scope-local piece of a hierarchy-crossing edge. The caller splits the
+/// edge; this function only builds the pieces that fall into the scope `input` describes.
+pub fn import_graph_with_segments(
     input: &ElkInputGraph,
-    operation_seed: OperationSeed,
-    root_scope: &[&str],
-    segments: &[ElkInputEdgeSegment],
-) -> ImportResult<LGraph> {
-    let graph_scope = graph_seed_scope(input, root_scope);
-    import_graph_with_operation_seed_at_seed_scope_and_segments(
-        input,
-        operation_seed,
-        &graph_scope,
-        segments,
-    )
-}
-
-pub fn import_graph_with_operation_seed_at_seed_scope_and_segments(
-    input: &ElkInputGraph,
-    operation_seed: OperationSeed,
-    graph_scope: &GraphSeedScope,
-    segments: &[ElkInputEdgeSegment],
-) -> ImportResult<LGraph> {
-    import_graph_with_random_seed_authority(
-        input,
-        RandomSeedAuthority::operation(operation_seed),
-        graph_scope.clone(),
-        segments,
-    )
-}
-
-fn import_graph_with_random_seed_authority(
-    input: &ElkInputGraph,
-    random_seed_authority: RandomSeedAuthority,
-    root_scope: GraphSeedScope,
     segments: &[ElkInputEdgeSegment],
 ) -> ImportResult<LGraph> {
     let index = InputIndex::new(input)?;
     validate_scoped_edge_segments(&index, segments)?;
     let prepared_segments =
         materialize_scoped_edge_segments(&index, segments, input.options.merge_edges);
-    let mut root = LGraph::new_with_random_seed_authority_at_scope(
-        input.id.clone(),
-        input.options.clone(),
-        random_seed_authority,
-        root_scope.clone(),
-    );
+    let mut root = LGraph::new(input.id.clone(), input.options.clone());
     root.options.direction = resolve_direction(root.options.direction);
     root.options.hierarchy_handling =
         resolve_root_hierarchy_handling(root.options.hierarchy_handling);
@@ -248,13 +171,7 @@ fn import_graph_with_random_seed_authority(
     let mut port_index = ImportPortIndex::new();
 
     if root.options.hierarchy_handling == HierarchyHandling::IncludeChildren {
-        root = import_hierarchical_graph(
-            &index,
-            root,
-            random_seed_authority,
-            &root_scope,
-            &mut port_index,
-        )?;
+        root = import_hierarchical_graph(&index, root, &mut port_index)?;
     } else {
         import_flat_graph(input, &index, &mut root, None, &mut port_index)?;
     }
@@ -263,14 +180,6 @@ fn import_graph_with_random_seed_authority(
 
     root.sync_graph_properties_to_options();
     Ok(root)
-}
-
-fn graph_seed_scope(input: &ElkInputGraph, root_scope: &[&str]) -> GraphSeedScope {
-    if root_scope.is_empty() {
-        GraphSeedScope::root(input.id.as_str())
-    } else {
-        GraphSeedScope::from_components(root_scope)
-    }
 }
 
 /// Rejects a scoped segment before any graph object is built. It checks that every endpoint is
@@ -735,8 +644,6 @@ impl HierarchicalImportArena {
 fn import_hierarchical_graph(
     index: &InputIndex<'_>,
     root: LGraph,
-    random_seed_authority: RandomSeedAuthority,
-    root_scope: &GraphSeedScope,
     port_index: &mut ImportPortIndex,
 ) -> ImportResult<LGraph> {
     let mut arena = HierarchicalImportArena::new(root, index.node_ids.len());
@@ -746,11 +653,11 @@ fn import_hierarchical_graph(
             .children(None)
             .iter()
             .copied()
-            .map(|node| (node, root_scope.clone(), ROOT_IMPORT_GRAPH_SLOT)),
+            .map(|node| (node, ROOT_IMPORT_GRAPH_SLOT)),
     );
 
     let mut model_order = 0usize;
-    while let Some((node, parent_scope, parent_slot)) = queue.pop_front() {
+    while let Some((node, parent_slot)) = queue.pop_front() {
         let node_model_order = needs_model_order_for_child(index, node).then(|| {
             let order = model_order;
             model_order += 1;
@@ -763,13 +670,7 @@ fn import_hierarchical_graph(
                 let materializes_children =
                     node_materializes_children(index, &parent_graph.options, node);
                 let nested_options = nested_graph_options(&parent_graph.options, node);
-                let nested_scope = parent_scope.child(node.id.as_str());
-                let mut nested_graph = LGraph::new_with_random_seed_authority_at_scope(
-                    node.id.clone(),
-                    nested_options,
-                    random_seed_authority,
-                    nested_scope.clone(),
-                );
+                let mut nested_graph = LGraph::new(node.id.clone(), nested_options);
                 nested_graph.parent_node_id = Some(node.id.clone());
                 apply_graph_padding_from_options(&mut nested_graph);
                 apply_inside_node_label_padding(
@@ -789,18 +690,13 @@ fn import_hierarchical_graph(
                         })?;
                 }
                 parent_graph.layerless_nodes[node_index].compound = true;
-                Some((
-                    node_index,
-                    nested_graph,
-                    nested_scope,
-                    materializes_children,
-                ))
+                Some((node_index, nested_graph, materializes_children))
             } else {
                 None
             }
         };
 
-        if let Some((parent_node, nested_graph, nested_scope, materializes_children)) = nested {
+        if let Some((parent_node, nested_graph, materializes_children)) = nested {
             let input_node = index
                 .node_index(node.id.as_str())
                 .expect("every imported node has a stable input index");
@@ -814,7 +710,7 @@ fn import_hierarchical_graph(
                         .children(Some(node.id.as_str()))
                         .iter()
                         .copied()
-                        .map(|child| (child, nested_scope.clone(), nested_slot)),
+                        .map(|child| (child, nested_slot)),
                 );
             }
         }
@@ -2152,9 +2048,7 @@ mod tests {
             edge_order,
         };
 
-        let imported =
-            import_graph_at_scope_and_segments(&input, &["root"], &[segment(0), segment(1)])
-                .unwrap();
+        let imported = import_graph_with_segments(&input, &[segment(0), segment(1)]).unwrap();
 
         assert_eq!(imported.edges.len(), 2);
         assert_eq!(imported.cross_hierarchy_edges.len(), 2);
@@ -2273,7 +2167,7 @@ mod tests {
         };
 
         assert_eq!(
-            import_graph_at_scope_and_segments(&nested_input, &["root"], &[deep]).unwrap_err(),
+            import_graph_with_segments(&nested_input, &[deep]).unwrap_err(),
             ImportError::SegmentDepthOverflow {
                 edge_id: "deep".to_string(),
             }
@@ -3102,7 +2996,7 @@ mod tests {
             edge_order: 0,
         };
 
-        let error = import_graph_at_scope_and_segments(&input, &["root"], &[segment])
+        let error = import_graph_with_segments(&input, &[segment])
             .expect_err("a flat import must reject a segment owned by a nested scope");
 
         assert_eq!(
@@ -3137,7 +3031,7 @@ mod tests {
             edge_order: 0,
         };
 
-        let error = import_graph_at_scope_and_segments(&input, &["root"], &[segment]).expect_err(
+        let error = import_graph_with_segments(&input, &[segment]).expect_err(
             "a locally includable scope below a SeparateChildren ancestor is unreachable",
         );
 
@@ -3173,7 +3067,7 @@ mod tests {
             edge_order: 0,
         };
 
-        let imported = import_graph_at_scope_and_segments(&input, &["root"], &[segment])
+        let imported = import_graph_with_segments(&input, &[segment])
             .expect("the nested owner scope is materialized");
 
         assert_eq!(imported.cross_hierarchy_edges.len(), 1);
@@ -3234,7 +3128,7 @@ mod tests {
             edge_order: 0,
         };
 
-        let imported = import_graph_at_scope_and_segments(&input, &["root"], &[segment])
+        let imported = import_graph_with_segments(&input, &[segment])
             .expect("the nested owner scope is materialized");
         let nested = imported
             .layerless_nodes
@@ -3268,98 +3162,17 @@ mod tests {
     }
 
     #[test]
-    fn import_preserves_elk_unseeded_zero_until_the_pipeline_resolves_it() {
+    fn import_keeps_elk_zero_seed_and_the_pipeline_rejects_it() {
         let mut input = graph(vec![node("A")], vec![]);
         input.options.random_seed = 0;
         let mut imported = import_graph(&input).expect("zero is a valid upstream input value");
 
         assert!(matches!(
             crate::pipeline::execute_ported_processors(&mut imported),
-            Err(crate::PipelineError::RandomSeed(crate::RandomSeedError::Unresolved {
-                graph_path
-            })) if graph_path == "root"
+            Err(crate::PipelineError::RandomSeed(crate::RandomSeedError::ZeroSeed {
+                graph_id
+            })) if graph_id == "root"
         ));
         assert_eq!(imported.options.random_seed, 0);
-    }
-
-    #[test]
-    fn operation_seed_scopes_nested_graphs_and_configuration_invocations() {
-        use std::num::NonZeroU64;
-
-        let mut group = node("group");
-        group.hierarchy_handling = Some(HierarchyHandling::IncludeChildren);
-        group.nested_options = Some(Box::new(LayeredOptions {
-            random_seed: 0,
-            ..Default::default()
-        }));
-        let mut child = node("child");
-        child.parent = Some("group".to_string());
-        let mut input = graph(vec![group, child], vec![]);
-        input.options.random_seed = 0;
-        let operation_seed = OperationSeed::from_operation_seed(
-            NonZeroU64::new(0x0ddc_0ffe_e15e_cafe).expect("nonzero operation seed"),
-        );
-
-        let mut first = import_graph_with_operation_seed(&input, operation_seed).expect("import");
-        let mut second = import_graph_with_operation_seed(&input, operation_seed).expect("import");
-        crate::configurator::configure_graph_properties(&mut first).expect("resolve first");
-        let first_root_first = first.random.clone().next_long();
-        let first_nested_first = first.layerless_nodes[0]
-            .nested_graph
-            .as_deref()
-            .expect("nested graph")
-            .random
-            .clone()
-            .next_long();
-        crate::configurator::configure_graph_properties(&mut first)
-            .expect("resolve repeated configuration");
-        let first_root_second = first.random.clone().next_long();
-        let first_nested_second = first.layerless_nodes[0]
-            .nested_graph
-            .as_deref()
-            .expect("nested graph")
-            .random
-            .clone()
-            .next_long();
-
-        crate::configurator::configure_graph_properties(&mut second).expect("resolve replay");
-        let second_root_first = second.random.clone().next_long();
-        let second_nested_first = second.layerless_nodes[0]
-            .nested_graph
-            .as_deref()
-            .expect("nested graph")
-            .random
-            .clone()
-            .next_long();
-        crate::configurator::configure_graph_properties(&mut second)
-            .expect("resolve replayed configuration");
-        let second_root_second = second.random.clone().next_long();
-        let second_nested_second = second.layerless_nodes[0]
-            .nested_graph
-            .as_deref()
-            .expect("nested graph")
-            .random
-            .clone()
-            .next_long();
-
-        assert_eq!(first.options.random_seed, 0);
-        assert_eq!(
-            first.layerless_nodes[0]
-                .nested_graph
-                .as_deref()
-                .expect("nested graph")
-                .options
-                .random_seed,
-            0
-        );
-        assert_ne!(first_root_first, first_nested_first);
-        assert_ne!(first_root_second, first_nested_second);
-        assert_ne!(first_root_first, first_root_second);
-        assert_ne!(first_nested_first, first_nested_second);
-        assert_eq!(first.options.random_seed, second.options.random_seed);
-        assert_eq!(first_root_first, second_root_first);
-        assert_eq!(first_nested_first, second_nested_first);
-        assert_eq!(first_root_second, second_root_second);
-        assert_eq!(first_nested_second, second_nested_second);
     }
 }

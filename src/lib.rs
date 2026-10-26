@@ -40,11 +40,7 @@ pub use graph::{
 };
 pub use importer::{
     ElkInputEdge, ElkInputEdgeSegment, ElkInputEdgeSegmentEndpoint, ElkInputGraph, ElkInputLabel,
-    ElkInputNode, ImportError, ImportResult, import_graph, import_graph_at_scope_and_segments,
-    import_graph_at_seed_scope_and_segments, import_graph_with_operation_seed,
-    import_graph_with_operation_seed_at_scope,
-    import_graph_with_operation_seed_at_scope_and_segments,
-    import_graph_with_operation_seed_at_seed_scope_and_segments,
+    ElkInputNode, ImportError, ImportResult, import_graph, import_graph_with_segments,
 };
 pub use intermediate::IntermediateError;
 pub use options::{
@@ -61,11 +57,11 @@ pub use pipeline::{
     assemble_processors, assemble_processors_for_graph, execute_ported_compound_processors,
     execute_ported_processors,
 };
-pub use random::{GraphSeedScope, OperationSeed, RandomSeedError};
+pub use random::RandomSeedError;
 
 /// Phase implementations are intentionally not public. In particular, this must fail to compile:
-/// a raw graph has not crossed the fallible configuration boundary that resolves or rejects
-/// ELK's `randomSeed = 0` sentinel.
+/// a raw graph has not crossed the fallible configuration boundary that rejects ELK's
+/// `randomSeed = 0` sentinel.
 ///
 /// ```compile_fail
 /// use elk_layered::{LGraph, LayeredOptions};

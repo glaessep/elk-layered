@@ -10,9 +10,7 @@ use super::options::{
     Alignment, ElkDirection, LayerConstraint, LayeredOptions, NodeLabelPlacement, PortAlignment,
     PortConstraints,
 };
-use crate::random::{
-    GraphSeedScope, JavaRandom, RandomSeedAuthority, RandomSeedError, RandomSeedPhase,
-};
+use crate::random::JavaRandom;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LGraph {
@@ -34,14 +32,6 @@ pub struct LGraph {
     pub cross_hierarchy_edges: Vec<CrossHierarchyEdge>,
     pub self_loop_holders: Vec<SelfLoopHolder>,
     pub in_layer_successor_constraints_between_non_dummies: bool,
-    random_seed_context: GraphRandomSeedContext,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct GraphRandomSeedContext {
-    authority: RandomSeedAuthority,
-    graph_scope: GraphSeedScope,
-    configuration_invocations: u64,
 }
 
 impl LGraph {
@@ -61,40 +51,8 @@ impl LGraph {
     }
 
     pub fn new(id: impl Into<String>, options: LayeredOptions) -> Self {
-        let id = id.into();
-        Self::new_with_random_seed_authority(
-            id.clone(),
-            options,
-            RandomSeedAuthority::require_explicit(),
-            vec![id],
-        )
-    }
-
-    pub(crate) fn new_with_random_seed_authority(
-        id: impl Into<String>,
-        options: LayeredOptions,
-        random_seed_authority: RandomSeedAuthority,
-        graph_path: Vec<String>,
-    ) -> Self {
-        let graph_path = graph_path.iter().map(String::as_str).collect::<Vec<_>>();
-        let graph_scope = GraphSeedScope::from_components(&graph_path);
-        Self::new_with_random_seed_authority_at_scope(
-            id,
-            options,
-            random_seed_authority,
-            graph_scope,
-        )
-    }
-
-    pub(crate) fn new_with_random_seed_authority_at_scope(
-        id: impl Into<String>,
-        options: LayeredOptions,
-        random_seed_authority: RandomSeedAuthority,
-        graph_scope: GraphSeedScope,
-    ) -> Self {
-        let id = id.into();
         Self {
-            id,
+            id: id.into(),
             options,
             size: LSize::default(),
             padding: LPadding::default(),
@@ -104,8 +62,8 @@ impl LGraph {
             edges: Vec::new(),
             graph_properties: GraphProperties::default(),
             cyclic: false,
-            // The seed is resolved immediately before processor assembly. The placeholder is
-            // never an execution source because every public pipeline entry configures first.
+            // `configure_graph_properties` replaces this with the stream seeded from
+            // `options.random_seed`. Every public pipeline entry configures first.
             random: JavaRandom::default(),
             parent_node_id: None,
             hidden_nodes: Vec::new(),
@@ -114,47 +72,21 @@ impl LGraph {
             cross_hierarchy_edges: Vec::new(),
             self_loop_holders: Vec::new(),
             in_layer_successor_constraints_between_non_dummies: false,
-            random_seed_context: GraphRandomSeedContext {
-                authority: random_seed_authority,
-                graph_scope,
-                configuration_invocations: 0,
-            },
         }
     }
 
     /// Copies configured properties without copying the graph's dense arenas.
     /// Components use the already-resolved random stream through their serial executor.
     pub(crate) fn component_shell(&self) -> Self {
-        let mut graph = Self::new_with_random_seed_authority_at_scope(
-            self.id.clone(),
-            self.options.clone(),
-            self.random_seed_context.authority,
-            self.random_seed_context.graph_scope.clone(),
-        );
+        let mut graph = Self::new(self.id.clone(), self.options.clone());
         graph.options.node_size_minimum = None;
         graph.padding = self.padding;
         graph.graph_properties = self.graph_properties.clone();
         graph.parent_node_id = self.parent_node_id.clone();
         graph.random = self.random.clone();
-        graph.random_seed_context = self.random_seed_context.clone();
         graph.in_layer_successor_constraints_between_non_dummies =
             self.in_layer_successor_constraints_between_non_dummies;
         graph
-    }
-
-    pub(crate) fn resolve_random_seed_for_configuration(&mut self) -> Result<i64, RandomSeedError> {
-        let invocation = self.random_seed_context.configuration_invocations;
-        let seed = self.random_seed_context.authority.resolve_scope(
-            self.options.random_seed,
-            &self.random_seed_context.graph_scope,
-            RandomSeedPhase::GraphConfigurator,
-            invocation,
-        )?;
-        self.random_seed_context.configuration_invocations = self
-            .random_seed_context
-            .configuration_invocations
-            .saturating_add(1);
-        Ok(seed)
     }
 
     pub fn sync_graph_properties_to_options(&mut self) {

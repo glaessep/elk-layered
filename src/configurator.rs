@@ -28,6 +28,9 @@ impl Default for LayeredSpacings {
 /// This mirrors the non-mutating Rust subset of `GraphConfigurator.configureGraphProperties(...)`:
 /// keep discovered graph properties synchronized with options, normalize undefined direction, enforce
 /// minimum edge-edge spacing, and set the default straight-edge preference based on edge routing.
+///
+/// Every graph in the hierarchy seeds its own `JavaRandom` with `random_seed`, the way ELK does.
+/// A seed of 0 is an error: ELK reads it as a time-based seed, and this crate stays deterministic.
 pub fn configure_graph_properties(graph: &mut LGraph) -> Result<(), RandomSeedError> {
     graph.try_for_each_graph_mut(|graph| {
         graph.graph_properties.apply_to_options(&mut graph.options);
@@ -41,7 +44,12 @@ pub fn configure_graph_properties(graph: &mut LGraph) -> Result<(), RandomSeedEr
             graph.options.node_placement_favor_straight_edges =
                 Some(graph.options.edge_routing == EdgeRouting::Orthogonal);
         }
-        graph.random = JavaRandom::new(graph.resolve_random_seed_for_configuration()?);
+        if graph.options.random_seed == 0 {
+            return Err(RandomSeedError::ZeroSeed {
+                graph_id: graph.id.clone(),
+            });
+        }
+        graph.random = JavaRandom::new(i64::from(graph.options.random_seed));
         Ok(())
     })
 }
@@ -68,7 +76,7 @@ mod tests {
     use crate::LGraph;
 
     #[test]
-    fn raw_graph_with_upstream_zero_fails_closed_at_the_configurator_boundary() {
+    fn upstream_zero_seed_is_an_error_at_the_configurator_boundary() {
         let options = LayeredOptions {
             random_seed: 0,
             ..Default::default()
@@ -77,8 +85,55 @@ mod tests {
 
         assert_eq!(
             configure_graph_properties(&mut graph),
-            Err(RandomSeedError::Unresolved {
-                graph_path: "root".to_string(),
+            Err(RandomSeedError::ZeroSeed {
+                graph_id: "root".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn each_graph_seeds_its_random_with_its_own_signed_seed() {
+        let mut root = LGraph::new(
+            "root",
+            LayeredOptions {
+                random_seed: i32::MIN,
+                ..Default::default()
+            },
+        );
+        let mut holder = crate::LNode::new("holder", 10.0, 10.0, None);
+        holder.nested_graph = Some(Box::new(LGraph::new(
+            "child",
+            LayeredOptions {
+                random_seed: -7,
+                ..Default::default()
+            },
+        )));
+        root.layerless_nodes.push(holder);
+
+        configure_graph_properties(&mut root).unwrap();
+
+        assert_eq!(root.random, JavaRandom::new(i64::from(i32::MIN)));
+        let child = root.layerless_nodes[0].nested_graph.as_deref().unwrap();
+        assert_eq!(child.random, JavaRandom::new(-7));
+    }
+
+    #[test]
+    fn nested_graph_with_zero_seed_names_itself_in_the_error() {
+        let mut root = LGraph::new("root", LayeredOptions::default());
+        let mut holder = crate::LNode::new("holder", 10.0, 10.0, None);
+        holder.nested_graph = Some(Box::new(LGraph::new(
+            "child",
+            LayeredOptions {
+                random_seed: 0,
+                ..Default::default()
+            },
+        )));
+        root.layerless_nodes.push(holder);
+
+        assert_eq!(
+            configure_graph_properties(&mut root),
+            Err(RandomSeedError::ZeroSeed {
+                graph_id: "child".to_string(),
             })
         );
     }
