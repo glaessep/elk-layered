@@ -12,7 +12,6 @@ use crate::graph::{
     PortType, create_external_port_dummy,
 };
 use crate::options::{ElkDirection, PortConstraints};
-use crate::work::{WorkError, checked_sum};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingCompoundSegment {
@@ -66,8 +65,9 @@ where
     let common_depth = shape.common_depth;
 
     let mut segments = Vec::with_capacity(
-        cross_hierarchy_segment_count(source_path.len(), target_path.len(), shape)
-            .expect("in-memory hierarchy paths cannot overflow their segment count"),
+        source_path.len().saturating_sub(common_depth)
+            + target_path.len().saturating_sub(common_depth)
+            + usize::from(!shape.source_is_target_ancestor && !shape.target_is_source_ancestor),
     );
 
     for depth in (common_depth + 1..=source_path.len()).rev() {
@@ -171,36 +171,6 @@ where
     }
 
     segments
-}
-
-pub(crate) fn source_ported_cross_hierarchy_segment_count<SourcePath, TargetPath>(
-    source: &str,
-    target: &str,
-    source_path: &[SourcePath],
-    target_path: &[TargetPath],
-) -> Result<usize, WorkError>
-where
-    SourcePath: AsRef<str>,
-    TargetPath: AsRef<str>,
-{
-    let shape = cross_hierarchy_shape(source, target, source_path, target_path);
-    cross_hierarchy_segment_count(source_path.len(), target_path.len(), shape)
-}
-
-fn cross_hierarchy_segment_count(
-    source_depth: usize,
-    target_depth: usize,
-    shape: CrossHierarchyShape,
-) -> Result<usize, WorkError> {
-    checked_sum([
-        source_depth
-            .checked_sub(shape.common_depth)
-            .ok_or(WorkError::ArithmeticOverflow)?,
-        target_depth
-            .checked_sub(shape.common_depth)
-            .ok_or(WorkError::ArithmeticOverflow)?,
-        usize::from(!shape.source_is_target_ancestor && !shape.target_is_source_ancestor),
-    ])
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -20,12 +20,9 @@ mod min_width;
 mod stretch_width;
 
 use crate::options::LayeringStrategy;
-use crate::work::{WorkControl, WorkError, checked_add, checked_mul, checked_sum};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LayeringError {
-    #[error(transparent)]
-    Work(#[from] WorkError),
     #[error("layer assignment requires an acyclic graph")]
     CyclicGraph,
     #[error("stretch-width layering cannot normalize these node dimensions")]
@@ -43,19 +40,7 @@ struct LayeringInput<'a> {
 }
 
 impl<'a> LayeringInput<'a> {
-    fn new(graph: &'a LGraph, work: &mut dyn WorkControl) -> LayeringResult<Self> {
-        let ports = graph
-            .layerless_nodes
-            .iter()
-            .try_fold(0, |total, node| checked_add(total, node.ports.len()))?;
-        charge(
-            work,
-            checked_sum([
-                checked_mul(graph.layerless_nodes.len(), 8)?,
-                checked_mul(graph.edges.len(), 4)?,
-                ports,
-            ])?,
-        )?;
+    fn new(graph: &'a LGraph) -> Self {
         let nodes = graph
             .layerless_nodes
             .iter()
@@ -80,12 +65,12 @@ impl<'a> LayeringInput<'a> {
                     .collect()
             })
             .collect();
-        Ok(Self {
+        Self {
             graph,
             nodes,
             incoming,
             outgoing,
-        })
+        }
     }
 
     fn source(&self, edge: usize) -> usize {
@@ -99,30 +84,22 @@ impl<'a> LayeringInput<'a> {
     }
 }
 
-fn charge(work: &mut dyn WorkControl, units: usize) -> LayeringResult<()> {
-    work.check(units)?;
-    work.charge(units)?;
-    Ok(())
-}
-
-/// Compute in private state, including bounded checkpoints inside adaptive searches. Only a
-/// completed layering mutates the graph, so interruption never exposes half-assigned layers.
+/// Compute the layers in private state. Only a completed layering mutates the graph, so an error
+/// never leaves half-assigned layers.
 pub(crate) fn layer_with_strategy(
     graph: &mut LGraph,
     strategy: LayeringStrategy,
-    work: &mut dyn WorkControl,
 ) -> LayeringResult<()> {
-    let input = LayeringInput::new(graph, work)?;
+    let input = LayeringInput::new(graph);
     let layers = match strategy {
-        LayeringStrategy::LongestPath => longest_path::layer(&input, false, work)?,
-        LayeringStrategy::LongestPathSource => longest_path::layer(&input, true, work)?,
-        LayeringStrategy::CoffmanGraham => coffman_graham::layer(&input, work)?,
-        LayeringStrategy::Interactive => interactive::layer(&input, work)?,
-        LayeringStrategy::MinWidth => min_width::layer(&input, work)?,
-        LayeringStrategy::StretchWidth => stretch_width::layer(&input, work)?,
+        LayeringStrategy::LongestPath => longest_path::layer(&input, false)?,
+        LayeringStrategy::LongestPathSource => longest_path::layer(&input, true)?,
+        LayeringStrategy::CoffmanGraham => coffman_graham::layer(&input)?,
+        LayeringStrategy::Interactive => interactive::layer(&input)?,
+        LayeringStrategy::MinWidth => min_width::layer(&input)?,
+        LayeringStrategy::StretchWidth => stretch_width::layer(&input)?,
         _ => unreachable!("the pipeline dispatches only the six source-backed layerers here"),
     };
-    charge(work, checked_add(input.len(), layers.len())?)?;
     graph.clear_layers();
     for nodes in layers {
         let index = graph.layers.len();

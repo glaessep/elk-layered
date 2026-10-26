@@ -1,15 +1,11 @@
 //! Stretch-width layering translated from Eclipse ELK, EPL-2.0:
 //! https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/StretchWidthLayerer.java
 
-use super::{LayeringError, LayeringInput, LayeringResult, charge};
+use super::{LayeringError, LayeringInput, LayeringResult};
 use crate::graph::LNodeKind;
-use crate::work::{WorkControl, checked_n_log_n, checked_sum};
 use std::cmp::Reverse;
 
-pub(super) fn layer(
-    input: &LayeringInput<'_>,
-    work: &mut dyn WorkControl,
-) -> LayeringResult<Vec<Vec<usize>>> {
+pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>> {
     if input.nodes.is_empty() {
         return Ok(Vec::new());
     }
@@ -20,7 +16,6 @@ pub(super) fn layer(
     let mut maximum = f64::NEG_INFINITY;
     let mut total_outgoing = 0.0;
     for &node in &input.nodes {
-        charge(work, checked_sum([input.incoming[node].len(), 1])?)?;
         outgoing[node] = input.outgoing[node].len();
         incoming[node] = input.incoming[node].len();
         ranks[node] = input.incoming[node]
@@ -35,7 +30,6 @@ pub(super) fn layer(
         }
     }
     let mut nodes = input.nodes.clone();
-    charge(work, checked_n_log_n(nodes.len())?)?;
     nodes.sort_by_key(|&node| Reverse(ranks[node]));
     // ELK normalizes nodes before clamping the minimum to one. A zero minimum together with a
     // positive height makes the adaptive retry loop infinite. Keep the all-zero case's NaN
@@ -58,7 +52,6 @@ pub(super) fn layer(
     let mut width_current = 0.0;
     let mut width_up = 0.0;
     while !remaining.is_empty() {
-        charge(work, checked_sum([remaining.len(), 1])?)?;
         let selected = remaining
             .iter()
             .position(|&node| remaining_outgoing[node] == 0);
@@ -74,7 +67,6 @@ pub(super) fn layer(
                 return Err(LayeringError::CyclicGraph);
             }
             for &node in current.iter() {
-                charge(work, checked_sum([input.incoming[node].len(), 1])?)?;
                 for &edge in &input.incoming[node] {
                     remaining_outgoing[input.source(edge)] -= 1;
                 }
@@ -83,7 +75,6 @@ pub(super) fn layer(
             width_current = width_up;
             width_up = 0.0;
         } else if go_up {
-            charge(work, checked_sum([input.len(), nodes.len(), layers.len()])?)?;
             layers.clear();
             layers.push(Vec::new());
             width_current = 0.0;
