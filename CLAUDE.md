@@ -41,11 +41,12 @@ The same graph gives the same layout, bit for bit, on every machine.
 ## Tests
 
 - **Test each feature for every equivalence class, boundary and error case.** One happy path
-  is not enough. Example: an option that takes a number gets a test for a valid value, for zero,
-  for a negative value, and for text that is no number.
-- **Break every test once on purpose and watch it fail.** Then restore the code. Name the
-  mutation in a comment above the test, such as `// Mutation: drop the zero check in
-  parse_spacing.`
+  is not enough. Example: a node width is tested at a normal value, at zero, which ELK accepts,
+  and at NaN, which `layout()` refuses with `Error::InvalidSize`.
+- **Break the code each test guards once on purpose, and watch the test fail.** Then restore
+  the code. Name that mutation in a comment above the test:
+  `// Mutation: accept a NaN width.` A table-driven or snapshot test names one mutation that
+  fails it. The rule binds new and changed tests; an older test gets its comment when it changes.
 
 ```bash
 cargo build
@@ -97,7 +98,7 @@ A review checks, in this order:
 4. **Caller input.** Malformed input gives an error, never a panic: no `unwrap`, `expect` or
    indexing that a caller's graph can break.
 5. **Tests.** Each new feature is tested for every equivalence class, boundary and error case,
-   and each test names the mutation that broke it. A change to
+   and each new or changed test names the mutation that broke it. A change to
    `tests/snapshots/` is explained in the pull request.
 6. **Scope.** The pull request does what its issue asks, and no more.
 
