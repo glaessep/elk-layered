@@ -131,3 +131,61 @@ fn a_graph_with_both_option_keys_is_an_error() {
     let both = json!({"id": "r", "layoutOptions": {}, "properties": {}});
     assert!(serde_json::from_value::<ElkNode>(both).is_err());
 }
+
+// Mutation: drop `alias = "source"` from `ElkEdge::sources`.
+#[test]
+fn the_old_edge_form_reads_like_sources_and_targets() {
+    let graph = |edge: Value| -> ElkNode {
+        serde_json::from_value(json!({
+            "id": "root",
+            "children": [
+                {"id": "a", "width": 60, "height": 30},
+                {"id": "b", "width": 60, "height": 30}
+            ],
+            "edges": [edge]
+        }))
+        .unwrap()
+    };
+    let old = graph(json!({"id": "e", "source": "a", "target": "b"}));
+    assert_eq!(old.edges[0].sources, ["a"]);
+    assert_eq!(old.edges[0].targets, ["b"]);
+    let new = graph(json!({"id": "e", "sources": ["a"], "targets": ["b"]}));
+    assert_eq!(layout(&old).unwrap(), layout(&new).unwrap());
+    // The result is written in the new form.
+    let back = serde_json::to_value(layout(&old).unwrap()).unwrap();
+    assert_eq!(back["edges"][0]["sources"], json!(["a"]));
+    assert!(back["edges"][0].get("source").is_none());
+}
+
+// Mutation: let the `ends` deserializer accept only a list.
+#[test]
+fn an_edge_end_is_a_string_or_a_list_of_strings() {
+    let edge = |ends: Value| -> Result<ElkNode, _> {
+        serde_json::from_value(json!({"id": "r", "edges": [{"id": "e", "sources": ends}]}))
+    };
+    assert!(edge(json!("a")).is_ok());
+    assert!(edge(json!(["a", "b"])).is_ok());
+    assert!(edge(json!(5)).is_err());
+    assert!(edge(json!([5])).is_err());
+    assert!(edge(json!({"id": "a"})).is_err());
+    let both = json!({"id": "r", "edges": [{"id": "e", "source": "a", "sources": ["a"]}]});
+    assert!(serde_json::from_value::<ElkNode>(both).is_err());
+}
+
+// Mutation: make `layout` skip the ports check, so the port key's node lays out port-free.
+#[test]
+fn a_port_in_the_old_edge_form_is_refused() {
+    let graph: ElkNode = serde_json::from_value(json!({
+        "id": "root",
+        "children": [
+            {"id": "a", "width": 60, "height": 30, "ports": [{"id": "p"}]},
+            {"id": "b", "width": 60, "height": 30}
+        ],
+        "edges": [{"id": "e", "source": "a", "sourcePort": "p", "target": "b"}]
+    }))
+    .unwrap();
+    assert!(matches!(
+        layout(&graph),
+        Err(elk_layered::Error::Unsupported { .. })
+    ));
+}
