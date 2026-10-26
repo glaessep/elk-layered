@@ -37,9 +37,6 @@ function generator(seed) {
 
 const rand = generator(SEED);
 
-// elkjs gives back every field of the input, an empty `edges` list too, and elk-layered writes no
-// empty list. So the generator writes none either: a list appears only with something in it.
-//
 // Sizes on a half-pixel grid, and now and then on a tenth, which no binary fraction holds exactly.
 function size(lo, hi) {
   if (rand.chance(0.1)) return lo + rand.int(0, (hi - lo) * 10) / 10;
@@ -52,6 +49,8 @@ function label(text) {
 
 const WORDS = ["req", "ack", "x", "speed", "0..*", "1", "pedal %", "brake request", "on"];
 
+// elkjs gives back every field of the input, an empty `edges` list too, and elk-layered writes no
+// empty list. So the generator writes none either: a list appears only with something in it.
 function graph() {
   const options = { "elk.algorithm": "layered" };
   const direction = rand.pick([null, "RIGHT", "LEFT", "DOWN", "UP"]);
