@@ -8,21 +8,23 @@
 //! After a change that is meant to move the layout, regenerate and read the diff:
 //!
 //! ```text
-//! UPDATE_SNAPSHOTS=1 cargo test --test layout_snapshot
+//! UPDATE_SNAPSHOTS=1 cargo test snapshot_tests
 //! ```
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use elk_layered::{
-    CycleBreakingStrategy, EdgeLabelPlacement, ElkDirection, ElkInputEdge, ElkInputGraph,
-    ElkInputLabel, ElkInputNode, FixedAlignment, HierarchyHandling, LGraph, LPoint, LayeredOptions,
-    NodeFlexibility, NodeLabelPlacement, OrderingStrategy, execute_ported_compound_processors,
-    execute_ported_processors, import_graph,
+use crate::graph::{EdgeLabelPlacement, LGraph, LNode, LPoint};
+use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, import_graph};
+use crate::options::{
+    CycleBreakingStrategy, ElkDirection, FixedAlignment, HierarchyHandling, LayeredOptions,
+    NodeFlexibility, NodeLabelPlacement, OrderingStrategy,
 };
+use crate::pipeline::{execute_ported_compound_processors, execute_ported_processors};
 
 fn node(id: &str, width: f64, height: f64, parent: Option<&str>) -> ElkInputNode {
     ElkInputNode {
+        parent_settings: Default::default(),
         id: id.into(),
         width,
         height,
@@ -36,7 +38,10 @@ fn node(id: &str, width: f64, height: f64, parent: Option<&str>) -> ElkInputNode
         node_flexibility: NodeFlexibility::default(),
         ports_surrounding: None,
         nested_options: None,
-        label: None,
+        labels: Vec::new(),
+        node_size: Default::default(),
+        self_loop_distribution: Default::default(),
+        self_loop_ordering: Default::default(),
     }
 }
 
@@ -52,6 +57,7 @@ fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
         priority_direction: 0,
         priority_shortness: 0,
         priority_straightness: 0,
+        container: None,
     }
 }
 
@@ -374,7 +380,7 @@ fn dump(graph: &LGraph, origin: LPoint, depth: usize, out: &mut String) {
     for edge in &graph.edges {
         let source = &graph.layerless_nodes[edge.source.node];
         let target = &graph.layerless_nodes[edge.target.node];
-        let end = |n: &elk_layered::LNode, p: usize| {
+        let end = |n: &LNode, p: usize| {
             let port = &n.ports[p];
             add(add(add(origin, n.position), port.position), port.anchor)
         };
@@ -437,7 +443,7 @@ fn every_layout_matches_its_committed_snapshot() {
     }
     assert!(
         failures.is_empty(),
-        "{}\nRun UPDATE_SNAPSHOTS=1 cargo test --test layout_snapshot and read the diff.",
+        "{}\nRun UPDATE_SNAPSHOTS=1 cargo test snapshot_tests and read the diff.",
         failures.join("\n")
     );
 }

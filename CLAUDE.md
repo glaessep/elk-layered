@@ -42,6 +42,9 @@ The same graph gives the same layout, bit for bit, on every machine.
 
 - **Each feature gets at least one test that shows it works.** It does not need full coverage,
   but it must fail when the feature breaks.
+- **The elkjs parity suite runs in CI.** `tests/elkjs/` holds ELK graphs and what elkjs 0.9.3
+  returns for them; `tests/elkjs_parity.rs` holds `layout()` to them, number for number.
+  `oracle/record.mjs` records a new case. Never edit an expected file by hand.
 - Before you call a test done, break the code it guards and watch the test fail. Then restore
   the code.
 

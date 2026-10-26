@@ -236,8 +236,13 @@ impl EdgeLabelSideSelection {
     }
 }
 
+/// Where a node label goes: one cell of ELK's node label grid, or `Fixed` when ELK leaves the
+/// label where the input put it.
+///
+/// Source: `org.eclipse.elk.alg.common.nodespacing.internal.NodeLabelLocation`. `Fixed` stands
+/// for ELK's `UNDEFINED`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum NodeLabelPlacement {
+pub enum NodeLabelLocation {
     #[default]
     Fixed,
     InsideTopLeft,
@@ -261,6 +266,486 @@ pub enum NodeLabelPlacement {
     OutsideRightTop,
     OutsideRightCenter,
     OutsideRightBottom,
+}
+
+impl NodeLabelLocation {
+    /// Whether the location lies inside the node.
+    ///
+    /// Source: `NodeLabelLocation.isInsideLocation`.
+    pub(crate) fn is_inside(self) -> bool {
+        matches!(
+            self,
+            Self::InsideTopLeft
+                | Self::InsideTopCenter
+                | Self::InsideTopRight
+                | Self::InsideCenterLeft
+                | Self::InsideCenter
+                | Self::InsideCenterRight
+                | Self::InsideBottomLeft
+                | Self::InsideBottomCenter
+                | Self::InsideBottomRight
+        )
+    }
+}
+
+/// One value of ELK's `NodeLabelPlacement` enumeration.
+///
+/// Source: `org.eclipse.elk.core.options.NodeLabelPlacement`. The order is ELK's ordinal order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NodeLabelPlacementFlag {
+    HLeft,
+    HCenter,
+    HRight,
+    VTop,
+    VCenter,
+    VBottom,
+    Inside,
+    Outside,
+    HPriority,
+}
+
+impl NodeLabelPlacementFlag {
+    pub(crate) const ALL: [Self; 9] = [
+        Self::HLeft,
+        Self::HCenter,
+        Self::HRight,
+        Self::VTop,
+        Self::VCenter,
+        Self::VBottom,
+        Self::Inside,
+        Self::Outside,
+        Self::HPriority,
+    ];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::HLeft => "H_LEFT",
+            Self::HCenter => "H_CENTER",
+            Self::HRight => "H_RIGHT",
+            Self::VTop => "V_TOP",
+            Self::VCenter => "V_CENTER",
+            Self::VBottom => "V_BOTTOM",
+            Self::Inside => "INSIDE",
+            Self::Outside => "OUTSIDE",
+            Self::HPriority => "H_PRIORITY",
+        }
+    }
+
+    const fn bit(self) -> u16 {
+        1 << (self as u16)
+    }
+}
+
+/// ELK's `EnumSet<NodeLabelPlacement>`: where node labels go. The empty set is ELK's `fixed()`,
+/// which leaves labels where the input put them.
+///
+/// ELK keeps the set, not the location it maps to, because mirroring and transposing a layout
+/// direction work on the set. A set that maps to no location can map to one once transposed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub struct NodeLabelPlacement(u16);
+
+impl NodeLabelPlacement {
+    /// The empty set: labels stay where the input put them.
+    pub const FIXED: Self = Self(0);
+
+    pub(crate) const fn of(flags: &[NodeLabelPlacementFlag]) -> Self {
+        let mut bits = 0;
+        let mut i = 0;
+        while i < flags.len() {
+            bits |= flags[i].bit();
+            i += 1;
+        }
+        Self(bits)
+    }
+
+    pub(crate) fn contains(self, flag: NodeLabelPlacementFlag) -> bool {
+        self.0 & flag.bit() != 0
+    }
+
+    pub(crate) fn insert(&mut self, flag: NodeLabelPlacementFlag) {
+        self.0 |= flag.bit();
+    }
+
+    pub(crate) fn remove(&mut self, flag: NodeLabelPlacementFlag) {
+        self.0 &= !flag.bit();
+    }
+
+    /// Whether the set is empty, which ELK calls fixed.
+    pub fn is_fixed(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Source: `NodeLabelPlacement.isValid`: at most one of inside and outside, one horizontal
+    /// and one vertical value.
+    pub(crate) fn is_valid(self) -> bool {
+        use NodeLabelPlacementFlag::*;
+        let count = |flags: [NodeLabelPlacementFlag; 3]| {
+            flags.iter().filter(|flag| self.contains(**flag)).count()
+        };
+        (u16::from(self.contains(Inside)) + u16::from(self.contains(Outside))) <= 1
+            && count([HLeft, HCenter, HRight]) <= 1
+            && count([VTop, VCenter, VBottom]) <= 1
+    }
+
+    /// The location the set maps to.
+    ///
+    /// Source: `NodeLabelLocation.fromNodeLabelPlacement`, which compares the whole set with
+    /// the sets each location is assigned.
+    pub fn location(self) -> NodeLabelLocation {
+        NODE_LABEL_LOCATIONS
+            .iter()
+            .find(|(_, sets)| sets.contains(&self))
+            .map_or(NodeLabelLocation::Fixed, |(location, _)| *location)
+    }
+
+    /// The first set ELK assigns to a location; `Fixed` gives the empty set.
+    #[cfg(test)]
+    pub fn from_location(location: NodeLabelLocation) -> Self {
+        NODE_LABEL_LOCATIONS
+            .iter()
+            .find(|(candidate, _)| *candidate == location)
+            .map_or(Self::FIXED, |(_, sets)| sets[0])
+    }
+
+    /// Source: `GraphTransformer.mirrorNodeLabelPlacementX`.
+    pub(crate) fn mirror_x(mut self) -> Self {
+        use NodeLabelPlacementFlag::*;
+        if self.contains(HLeft) {
+            self.remove(HLeft);
+            self.insert(HRight);
+        } else if self.contains(HRight) {
+            self.remove(HRight);
+            self.insert(HLeft);
+        }
+        self
+    }
+
+    /// Source: `GraphTransformer.mirrorNodeLabelPlacementY`.
+    pub(crate) fn mirror_y(mut self) -> Self {
+        use NodeLabelPlacementFlag::*;
+        if self.contains(VTop) {
+            self.remove(VTop);
+            self.insert(VBottom);
+        } else if self.contains(VBottom) {
+            self.remove(VBottom);
+            self.insert(VTop);
+        }
+        self
+    }
+
+    /// Source: `GraphTransformer.transposeNodeLabelPlacement`.
+    pub(crate) fn transpose(self) -> Self {
+        use NodeLabelPlacementFlag::*;
+        if self.is_fixed() {
+            return self;
+        }
+        let mut new = Self::FIXED;
+        if self.contains(Inside) {
+            new.insert(Inside);
+        } else {
+            new.insert(Outside);
+        }
+        if !self.contains(HPriority) {
+            new.insert(HPriority);
+        }
+        if self.contains(HLeft) {
+            new.insert(VTop);
+        } else if self.contains(HCenter) {
+            new.insert(VCenter);
+        } else if self.contains(HRight) {
+            new.insert(VBottom);
+        }
+        if self.contains(VTop) {
+            new.insert(HLeft);
+        } else if self.contains(VCenter) {
+            new.insert(HCenter);
+        } else if self.contains(VBottom) {
+            new.insert(HRight);
+        }
+        new
+    }
+}
+
+/// Each location with the sets ELK assigns to it, in ELK's declaration order.
+///
+/// Source: `NodeLabelLocation`'s constructor arguments.
+const NODE_LABEL_LOCATIONS: [(NodeLabelLocation, &[NodeLabelPlacement]); 21] = {
+    use NodeLabelLocation as L;
+    use NodeLabelPlacementFlag::*;
+    const fn set(flags: &[NodeLabelPlacementFlag]) -> NodeLabelPlacement {
+        NodeLabelPlacement::of(flags)
+    }
+    [
+        (L::OutsideTopLeft, &[set(&[Outside, VTop, HLeft])]),
+        (
+            L::OutsideTopCenter,
+            &[
+                set(&[Outside, VTop, HCenter]),
+                set(&[Outside, VTop, HCenter, HPriority]),
+            ],
+        ),
+        (L::OutsideTopRight, &[set(&[Outside, VTop, HRight])]),
+        (L::OutsideBottomLeft, &[set(&[Outside, VBottom, HLeft])]),
+        (
+            L::OutsideBottomCenter,
+            &[
+                set(&[Outside, VBottom, HCenter]),
+                set(&[Outside, VBottom, HCenter, HPriority]),
+            ],
+        ),
+        (L::OutsideBottomRight, &[set(&[Outside, VBottom, HRight])]),
+        (
+            L::OutsideLeftTop,
+            &[set(&[Outside, HLeft, VTop, HPriority])],
+        ),
+        (
+            L::OutsideLeftCenter,
+            &[
+                set(&[Outside, HLeft, VCenter]),
+                set(&[Outside, HLeft, VCenter, HPriority]),
+            ],
+        ),
+        (
+            L::OutsideLeftBottom,
+            &[set(&[Outside, HLeft, VBottom, HPriority])],
+        ),
+        (
+            L::OutsideRightTop,
+            &[set(&[Outside, HRight, VTop, HPriority])],
+        ),
+        (
+            L::OutsideRightCenter,
+            &[
+                set(&[Outside, HRight, VCenter]),
+                set(&[Outside, HRight, VCenter, HPriority]),
+            ],
+        ),
+        (
+            L::OutsideRightBottom,
+            &[set(&[Outside, HRight, VBottom, HPriority])],
+        ),
+        (
+            L::InsideTopLeft,
+            &[
+                set(&[Inside, VTop, HLeft]),
+                set(&[Inside, VTop, HLeft, HPriority]),
+            ],
+        ),
+        (
+            L::InsideTopCenter,
+            &[
+                set(&[Inside, VTop, HCenter]),
+                set(&[Inside, VTop, HCenter, HPriority]),
+            ],
+        ),
+        (
+            L::InsideTopRight,
+            &[
+                set(&[Inside, VTop, HRight]),
+                set(&[Inside, VTop, HRight, HPriority]),
+            ],
+        ),
+        (
+            L::InsideCenterLeft,
+            &[
+                set(&[Inside, VCenter, HLeft]),
+                set(&[Inside, VCenter, HLeft, HPriority]),
+            ],
+        ),
+        (
+            L::InsideCenter,
+            &[
+                set(&[Inside, VCenter, HCenter]),
+                set(&[Inside, VCenter, HCenter, HPriority]),
+            ],
+        ),
+        (
+            L::InsideCenterRight,
+            &[
+                set(&[Inside, VCenter, HRight]),
+                set(&[Inside, VCenter, HRight, HPriority]),
+            ],
+        ),
+        (
+            L::InsideBottomLeft,
+            &[
+                set(&[Inside, VBottom, HLeft]),
+                set(&[Inside, VBottom, HLeft, HPriority]),
+            ],
+        ),
+        (
+            L::InsideBottomCenter,
+            &[
+                set(&[Inside, VBottom, HCenter]),
+                set(&[Inside, VBottom, HCenter, HPriority]),
+            ],
+        ),
+        (
+            L::InsideBottomRight,
+            &[
+                set(&[Inside, VBottom, HRight]),
+                set(&[Inside, VBottom, HRight, HPriority]),
+            ],
+        ),
+    ]
+};
+
+/// ELK's `EnumSet<SizeConstraint>`: what a node's size must make room for. The empty set is
+/// ELK's `fixed()`.
+///
+/// Source: `org.eclipse.elk.core.options.SizeConstraint`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub struct SizeConstraints(u8);
+
+impl SizeConstraints {
+    /// The empty set: the size stays as given.
+    pub const FIXED: Self = Self(0);
+    /// `PORTS`.
+    pub const PORTS: Self = Self(1);
+    /// `PORT_LABELS`.
+    pub const PORT_LABELS: Self = Self(1 << 1);
+    /// `NODE_LABELS`.
+    pub const NODE_LABELS: Self = Self(1 << 2);
+    /// `MINIMUM_SIZE`.
+    pub const MINIMUM_SIZE: Self = Self(1 << 3);
+
+    pub(crate) const NAMES: [(&'static str, Self); 4] = [
+        ("PORTS", Self::PORTS),
+        ("PORT_LABELS", Self::PORT_LABELS),
+        ("NODE_LABELS", Self::NODE_LABELS),
+        ("MINIMUM_SIZE", Self::MINIMUM_SIZE),
+    ];
+
+    /// Whether every value of `other` is in the set.
+    pub fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// Whether the set is empty.
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub(crate) fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+}
+
+impl std::ops::BitOr for SizeConstraints {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+
+/// ELK's `EnumSet<SizeOptions>`: how a node's size is computed.
+///
+/// Source: `org.eclipse.elk.core.options.SizeOptions`. ELK's default is
+/// `DEFAULT_MINIMUM_SIZE` alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SizeOptions(u16);
+
+impl Default for SizeOptions {
+    fn default() -> Self {
+        Self::DEFAULT_MINIMUM_SIZE
+    }
+}
+
+impl SizeOptions {
+    /// The empty set.
+    pub const NONE: Self = Self(0);
+    /// `DEFAULT_MINIMUM_SIZE`.
+    pub const DEFAULT_MINIMUM_SIZE: Self = Self(1);
+    /// `MINIMUM_SIZE_ACCOUNTS_FOR_PADDING`.
+    pub const MINIMUM_SIZE_ACCOUNTS_FOR_PADDING: Self = Self(1 << 1);
+    /// `COMPUTE_PADDING`.
+    pub const COMPUTE_PADDING: Self = Self(1 << 2);
+    /// `OUTSIDE_NODE_LABELS_OVERHANG`.
+    pub const OUTSIDE_NODE_LABELS_OVERHANG: Self = Self(1 << 3);
+    /// `PORTS_OVERHANG`.
+    pub const PORTS_OVERHANG: Self = Self(1 << 4);
+    /// `UNIFORM_PORT_SPACING`.
+    pub const UNIFORM_PORT_SPACING: Self = Self(1 << 5);
+    /// `SPACE_EFFICIENT_PORT_LABELS`.
+    pub const SPACE_EFFICIENT_PORT_LABELS: Self = Self(1 << 6);
+    /// `FORCE_TABULAR_NODE_LABELS`.
+    pub const FORCE_TABULAR_NODE_LABELS: Self = Self(1 << 7);
+    /// `ASYMMETRICAL`.
+    pub const ASYMMETRICAL: Self = Self(1 << 8);
+
+    pub(crate) const NAMES: [(&'static str, Self); 9] = [
+        ("DEFAULT_MINIMUM_SIZE", Self::DEFAULT_MINIMUM_SIZE),
+        (
+            "MINIMUM_SIZE_ACCOUNTS_FOR_PADDING",
+            Self::MINIMUM_SIZE_ACCOUNTS_FOR_PADDING,
+        ),
+        ("COMPUTE_PADDING", Self::COMPUTE_PADDING),
+        (
+            "OUTSIDE_NODE_LABELS_OVERHANG",
+            Self::OUTSIDE_NODE_LABELS_OVERHANG,
+        ),
+        ("PORTS_OVERHANG", Self::PORTS_OVERHANG),
+        ("UNIFORM_PORT_SPACING", Self::UNIFORM_PORT_SPACING),
+        (
+            "SPACE_EFFICIENT_PORT_LABELS",
+            Self::SPACE_EFFICIENT_PORT_LABELS,
+        ),
+        ("FORCE_TABULAR_NODE_LABELS", Self::FORCE_TABULAR_NODE_LABELS),
+        ("ASYMMETRICAL", Self::ASYMMETRICAL),
+    ];
+
+    /// Whether every value of `other` is in the set.
+    pub fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub(crate) fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+}
+
+/// The three node size options ELK keeps on a node and on the graph inside it.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct NodeSizing {
+    /// `org.eclipse.elk.nodeSize.constraints`.
+    pub constraints: SizeConstraints,
+    /// `org.eclipse.elk.nodeSize.options`.
+    pub options: SizeOptions,
+    /// `org.eclipse.elk.nodeSize.minimum`.
+    pub minimum: crate::graph::LSize,
+}
+
+impl NodeSizing {
+    /// The `MINIMUM_SIZE` constraint with the given minimum and ELK's default size options.
+    #[cfg(test)]
+    pub fn with_minimum(minimum: crate::graph::LSize) -> Self {
+        Self {
+            constraints: SizeConstraints::MINIMUM_SIZE,
+            options: SizeOptions::default(),
+            minimum,
+        }
+    }
+
+    /// The minimum size ELK enforces, or `None` without the `MINIMUM_SIZE` constraint.
+    ///
+    /// Source: `ElkUtil.effectiveMinSizeConstraintFor` and the matching code in
+    /// `ElkLayered.resizeGraph` and `HierarchicalNodeResizingProcessor.resizeGraph`.
+    pub(crate) fn effective_minimum(&self) -> Option<crate::graph::LSize> {
+        if !self.constraints.contains(SizeConstraints::MINIMUM_SIZE) {
+            return None;
+        }
+        let mut minimum = self.minimum;
+        if self.options.contains(SizeOptions::DEFAULT_MINIMUM_SIZE) {
+            if minimum.width <= 0.0 {
+                minimum.width = 20.0;
+            }
+            if minimum.height <= 0.0 {
+                minimum.height = 20.0;
+            }
+        }
+        Some(minimum)
+    }
 }
 
 /// Alignment of graph contents when a minimum size leaves additional space on an axis.
@@ -289,13 +774,16 @@ pub struct LayeredOptions {
     pub edge_routing: EdgeRouting,
     pub padding: ElkPadding,
     pub node_labels_padding: ElkPadding,
-    /// `Some` enables ELK's `MINIMUM_SIZE` constraint; dimensions include graph padding.
-    pub node_size_minimum: Option<crate::graph::LSize>,
-    pub node_size_default_minimum: bool,
-    pub node_size_include_labels: bool,
+    /// The node size options of the node this graph belongs to. ELK copies a node's options to
+    /// the graph inside it, which then resizes by them.
+    pub node_size: NodeSizing,
     pub horizontal_content_alignment: ContentAlignment,
     pub vertical_content_alignment: ContentAlignment,
     pub spacing: SpacingOptions,
+    /// `org.eclipse.elk.layered.spacing.baseValue`, applied when the graph is imported.
+    pub spacing_base_value: Option<f64>,
+    /// The spacings set explicitly, which the base value does not change.
+    pub explicit_spacings: ExplicitSpacings,
     pub cycle_breaking_strategy: CycleBreakingStrategy,
     pub layering_strategy: LayeringStrategy,
     pub layering_coffman_graham_layer_bound: i32,
@@ -319,8 +807,6 @@ pub struct LayeredOptions {
     pub merge_edges: bool,
     pub merge_hierarchy_edges: bool,
     pub unnecessary_bendpoints: bool,
-    pub self_loop_distribution: SelfLoopDistributionStrategy,
-    pub self_loop_ordering: SelfLoopOrderingStrategy,
     pub wrapping_strategy: WrappingStrategy,
     pub wrapping_multi_edge_improve_cuts: bool,
     pub wrapping_multi_edge_improve_wrapped_edges: bool,
@@ -420,26 +906,144 @@ impl SpacingOptions {
     ///
     /// Source:
     /// https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/options/LayeredSpacings.java
+    #[cfg(test)]
     pub fn layered_base_value(base_value: f64) -> Self {
+        Self::default().with_base_value(base_value, ExplicitSpacings::NONE)
+    }
+
+    /// Sets every spacing the user did not set to its default factor times the base value.
+    ///
+    /// Source: `ElkSpacings.AbstractSpacingsBuilder.build`, through
+    /// `LayeredSpacings.withBaseValue`. ELK skips the whole step when the base value is within
+    /// `10e-5` of the node-node default, and computes each value as
+    /// `(default / nodeNodeDefault) * base`.
+    pub(crate) fn with_base_value(mut self, base: f64, explicit: ExplicitSpacings) -> Self {
         let defaults = Self::default();
-        let scale = base_value / defaults.node_node;
-        Self {
-            component_component: defaults.component_component * scale,
-            node_node: base_value,
-            node_self_loop: defaults.node_self_loop * scale,
-            edge_edge: defaults.edge_edge * scale,
-            edge_node: defaults.edge_node * scale,
-            edge_label: defaults.edge_label * scale,
-            label_label: defaults.label_label * scale,
-            label_node: defaults.label_node * scale,
-            label_port_horizontal: defaults.label_port_horizontal * scale,
-            label_port_vertical: defaults.label_port_vertical * scale,
-            port_port: defaults.port_port * scale,
-            edge_edge_between_layers: defaults.edge_edge_between_layers * scale,
-            edge_node_between_layers: defaults.edge_node_between_layers * scale,
-            node_node_between_layers: defaults.node_node_between_layers * scale,
-            ports_surrounding: defaults.ports_surrounding,
+        let node_node_default = defaults.node_node;
+        if (base - node_node_default).abs() <= 10e-5 {
+            return self;
         }
+        let scaled = |default: f64| (default / node_node_default) * base;
+        let set = |flag: ExplicitSpacings, field: &mut f64, default: f64| {
+            if !explicit.contains(flag) {
+                *field = scaled(default);
+            }
+        };
+        set(
+            ExplicitSpacings::NODE_NODE,
+            &mut self.node_node,
+            defaults.node_node,
+        );
+        set(
+            ExplicitSpacings::COMPONENT_COMPONENT,
+            &mut self.component_component,
+            defaults.component_component,
+        );
+        set(
+            ExplicitSpacings::EDGE_EDGE,
+            &mut self.edge_edge,
+            defaults.edge_edge,
+        );
+        set(
+            ExplicitSpacings::EDGE_LABEL,
+            &mut self.edge_label,
+            defaults.edge_label,
+        );
+        set(
+            ExplicitSpacings::EDGE_NODE,
+            &mut self.edge_node,
+            defaults.edge_node,
+        );
+        set(
+            ExplicitSpacings::LABEL_LABEL,
+            &mut self.label_label,
+            defaults.label_label,
+        );
+        set(
+            ExplicitSpacings::LABEL_NODE,
+            &mut self.label_node,
+            defaults.label_node,
+        );
+        set(
+            ExplicitSpacings::LABEL_PORT_HORIZONTAL,
+            &mut self.label_port_horizontal,
+            defaults.label_port_horizontal,
+        );
+        set(
+            ExplicitSpacings::LABEL_PORT_VERTICAL,
+            &mut self.label_port_vertical,
+            defaults.label_port_vertical,
+        );
+        set(
+            ExplicitSpacings::NODE_SELF_LOOP,
+            &mut self.node_self_loop,
+            defaults.node_self_loop,
+        );
+        set(
+            ExplicitSpacings::PORT_PORT,
+            &mut self.port_port,
+            defaults.port_port,
+        );
+        set(
+            ExplicitSpacings::EDGE_EDGE_BETWEEN_LAYERS,
+            &mut self.edge_edge_between_layers,
+            defaults.edge_edge_between_layers,
+        );
+        set(
+            ExplicitSpacings::EDGE_NODE_BETWEEN_LAYERS,
+            &mut self.edge_node_between_layers,
+            defaults.edge_node_between_layers,
+        );
+        set(
+            ExplicitSpacings::NODE_NODE_BETWEEN_LAYERS,
+            &mut self.node_node_between_layers,
+            defaults.node_node_between_layers,
+        );
+        self
+    }
+}
+
+/// Which spacing options a graph sets itself. `spacing.baseValue` leaves those alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ExplicitSpacings(u16);
+
+impl ExplicitSpacings {
+    pub(crate) const NONE: Self = Self(0);
+    pub(crate) const NODE_NODE: Self = Self(1);
+    pub(crate) const COMPONENT_COMPONENT: Self = Self(1 << 1);
+    pub(crate) const EDGE_EDGE: Self = Self(1 << 2);
+    pub(crate) const EDGE_LABEL: Self = Self(1 << 3);
+    pub(crate) const EDGE_NODE: Self = Self(1 << 4);
+    pub(crate) const LABEL_LABEL: Self = Self(1 << 5);
+    pub(crate) const LABEL_NODE: Self = Self(1 << 6);
+    pub(crate) const LABEL_PORT_HORIZONTAL: Self = Self(1 << 7);
+    pub(crate) const LABEL_PORT_VERTICAL: Self = Self(1 << 8);
+    pub(crate) const NODE_SELF_LOOP: Self = Self(1 << 9);
+    pub(crate) const PORT_PORT: Self = Self(1 << 10);
+    pub(crate) const EDGE_EDGE_BETWEEN_LAYERS: Self = Self(1 << 11);
+    pub(crate) const EDGE_NODE_BETWEEN_LAYERS: Self = Self(1 << 12);
+    pub(crate) const NODE_NODE_BETWEEN_LAYERS: Self = Self(1 << 13);
+
+    pub(crate) fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub(crate) fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+}
+
+impl LayeredOptions {
+    /// The options as ELK's importer leaves them on a new `LGraph`: with
+    /// `spacing.baseValue` applied to the spacings the graph does not set itself.
+    ///
+    /// Source: `ElkGraphImporter.importGraph` and `importHierarchicalGraph`, which apply
+    /// `LayeredSpacings.withBaseValue` to each graph that has the option.
+    pub(crate) fn with_spacing_base_value_applied(mut self) -> Self {
+        if let Some(base) = self.spacing_base_value {
+            self.spacing = self.spacing.with_base_value(base, self.explicit_spacings);
+        }
+        self
     }
 }
 
@@ -457,12 +1061,12 @@ impl Default for LayeredOptions {
             edge_routing: EdgeRouting::Orthogonal,
             padding: ElkPadding::default(),
             node_labels_padding: ElkPadding::uniform(5.0),
-            node_size_minimum: None,
-            node_size_default_minimum: true,
-            node_size_include_labels: false,
+            node_size: NodeSizing::default(),
             horizontal_content_alignment: ContentAlignment::Start,
             vertical_content_alignment: ContentAlignment::Start,
             spacing: SpacingOptions::default(),
+            spacing_base_value: None,
+            explicit_spacings: ExplicitSpacings::NONE,
             cycle_breaking_strategy: CycleBreakingStrategy::Greedy,
             layering_strategy: LayeringStrategy::NetworkSimplex,
             layering_coffman_graham_layer_bound: i32::MAX,
@@ -486,8 +1090,6 @@ impl Default for LayeredOptions {
             merge_edges: false,
             merge_hierarchy_edges: true,
             unnecessary_bendpoints: false,
-            self_loop_distribution: SelfLoopDistributionStrategy::North,
-            self_loop_ordering: SelfLoopOrderingStrategy::Stacked,
             wrapping_strategy: WrappingStrategy::Off,
             wrapping_multi_edge_improve_cuts: true,
             wrapping_multi_edge_improve_wrapped_edges: true,
@@ -512,62 +1114,15 @@ impl Default for LayeredOptions {
 
 impl LayeredOptions {
     pub fn validate_node_size_minimum(&self) -> Result<(), NodeSizeError> {
-        if self
-            .node_size_minimum
-            .is_some_and(|size| !size.width.is_finite() || !size.height.is_finite())
-        {
+        let minimum = self.node_size.minimum;
+        if !minimum.width.is_finite() || !minimum.height.is_finite() {
             return Err(NodeSizeError);
         }
         Ok(())
-    }
-    pub(crate) fn effective_node_size_minimum(&self) -> Option<crate::graph::LSize> {
-        self.node_size_minimum.map(|mut minimum| {
-            if self.node_size_default_minimum {
-                if minimum.width <= 0.0 {
-                    minimum.width = 20.0;
-                }
-                if minimum.height <= 0.0 {
-                    minimum.height = 20.0;
-                }
-            }
-            minimum
-        })
     }
 
-    /// Accounts for Mermaid's single inside-top-center container title in the source
-    /// `NODE_LABELS` minimum. ELK's default symmetric label grid reserves both outer rows.
-    /// A standalone scope uses this before import because its owner label is outside the graph.
-    pub fn include_inside_top_center_label_minimum(
-        &mut self,
-        label: crate::graph::LSize,
-    ) -> Result<(), NodeSizeError> {
-        self.validate_node_size_minimum()?;
-        if !self.node_size_include_labels {
-            return Ok(());
-        }
-        if !label.width.is_finite() || !label.height.is_finite() {
-            return Err(NodeSizeError);
-        }
-        let width = if label.width > 0.0 {
-            label.width + self.node_labels_padding.left + self.node_labels_padding.right
-        } else {
-            0.0
-        };
-        let height = if label.height > 0.0 {
-            2.0 * label.height
-                + 2.0 * self.spacing.label_label
-                + self.node_labels_padding.top
-                + self.node_labels_padding.bottom
-        } else {
-            0.0
-        };
-        if !width.is_finite() || !height.is_finite() {
-            return Err(NodeSizeError);
-        }
-        let minimum = self.node_size_minimum.get_or_insert_default();
-        minimum.width = minimum.width.max(width);
-        minimum.height = minimum.height.max(height);
-        Ok(())
+    pub(crate) fn effective_node_size_minimum(&self) -> Option<crate::graph::LSize> {
+        self.node_size.effective_minimum()
     }
 
     /// The option set most pinned elkjs 0.9.3 cases in the tests were captured with. Only tests
@@ -584,10 +1139,6 @@ impl LayeredOptions {
             consider_model_order_strategy: OrderingStrategy::NodesAndEdges,
             spacing: SpacingOptions::layered_base_value(40.0),
             unnecessary_bendpoints: true,
-            // The captured cases set EQUALLY on the root graph, but ELK resolves this node-scoped
-            // option from each node's default (NORTH) unless a node overrides it.
-            self_loop_distribution: SelfLoopDistributionStrategy::North,
-            self_loop_ordering: SelfLoopOrderingStrategy::Stacked,
             wrapping_multi_edge_improve_cuts: true,
             wrapping_multi_edge_improve_wrapped_edges: true,
             merge_hierarchy_edges: true,
@@ -659,16 +1210,6 @@ mod tests {
         assert_eq!(options.spacing.edge_edge_between_layers, 20.0);
         assert_eq!(options.spacing.edge_node_between_layers, 20.0);
         assert_eq!(options.spacing.node_node_between_layers, 40.0);
-    }
-
-    #[test]
-    fn layered_default_self_loop_ordering_is_stacked() {
-        let options = LayeredOptions::default();
-
-        assert_eq!(
-            options.self_loop_ordering,
-            SelfLoopOrderingStrategy::Stacked
-        );
     }
 
     #[test]

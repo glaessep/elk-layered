@@ -1,0 +1,450 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.edgeRouting": "ORTHOGONAL",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+    "elk.randomSeed": "1",
+    "elk.padding": "[top=20,left=20,bottom=20,right=20]"
+  },
+  "children": [
+    {
+      "id": "Driver",
+      "width": 70,
+      "height": 40,
+      "ports": [
+        {
+          "id": "drv_out",
+          "width": 10,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          },
+          "x": 70,
+          "y": 15
+        }
+      ],
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE"
+      },
+      "$H": 454,
+      "x": 20,
+      "y": 126
+    },
+    {
+      "id": "Brake System",
+      "ports": [
+        {
+          "id": "pedal_in",
+          "width": 10,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "x": -10,
+          "y": 121
+        },
+        {
+          "id": "hyd_out",
+          "width": 10,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          },
+          "x": 822,
+          "y": 62.666666666666664
+        }
+      ],
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.padding": "[top=34,left=24,bottom=20,right=24]",
+        "elk.direction": "RIGHT",
+        "elk.layered.spacing.nodeNodeBetweenLayers": "45"
+      },
+      "children": [
+        {
+          "id": "PedalSensor",
+          "width": 128,
+          "height": 48,
+          "ports": [
+            {
+              "id": "ps_in",
+              "width": 10,
+              "height": 10,
+              "layoutOptions": {
+                "elk.port.side": "WEST"
+              },
+              "x": -10,
+              "y": 19
+            },
+            {
+              "id": "ps_out",
+              "width": 10,
+              "height": 10,
+              "layoutOptions": {
+                "elk.port.side": "EAST"
+              },
+              "x": 128,
+              "y": 19
+            }
+          ],
+          "layoutOptions": {
+            "elk.portConstraints": "FIXED_SIDE"
+          },
+          "$H": 461,
+          "x": 50,
+          "y": 102
+        },
+        {
+          "id": "Brake ECU",
+          "width": 114,
+          "height": 48,
+          "ports": [
+            {
+              "id": "ecu_in",
+              "width": 10,
+              "height": 10,
+              "layoutOptions": {
+                "elk.port.side": "WEST"
+              },
+              "x": -10,
+              "y": 28.66666666666667
+            },
+            {
+              "id": "ecu_ws",
+              "width": 10,
+              "height": 10,
+              "layoutOptions": {
+                "elk.port.side": "WEST"
+              },
+              "x": -10,
+              "y": 9.333333333333334
+            },
+            {
+              "id": "ecu_out",
+              "width": 10,
+              "height": 10,
+              "layoutOptions": {
+                "elk.port.side": "EAST"
+              },
+              "x": 114,
+              "y": 19
+            }
+          ],
+          "layoutOptions": {
+            "elk.portConstraints": "FIXED_SIDE"
+          },
+          "$H": 465,
+          "x": 370,
+          "y": 43.666666666666664
+        },
+        {
+          "id": "ABS Controller",
+          "width": 142,
+          "height": 48,
+          "ports": [
+            {
+              "id": "abs_in",
+              "width": 10,
+              "height": 10,
+              "layoutOptions": {
+                "elk.port.side": "WEST"
+              },
+              "x": -10,
+              "y": 19
+            },
+            {
+              "id": "abs_out",
+              "width": 10,
+              "height": 10,
+              "layoutOptions": {
+                "elk.port.side": "EAST"
+              },
+              "x": 142,
+              "y": 19
+            }
+          ],
+          "layoutOptions": {
+            "elk.portConstraints": "FIXED_SIDE"
+          },
+          "$H": 470,
+          "x": 646,
+          "y": 43.666666666666664
+        },
+        {
+          "id": "WheelSpeedSensor",
+          "width": 170,
+          "height": 48,
+          "ports": [
+            {
+              "id": "ws_out",
+              "width": 10,
+              "height": 10,
+              "layoutOptions": {
+                "elk.port.side": "EAST"
+              },
+              "x": 170,
+              "y": 19
+            }
+          ],
+          "layoutOptions": {
+            "elk.portConstraints": "FIXED_SIDE"
+          },
+          "$H": 474,
+          "x": 24,
+          "y": 34
+        }
+      ],
+      "edges": [
+        {
+          "id": "c1",
+          "sources": [
+            "pedal_in"
+          ],
+          "targets": [
+            "ps_in"
+          ],
+          "sections": [
+            {
+              "id": "c1_s0",
+              "startPoint": {
+                "x": -10,
+                "y": 126
+              },
+              "endPoint": {
+                "x": 40,
+                "y": 126
+              },
+              "incomingShape": "pedal_in",
+              "outgoingShape": "ps_in"
+            }
+          ],
+          "container": "Brake System"
+        },
+        {
+          "id": "c2",
+          "sources": [
+            "ps_out"
+          ],
+          "targets": [
+            "ecu_in"
+          ],
+          "labels": [
+            {
+              "text": "pedal %",
+              "width": 44,
+              "height": 15,
+              "x": 260,
+              "y": 129
+            }
+          ],
+          "sections": [
+            {
+              "id": "c2_s0",
+              "startPoint": {
+                "x": 188,
+                "y": 126
+              },
+              "endPoint": {
+                "x": 360,
+                "y": 77.33333333333334
+              },
+              "bendPoints": [
+                {
+                  "x": 325,
+                  "y": 126
+                },
+                {
+                  "x": 325,
+                  "y": 77.33333333333334
+                }
+              ],
+              "incomingShape": "ps_out",
+              "outgoingShape": "ecu_in"
+            }
+          ],
+          "container": "Brake System"
+        },
+        {
+          "id": "c3",
+          "sources": [
+            "ecu_out"
+          ],
+          "targets": [
+            "abs_in"
+          ],
+          "labels": [
+            {
+              "text": "brake req",
+              "width": 52,
+              "height": 15,
+              "x": 539,
+              "y": 70.66666666666666
+            }
+          ],
+          "sections": [
+            {
+              "id": "c3_s0",
+              "startPoint": {
+                "x": 494,
+                "y": 67.66666666666666
+              },
+              "endPoint": {
+                "x": 636,
+                "y": 67.66666666666666
+              },
+              "incomingShape": "ecu_out",
+              "outgoingShape": "abs_in"
+            }
+          ],
+          "container": "Brake System"
+        },
+        {
+          "id": "c4",
+          "sources": [
+            "ws_out"
+          ],
+          "targets": [
+            "ecu_ws"
+          ],
+          "labels": [
+            {
+              "text": "wheel speed",
+              "width": 66,
+              "height": 15,
+              "x": 249,
+              "y": 40
+            }
+          ],
+          "sections": [
+            {
+              "id": "c4_s0",
+              "startPoint": {
+                "x": 204,
+                "y": 58
+              },
+              "endPoint": {
+                "x": 360,
+                "y": 58
+              },
+              "incomingShape": "ws_out",
+              "outgoingShape": "ecu_ws"
+            }
+          ],
+          "container": "Brake System"
+        },
+        {
+          "id": "c5",
+          "sources": [
+            "abs_out"
+          ],
+          "targets": [
+            "hyd_out"
+          ],
+          "sections": [
+            {
+              "id": "c5_s0",
+              "startPoint": {
+                "x": 798,
+                "y": 67.66666666666666
+              },
+              "endPoint": {
+                "x": 832,
+                "y": 67.66666666666666
+              },
+              "incomingShape": "abs_out",
+              "outgoingShape": "hyd_out"
+            }
+          ],
+          "container": "Brake System"
+        }
+      ],
+      "$H": 457,
+      "x": 130,
+      "y": 20,
+      "width": 822,
+      "height": 170
+    },
+    {
+      "id": "Hydraulics",
+      "width": 100,
+      "height": 40,
+      "ports": [
+        {
+          "id": "hyd_in",
+          "width": 10,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "x": -10,
+          "y": 15
+        }
+      ],
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE"
+      },
+      "$H": 477,
+      "x": 992,
+      "y": 67.66666666666666
+    }
+  ],
+  "edges": [
+    {
+      "id": "x1",
+      "sources": [
+        "drv_out"
+      ],
+      "targets": [
+        "pedal_in"
+      ],
+      "sections": [
+        {
+          "id": "x1_s0",
+          "startPoint": {
+            "x": 100,
+            "y": 146
+          },
+          "endPoint": {
+            "x": 120,
+            "y": 146
+          },
+          "incomingShape": "drv_out",
+          "outgoingShape": "pedal_in"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "x2",
+      "sources": [
+        "hyd_out"
+      ],
+      "targets": [
+        "hyd_in"
+      ],
+      "sections": [
+        {
+          "id": "x2_s0",
+          "startPoint": {
+            "x": 962,
+            "y": 87.66666666666666
+          },
+          "endPoint": {
+            "x": 982,
+            "y": 87.66666666666666
+          },
+          "incomingShape": "hyd_out",
+          "outgoingShape": "hyd_in"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 452,
+  "x": 0,
+  "y": 0,
+  "width": 1112,
+  "height": 210
+}

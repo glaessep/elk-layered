@@ -7,8 +7,8 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/graph/LPort.java
 
 use super::options::{
-    Alignment, ElkDirection, LayerConstraint, LayeredOptions, NodeLabelPlacement, PortAlignment,
-    PortConstraints,
+    Alignment, ElkDirection, LayerConstraint, LayeredOptions, NodeLabelPlacement, NodeSizing,
+    PortAlignment, PortConstraints,
 };
 use crate::random::JavaRandom;
 
@@ -38,6 +38,7 @@ impl LGraph {
     /// Size returned for a completed provider invocation's root by
     /// `ElkGraphLayoutTransferrer.applyParentNodeLayout` and `ElkUtil.resizeNode`.
     /// This final minimum-size clamp does not realign the graph contents a second time.
+    #[cfg(test)]
     pub fn exported_root_size(&self) -> LSize {
         let mut size = LSize {
             width: self.size.width + self.padding.left + self.padding.right,
@@ -79,7 +80,7 @@ impl LGraph {
     /// Components use the already-resolved random stream through their serial executor.
     pub(crate) fn component_shell(&self) -> Self {
         let mut graph = Self::new(self.id.clone(), self.options.clone());
-        graph.options.node_size_minimum = None;
+        graph.options.node_size.constraints = crate::options::SizeConstraints::FIXED;
         graph.padding = self.padding;
         graph.graph_properties = self.graph_properties.clone();
         graph.parent_node_id = self.parent_node_id.clone();
@@ -210,6 +211,12 @@ pub struct LNode {
     pub labels: Vec<LLabel>,
     pub represented_labels: Vec<LLabel>,
     pub node_label_placement: NodeLabelPlacement,
+    /// The node's own size options. ELK's `LabelAndNodeSizeProcessor` sizes the node by them.
+    pub node_size: NodeSizing,
+    /// `layered.edgeRouting.selfLoopDistribution`, which ELK reads from each node.
+    pub self_loop_distribution: super::options::SelfLoopDistributionStrategy,
+    /// `layered.edgeRouting.selfLoopOrdering`, which ELK reads from each node.
+    pub self_loop_ordering: super::options::SelfLoopOrderingStrategy,
     pub ports: Vec<LPort>,
     pub nested_graph: Option<Box<LGraph>>,
     pub model_order: Option<usize>,
@@ -253,7 +260,10 @@ impl LNode {
             padding: LPadding::default(),
             labels: Vec::new(),
             represented_labels: Vec::new(),
-            node_label_placement: NodeLabelPlacement::Fixed,
+            node_label_placement: NodeLabelPlacement::FIXED,
+            node_size: NodeSizing::default(),
+            self_loop_distribution: Default::default(),
+            self_loop_ordering: Default::default(),
             ports: Vec::new(),
             nested_graph: None,
             model_order,
@@ -296,6 +306,8 @@ pub enum LNodeKind {
     ExternalPort,
     Label,
     NorthSouthPort,
+    // ELK's graph wrapping inserts these; wrapping is not ported, so none is built yet.
+    #[allow(dead_code)]
     BreakingPoint,
 }
 
@@ -539,6 +551,8 @@ pub struct LLabel {
     pub original_label_edge: Option<String>,
     /// Opaque caller-owned label identity, preserved through layout transformations.
     pub source_index: Option<usize>,
+    /// The label's own `nodeLabels.placement`, which wins over its node's.
+    pub node_label_placement: Option<NodeLabelPlacement>,
 }
 
 impl LLabel {
@@ -553,6 +567,7 @@ impl LLabel {
             end_label_edge: None,
             original_label_edge: None,
             source_index: None,
+            node_label_placement: None,
         }
     }
 }
@@ -1006,14 +1021,6 @@ impl LGraph {
     }
 
     /// ELK's `LNode#getPorts(PortType.INPUT)` is based on actual incoming edge incidence.
-    pub fn port_has_input_type(&self, port_ref: PortRef) -> bool {
-        self.layerless_nodes
-            .get(port_ref.node)
-            .and_then(|node| node.ports.get(port_ref.port))
-            .map(|port| !port.incoming_edges.is_empty())
-            .unwrap_or(false)
-    }
-
     pub fn reorder_node_ports(
         &mut self,
         node_index: usize,

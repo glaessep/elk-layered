@@ -1,0 +1,73 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "LEFT",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "a",
+      "width": 80,
+      "height": 50,
+      "labels": [
+        {
+          "text": "A",
+          "width": 40,
+          "height": 14,
+          "layoutOptions": {
+            "elk.nodeLabels.placement": "[H_RIGHT, V_CENTER, OUTSIDE]"
+          }
+        }
+      ]
+    },
+    {
+      "id": "g",
+      "labels": [
+        {
+          "text": "Title",
+          "width": 40,
+          "height": 14,
+          "layoutOptions": {
+            "elk.nodeLabels.placement": "[H_RIGHT, V_CENTER, OUTSIDE]"
+          }
+        }
+      ],
+      "layoutOptions": {
+        "elk.nodeSize.constraints": "[NODE_LABELS]"
+      },
+      "children": [
+        {
+          "id": "x",
+          "width": 30,
+          "height": 30
+        }
+      ]
+    },
+    {
+      "id": "b",
+      "width": 60,
+      "height": 40
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "sources": [
+        "a"
+      ],
+      "targets": [
+        "x"
+      ]
+    },
+    {
+      "id": "e1",
+      "sources": [
+        "x"
+      ],
+      "targets": [
+        "b"
+      ]
+    }
+  ]
+}
