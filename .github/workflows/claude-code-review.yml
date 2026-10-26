@@ -1,0 +1,55 @@
+name: Claude review
+
+# A first review of a pull request: Claude Code's built-in `/code-review`, posting its findings as
+# comments on the pull request. Adding the label `review-request` starts it. CLAUDE.md, section
+# "Reviewing", says what the review checks here.
+#
+# Only collaborators can add a label. A pull request from a fork never starts a run: the job
+# skips it, and GitHub hands no secret to a `pull_request` run from a fork anyway. Do not change
+# the trigger to `pull_request_target`, which would hand it the secret.
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  review:
+    name: Claude review
+    if: >-
+      github.event.label.name == 'review-request' &&
+      github.event.pull_request.state == 'open' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: claude-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: "/code-review high --comment ${{ github.event.pull_request.number }}"
+          claude_args: |
+            --model claude-opus-5-5
+            --effort high
+            --append-system-prompt "Read the section Reviewing in CLAUDE.md before reviewing and apply it. You cannot build or run code here: name what you could not check in your review. If you conclude the diff needs no review, post one gh pr comment saying so and why before you stop."
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(grep:*),Bash(sed:*),Bash(find:*),Bash(ls:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git grep:*)"
+
+      # The label is a request, not a state. Taking it off after every run, passed or failed,
+      # means the next review is a new request.
+      - name: Take the label off
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label review-request
