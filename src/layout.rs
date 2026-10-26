@@ -79,6 +79,10 @@ struct Tree<'a> {
     /// In the order elkjs's `JsonImporter.transformEdges` reads them: a node's edges, then
     /// those of its children, depth first.
     edges: Vec<EdgeInfo<'a>>,
+    /// The index in `nodes` of each node id.
+    by_id: HashMap<&'a str, usize>,
+    /// For each node, the indices in `edges` of the edges it contains, in ascending order.
+    edges_by_container: Vec<Vec<usize>>,
 }
 
 /// No ELK counterpart: names a node in an error.
@@ -250,10 +254,17 @@ impl<'a> Tree<'a> {
             }
         }
         // elkjs reads edges depth first through the JSON, which is preorder: the order above.
-        let mut tree = Self { nodes, edges };
+        let edges_by_container = vec![Vec::new(); nodes.len()];
+        let mut tree = Self {
+            nodes,
+            edges,
+            by_id,
+            edges_by_container,
+        };
         for edge in 0..tree.edges.len() {
-            tree.edges[edge].container =
-                tree.best_containment(tree.edges[edge].source, tree.edges[edge].target);
+            let container = tree.best_containment(tree.edges[edge].source, tree.edges[edge].target);
+            tree.edges[edge].container = container;
+            tree.edges_by_container[container].push(edge);
         }
         Ok(tree)
     }
@@ -494,11 +505,15 @@ impl<'a, 't> Work<'a, 't> {
         }
 
         // The edges of this run.
+        // Visited in the order of `tree.edges`, which reaches the layout.
+        let mut candidates: Vec<usize> = graph_nodes
+            .iter()
+            .flat_map(|&node| tree.edges_by_container[node].iter().copied())
+            .collect();
+        candidates.sort_unstable();
         let mut edges = Vec::new();
-        for (edge_index, edge) in tree.edges.iter().enumerate() {
-            if !graph_nodes.contains(&edge.container) {
-                continue;
-            }
+        for edge_index in candidates {
+            let edge = &tree.edges[edge_index];
             let element = edge_element(&edge.edge.id);
             if !include {
                 // `ElkGraphImporter.importFlatGraph` takes an edge between two children and
@@ -700,15 +715,8 @@ impl<'a, 't> Work<'a, 't> {
     ///
     /// Ports the writes of `ElkGraphLayoutTransferrer.applyNodeLayout` into the input graph.
     fn write_result(&mut self, scope: usize, edges: &[usize], result: LayoutResult) {
-        let index_of: HashMap<&str, usize> = self
-            .tree
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(index, info)| (info.node.id.as_str(), index))
-            .collect();
         for node in &result.nodes {
-            let Some(&index) = index_of.get(node.id.as_str()) else {
+            let Some(&index) = self.tree.by_id.get(node.id.as_str()) else {
                 continue;
             };
             let out = self.out_node(index);
