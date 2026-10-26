@@ -93,6 +93,15 @@ pub enum Error {
         /// The other key.
         other: String,
     },
+    /// The graph's numbers are outside what the layout can compute, such as a negative
+    /// spacing or a node size too large for ELK's `int` arithmetic.
+    #[error("{element}: {reason}")]
+    Unsolvable {
+        /// Where the numbers are. This names the graph the layout was working on.
+        element: String,
+        /// What cannot be computed.
+        reason: String,
+    },
     /// The layout failed inside the algorithm. This points at a bug in elk-layered.
     #[error("layout failed: {message}")]
     Internal {

@@ -17,6 +17,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::api::{ElkEdge, ElkEdgeSection, ElkLabel, ElkNode, ElkPoint};
+use crate::common::networksimplex::NetworkSimplexError;
+use crate::components::ComponentError;
 use crate::error::Error;
 use crate::export::{self, LayoutResult, TransferInput};
 use crate::graph::{LPoint, LSize};
@@ -25,6 +27,7 @@ use crate::layout_options::{
     self, EdgeSettings, LabelSettings, NodeSettings, OptionError, OptionProblem,
 };
 use crate::options::{ElkDirection, HierarchyHandling, LayeredOptions, SizeConstraints};
+use crate::p2layers::LayeringError;
 use crate::pipeline::{self, PipelineError};
 
 /// Lays out an ELK graph the way elkjs 0.9.3 does with the layered algorithm.
@@ -577,8 +580,16 @@ impl<'a, 't> Work<'a, 't> {
         };
         let mut graph =
             importer::import_scope(&input, &[], root_label_padding).map_err(|error| {
-                Error::Internal {
-                    message: error.to_string(),
+                match error {
+                    // The minimum node size comes from the caller's options.
+                    importer::ImportError::NodeSize(_) => Error::Unsolvable {
+                        element: node_element(&scope_info.node.id),
+                        reason: error.to_string(),
+                    },
+                    // Ids and parents are checked before the import, so the rest is a bug.
+                    other => Error::Internal {
+                        message: other.to_string(),
+                    },
                 }
             })?;
         let result = if include {
@@ -877,6 +888,27 @@ fn pipeline_error(scope: &str, error: PipelineError) -> Error {
             element: node_element(scope),
             feature: error.to_string(),
         },
+        // The caller's numbers: the minimum node size, a spacing, a size too large for ELK's
+        // `int` arithmetic, or a node size stretch-width cannot normalize.
+        error @ (PipelineError::NodeSize(_)
+        | PipelineError::NetworkSimplex(NetworkSimplexError::CoordinateOutOfRange)
+        | PipelineError::Component(ComponentError::InvalidGeometry)
+        | PipelineError::Layering(
+            LayeringError::InvalidStretchWidthDimensions
+            | LayeringError::StretchWidthRetryLimit { .. },
+        )) => Error::Unsolvable {
+            element: node_element(scope),
+            reason: error.to_string(),
+        },
+        // A step that is not ported.
+        error @ PipelineError::Component(
+            ComponentError::ExternalPortGroups | ComponentError::HierarchyEdges,
+        ) => Error::Unsupported {
+            element: node_element(scope),
+            feature: error.to_string(),
+        },
+        // Everything left cannot come from the caller's graph: a cycle after cycle breaking,
+        // a bad index, or a layer count that cannot be allocated.
         other => Error::Internal {
             message: other.to_string(),
         },

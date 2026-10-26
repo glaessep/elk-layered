@@ -629,6 +629,32 @@ fn a_zero_random_seed_is_an_error() {
     );
 }
 
+// Mutation: map the pipeline's `InvalidGeometry` error to `Error::Internal`.
+#[test]
+fn a_negative_component_spacing_is_unsolvable() {
+    let mut graph = root(vec![node("a", 10.0, 10.0), node("b", 10.0, 10.0)], vec![]);
+    graph.layout_options = options(&[("elk.spacing.componentComponent", "-5")]);
+    assert!(matches!(
+        error_of(&graph),
+        Error::Unsolvable { element, .. } if element == "node \"root\""
+    ));
+}
+
+// Mutation: map the pipeline's `CoordinateOutOfRange` error to `Error::Internal`.
+#[test]
+fn a_node_too_large_for_ints_is_unsolvable() {
+    let mut graph = root(
+        vec![
+            node("a", 10.0, 1e12),
+            node("b", 10.0, 1e12),
+            node("c", 10.0, 10.0),
+        ],
+        vec![edge("e", "a", "c"), edge("f", "b", "c")],
+    );
+    graph.layout_options = options(&[("elk.layered.nodePlacement.strategy", "NETWORK_SIMPLEX")]);
+    assert!(matches!(error_of(&graph), Error::Unsolvable { .. }));
+}
+
 // Mutation: let `resolve` skip the dot check, so `lk.direction` names the direction.
 #[test]
 fn an_unknown_option_is_an_error() {
