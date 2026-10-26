@@ -5,9 +5,9 @@
 //! Java source: Eclipse ELK 62d5909f96fad541bc101ad52dabaece6b7eab7e (EPL-2.0).
 //! Original worker SHA-256: 90ab078ad34ff826ca0ece1ee338ae98071a6b3e6cfbb00ce2eb671b32eacd88
 
-use super::layer_with_strategy;
 use super::tests::{edge, graph, node};
 use crate::options::{ElkDirection, LayeringStrategy};
+use crate::pipeline::{LayeredPhase, run_processors_until_phase};
 
 fn assert_oracle(
     strategy: LayeringStrategy,
@@ -48,7 +48,8 @@ fn assert_oracle(
     for (node, &(_, _, x)) in graph.layerless_nodes.iter_mut().zip(sizes) {
         node.position.x = x;
     }
-    layer_with_strategy(&mut graph, strategy).unwrap();
+    // Run what elkjs ran: the configurator and every processor scheduled up to the layerer.
+    run_processors_until_phase(&mut graph, LayeredPhase::P2Layering).unwrap();
     let actual = graph
         .layers
         .iter()

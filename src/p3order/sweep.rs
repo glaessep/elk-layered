@@ -3939,13 +3939,12 @@ mod tests {
                 edges,
             })
             .unwrap();
-            // Run the phase 1 to 3 steps this graph needs, up to the crossing minimizer.
-            crate::configurator::configure_graph_properties(&mut graph).unwrap();
-            layer_network_simplex(&mut graph).unwrap();
-            split_long_edges(&mut graph);
-            process_port_sides(&mut graph);
-            sort_port_lists(&mut graph);
-            crate::p3order::sort_by_input_model(&mut graph);
+            // Run every processor the schedule has before the sweep, as the full runner does.
+            crate::pipeline::run_processors_until(
+                &mut graph,
+                crate::pipeline::ProcessorKind::SortByInputModelProcessor,
+            )
+            .unwrap();
 
             if hierarchical {
                 minimize_crossings_layer_sweep_hierarchical_with_type(

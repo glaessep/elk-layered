@@ -568,6 +568,45 @@ fn validate_ported_graph_processors(graph: &LGraph) -> PipelineResult<()> {
     Ok(())
 }
 
+/// Run the assembled processors of a flat graph up to and including the first one `is_last`
+/// accepts.
+///
+/// Tests use this to stop at a phase boundary with exactly the state the full runner has there:
+/// the configurator, the edge and layer constraint steps and every other scheduled processor.
+#[cfg(test)]
+fn run_processors_until_slot(
+    graph: &mut LGraph,
+    is_last: impl Fn(&ProcessorSlot) -> bool,
+) -> PipelineResult<Vec<ProcessorKind>> {
+    let mut executed = Vec::new();
+    for slot in prepare_single_graph_processors(graph)? {
+        execute_processor(graph, slot.kind)?;
+        executed.push(slot.kind);
+        if is_last(&slot) {
+            break;
+        }
+    }
+    Ok(executed)
+}
+
+/// Run the assembled processors up to and including `target`.
+#[cfg(test)]
+pub(crate) fn run_processors_until(
+    graph: &mut LGraph,
+    target: ProcessorKind,
+) -> PipelineResult<Vec<ProcessorKind>> {
+    run_processors_until_slot(graph, |slot| slot.kind == target)
+}
+
+/// Run the assembled processors up to and including the one that carries `phase`.
+#[cfg(test)]
+pub(crate) fn run_processors_until_phase(
+    graph: &mut LGraph,
+    phase: LayeredPhase,
+) -> PipelineResult<Vec<ProcessorKind>> {
+    run_processors_until_slot(graph, |slot| slot.phase == Some(phase))
+}
+
 /// Execute all currently source-ported processors assembled for this graph.
 ///
 /// This is the library equivalent of `ElkLayered.layout(...)`: it uses the same assembled
