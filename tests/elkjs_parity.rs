@@ -68,8 +68,12 @@ fn first_difference(path: &str, want: &Value, got: &Value) -> Option<String> {
                             return Some(d);
                         }
                     }
-                    (Some(_), None) => return Some(format!("{next}: elkjs has it, elk-layered not")),
-                    (None, Some(_)) => return Some(format!("{next}: elk-layered has it, elkjs not")),
+                    (Some(_), None) => {
+                        return Some(format!("{next}: elkjs has it, elk-layered not"));
+                    }
+                    (None, Some(_)) => {
+                        return Some(format!("{next}: elk-layered has it, elkjs not"));
+                    }
                     (None, None) => unreachable!("the key came from one of the two maps"),
                 }
             }
@@ -102,8 +106,8 @@ fn lay_out(input: &Path) -> Result<Value, String> {
 
 fn expected(case: &str) -> Value {
     let path = cases_dir().join(format!("{case}.expected.json"));
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("{case}: no {}", path.display()));
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("{case}: no {}", path.display()));
     let mut want: Value = serde_json::from_str(&text).unwrap();
     without_hash_ids(&mut want);
     want
