@@ -1133,7 +1133,8 @@ fn introduce_hierarchical_edge_segment(
             priority_direction: edge.priority_direction,
             priority_shortness: edge.priority_shortness,
             priority_straightness: edge.priority_straightness,
-            thickness: 0.0,
+            // `createDummyEdge` copies the original edge's properties, so the thickness is ELK's default.
+            thickness: 1.0,
             original_opposite_port: None,
             compound_segment: Some(pending.segment),
         })
