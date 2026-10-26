@@ -123,6 +123,24 @@ fn expected(case: &str) -> Value {
     want
 }
 
+/// How the result of `layout` differs from what elkjs gave, or `None` when it does not.
+///
+/// elkjs refuses some graphs, such as one with an edge into a part laid out on its own.
+/// `record.mjs` then writes `{"elkjsError": ...}`, and `layout` must refuse the graph too. The
+/// two messages are not compared: they come from two programs.
+fn difference(want: &Value, got: Result<Value, String>) -> Option<String> {
+    match (want.get("elkjsError"), got) {
+        (Some(_), Err(_)) => None,
+        (Some(refusal), Ok(_)) => Some(format!(
+            "elkjs refuses it ({refusal}), elk-layered lays it out"
+        )),
+        (None, Err(error)) => Some(error),
+        (None, Ok(got)) => first_difference("", want, &got),
+    }
+}
+
+// Mutation: drop the first `graph.random.next_long()` of the greedy switch in
+// src/p3order/sweep.rs. random/r017, r063, r144, r145 and r169 then differ.
 #[test]
 fn every_case_lays_out_exactly_as_elkjs_does() {
     let mut failures = Vec::new();
@@ -132,13 +150,8 @@ fn every_case_lays_out_exactly_as_elkjs_does() {
         if NOT_YET.iter().any(|(n, _)| *n == case) {
             continue;
         }
-        match lay_out(&input) {
-            Ok(got) => {
-                if let Some(d) = first_difference("", &expected(&case), &got) {
-                    failures.push(format!("{case}: {d}"));
-                }
-            }
-            Err(e) => failures.push(format!("{case}: {e}")),
+        if let Some(d) = difference(&expected(&case), lay_out(&input)) {
+            failures.push(format!("{case}: {d}"));
         }
         checked += 1;
     }
@@ -153,21 +166,21 @@ fn every_case_lays_out_exactly_as_elkjs_does() {
 
 /// A case on the not-yet list that already passes should leave the list, so the list never hides
 /// a case that works.
+// Mutation: add "chain" to NOT_YET. The test then asks to take it off again.
 #[test]
 fn no_case_waits_for_a_feature_that_already_works() {
     for (case, issue) in NOT_YET {
         let input = cases_dir().join(format!("{case}.input.json"));
         assert!(input.exists(), "{case} is on NOT_YET but has no input");
-        if let Ok(got) = lay_out(&input) {
-            assert!(
-                first_difference("", &expected(case), &got).is_some(),
-                "{case} now matches elkjs: take it off NOT_YET ({issue})"
-            );
-        }
+        assert!(
+            difference(&expected(case), lay_out(&input)).is_some(),
+            "{case} now matches elkjs: take it off NOT_YET ({issue})"
+        );
     }
 }
 
 /// The differ itself must see a one-bit change, or the suite proves nothing.
+// Mutation: compare the numbers with `==` on `f32`. The one-bit change then goes unseen.
 #[test]
 fn the_comparison_sees_a_one_bit_difference() {
     let want: Value = serde_json::json!({"x": 12.0, "a": [{"y": 1}]});

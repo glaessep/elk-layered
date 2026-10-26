@@ -362,6 +362,8 @@ fn check(number: u64, graph: ElkNode) -> bool {
     }
 }
 
+// Mutation: read an edge end in src/layout.rs with `by_id.get(id).unwrap()` instead of
+// returning `Error::UnknownId`. Graph 14, with its dangling edge, then makes layout panic.
 #[test]
 fn layout_never_panics_hangs_or_wavers() {
     let mut rng = Rng(0x0e1c_1a7e_4ed0_0001);

@@ -26,8 +26,16 @@ if (one) {
   // The child: lay out one case and write it.
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
   const graph = JSON.parse(readFileSync(join(dir, one), "utf8"));
-  const laid = await new ELK().layout(graph);
   const out = join(dir, one.replace(/\.input\.json$/, ".expected.json"));
+  let laid;
+  try {
+    laid = await new ELK().layout(graph);
+  } catch (error) {
+    // elkjs refuses the graph. The expected file says so, and the parity test then expects
+    // layout() to refuse it too. Only the exception's first line is kept: the rest prints
+    // GWT's object dumps, which change with every build.
+    laid = { elkjsError: String(error?.message ?? error).split("\n")[0] };
+  }
   writeFileSync(out, JSON.stringify(laid, null, 2) + "\n");
   console.log(`recorded ${out}`);
 } else {
