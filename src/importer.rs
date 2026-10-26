@@ -58,6 +58,20 @@ pub struct ElkInputNode {
     pub self_loop_distribution: crate::options::SelfLoopDistributionStrategy,
     /// The node's own `layered.edgeRouting.selfLoopOrdering`.
     pub self_loop_ordering: crate::options::SelfLoopOrderingStrategy,
+    /// What the node's parent sets itself. The caller works this out once, so every path that
+    /// sizes a node reads the same values.
+    pub parent_settings: ParentSettings,
+}
+
+/// What ELK reads from a node's parent when it sizes the node.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ParentSettings {
+    /// The options the parent sets itself, before the importer touches them. They supply the
+    /// label spacings, as `IndividualSpacings.getIndividualOrInherited` reads them.
+    pub options: LayeredOptions,
+    /// The direction the parent sets itself, or `Undefined`. It decides the
+    /// `horizontalLayoutMode` of `calculateMinimumGraphSize`.
+    pub direction: ElkDirection,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -707,8 +721,7 @@ fn import_hierarchical_graph(
                 nested_graph.parent_node_id = Some(node.id.clone());
                 // ELK reads the spacings for a node's labels from the node's parent, as the
                 // user set them: `IndividualSpacings.getIndividualOrInherited`.
-                let parent_raw = index.raw_parent_options(node);
-                let cell_node = cell_node(node, parent_raw);
+                let cell_node = cell_node(node);
                 apply_graph_padding_from_options(&mut nested_graph);
                 add_padding(
                     &mut nested_graph,
@@ -716,7 +729,7 @@ fn import_hierarchical_graph(
                 );
                 nested_graph.options = nested_graph.options.with_spacing_base_value_applied();
                 if !node.node_size.constraints.is_empty() {
-                    let horizontal = !index.raw_parent_direction(node).is_vertical();
+                    let horizontal = !node.parent_settings.direction.is_vertical();
                     include_minimum_graph_size(&mut nested_graph.options, &cell_node, horizontal);
                 }
                 parent_graph.layerless_nodes[node_index].compound = true;
@@ -1029,9 +1042,10 @@ fn add_padding(graph: &mut LGraph, padding: ElkPadding) {
     graph.padding.left += padding.left;
 }
 
-/// What ELK's cell system reads from a node of the input graph. `parent` holds the options
-/// the node's parent sets, which supply the label spacings.
-pub(crate) fn cell_node(node: &ElkInputNode, parent: &LayeredOptions) -> CellNode {
+/// What ELK's cell system reads from a node of the input graph. The label spacings come from
+/// the options the node's parent sets.
+pub(crate) fn cell_node(node: &ElkInputNode) -> CellNode {
+    let parent = &node.parent_settings.options;
     CellNode {
         size: LSize {
             width: node.width,
@@ -1482,8 +1496,6 @@ struct InputIndex<'a> {
     edges_by_parent: HashMap<Option<&'a str>, Vec<&'a ElkInputEdge>>,
     inside_self_loop_nodes: HashSet<&'a str>,
     root_options: LayeredOptions,
-    /// The root's options as the input sets them.
-    raw_root_options: LayeredOptions,
     effective_options: HashMap<&'a str, LayeredOptions>,
     hierarchy_queries: HierarchyQueryIndex,
     container_depths: Vec<Option<usize>>,
@@ -1596,7 +1608,6 @@ impl<'a> InputIndex<'a> {
             edges_by_parent: HashMap::new(),
             inside_self_loop_nodes,
             root_options,
-            raw_root_options: input.options.clone(),
             effective_options,
             hierarchy_queries,
             container_depths: vec![None; input.nodes.len()],
@@ -1608,27 +1619,6 @@ impl<'a> InputIndex<'a> {
             result.edges_by_parent.entry(parent).or_default().push(edge);
         }
         Ok(result)
-    }
-
-    /// The options the node's parent sets itself, before the importer touches them.
-    fn raw_parent_options(&self, node: &ElkInputNode) -> &LayeredOptions {
-        node.parent
-            .as_deref()
-            .and_then(|parent| self.nodes.get(parent))
-            .and_then(|parent| parent.nested_options.as_deref())
-            .unwrap_or(&self.raw_root_options)
-    }
-
-    /// The direction the node's parent sets itself, or `Undefined`.
-    fn raw_parent_direction(&self, node: &ElkInputNode) -> ElkDirection {
-        match node.parent.as_deref() {
-            Some(parent) => self
-                .nodes
-                .get(parent)
-                .and_then(|parent| parent.direction)
-                .unwrap_or(ElkDirection::Undefined),
-            None => self.raw_root_options.direction,
-        }
     }
 
     /// Returns the stable input-order child slice without cloning the parent's membership vector.
@@ -1842,6 +1832,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
             height: 40.0,

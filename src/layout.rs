@@ -22,7 +22,9 @@ use crate::components::ComponentError;
 use crate::error::Error;
 use crate::export::{self, LayoutResult, TransferInput};
 use crate::graph::{LPoint, LSize};
-use crate::importer::{self, ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode};
+use crate::importer::{
+    self, ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, ParentSettings,
+};
 use crate::layout_options::{
     self, EdgeSettings, LabelSettings, NodeSettings, OptionError, OptionProblem,
 };
@@ -575,17 +577,13 @@ impl<'a, 't> Work<'a, 't> {
         }
 
         // The options of the scope, and what ELK reads from its parent.
-        let parent_raw = scope_info
-            .parent
-            .map_or_else(LayeredOptions::default, |parent| {
-                tree.nodes[parent].settings.options.clone()
-            });
+        let scope_input = self.input_node(scope, scope);
         let mut options = scope_info.settings.options.clone();
         options.hierarchy_handling = self.handling[scope];
-        let scope_cell = importer::cell_node(&self.input_node(scope, scope), &parent_raw);
+        let scope_cell = importer::cell_node(&scope_input);
         if scope_info.parent.is_some() && !self.sizing[scope].constraints.is_empty() {
             // `ElkGraphImporter.calculateMinimumGraphSize`, for a node laid out on its own.
-            let horizontal = !self.parent_direction(scope).is_vertical();
+            let horizontal = !scope_input.parent_settings.direction.is_vertical();
             options.node_size = self.sizing[scope];
             importer::include_minimum_graph_size(&mut options, &scope_cell, horizontal);
             // ELK adds the constraint to the set it shares with the node, so the node keeps it.
@@ -659,16 +657,6 @@ impl<'a, 't> Work<'a, 't> {
         Ok(())
     }
 
-    /// The direction the node's parent sets itself, or `Undefined`.
-    ///
-    /// No ELK counterpart: `graph.hasProperty(DIRECTION)` in `NodeLabelAndSizeCalculator.process`.
-    fn parent_direction(&self, node: usize) -> ElkDirection {
-        self.tree.nodes[node]
-            .parent
-            .and_then(|parent| self.tree.nodes[parent].settings.direction)
-            .unwrap_or(ElkDirection::Undefined)
-    }
-
     /// The node as the importer takes it, in a run whose top node is `scope`.
     ///
     /// No ELK counterpart: maps the elkjs JSON tree onto the importer's input.
@@ -685,6 +673,22 @@ impl<'a, 't> Work<'a, 't> {
         } else {
             Some(self.handling[node])
         };
+        // What the node's parent sets itself, which `calculateMinimumGraphSize` and the label
+        // spacings read. `graph.hasProperty(DIRECTION)` in `NodeLabelAndSizeCalculator.process`
+        // is the Java side of the direction. The root has no parent.
+        let parent_settings = info.parent.map_or_else(
+            || ParentSettings {
+                options: LayeredOptions::default(),
+                direction: ElkDirection::Undefined,
+            },
+            |parent| ParentSettings {
+                options: self.tree.nodes[parent].settings.options.clone(),
+                direction: self.tree.nodes[parent]
+                    .settings
+                    .direction
+                    .unwrap_or(ElkDirection::Undefined),
+            },
+        );
         ElkInputNode {
             id: info.node.id.clone(),
             width: current.width,
@@ -710,6 +714,7 @@ impl<'a, 't> Work<'a, 't> {
             node_size,
             self_loop_distribution: info.settings.self_loop_distribution,
             self_loop_ordering: info.settings.self_loop_ordering,
+            parent_settings,
         }
     }
 

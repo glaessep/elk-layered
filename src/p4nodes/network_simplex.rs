@@ -668,6 +668,7 @@ mod tests {
 
     fn node(id: &str, width: f64, height: f64) -> ElkInputNode {
         ElkInputNode {
+            parent_settings: Default::default(),
             id: id.to_string(),
             width,
             height,

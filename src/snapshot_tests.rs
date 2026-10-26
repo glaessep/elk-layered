@@ -24,6 +24,7 @@ use crate::pipeline::{execute_ported_compound_processors, execute_ported_process
 
 fn node(id: &str, width: f64, height: f64, parent: Option<&str>) -> ElkInputNode {
     ElkInputNode {
+        parent_settings: Default::default(),
         id: id.into(),
         width,
         height,

@@ -1,0 +1,196 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.randomSeed": "1",
+    "elk.direction": "DOWN",
+    "elk.spacing.labelNode": "9",
+    "elk.spacing.labelLabel": "2",
+    "elk.nodeLabels.padding": "[top=8,left=2,bottom=1,right=7]",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "p",
+      "width": 40,
+      "height": 30,
+      "$H": 277,
+      "x": 107.5,
+      "y": 12
+    },
+    {
+      "id": "g",
+      "labels": [
+        {
+          "text": "Label 0",
+          "width": 80,
+          "height": 14,
+          "x": 2,
+          "y": 8
+        },
+        {
+          "text": "Label 1",
+          "width": 80,
+          "height": 14,
+          "x": 2,
+          "y": 24
+        }
+      ],
+      "layoutOptions": {
+        "elk.nodeLabels.placement": "[H_LEFT, V_TOP, INSIDE]",
+        "elk.nodeSize.constraints": "[NODE_LABELS, MINIMUM_SIZE]",
+        "elk.direction": "RIGHT",
+        "elk.spacing.labelNode": "13",
+        "elk.spacing.labelLabel": "6",
+        "elk.nodeLabels.padding": "[top=3,left=5,bottom=4,right=6]"
+      },
+      "children": [
+        {
+          "id": "x",
+          "width": 40,
+          "height": 24,
+          "$H": 284,
+          "x": 138.5,
+          "y": 54
+        },
+        {
+          "id": "h",
+          "labels": [
+            {
+              "text": "Label 0",
+              "width": 50,
+              "height": 14,
+              "x": 5,
+              "y": 3
+            },
+            {
+              "text": "Label 1",
+              "width": 50,
+              "height": 14,
+              "x": 5,
+              "y": 23
+            }
+          ],
+          "layoutOptions": {
+            "elk.nodeLabels.placement": "[H_LEFT, V_TOP, INSIDE]",
+            "elk.nodeSize.constraints": "[NODE_LABELS, MINIMUM_SIZE]"
+          },
+          "children": [
+            {
+              "id": "hx",
+              "width": 30,
+              "height": 20,
+              "$H": 290,
+              "x": 79,
+              "y": 61
+            },
+            {
+              "id": "hy",
+              "width": 30,
+              "height": 20,
+              "$H": 292,
+              "x": 79,
+              "y": 101
+            }
+          ],
+          "edges": [
+            {
+              "id": "he",
+              "sources": [
+                "hx"
+              ],
+              "targets": [
+                "hy"
+              ],
+              "sections": [
+                {
+                  "id": "he_s0",
+                  "startPoint": {
+                    "x": 94,
+                    "y": 81
+                  },
+                  "endPoint": {
+                    "x": 94,
+                    "y": 101
+                  },
+                  "incomingShape": "hx",
+                  "outgoingShape": "hy"
+                }
+              ],
+              "container": "h"
+            }
+          ],
+          "$H": 286,
+          "x": 98,
+          "y": 98,
+          "width": 121,
+          "height": 133
+        }
+      ],
+      "edges": [
+        {
+          "id": "ge",
+          "sources": [
+            "x"
+          ],
+          "targets": [
+            "h"
+          ],
+          "sections": [
+            {
+              "id": "ge_s0",
+              "startPoint": {
+                "x": 158.5,
+                "y": 78
+              },
+              "endPoint": {
+                "x": 158.5,
+                "y": 98
+              },
+              "incomingShape": "x",
+              "outgoingShape": "h"
+            }
+          ],
+          "container": "g"
+        }
+      ],
+      "$H": 279,
+      "x": 12,
+      "y": 62,
+      "width": 231,
+      "height": 337
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "sources": [
+        "p"
+      ],
+      "targets": [
+        "g"
+      ],
+      "sections": [
+        {
+          "id": "e0_s0",
+          "startPoint": {
+            "x": 127.5,
+            "y": 42
+          },
+          "endPoint": {
+            "x": 127.5,
+            "y": 62
+          },
+          "incomingShape": "p",
+          "outgoingShape": "g"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 255,
+  "height": 411
+}
