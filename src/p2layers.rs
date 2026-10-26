@@ -27,6 +27,11 @@ pub enum LayeringError {
     CyclicGraph,
     #[error("stretch-width layering cannot normalize these node dimensions")]
     InvalidStretchWidthDimensions,
+    #[error("stretch-width layering needs more than {limit} retries to fit the widest node")]
+    StretchWidthRetryLimit {
+        /// The retry bound that was reached.
+        limit: usize,
+    },
 }
 
 type LayeringResult<T> = Result<T, LayeringError>;

@@ -5,6 +5,16 @@ use super::{LayeringError, LayeringInput, LayeringResult};
 use crate::graph::LNodeKind;
 use std::cmp::Reverse;
 
+/// Most times the adaptive loop may widen `max_width` and start over.
+///
+/// ELK has no such bound. Java's `StretchWidthLayerer` divides every size by the unclamped
+/// minimum but starts `maxWidth` from the clamped one. A normal node much shorter than one unit
+/// then leaves `maxWidth` far below the tallest node's size, and ELK adds 1 per retry until it
+/// catches up. Heights `1e-15` and `1` need about 1e15 retries. Each retry walks every node, so a
+/// layout that needs even a million of them does not finish in reasonable time in ELK either.
+/// The bound turns that case into an error and changes no layering ELK completes.
+const MAX_WIDTH_RETRIES: usize = 1_000_000;
+
 pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>> {
     if input.nodes.is_empty() {
         return Ok(Vec::new());
@@ -51,6 +61,7 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>
     let mut layers: Vec<Vec<usize>> = vec![Vec::new()];
     let mut width_current = 0.0;
     let mut width_up = 0.0;
+    let mut retries = 0;
     while !remaining.is_empty() {
         let selected = remaining
             .iter()
@@ -84,6 +95,12 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>
                 return Err(LayeringError::InvalidStretchWidthDimensions);
             }
             max_width = next;
+            retries += 1;
+            if retries > MAX_WIDTH_RETRIES {
+                return Err(LayeringError::StretchWidthRetryLimit {
+                    limit: MAX_WIDTH_RETRIES,
+                });
+            }
             remaining.clone_from(&nodes);
             remaining_outgoing.clone_from(&outgoing);
         } else {

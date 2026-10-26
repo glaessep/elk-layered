@@ -91,6 +91,25 @@ fn zero_normal_height_rejects_stretch_widths_nonterminating_source_case() {
 }
 
 #[test]
+fn tiny_normal_height_rejects_stretch_widths_endless_retries() {
+    // Sizes divide by the unclamped minimum (1e-15), but max_width starts from the clamped one,
+    // so ELK would add 1 to max_width about 1e15 times.
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    graph
+        .layerless_nodes
+        .push(LNode::new("tiny", 20.0, 1e-15, None));
+    graph
+        .layerless_nodes
+        .push(LNode::new("one", 20.0, 1.0, None));
+    let before = graph.clone();
+    assert!(matches!(
+        layer_with_strategy(&mut graph, LayeringStrategy::StretchWidth),
+        Err(LayeringError::StretchWidthRetryLimit { .. })
+    ));
+    assert_eq!(graph, before);
+}
+
+#[test]
 fn longest_path_uses_an_explicit_stack_for_deep_graphs() {
     std::thread::Builder::new()
         .stack_size(64 * 1024)
