@@ -6,7 +6,6 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/InnermostNodeMarginCalculator.java
 
 pub mod bk;
-pub mod linear_segments;
 pub mod network_simplex;
 pub mod simple;
 
@@ -14,7 +13,6 @@ use crate::common::nodespacing;
 use crate::graph::{InLayerConstraint, LGraph, LNodeKind};
 
 pub use bk::place_nodes_brandes_koepf;
-pub use linear_segments::place_nodes_linear_segments;
 pub use network_simplex::place_nodes_network_simplex;
 pub use simple::place_nodes_simple;
 

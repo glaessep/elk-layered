@@ -43,8 +43,7 @@ use crate::p3order::{
 };
 use crate::p4nodes::{
     calculate_innermost_node_margins, calculate_label_and_node_sizes, place_nodes_brandes_koepf,
-    place_nodes_linear_segments, place_nodes_network_simplex, place_nodes_simple,
-    process_in_layer_constraints,
+    place_nodes_network_simplex, place_nodes_simple, process_in_layer_constraints,
 };
 use crate::p5edges::route_edges_orthogonal;
 use crate::selfloops::{
@@ -521,7 +520,6 @@ fn is_source_ported_processor(kind: ProcessorKind) -> bool {
             | ProcessorKind::HierarchicalPortDummySizeProcessor
             | ProcessorKind::BKNodePlacer
             | ProcessorKind::SimpleNodePlacer
-            | ProcessorKind::LinearSegmentsNodePlacer
             | ProcessorKind::NetworkSimplexPlacer
             | ProcessorKind::LayerSizeAndGraphHeightCalculator
             | ProcessorKind::HierarchicalPortPositionProcessor
@@ -1100,7 +1098,6 @@ fn execute_processor(graph: &mut LGraph, kind: ProcessorKind) -> PipelineResult<
         ProcessorKind::EndLabelPreprocessor => preprocess_end_labels(graph),
         ProcessorKind::BKNodePlacer => place_nodes_brandes_koepf(graph),
         ProcessorKind::SimpleNodePlacer => place_nodes_simple(graph),
-        ProcessorKind::LinearSegmentsNodePlacer => place_nodes_linear_segments(graph),
         ProcessorKind::NetworkSimplexPlacer => place_nodes_network_simplex(graph)?,
         ProcessorKind::LayerSizeAndGraphHeightCalculator => {
             calculate_layer_sizes_and_graph_height(graph);
@@ -1977,6 +1974,13 @@ mod tests {
             ),
             (
                 LayeredOptions {
+                    node_placement_strategy: NodePlacementStrategy::LinearSegments,
+                    ..LayeredOptions::default()
+                },
+                ProcessorKind::LinearSegmentsNodePlacer,
+            ),
+            (
+                LayeredOptions {
                     edge_routing: EdgeRouting::Polyline,
                     ..LayeredOptions::default()
                 },
@@ -2191,7 +2195,6 @@ mod tests {
         for node_placement_strategy in [
             NodePlacementStrategy::BrandesKoepf,
             NodePlacementStrategy::Simple,
-            NodePlacementStrategy::LinearSegments,
             NodePlacementStrategy::NetworkSimplex,
         ] {
             assert_processors_are_source_ported(

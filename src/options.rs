@@ -80,6 +80,8 @@ pub enum CrossingMinimizationStrategy {
 pub enum NodePlacementStrategy {
     Simple,
     Interactive,
+    /// ELK's linear segments placer is not ported. Selecting it makes the pipeline fail with
+    /// `PipelineError::UnsupportedProcessor`.
     LinearSegments,
     #[default]
     BrandesKoepf,
