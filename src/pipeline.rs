@@ -2586,24 +2586,26 @@ mod tests {
 
     #[test]
     fn full_runner_minimizes_crossings() {
+        // The traversal order that layering gives the nodes crosses two edge pairs here. Only
+        // the crossing minimizer can remove them.
+        let edges = [("A", "X"), ("A", "Y"), ("A", "Z"), ("B", "X")];
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
             options: LayeredOptions {
                 separate_connected_components: false,
                 ..p3_options()
             },
-            nodes: vec![node("Top"), node("Bottom"), node("Left"), node("Right")],
-            edges: vec![
-                edge("Top-Right", "Top", "Right"),
-                edge("Bottom-Left", "Bottom", "Left"),
-            ],
+            nodes: ["A", "B", "X", "Y", "Z"].map(node).to_vec(),
+            edges: edges
+                .iter()
+                .enumerate()
+                .map(|(index, (source, target))| edge(&format!("e{index}"), source, target))
+                .collect(),
         })
         .unwrap();
 
         execute_ported_processors(&mut graph).unwrap();
 
-        // Input order puts Top above Bottom and Left above Right, which would cross the two
-        // edges. The sweep must flip one pair so that both edges stay parallel.
         let y_of = |id: &str| {
             graph
                 .layerless_nodes
@@ -2613,7 +2615,18 @@ mod tests {
                 .position
                 .y
         };
-        assert_eq!(y_of("Top") < y_of("Bottom"), y_of("Right") < y_of("Left"));
+        let mut crossings = 0;
+        for first in &edges {
+            for second in &edges {
+                let shares_an_end = first.0 == second.0 || first.1 == second.1;
+                let flips_order =
+                    (y_of(first.0) < y_of(second.0)) != (y_of(first.1) < y_of(second.1));
+                if !shares_an_end && flips_order {
+                    crossings += 1;
+                }
+            }
+        }
+        assert_eq!(crossings, 0);
     }
 
     #[test]
