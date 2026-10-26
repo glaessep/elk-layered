@@ -66,6 +66,23 @@ bash scripts/check-branch-name.test.sh
 - **Agents never merge a pull request, never close an issue and never push to `main`.** The
   maintainer merges.
 
+## Reviewing
+
+Add the label `review-request` to a pull request to get a review by Claude Code
+(`.github/workflows/claude-code-review.yml`). Add it at most twice over a pull request's life, and
+never to retry or nudge a run that is still going. A review checks, in this order:
+
+1. **Fidelity.** Each ported function matches the ELK Java it cites, at commit `62d5909`. A
+   difference from Java needs a comment that says why: elkjs behaves that way, or Rust needs it.
+2. **elkjs behaviour.** Where elkjs and Java differ, the code follows elkjs and says so.
+3. **Determinism.** No `HashMap` or `HashSet` order, clock, environment or thread timing reaches
+   the result.
+4. **Caller input.** Malformed input gives an error, never a panic: no `unwrap`, `expect` or
+   indexing that a caller's graph can break.
+5. **Tests.** Each new feature has a test that fails when the feature breaks. A change to
+   `tests/snapshots/` is explained in the pull request.
+6. **Scope.** The pull request does what its issue asks, and no more.
+
 ## Commits
 
 Conventional Commits: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`,
