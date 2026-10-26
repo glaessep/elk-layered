@@ -1357,7 +1357,7 @@ mod tests {
     use super::*;
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::options::{ElkDirection, GreedySwitchType, LayeredOptions};
-    use crate::pipeline::execute_ported_processors;
+    use crate::pipeline::{LayeredPhase, run_processors_until_phase};
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
@@ -1408,21 +1408,17 @@ mod tests {
         })
         .unwrap();
 
-        execute_ported_processors(&mut graph).unwrap();
+        run_processors_until_phase(&mut graph, LayeredPhase::P4NodePlacement).unwrap();
 
-        // A and B share the first layer, so the placer must keep them apart in y.
-        let position = |id: &str| {
-            let node = graph
-                .layerless_nodes
-                .iter()
-                .find(|node| node.id == id)
-                .unwrap();
-            (node.position.y, node.size.height)
-        };
-        let (mut upper, mut lower) = (position("A"), position("B"));
-        if lower.0 < upper.0 {
-            std::mem::swap(&mut upper, &mut lower);
+        // Every layer must keep its nodes apart in y, margins included.
+        assert!(!graph.layers.is_empty());
+        for layer in &graph.layers {
+            let mut bottom = f64::NEG_INFINITY;
+            for node in &layer.nodes {
+                let lnode = &graph.layerless_nodes[*node];
+                assert!(lnode.position.y - lnode.margin.top > bottom);
+                bottom = lnode.position.y + lnode.size.height + lnode.margin.bottom;
+            }
         }
-        assert!(upper.0 + upper.1 < lower.0);
     }
 }
