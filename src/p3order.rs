@@ -1238,6 +1238,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
             height: 40.0,

@@ -179,10 +179,13 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
         Vec::new()
     };
     make_connected(&mut aux.graph);
-    let iteration_limit = graph
-        .options
-        .thoroughness
-        .saturating_mul(aux.graph.nodes.len());
+    // Ports `NetworkSimplexPlacer.process`:
+    // `int iterLimit = THOROUGHNESS * nGraph.nodes.size();`. Java's `int` wraps, and a negative
+    // limit stops the loop at once. The option value is an `i32`, so the first cast is exact.
+    let iteration_limit = usize::try_from(
+        (graph.options.thoroughness as i32).wrapping_mul(aux.graph.nodes.len() as i32),
+    )
+    .unwrap_or(0);
     NetworkSimplex::for_graph(&mut aux.graph)
         .with_iteration_limit(iteration_limit)
         .with_balancing(false)
@@ -665,6 +668,7 @@ mod tests {
 
     fn node(id: &str, width: f64, height: f64) -> ElkInputNode {
         ElkInputNode {
+            parent_settings: Default::default(),
             id: id.to_string(),
             width,
             height,

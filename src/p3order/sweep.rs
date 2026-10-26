@@ -3837,6 +3837,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
             height: 40.0,
@@ -3875,6 +3876,7 @@ mod tests {
 
     fn nested_node(id: &str, parent: Option<&str>) -> ElkInputNode {
         ElkInputNode {
+            parent_settings: Default::default(),
             id: id.to_string(),
             width: 54.0,
             height: 68.0,
@@ -3897,6 +3899,7 @@ mod tests {
 
     fn nested_group(id: &str, parent: Option<&str>) -> ElkInputNode {
         ElkInputNode {
+            parent_settings: Default::default(),
             id: id.to_string(),
             width: 0.0,
             height: 0.0,

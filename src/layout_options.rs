@@ -488,12 +488,21 @@ pub(crate) struct OptionError {
     pub(crate) problem: OptionProblem,
 }
 
+/// Whether `suffix` is `id` or the end of `id` after a dot, such as `direction` of
+/// `org.eclipse.elk.direction`. An empty suffix is none.
+///
+/// Ports the suffix match of `LayoutMetaDataService.getOptionDataBySuffix` and
+/// `getAlgorithmDataBySuffix`.
+pub(crate) fn is_id_suffix(id: &str, suffix: &str) -> bool {
+    !suffix.is_empty()
+        && id.ends_with(suffix)
+        && (id.len() == suffix.len() || id.as_bytes()[id.len() - suffix.len() - 1] == b'.')
+}
+
 /// Finds the option a key names.
 ///
-/// Source: `LayoutMetaDataService.getOptionDataBySuffix`. ELK's one legacy id is for an
-/// internal option, so legacy ids are left out.
-///
-/// Ports `LayoutMetaDataService.getOptionDataBySuffix`.
+/// Ports `LayoutMetaDataService.getOptionDataBySuffix`. ELK's one legacy id is for an internal
+/// option, so legacy ids are left out.
 pub(crate) fn resolve(key: &str) -> Option<(&'static str, u8)> {
     if key.is_empty() {
         return None;
@@ -503,7 +512,7 @@ pub(crate) fn resolve(key: &str) -> Option<(&'static str, u8)> {
         if id == key {
             return Some((id, targets));
         }
-        if id.ends_with(key) && id.as_bytes()[id.len() - key.len() - 1] == b'.' {
+        if is_id_suffix(id, key) {
             if found.is_some() {
                 return None;
             }
@@ -1275,8 +1284,6 @@ fn parse_node_label_placement(value: &str) -> Result<NodeLabelPlacement, OptionP
     Ok(placement)
 }
 
-/// Source: `LayoutOptionData.parseValue`, case `BOOLEAN`.
-///
 /// Ports `LayoutOptionData.parseValue`, case `BOOLEAN`.
 pub(crate) fn parse_bool(value: &str) -> Result<bool, OptionProblem> {
     if value.eq_ignore_ascii_case("true") {
@@ -1288,9 +1295,7 @@ pub(crate) fn parse_bool(value: &str) -> Result<bool, OptionProblem> {
     }
 }
 
-/// Source: `LayoutOptionData.parseValue`, case `INT`: `Integer.valueOf`.
-///
-/// Ports `LayoutOptionData.parseValue`, case `INT`.
+/// Ports `LayoutOptionData.parseValue`, case `INT`: `Integer.valueOf`.
 pub(crate) fn parse_int(value: &str) -> Result<i32, OptionProblem> {
     let digits = value.strip_prefix(['+', '-']).unwrap_or(value);
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
@@ -1301,11 +1306,9 @@ pub(crate) fn parse_int(value: &str) -> Result<i32, OptionProblem> {
         .map_err(|_| OptionProblem::InvalidValue)
 }
 
-/// Source: `LayoutOptionData.parseValue`, case `DOUBLE`, as GWT's `Double.valueOf` parses:
-/// `^\s*[+-]?(NaN|Infinity|((\d+\.?\d*)|(\.\d+))([eE][+-]?\d+)?[dDfF]?)\s*$`. A value that
-/// is not finite is refused too, because no layout can use it.
-///
-/// Ports `LayoutOptionData.parseValue`, case `DOUBLE`.
+/// Ports `LayoutOptionData.parseValue`, case `DOUBLE`, as GWT's `Double.valueOf` parses:
+/// `^\s*[+-]?(NaN|Infinity|((\d+\.?\d*)|(\.\d+))([eE][+-]?\d+)?[dDfF]?)\s*$`. A value that is not
+/// finite is refused too, because no layout can use it.
 pub(crate) fn parse_double(value: &str) -> Result<f64, OptionProblem> {
     let trimmed = value.trim_matches(|c: char| c.is_whitespace());
     let body = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
@@ -1342,10 +1345,8 @@ pub(crate) fn parse_double(value: &str) -> Result<f64, OptionProblem> {
     }
 }
 
-/// Source: `LayoutOptionData.enumForString`: the exact constant name, or its ordinal. elkjs
-/// compares names case-sensitively, so `down` is no direction.
-///
-/// Ports `LayoutOptionData.enumForString`.
+/// Ports `LayoutOptionData.enumForString`: the exact constant name, or its ordinal. elkjs compares
+/// names case-sensitively, so `down` is no direction.
 fn parse_enum<T: Copy>(value: &str, values: &[(&str, T)]) -> Result<T, OptionProblem> {
     if let Some((_, v)) = values.iter().find(|(name, _)| *name == value) {
         return Ok(*v);
@@ -1358,10 +1359,8 @@ fn parse_enum<T: Copy>(value: &str, values: &[(&str, T)]) -> Result<T, OptionPro
         .ok_or(OptionProblem::InvalidValue)
 }
 
-/// Source: `LayoutOptionData.enumSetForStringArray`: the value splits at
-/// `[\[\]\s,]+`, and every part must name a constant.
-///
-/// Ports `LayoutOptionData.enumSetForStringArray`.
+/// Ports `LayoutOptionData.enumSetForStringArray`: the value splits at `[\[\]\s,]+`, and every part
+/// must name a constant.
 fn parse_flags<T: Copy, S>(
     value: &str,
     values: &[(&str, T)],
@@ -1398,10 +1397,8 @@ fn strip_delimiters(value: &str) -> &str {
         .trim_end_matches([')', ']', '}', '"', '\'', ' ', '\t', '\r', '\n'])
 }
 
-/// Source: `Spacing.parse`, which `ElkPadding` and `ElkMargin` share. Keys it does not know
-/// are skipped; sides not named stay zero.
-///
-/// Ports `Spacing.parse`.
+/// Ports `Spacing.parse`, which `ElkPadding` and `ElkMargin` share. Keys it does not know are
+/// skipped; sides not named stay zero.
 pub(crate) fn parse_spacing(value: &str) -> Result<ElkPadding, OptionProblem> {
     let mut padding = ElkPadding::uniform(0.0);
     let inner = strip_delimiters(value);
@@ -1425,9 +1422,7 @@ pub(crate) fn parse_spacing(value: &str) -> Result<ElkPadding, OptionProblem> {
     Ok(padding)
 }
 
-/// Source: `KVector.parse`: exactly two numbers.
-///
-/// Ports `KVector.parse`.
+/// Ports `KVector.parse`: exactly two numbers.
 pub(crate) fn parse_vector(value: &str) -> Result<(f64, f64), OptionProblem> {
     let inner = strip_delimiters(value);
     if inner.is_empty() {
@@ -1456,6 +1451,18 @@ mod tests {
 
     fn node(pairs: &[(&str, &str)]) -> Result<NodeSettings, OptionProblem> {
         node_settings(&map(pairs)).map_err(|error| error.problem)
+    }
+
+    // Mutation: drop the dot check in `is_id_suffix`.
+    #[test]
+    fn an_id_suffix_is_the_id_or_the_part_after_a_dot() {
+        let id = "org.eclipse.elk.layered";
+        assert!(is_id_suffix(id, id));
+        assert!(is_id_suffix(id, "layered"));
+        assert!(is_id_suffix(id, "elk.layered"));
+        assert!(!is_id_suffix(id, "ayered"));
+        assert!(!is_id_suffix(id, "xorg.eclipse.elk.layered"));
+        assert!(!is_id_suffix(id, ""));
     }
 
     // Mutation: drop the dot check in `resolve`.

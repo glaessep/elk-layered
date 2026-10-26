@@ -1714,6 +1714,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
             height: 40.0,
@@ -2494,6 +2495,7 @@ mod tests {
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![
                 ElkInputNode {
+                    parent_settings: Default::default(),
                     id: "cluster".to_string(),
                     width: 0.0,
                     height: 0.0,
@@ -2513,6 +2515,7 @@ mod tests {
                     self_loop_ordering: Default::default(),
                 },
                 ElkInputNode {
+                    parent_settings: Default::default(),
                     id: "A".to_string(),
                     width: 80.0,
                     height: 40.0,
@@ -2584,6 +2587,7 @@ mod tests {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![ElkInputNode {
+                parent_settings: Default::default(),
                 id: "A".to_string(),
                 width: 80.0,
                 height: 40.0,

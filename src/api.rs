@@ -5,6 +5,19 @@
 //! write the JSON elkjs reads and writes: field names in camel case, missing numbers as zero,
 //! missing lists as empty, and empty lists left out.
 //!
+//! elkjs also reads the options from a legacy `properties` key (`transformProperties` in the
+//! importer below). Every type that has `layout_options` takes that key as an alias. elkjs
+//! reads `properties` only when `layoutOptions` is missing. A graph with both keys is a serde
+//! error here, where elkjs would quietly ignore `properties`.
+//!
+//! elkjs reads an edge in an old form too: a single `source` and `target` string, with an
+//! optional `sourcePort` and `targetPort`. `source` and `target` read as one-element `sources`
+//! and `targets`. The old port keys are not read: a port only exists as an entry in `ports`,
+//! and a graph with one is refused. elkjs itself ignores a port key that names no port. It
+//! picks the old form only when neither `sources` nor `targets` is present; here, a graph
+//! that gives both `source` and `sources` is a serde error, and `source` next to `targets`
+//! reads as one source.
+//!
 //! Source: `org.eclipse.elk.graph.json/src/org/eclipse/elk/graph/json/JsonImporter.xtend`,
 //! which reads this JSON and writes the layout back into it.
 
@@ -64,6 +77,7 @@ pub struct ElkNode {
         feature = "serde",
         serde(
             default,
+            alias = "properties",
             skip_serializing_if = "BTreeMap::is_empty",
             deserialize_with = "options::deserialize"
         )
@@ -101,6 +115,7 @@ pub struct ElkPort {
         feature = "serde",
         serde(
             default,
+            alias = "properties",
             skip_serializing_if = "BTreeMap::is_empty",
             deserialize_with = "options::deserialize"
         )
@@ -116,10 +131,21 @@ pub struct ElkEdge {
     /// Unique among all edges of the graph.
     pub id: String,
     /// The ids of the edge's source nodes. elk-layered supports exactly one.
-    #[cfg_attr(feature = "serde", serde(default))]
+    ///
+    /// The JSON may also give the old form: a single `source` string
+    /// (`transformPrimitiveEdge` in the importer).
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, alias = "source", deserialize_with = "ends::deserialize")
+    )]
     pub sources: Vec<String>,
     /// The ids of the edge's target nodes. elk-layered supports exactly one.
-    #[cfg_attr(feature = "serde", serde(default))]
+    ///
+    /// The JSON may also give the old form: a single `target` string.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, alias = "target", deserialize_with = "ends::deserialize")
+    )]
     pub targets: Vec<String>,
     /// The edge's labels. Their coordinates are relative to [`ElkEdge::container`].
     #[cfg_attr(
@@ -132,6 +158,7 @@ pub struct ElkEdge {
         feature = "serde",
         serde(
             default,
+            alias = "properties",
             skip_serializing_if = "BTreeMap::is_empty",
             deserialize_with = "options::deserialize"
         )
@@ -222,6 +249,7 @@ pub struct ElkLabel {
         feature = "serde",
         serde(
             default,
+            alias = "properties",
             skip_serializing_if = "BTreeMap::is_empty",
             deserialize_with = "options::deserialize"
         )
@@ -239,6 +267,38 @@ pub struct ElkPoint {
     /// Vertical coordinate.
     #[cfg_attr(feature = "serde", serde(default))]
     pub y: f64,
+}
+
+#[cfg(feature = "serde")]
+mod ends {
+    use std::fmt;
+
+    use serde::Deserializer;
+    use serde::de::{SeqAccess, Visitor};
+
+    /// A list of ids, or a single id string for the old `source` and `target` keys.
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<String>, D::Error> {
+        struct EndsVisitor;
+        impl<'de> Visitor<'de> for EndsVisitor {
+            type Value = Vec<String>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("an id or a list of ids")
+            }
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(vec![v.to_string()])
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut ids = Vec::new();
+                while let Some(id) = seq.next_element::<String>()? {
+                    ids.push(id);
+                }
+                Ok(ids)
+            }
+        }
+        deserializer.deserialize_any(EndsVisitor)
+    }
 }
 
 #[cfg(feature = "serde")]
