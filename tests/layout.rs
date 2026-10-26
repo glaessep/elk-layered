@@ -829,3 +829,35 @@ fn a_vertical_layout_sizes_and_places_node_labels_across_it() {
     let laid = layout(&graph).unwrap();
     assert_eq!(size(&laid, "b"), (0.0, 40.0));
 }
+
+// Mutation: let the importer ignore `ElkInputEdge::container` and fall back to its own rule,
+// which puts the edge n7 -> n4 in the root. Depth-first cycle breaking then walks the edges in
+// another order and reverses another edge.
+#[test]
+fn edges_are_imported_in_the_order_of_their_containers() {
+    let n6 = group("n6", vec![node("n7", 60.0, 30.0)]);
+    let n3 = group(
+        "n3",
+        vec![node("n4", 60.0, 44.0), node("n5", 60.0, 30.0), n6],
+    );
+    let mut graph = include_children(root(
+        vec![node("n1", 75.5, 20.0), node("n2", 60.0, 20.0), n3],
+        vec![
+            edge("e0", "n7", "n4"),
+            edge("e1", "n7", "n1"),
+            edge("e2", "n2", "n4"),
+            edge("e3", "n2", "n1"),
+            edge("e4", "n4", "n7"),
+        ],
+    ));
+    graph.layout_options.insert(
+        "elk.layered.cycleBreaking.strategy".into(),
+        "DEPTH_FIRST".into(),
+    );
+    let laid = layout(&graph).unwrap();
+    assert_eq!(find_edge(&laid, "e0").container.as_deref(), Some("n3"));
+    assert_eq!(find_edge(&laid, "e1").container.as_deref(), Some("root"));
+    assert_eq!(at(&laid, "n4"), (146.0, 104.0));
+    assert_eq!(size(&laid, "n3"), (218.0, 160.0));
+    assert_eq!(at(&laid, "n2"), (12.0, 146.666_666_666_666_69));
+}
