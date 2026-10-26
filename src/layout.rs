@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::api::{ElkEdge, ElkEdgeSection, ElkLabel, ElkNode, ElkPoint};
 use crate::error::Error;
 use crate::export::{self, LayoutResult, TransferInput};
-use crate::graph::{EdgeLabelPlacement, LPoint, LSize};
+use crate::graph::{LPoint, LSize};
 use crate::importer::{self, ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode};
 use crate::layout_options::{
     self, EdgeSettings, LabelSettings, NodeSettings, OptionError, OptionProblem,
@@ -520,9 +520,10 @@ impl<'a, 't> Work<'a, 't> {
                 // leaves edges into other levels unrouted.
                 let siblings = tree.nodes[edge.source].parent == Some(scope)
                     && tree.nodes[edge.target].parent == Some(scope);
+                // The two cases exclude each other: a node is not its own parent.
                 let to_graph = (tree.nodes[edge.source].parent == Some(scope)
                     && edge.target == scope)
-                    ^ (tree.nodes[edge.target].parent == Some(scope) && edge.source == scope);
+                    || (tree.nodes[edge.target].parent == Some(scope) && edge.source == scope);
                 if to_graph {
                     return Err(Error::Unsupported {
                         element,
@@ -851,10 +852,7 @@ fn input_label(index: usize, label: &ElkLabel, settings: &LabelSettings) -> ElkI
         text: label.text.clone(),
         width: label.width,
         height: label.height,
-        placement: match settings.placement {
-            EdgeLabelPlacement::Center => EdgeLabelPlacement::Center,
-            other => other,
-        },
+        placement: settings.placement,
         inline: settings.inline,
         node_label_placement: settings.node_label_placement,
     }
