@@ -296,9 +296,7 @@ impl<'a> Tree<'a> {
         false
     }
 
-    /// Source: `ElkGraphUtil.findBestEdgeContainment` for one source and one target.
-    ///
-    /// Ports `ElkGraphUtil.findBestEdgeContainment`.
+    /// Ports `ElkGraphUtil.findBestEdgeContainment`, for one source and one target.
     fn best_containment(&self, source: usize, target: usize) -> usize {
         let source_parent = self.nodes[source].parent;
         let target_parent = self.nodes[target].parent;
@@ -317,16 +315,12 @@ impl<'a> Tree<'a> {
         if target == common || self.is_descendant(target, common) {
             return common;
         }
-        if self.nodes[target].parent == self.nodes[common].parent {
-            return self.nodes[target].parent.unwrap_or(common);
-        }
+        // Java's loop also meets the sibling case here. With one source and one target, it has
+        // returned above as the equal-parent case.
         self.lowest_common_ancestor(common, target)
     }
 
-    /// Source: `ElkGraphUtil.findLowestCommonAncestor`, which counts a node as its own
-    /// ancestor.
-    ///
-    /// Ports `ElkGraphUtil.findLowestCommonAncestor`.
+    /// Ports `ElkGraphUtil.findLowestCommonAncestor`, which counts a node as its own ancestor.
     fn lowest_common_ancestor(&self, a: usize, b: usize) -> usize {
         let ancestors = |mut node: usize| {
             let mut list = vec![node];
@@ -421,8 +415,6 @@ impl<'a, 't> Work<'a, 't> {
         node
     }
 
-    /// Source: `RecursiveGraphLayoutEngine.evaluateHierarchyHandlingInheritance`.
-    ///
     /// Ports `RecursiveGraphLayoutEngine.evaluateHierarchyHandlingInheritance`.
     fn evaluate_handling(&mut self, node: usize) {
         if self.handling[node] == HierarchyHandling::Inherit {
@@ -448,11 +440,11 @@ impl<'a, 't> Work<'a, 't> {
         Ok(())
     }
 
-    /// Source: `RecursiveGraphLayoutEngine.layoutRecursively`.
+    /// Ports `RecursiveGraphLayoutEngine.layoutRecursively`, without top-down layout and inside
+    /// self-loops.
     ///
-    /// Ports `RecursiveGraphLayoutEngine.layoutRecursively`, without top-down layout and inside self-loops.
-    /// Java recurses once per nesting level. This keeps the same visiting order on a work
-    /// list, so a deeply nested graph cannot overflow Rust's stack.
+    /// Java recurses once per nesting level. This keeps the same visiting order on a work list, so
+    /// a deeply nested graph cannot overflow Rust's stack.
     fn layout_recursively(&mut self, root: usize) -> Result<(), Error> {
         let tree = self.tree;
         let mut stack: Vec<Level> = Vec::new();
@@ -521,9 +513,10 @@ impl<'a, 't> Work<'a, 't> {
 
     /// Lays out one scope with layered and writes the result.
     ///
-    /// Source: `LayeredLayoutProvider.layout`.
+    /// Lays out one scope with layered and writes the result.
     ///
-    /// Ports `LayeredLayoutProvider.layout`, with `ElkGraphImporter.importGraph`'s edge selection and `calculateMinimumGraphSize`.
+    /// Ports `LayeredLayoutProvider.layout`, with `ElkGraphImporter.importGraph`'s edge selection
+    /// and `calculateMinimumGraphSize`.
     fn run_layered(&mut self, scope: usize, include: bool) -> Result<(), Error> {
         let tree = self.tree;
         let scope_info = &tree.nodes[scope];
@@ -792,11 +785,9 @@ impl<'a, 't> Work<'a, 't> {
         self.apply_parent_node_layout(scope, result.actual_size);
     }
 
-    /// Source: `ElkGraphLayoutTransferrer.applyParentNodeLayout` for the top graph of a run,
-    /// with `ElkUtil.resizeNode(node, width, height, true, true)`. Without ports, there is
-    /// no port to move.
-    ///
-    /// Ports `ElkGraphLayoutTransferrer.applyParentNodeLayout` with `ElkUtil.resizeNode` and `effectiveMinSizeConstraintFor`.
+    /// Ports `ElkGraphLayoutTransferrer.applyParentNodeLayout` for the top graph of a run, with
+    /// `ElkUtil.resizeNode(node, width, height, true, true)` and `effectiveMinSizeConstraintFor`.
+    /// Without ports, there is no port to move.
     fn apply_parent_node_layout(&mut self, scope: usize, actual: LSize) {
         let mut new_size = self.sizing[scope].effective_minimum().unwrap_or_default();
         new_size.width = f64::max(new_size.width, actual.width);
