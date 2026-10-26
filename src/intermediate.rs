@@ -1804,28 +1804,29 @@ fn create_end_label_cell(
     }
 }
 
+/// The minimum size of a label cell that holds `labels`.
+///
+/// Ports `LabelCell.addLabel` at commit `62d5909`, label by label and in Java's order of
+/// additions, so the sum rounds the way Java's does. In horizontal layout mode a cell stacks its
+/// labels one below the other; in vertical mode it puts them side by side.
 fn label_cell_size(labels: &[LLabel], label_label_spacing: f64, horizontal_layout: bool) -> LSize {
     let mut width: f64 = 0.0;
     let mut height: f64 = 0.0;
-
-    if horizontal_layout {
-        for label in labels {
-            width += label.size.width + label_label_spacing;
-            height = height.max(label.size.height);
-        }
-        if !labels.is_empty() {
-            width -= label_label_spacing;
-        }
-    } else {
-        for label in labels {
+    for (count, label) in labels.iter().enumerate() {
+        if horizontal_layout {
             width = width.max(label.size.width);
-            height += label.size.height + label_label_spacing;
-        }
-        if !labels.is_empty() {
-            height -= label_label_spacing;
+            height += label.size.height;
+            if count > 0 {
+                height += label_label_spacing;
+            }
+        } else {
+            width += label.size.width;
+            height = height.max(label.size.height);
+            if count > 0 {
+                width += label_label_spacing;
+            }
         }
     }
-
     LSize { width, height }
 }
 
@@ -2148,15 +2149,18 @@ fn apply_end_label_cell_layout(
     cursor.x += node_position.x;
     cursor.y += node_position.y;
 
+    // `LabelCell.applyHorizontalModeLabelLayout` stacks the labels one below the other, and
+    // `applyVerticalModeLabelLayout` puts them side by side. The cell is exactly as large as its
+    // labels, so the alignment offset of the first label is zero.
     for label in &mut labels {
         if cell.horizontal_layout {
-            label.position.x = cursor.x;
-            label.position.y = aligned_y(cursor.y, cell.size.height, label.size.height, cell);
-            cursor.x += label.size.width + label_label_spacing;
-        } else {
             label.position.x = aligned_x(cursor.x, cell.size.width, label.size.width, cell);
             label.position.y = cursor.y;
             cursor.y += label.size.height + label_label_spacing;
+        } else {
+            label.position.x = cursor.x;
+            label.position.y = aligned_y(cursor.y, cell.size.height, label.size.height, cell);
+            cursor.x += label.size.width + label_label_spacing;
         }
     }
 
