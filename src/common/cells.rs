@@ -1037,19 +1037,16 @@ impl<'a> Context<'a> {
     /// `getMinimumClientAreaSize`.
     fn setup_minimum_client_area_size(&mut self) {
         let sizing = self.node.sizing;
-        if sizing.constraints.contains(SizeConstraints::MINIMUM_SIZE)
-            && sizing
-                .options
-                .contains(SizeOptions::MINIMUM_SIZE_ACCOUNTS_FOR_PADDING)
-        {
-            let minimum = minimum_node_or_client_area_size(&sizing);
-            if let Kind::Grid {
+        if sizing
+            .options
+            .contains(SizeOptions::MINIMUM_SIZE_ACCOUNTS_FOR_PADDING)
+            && let Some(minimum) = sizing.effective_minimum()
+            && let Kind::Grid {
                 center_cell_minimum_size,
                 ..
             } = &mut self.cells.cells[self.inside_node_label_container].kind
-            {
-                *center_cell_minimum_size = Some(minimum);
-            }
+        {
+            *center_cell_minimum_size = Some(minimum);
         }
     }
 
@@ -1300,28 +1297,14 @@ fn location_order(location: NodeLabelLocation) -> usize {
 
 /// Source: `NodeLabelAndSizeUtilities.getMinimumNodeSize`.
 fn minimum_node_size(sizing: &NodeSizing) -> Option<LSize> {
-    if sizing.constraints.contains(SizeConstraints::MINIMUM_SIZE)
-        && !sizing
-            .options
-            .contains(SizeOptions::MINIMUM_SIZE_ACCOUNTS_FOR_PADDING)
+    if sizing
+        .options
+        .contains(SizeOptions::MINIMUM_SIZE_ACCOUNTS_FOR_PADDING)
     {
-        return Some(minimum_node_or_client_area_size(sizing));
+        return None;
     }
-    None
-}
-
-/// Source: `NodeLabelAndSizeUtilities.getMinimumNodeOrClientAreaSize`.
-fn minimum_node_or_client_area_size(sizing: &NodeSizing) -> LSize {
-    let mut minimum = sizing.minimum;
-    if sizing.options.contains(SizeOptions::DEFAULT_MINIMUM_SIZE) {
-        if minimum.width <= 0.0 {
-            minimum.width = 20.0;
-        }
-        if minimum.height <= 0.0 {
-            minimum.height = 20.0;
-        }
-    }
-    minimum
+    // `NodeLabelAndSizeUtilities.getMinimumNodeOrClientAreaSize`, behind the constraint check.
+    sizing.effective_minimum()
 }
 
 /// Sizes a node and places its labels.

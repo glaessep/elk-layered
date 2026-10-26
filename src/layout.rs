@@ -24,9 +24,7 @@ use crate::importer::{self, ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInput
 use crate::layout_options::{
     self, EdgeSettings, LabelSettings, NodeSettings, OptionError, OptionProblem,
 };
-use crate::options::{
-    ElkDirection, HierarchyHandling, LayeredOptions, SizeConstraints, SizeOptions,
-};
+use crate::options::{ElkDirection, HierarchyHandling, LayeredOptions, SizeConstraints};
 use crate::pipeline::{self, PipelineError};
 
 /// Lays out an ELK graph the way elkjs 0.9.3 does with the layered algorithm.
@@ -760,25 +758,11 @@ impl<'a, 't> Work<'a, 't> {
     ///
     /// Ports `ElkGraphLayoutTransferrer.applyParentNodeLayout` with `ElkUtil.resizeNode` and `effectiveMinSizeConstraintFor`.
     fn apply_parent_node_layout(&mut self, scope: usize, actual: LSize) {
-        let sizing = self.sizing[scope];
-        let constraints = if self.size_fixed[scope] {
-            SizeConstraints::FIXED
-        } else {
-            sizing.constraints
-        };
-        let mut new_size = LSize::default();
-        // `ElkUtil.effectiveMinSizeConstraintFor`.
-        if constraints.contains(SizeConstraints::MINIMUM_SIZE) {
-            new_size = sizing.minimum;
-            if sizing.options.contains(SizeOptions::DEFAULT_MINIMUM_SIZE) {
-                if new_size.width <= 0.0 {
-                    new_size.width = 20.0;
-                }
-                if new_size.height <= 0.0 {
-                    new_size.height = 20.0;
-                }
-            }
+        let mut sizing = self.sizing[scope];
+        if self.size_fixed[scope] {
+            sizing.constraints = SizeConstraints::FIXED;
         }
+        let mut new_size = sizing.effective_minimum().unwrap_or_default();
         new_size.width = f64::max(new_size.width, actual.width);
         new_size.height = f64::max(new_size.height, actual.height);
         let node = self.out_node(scope);
