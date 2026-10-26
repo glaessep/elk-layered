@@ -1,0 +1,91 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.edgeRouting": "ORTHOGONAL",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+    "elk.randomSeed": "1",
+    "elk.padding": "[top=20,left=20,bottom=20,right=20]"
+  },
+  "children": [
+    {
+      "id": "Driver",
+      "width": 70,
+      "height": 40,
+      "ports": [{ "id": "drv_out", "width": 10, "height": 10, "layoutOptions": { "elk.port.side": "EAST" } }],
+      "layoutOptions": { "elk.portConstraints": "FIXED_SIDE" }
+    },
+    {
+      "id": "Brake System",
+      "ports": [
+        { "id": "pedal_in", "width": 10, "height": 10, "layoutOptions": { "elk.port.side": "WEST" } },
+        { "id": "hyd_out", "width": 10, "height": 10, "layoutOptions": { "elk.port.side": "EAST" } }
+      ],
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.padding": "[top=34,left=24,bottom=20,right=24]",
+        "elk.direction": "RIGHT",
+        "elk.layered.spacing.nodeNodeBetweenLayers": "45"
+      },
+      "children": [
+        {
+          "id": "PedalSensor",
+          "width": 128,
+          "height": 48,
+          "ports": [
+            { "id": "ps_in", "width": 10, "height": 10, "layoutOptions": { "elk.port.side": "WEST" } },
+            { "id": "ps_out", "width": 10, "height": 10, "layoutOptions": { "elk.port.side": "EAST" } }
+          ],
+          "layoutOptions": { "elk.portConstraints": "FIXED_SIDE" }
+        },
+        {
+          "id": "Brake ECU",
+          "width": 114,
+          "height": 48,
+          "ports": [
+            { "id": "ecu_in", "width": 10, "height": 10, "layoutOptions": { "elk.port.side": "WEST" } },
+            { "id": "ecu_ws", "width": 10, "height": 10, "layoutOptions": { "elk.port.side": "SOUTH" } },
+            { "id": "ecu_out", "width": 10, "height": 10, "layoutOptions": { "elk.port.side": "EAST" } }
+          ],
+          "layoutOptions": { "elk.portConstraints": "FIXED_SIDE" }
+        },
+        {
+          "id": "ABS Controller",
+          "width": 142,
+          "height": 48,
+          "ports": [
+            { "id": "abs_in", "width": 10, "height": 10, "layoutOptions": { "elk.port.side": "WEST" } },
+            { "id": "abs_out", "width": 10, "height": 10, "layoutOptions": { "elk.port.side": "EAST" } }
+          ],
+          "layoutOptions": { "elk.portConstraints": "FIXED_SIDE" }
+        },
+        {
+          "id": "WheelSpeedSensor",
+          "width": 170,
+          "height": 48,
+          "ports": [{ "id": "ws_out", "width": 10, "height": 10, "layoutOptions": { "elk.port.side": "NORTH" } }],
+          "layoutOptions": { "elk.portConstraints": "FIXED_SIDE" }
+        }
+      ],
+      "edges": [
+        { "id": "c1", "sources": ["pedal_in"], "targets": ["ps_in"] },
+        { "id": "c2", "sources": ["ps_out"], "targets": ["ecu_in"], "labels": [{ "text": "pedal %", "width": 44, "height": 15 }] },
+        { "id": "c3", "sources": ["ecu_out"], "targets": ["abs_in"], "labels": [{ "text": "brake req", "width": 52, "height": 15 }] },
+        { "id": "c4", "sources": ["ws_out"], "targets": ["ecu_ws"], "labels": [{ "text": "wheel speed", "width": 66, "height": 15 }] },
+        { "id": "c5", "sources": ["abs_out"], "targets": ["hyd_out"] }
+      ]
+    },
+    {
+      "id": "Hydraulics",
+      "width": 100,
+      "height": 40,
+      "ports": [{ "id": "hyd_in", "width": 10, "height": 10, "layoutOptions": { "elk.port.side": "WEST" } }],
+      "layoutOptions": { "elk.portConstraints": "FIXED_SIDE" }
+    }
+  ],
+  "edges": [
+    { "id": "x1", "sources": ["drv_out"], "targets": ["pedal_in"] },
+    { "id": "x2", "sources": ["hyd_out"], "targets": ["hyd_in"] }
+  ]
+}
