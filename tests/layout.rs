@@ -907,14 +907,13 @@ fn in_small_thread<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static)
         .expect("the thread did not overflow")
 }
 
-// Mutation: make `layout_recursively` call itself once per level again. A debug build then
-// overflows the stack at about 1200 levels, below the limit.
+// Mutation: lower `MAX_NESTING_DEPTH` to 255. The deepest allowed graph is then refused.
 #[test]
 fn the_deepest_allowed_nesting_lays_out() {
-    // The root plus 1299 groups plus the leaf: the leaf sits 1300 levels below the root.
+    // The root plus 255 groups plus the leaf: the leaf sits 256 levels below the root.
     for include in [false, true] {
         let laid_out = in_small_thread(move || {
-            let mut graph = nested_chain(1299);
+            let mut graph = nested_chain(255);
             if include {
                 graph = include_children(graph);
             }
@@ -926,11 +925,11 @@ fn the_deepest_allowed_nesting_lays_out() {
     }
 }
 
-// Mutation: raise `MAX_NESTING_DEPTH` to 1301.
+// Mutation: raise `MAX_NESTING_DEPTH` to 257.
 #[test]
 fn a_graph_nested_one_level_deeper_is_refused() {
     let error = in_small_thread(|| {
-        let graph = nested_chain(1300);
+        let graph = nested_chain(256);
         let error = layout(&graph).expect_err("it is refused");
         std::mem::forget(graph);
         error
@@ -939,7 +938,7 @@ fn a_graph_nested_one_level_deeper_is_refused() {
         error,
         Error::Unsupported {
             element: "node \"leaf\"".into(),
-            feature: "a graph nested deeper than 1300 levels".into(),
+            feature: "a graph nested deeper than 256 levels".into(),
         }
     );
 }

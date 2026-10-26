@@ -155,8 +155,9 @@ fn label_settings(labels: &[ElkLabel], owner: &str) -> Result<Vec<LabelSettings>
         .collect()
 }
 
-/// The most levels a node may sit below the root.
-const MAX_NESTING_DEPTH: usize = 1300;
+/// The most levels a node may sit below the root. ELK has no such limit; Rust's stack needs one.
+/// 256 leaves a wide margin on every target, and is twice what serde_json reads by default.
+const MAX_NESTING_DEPTH: usize = 256;
 
 impl<'a> Tree<'a> {
     /// Ports `JsonImporter.transform`: nodes in JSON order, then edges depth first, each moved by `ElkGraphUtil.updateContainment`.
@@ -169,8 +170,8 @@ impl<'a> Tree<'a> {
         while let Some((node, parent, path)) = stack.pop() {
             let element = node_element(&node.id);
             // The graph types clone and drop their children recursively, and a debug build in
-            // a 2 MB thread overflows its stack at about 1600 levels. Refuse earlier, with an
-            // error, rather than abort.
+            // a 2 MB thread overflows its stack at about 1600 levels on Linux x86-64. Refuse a
+            // graph far deeper than any diagram, with an error, rather than abort.
             if path.len() > MAX_NESTING_DEPTH {
                 return Err(Error::Unsupported {
                     element,
