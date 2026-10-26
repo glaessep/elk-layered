@@ -96,7 +96,8 @@ A review checks, in this order:
    the result.
 4. **Caller input.** Malformed input gives an error, never a panic: no `unwrap`, `expect` or
    indexing that a caller's graph can break.
-5. **Tests.** Each new feature has a test that fails when the feature breaks. A change to
+5. **Tests.** Each new feature is tested for every equivalence class, boundary and error case,
+   and each test names the mutation that broke it. A change to
    `tests/snapshots/` is explained in the pull request.
 6. **Scope.** The pull request does what its issue asks, and no more.
 
