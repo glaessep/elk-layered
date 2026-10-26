@@ -63,14 +63,29 @@ bash scripts/check-branch-name.test.sh
 - One issue per branch and per pull request. The pull request body says `Closes #N`.
 - CI runs on every pull request, on Ubuntu and on macOS. A pull request is green only when both
   have run and passed.
-- **Agents never merge a pull request, never close an issue and never push to `main`.** The
-  maintainer merges.
+- **Agents never close an issue and never push to `main`.**
+- **An agent merges a pull request only when the maintainer has allowed it for that session.**
+  Even then, two conditions hold:
+  - CI is green on the current head.
+  - Every review thread is resolved.
+
+  It merges with a merge commit, so branches stacked on the pull request stay valid. Without that
+  permission, the maintainer merges.
 
 ## Reviewing
 
 Add the label `review-request` to a pull request to get a review by Claude Code
-(`.github/workflows/claude-code-review.yml`). Add it at most twice over a pull request's life, and
-never to retry or nudge a run that is still going. A review checks, in this order:
+(`.github/workflows/claude-code-review.yml`). Never add it to retry or nudge a run that is still
+going.
+
+- **Every pull request gets at least one review.**
+- **A second review follows when the first one found real work.** That means code fixes for at
+  least three findings, or for at least one real defect: a wrong result, a panic or a hang. Style,
+  naming and optional points do not count.
+- **A first review that brings only small or optional points is enough.**
+- **Never more than two rounds.**
+
+A review checks, in this order:
 
 1. **Fidelity.** Each ported function matches the ELK Java it cites, at commit `62d5909`. A
    difference from Java needs a comment that says why: elkjs behaves that way, or Rust needs it.
