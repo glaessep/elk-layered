@@ -17,7 +17,7 @@ use super::options::{
 };
 use crate::RandomSeedError;
 use crate::compound::preprocess_source_ported_compound_graph;
-use crate::configurator::{configure_graph_properties, configured_options};
+use crate::configurator::{check_random_seeds, configure_graph_properties, configured_options};
 use crate::graph::{LGraph, LNode, LNodeKind, LPoint, LSize, PortSide};
 use crate::intermediate::{
     IntermediateError, calculate_layer_sizes_and_graph_height, insert_label_dummies,
@@ -575,12 +575,11 @@ fn validate_ported_graph_processors(graph: &LGraph) -> PipelineResult<()> {
 /// the graph.
 pub fn execute_ported_processors(graph: &mut LGraph) -> PipelineResult<Vec<ProcessorKind>> {
     let mut executed = Vec::new();
-    // The full runner promises to reject unsupported processors without mutating the caller's
-    // graph, so it proves the processor list on a copy first.
-    let mut validation_graph = graph.clone();
-    configure_graph_properties(&mut validation_graph)?;
-    validate_ported_processors(&assemble_processors_for_graph(&validation_graph))?;
-    drop(validation_graph);
+    // The full runner promises to reject a zero seed and unsupported processors without mutating
+    // the caller's graph. Both checks only read it. `assemble_processors_for_graph` applies the
+    // same option rewrites as the configurator, on a copy of the options.
+    check_random_seeds(graph)?;
+    validate_ported_processors(&assemble_processors_for_graph(graph))?;
     let processors = prepare_single_graph_processors(graph)?;
 
     if let Some(mut components) = crate::components::split(graph)? {
@@ -650,6 +649,8 @@ pub fn execute_ported_compound_processors(
 ) -> PipelineResult<Vec<GraphExecution>> {
     validate_ported_graph_processors(graph)?;
     validate_node_size_minima(graph)?;
+    // Check every seed before the preprocessor and the configurator change the caller's graph.
+    check_random_seeds(graph)?;
     preprocess_source_ported_compound_graph(graph);
     configure_graph_properties(graph)?;
     review_and_correct_hierarchical_processors(graph)?;
@@ -2034,6 +2035,50 @@ mod tests {
             Err(PipelineError::UnsupportedProcessor {
                 kind: ProcessorKind::BreadthFirstModelOrderLayerer,
             })
+        );
+        assert_eq!(graph, before);
+    }
+
+    /// A root that the configurator would rewrite (undefined direction, edge spacing below the
+    /// minimum) and a child with seed 0, so a runner that configures before it checks the seed
+    /// leaves a visible trace on the root.
+    fn root_to_rewrite_with_zero_seed_child() -> LGraph {
+        let mut graph = deep_compound_chain(2);
+        graph.options.direction = ElkDirection::Undefined;
+        graph.options.spacing.edge_edge = 0.0;
+        graph.layerless_nodes[0]
+            .nested_graph
+            .as_deref_mut()
+            .expect("the fixture should contain one child graph")
+            .options
+            .random_seed = 0;
+        graph
+    }
+
+    #[test]
+    fn full_runner_rejects_nested_zero_seed_without_changing_the_graph() {
+        let mut graph = root_to_rewrite_with_zero_seed_child();
+        let before = graph.clone();
+
+        assert_eq!(
+            execute_ported_processors(&mut graph),
+            Err(PipelineError::RandomSeed(RandomSeedError::ZeroSeed {
+                graph_id: "graph-1".to_string(),
+            }))
+        );
+        assert_eq!(graph, before);
+    }
+
+    #[test]
+    fn compound_full_runner_rejects_nested_zero_seed_without_changing_the_graph() {
+        let mut graph = root_to_rewrite_with_zero_seed_child();
+        let before = graph.clone();
+
+        assert_eq!(
+            execute_ported_compound_processors(&mut graph),
+            Err(PipelineError::RandomSeed(RandomSeedError::ZeroSeed {
+                graph_id: "graph-1".to_string(),
+            }))
         );
         assert_eq!(graph, before);
     }

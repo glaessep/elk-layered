@@ -33,25 +33,40 @@ impl Default for LayeredSpacings {
 /// A seed of 0 is an error: ELK reads it as a time-based seed, and this crate stays deterministic.
 pub fn configure_graph_properties(graph: &mut LGraph) -> Result<(), RandomSeedError> {
     graph.try_for_each_graph_mut(|graph| {
-        graph.graph_properties.apply_to_options(&mut graph.options);
-        if graph.options.direction == ElkDirection::Undefined {
-            graph.options.direction = ElkDirection::Right;
-        }
-        if graph.options.spacing.edge_edge < MIN_EDGE_SPACING {
-            graph.options.spacing.edge_edge = MIN_EDGE_SPACING;
-        }
-        if graph.options.node_placement_favor_straight_edges.is_none() {
-            graph.options.node_placement_favor_straight_edges =
-                Some(graph.options.edge_routing == EdgeRouting::Orthogonal);
-        }
+        // Runners call `check_random_seeds` before they change anything, so this check does not
+        // fire for them. It stays as the configurator's own guard against a seed of 0.
         if graph.options.random_seed == 0 {
             return Err(RandomSeedError::ZeroSeed {
                 graph_id: graph.id.clone(),
             });
         }
+        graph.options = configured_options(graph);
         graph.random = JavaRandom::new(i64::from(graph.options.random_seed));
         Ok(())
     })
+}
+
+/// Reject a seed of 0 anywhere in the hierarchy without changing the graph.
+///
+/// The runners call this first, so a rejected graph stays exactly as the caller gave it. It visits
+/// graphs in the order `configure_graph_properties` does, so both name the same graph.
+pub(crate) fn check_random_seeds(graph: &LGraph) -> Result<(), RandomSeedError> {
+    let mut pending = vec![graph];
+    while let Some(current) = pending.pop() {
+        if current.options.random_seed == 0 {
+            return Err(RandomSeedError::ZeroSeed {
+                graph_id: current.id.clone(),
+            });
+        }
+        pending.extend(
+            current
+                .layerless_nodes
+                .iter()
+                .rev()
+                .filter_map(|node| node.nested_graph.as_deref()),
+        );
+    }
+    Ok(())
 }
 
 pub fn configured_options(graph: &LGraph) -> LayeredOptions {
@@ -89,6 +104,23 @@ mod tests {
                 graph_id: "root".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn zero_seed_graph_is_not_rewritten_before_the_error() {
+        let mut graph = LGraph::new(
+            "root",
+            LayeredOptions {
+                random_seed: 0,
+                direction: ElkDirection::Undefined,
+                ..Default::default()
+            },
+        );
+        let before = graph.clone();
+
+        assert!(configure_graph_properties(&mut graph).is_err());
+
+        assert_eq!(graph, before);
     }
 
     #[test]
@@ -136,5 +168,45 @@ mod tests {
                 graph_id: "child".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn seed_check_names_the_same_graph_as_the_configurator_and_changes_nothing() {
+        // "grandchild-a" and "child-b" both have seed 0. Depth-first order reaches the grandchild
+        // first, a breadth-first walk would name "child-b".
+        let mut root = LGraph::new("root", LayeredOptions::default());
+        for (holder, child, seed) in [("h0", "child-a", 3), ("h1", "child-b", 0)] {
+            let mut node = crate::LNode::new(holder, 10.0, 10.0, None);
+            let mut nested = LGraph::new(
+                child,
+                LayeredOptions {
+                    random_seed: seed,
+                    ..Default::default()
+                },
+            );
+            let mut inner = crate::LNode::new(format!("{holder}-inner"), 10.0, 10.0, None);
+            inner.nested_graph = Some(Box::new(LGraph::new(
+                format!("grandchild-{}", &child[6..]),
+                LayeredOptions {
+                    random_seed: if seed == 3 { 0 } else { 5 },
+                    ..Default::default()
+                },
+            )));
+            nested.layerless_nodes.push(inner);
+            node.nested_graph = Some(Box::new(nested));
+            root.layerless_nodes.push(node);
+        }
+        let before = root.clone();
+
+        let checked = check_random_seeds(&root);
+
+        assert_eq!(root, before);
+        assert_eq!(
+            checked,
+            Err(RandomSeedError::ZeroSeed {
+                graph_id: "grandchild-a".to_string(),
+            })
+        );
+        assert_eq!(configure_graph_properties(&mut root), checked);
     }
 }
