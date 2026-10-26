@@ -118,7 +118,19 @@ pub(crate) fn layer_with_strategy(
     Ok(())
 }
 
-const ITER_LIMIT_FACTOR: usize = 4;
+const ITER_LIMIT_FACTOR: i32 = 4;
+
+/// Ports `NetworkSimplexLayerer.process`:
+/// `int thoroughness = THOROUGHNESS * ITER_LIMIT_FACTOR;` and
+/// `int iterLimit = thoroughness * (int) Math.sqrt(connComp.size());`.
+///
+/// Java's `int` wraps, and the product can wrap to a negative limit, which stops the loop at
+/// once (`iter < iterationLimit` is false). The option value is an `i32`, so the cast is exact.
+fn iteration_limit(thoroughness: usize, component_len: usize) -> usize {
+    let thoroughness = (thoroughness as i32).wrapping_mul(ITER_LIMIT_FACTOR);
+    let limit = thoroughness.wrapping_mul((component_len as f64).sqrt() as i32);
+    usize::try_from(limit).unwrap_or(0)
+}
 
 pub fn layer_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexError> {
     graph.clear_layers();
@@ -136,9 +148,7 @@ pub fn layer_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexErr
     let mut previous_layering_node_counts = None;
 
     for component in connected_components.iter() {
-        let iter_limit = graph.options.thoroughness
-            * ITER_LIMIT_FACTOR
-            * (component.len() as f64).sqrt() as usize;
+        let iter_limit = iteration_limit(graph.options.thoroughness, component.len());
         let mut ngraph = initialize(graph, component);
 
         NetworkSimplex::for_graph(&mut ngraph)
@@ -262,6 +272,17 @@ mod tests {
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::options::{ElkDirection, LayeredOptions};
     use crate::p1cycles::break_cycles_greedy;
+
+    // Mutation: multiply in `usize` instead of wrapping in `i32`.
+    #[test]
+    fn the_iteration_limit_wraps_like_javas_int() {
+        // 7 * 4 * (int) sqrt(10) = 84.
+        assert_eq!(iteration_limit(7, 10), 84);
+        // 2^29 * 4 wraps to i32::MIN, and the limit is then negative: no iterations.
+        assert_eq!(iteration_limit(1 << 29, 10), 0);
+        // (2^30 + 5) * 4 wraps to 20.
+        assert_eq!(iteration_limit((1 << 30) + 5, 1), 20);
+    }
 
     pub(super) fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
