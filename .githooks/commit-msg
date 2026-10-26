@@ -1,0 +1,29 @@
+#!/bin/bash
+# Deletes the session link from every commit message.
+#
+# A Claude Code cloud session asks for a `Claude-Session: https://claude.ai/code/session_...`
+# trailer on each commit. That link points at a private conversation, so it stays out of this
+# repository. The hook deletes it and changes nothing else.
+#
+# The match is anchored at the start of a line, where git trailers live. So a subject or a body
+# sentence that mentions claude.ai survives.
+#
+# The hook never exits non-zero: git reads that as "reject this commit". Where it cannot do its
+# job, it leaves the message as it found it. `commit-msg.test.sh` beside this file checks it.
+set -uo pipefail
+
+msg_file="$1"
+
+# grep exits 1 when it filters out every line (a message that was only the trailer). That is a
+# success here. Exit 2 means the file could not be read: then stop, and keep the message.
+if grep -viE '^claude-session:' "$msg_file" > "$msg_file.tmp"; then
+  :
+else
+  status=$?
+  if [ "$status" -ne 1 ]; then
+    rm -f "$msg_file.tmp"
+    exit 0
+  fi
+fi
+mv "$msg_file.tmp" "$msg_file"
+exit 0

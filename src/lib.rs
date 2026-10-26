@@ -82,7 +82,7 @@ pub use work::{NoopWorkControl, WorkControl, WorkError};
 /// ELK's `randomSeed = 0` sentinel.
 ///
 /// ```compile_fail
-/// use merman_elk_layered::{LGraph, LayeredOptions};
+/// use elk_layered::{LGraph, LayeredOptions};
 ///
 /// let mut graph = LGraph::new(
 ///     "root",
@@ -91,6 +91,6 @@ pub use work::{NoopWorkControl, WorkControl, WorkError};
 ///         ..Default::default()
 ///     },
 /// );
-/// merman_elk_layered::p1cycles::break_cycles_greedy(&mut graph);
+/// elk_layered::p1cycles::break_cycles_greedy(&mut graph);
 /// ```
 const _RAW_PHASES_ARE_NOT_PUBLIC: () = ();
