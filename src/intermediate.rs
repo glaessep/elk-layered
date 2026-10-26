@@ -32,6 +32,8 @@ use crate::options::{
 use crate::p5edges::orthogonal::{RoutingDirection, route_edges};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+// Each variant names the edge that breaks a layer constraint, so all end in `Edge`.
+#[allow(clippy::enum_variant_names)]
 pub enum IntermediateError {
     #[error(
         "node `{node_id}` has layer constraint FIRST_SEPARATE but has incoming edge `{edge_id}`"

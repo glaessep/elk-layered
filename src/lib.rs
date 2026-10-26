@@ -1,9 +1,36 @@
-//! Source-backed Eclipse ELK layered port.
+//! Eclipse ELK's layered layout algorithm, in Rust.
 //!
-//! This module mirrors the structure of Eclipse ELK instead of the old compatibility backend:
+//! [`layout`] takes a graph shaped like elkjs's JSON graph and returns the same graph with
+//! every position filled in, exactly as elkjs 0.9.3 returns it. With the `serde` feature, the
+//! graph types read and write that JSON.
+//!
+//! ```
+//! use elk_layered::{ElkEdge, ElkNode, layout};
+//!
+//! let node = |id: &str| ElkNode {
+//!     id: id.into(),
+//!     width: 60.0,
+//!     height: 30.0,
+//!     ..Default::default()
+//! };
+//! let graph = ElkNode {
+//!     id: "root".into(),
+//!     children: vec![node("a"), node("b")],
+//!     edges: vec![ElkEdge {
+//!         id: "e".into(),
+//!         sources: vec!["a".into()],
+//!         targets: vec!["b".into()],
+//!         ..Default::default()
+//!     }],
+//!     ..Default::default()
+//! };
+//! let laid_out = layout(&graph).unwrap();
+//! assert_eq!((laid_out.children[1].x, laid_out.children[1].y), (92.0, 12.0));
+//! ```
+//!
+//! The port follows ELK's Java at commit `62d5909`:
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/LayeredPhases.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/GraphConfigurator.java
-//! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/IntermediateProcessorStrategy.java
 //! - https://github.com/eclipse-elk/elk/tree/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/graph
 
 mod api;
@@ -29,57 +56,17 @@ mod random;
 mod selfloops;
 mod transform;
 
-// The source-port graph and phase implementations are deliberately private. A raw `LGraph`
-// may carry ELK's `randomSeed = 0` sentinel, so only public pipeline entry points are allowed to
-// execute it: they configure the graph first and fail closed on that sentinel. Keep phase helpers
-// crate-private. There is no entry point that stops the pipeline half way.
-pub use api::{ElkEdge, ElkEdgeSection, ElkLabel, ElkNode, ElkPoint, ElkPort};
-pub use common::networksimplex::NetworkSimplexError;
-pub use components::ComponentError;
-pub use configurator::{LayeredSpacings, configure_graph_properties, configured_options};
-pub use error::Error;
-pub use graph::{
-    CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphProperties, LGraph, LLabel,
-    LMargin, LNode, LNodeKind, LPadding, LPoint, LPort, LSize, LabelSide, Layer, LayeredEdge,
-    PortRef, PortSide, PortType, SelfHyperLoop, SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder,
-    SelfLoopLabelAlignment, SelfLoopLabelRef, SelfLoopPort, SelfLoopType,
-};
-pub use importer::{
-    ElkInputEdge, ElkInputEdgeSegment, ElkInputEdgeSegmentEndpoint, ElkInputGraph, ElkInputLabel,
-    ElkInputNode, ImportError, ImportResult, import_graph, import_graph_with_segments,
-};
-pub use intermediate::IntermediateError;
-pub use layout::layout;
-pub use options::{
-    Alignment, ContentAlignment, CycleBreakingStrategy, DirectionCongruency,
-    EdgeLabelSideSelection, EdgeRouting, ElkDirection, ElkPadding, FixedAlignment,
-    GreedySwitchType, HierarchyHandling, LayerConstraint, LayeredOptions, LayeringStrategy,
-    LongEdgeOrderingStrategy, NodeFlexibility, NodeLabelPlacement, NodePlacementStrategy,
-    NodeSizeError, OrderingStrategy, PortAlignment, PortConstraints, PortSortingStrategy,
-    SelfLoopDistributionStrategy, SelfLoopOrderingStrategy, SpacingMargin, SpacingOptions,
-};
-pub use p2layers::LayeringError;
-pub use pipeline::{
-    GraphExecution, LayeredPhase, PipelineError, PipelineResult, ProcessorKind, ProcessorSlot,
-    assemble_processors, assemble_processors_for_graph, execute_ported_compound_processors,
-    execute_ported_processors,
-};
-pub use random::RandomSeedError;
+#[cfg(test)]
+mod snapshot_tests;
 
-/// Phase implementations are intentionally not public. In particular, this must fail to compile:
-/// a raw graph has not crossed the fallible configuration boundary that rejects ELK's
-/// `randomSeed = 0` sentinel.
+pub use api::{ElkEdge, ElkEdgeSection, ElkLabel, ElkNode, ElkPoint, ElkPort};
+pub use error::Error;
+pub use layout::layout;
+
+/// The layered graph and its phases are not public: `layout` is the only way in. This must
+/// fail to compile.
 ///
 /// ```compile_fail
-/// use elk_layered::{LGraph, LayeredOptions};
-///
-/// let mut graph = LGraph::new(
-///     "root",
-///     LayeredOptions {
-///         random_seed: 0,
-///         ..Default::default()
-///     },
-/// );
-/// elk_layered::p1cycles::break_cycles_greedy(&mut graph);
+/// use elk_layered::LGraph;
 /// ```
-const _RAW_PHASES_ARE_NOT_PUBLIC: () = ();
+const _INTERNALS_ARE_NOT_PUBLIC: () = ();

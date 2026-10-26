@@ -87,6 +87,8 @@ pub struct ElkInputEdge {
 /// node is the collapsed compound node in the parent scope; it is intentionally absent from the
 /// current scope's node list.
 #[derive(Debug, Clone, PartialEq, Eq)]
+// Only tests build scoped segments: `layout` lays out a whole hierarchy in one run.
+#[allow(dead_code)]
 pub enum ElkInputEdgeSegmentEndpoint {
     Node { id: String },
     ParentBoundary { id: String, connects_node: bool },
@@ -116,6 +118,7 @@ pub struct ElkInputLabel {
 }
 
 impl ElkInputLabel {
+    #[cfg(test)]
     pub fn center(text: impl Into<String>, width: f64, height: f64) -> Self {
         Self {
             source_index: None,
@@ -163,6 +166,7 @@ pub type ImportResult<T> = Result<T, ImportError>;
 /// This mirrors the front half of `ElkGraphImporter.importGraph(...)`: create the root `LGraph`,
 /// transform nodes into `layerless_nodes`, create nested graphs for hierarchy-enabled compound
 /// nodes, transform edges with synthetic ports, and mark graph properties discovered during import.
+#[cfg(test)]
 pub fn import_graph(input: &ElkInputGraph) -> ImportResult<LGraph> {
     import_graph_with_segments(input, &[])
 }
@@ -171,6 +175,7 @@ pub fn import_graph(input: &ElkInputGraph) -> ImportResult<LGraph> {
 ///
 /// Each segment is one scope-local piece of a hierarchy-crossing edge. The caller splits the
 /// edge; this function only builds the pieces that fall into the scope `input` describes.
+#[cfg(test)]
 pub fn import_graph_with_segments(
     input: &ElkInputGraph,
     segments: &[ElkInputEdgeSegment],
@@ -1830,10 +1835,10 @@ fn detect_parent_cycles<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SpacingOptions;
     use crate::compound::preprocess_source_ported_compound_graph;
     use crate::graph::LNodeKind;
     use crate::options::OrderingStrategy;
+    use crate::options::SpacingOptions;
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
@@ -3193,7 +3198,7 @@ mod tests {
 
         assert!(matches!(
             crate::pipeline::execute_ported_processors(&mut imported),
-            Err(crate::PipelineError::RandomSeed(crate::RandomSeedError::ZeroSeed {
+            Err(crate::pipeline::PipelineError::RandomSeed(crate::random::RandomSeedError::ZeroSeed {
                 graph_id
             })) if graph_id == "root"
         ));

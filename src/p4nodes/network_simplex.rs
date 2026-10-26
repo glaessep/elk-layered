@@ -775,9 +775,9 @@ mod tests {
         );
         graph.layerless_nodes[2].node_flexibility = NodeFlexibility::PortPosition;
         assert!(is_flexible(&graph, 2));
-        graph.layerless_nodes[2].port_constraints = crate::PortConstraints::FixedPos;
+        graph.layerless_nodes[2].port_constraints = crate::options::PortConstraints::FixedPos;
         assert!(!is_flexible(&graph, 2));
-        graph.layerless_nodes[2].port_constraints = crate::PortConstraints::Free;
+        graph.layerless_nodes[2].port_constraints = crate::options::PortConstraints::Free;
         graph.layerless_nodes[2].size.height = 10.0;
         assert!(!is_flexible(&graph, 2));
     }
@@ -837,11 +837,12 @@ mod tests {
             vec![edge("A-X", "A", "X"), edge("X-B", "X", "B")],
         );
         graph.options.direction = ElkDirection::Right;
-        graph.options.node_placement_strategy = crate::NodePlacementStrategy::NetworkSimplex;
+        graph.options.node_placement_strategy =
+            crate::options::NodePlacementStrategy::NetworkSimplex;
 
         assert_eq!(
-            crate::execute_ported_processors(&mut graph),
-            Err(crate::PipelineError::NetworkSimplex(
+            crate::pipeline::execute_ported_processors(&mut graph),
+            Err(crate::pipeline::PipelineError::NetworkSimplex(
                 NetworkSimplexError::CoordinateOutOfRange
             )),
         );
@@ -852,7 +853,7 @@ mod tests {
         for flexibility in [NodeFlexibility::None, NodeFlexibility::PortPosition] {
             let mut middle = node("X", 80.0, 160.0);
             middle.node_flexibility = flexibility;
-            middle.ports_surrounding = Some(crate::SpacingMargin {
+            middle.ports_surrounding = Some(crate::options::SpacingMargin {
                 top: 12.0,
                 right: 12.0,
                 bottom: 12.0,
@@ -862,7 +863,7 @@ mod tests {
                 id: "root".into(),
                 options: LayeredOptions {
                     direction: ElkDirection::Right,
-                    node_placement_strategy: crate::NodePlacementStrategy::NetworkSimplex,
+                    node_placement_strategy: crate::options::NodePlacementStrategy::NetworkSimplex,
                     ..Default::default()
                 },
                 nodes: vec![
@@ -880,7 +881,7 @@ mod tests {
                 ],
             })
             .unwrap();
-            crate::execute_ported_processors(&mut graph).unwrap();
+            crate::pipeline::execute_ported_processors(&mut graph).unwrap();
             // Published elkjs coordinates include root padding (12, 12).
             let expected_y = match flexibility {
                 NodeFlexibility::None => [110.0, 40.0, 12.0, 50.0, 100.0],

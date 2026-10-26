@@ -38,6 +38,7 @@ impl LGraph {
     /// Size returned for a completed provider invocation's root by
     /// `ElkGraphLayoutTransferrer.applyParentNodeLayout` and `ElkUtil.resizeNode`.
     /// This final minimum-size clamp does not realign the graph contents a second time.
+    #[cfg(test)]
     pub fn exported_root_size(&self) -> LSize {
         let mut size = LSize {
             width: self.size.width + self.padding.left + self.padding.right,
@@ -305,6 +306,8 @@ pub enum LNodeKind {
     ExternalPort,
     Label,
     NorthSouthPort,
+    // ELK's graph wrapping inserts these; wrapping is not ported, so none is built yet.
+    #[allow(dead_code)]
     BreakingPoint,
 }
 
@@ -1018,14 +1021,6 @@ impl LGraph {
     }
 
     /// ELK's `LNode#getPorts(PortType.INPUT)` is based on actual incoming edge incidence.
-    pub fn port_has_input_type(&self, port_ref: PortRef) -> bool {
-        self.layerless_nodes
-            .get(port_ref.node)
-            .and_then(|node| node.ports.get(port_ref.port))
-            .map(|port| !port.incoming_edges.is_empty())
-            .unwrap_or(false)
-    }
-
     pub fn reorder_node_ports(
         &mut self,
         node_index: usize,

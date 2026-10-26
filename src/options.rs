@@ -399,6 +399,7 @@ impl NodeLabelPlacement {
     }
 
     /// The first set ELK assigns to a location; `Fixed` gives the empty set.
+    #[cfg(test)]
     pub fn from_location(location: NodeLabelLocation) -> Self {
         NODE_LABEL_LOCATIONS
             .iter()
@@ -717,6 +718,7 @@ pub struct NodeSizing {
 
 impl NodeSizing {
     /// The `MINIMUM_SIZE` constraint with the given minimum and ELK's default size options.
+    #[cfg(test)]
     pub fn with_minimum(minimum: crate::graph::LSize) -> Self {
         Self {
             constraints: SizeConstraints::MINIMUM_SIZE,
@@ -904,6 +906,7 @@ impl SpacingOptions {
     ///
     /// Source:
     /// https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/options/LayeredSpacings.java
+    #[cfg(test)]
     pub fn layered_base_value(base_value: f64) -> Self {
         Self::default().with_base_value(base_value, ExplicitSpacings::NONE)
     }

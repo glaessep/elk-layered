@@ -10,19 +10,6 @@ use crate::random::{JavaRandom, RandomSeedError};
 
 const MIN_EDGE_SPACING: f64 = 2.0;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LayeredSpacings {
-    pub edge_edge: f64,
-}
-
-impl Default for LayeredSpacings {
-    fn default() -> Self {
-        Self {
-            edge_edge: MIN_EDGE_SPACING,
-        }
-    }
-}
-
 /// Configure graph properties before assembling processors.
 ///
 /// This mirrors the non-mutating Rust subset of `GraphConfigurator.configureGraphProperties(...)`:
@@ -88,7 +75,7 @@ pub fn configured_options(graph: &LGraph) -> LayeredOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::LGraph;
+    use crate::graph::LGraph;
 
     #[test]
     fn upstream_zero_seed_is_an_error_at_the_configurator_boundary() {
@@ -132,7 +119,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let mut holder = crate::LNode::new("holder", 10.0, 10.0, None);
+        let mut holder = crate::graph::LNode::new("holder", 10.0, 10.0, None);
         holder.nested_graph = Some(Box::new(LGraph::new(
             "child",
             LayeredOptions {
@@ -152,7 +139,7 @@ mod tests {
     #[test]
     fn nested_graph_with_zero_seed_names_itself_in_the_error() {
         let mut root = LGraph::new("root", LayeredOptions::default());
-        let mut holder = crate::LNode::new("holder", 10.0, 10.0, None);
+        let mut holder = crate::graph::LNode::new("holder", 10.0, 10.0, None);
         holder.nested_graph = Some(Box::new(LGraph::new(
             "child",
             LayeredOptions {
@@ -176,7 +163,7 @@ mod tests {
         // first, a breadth-first walk would name "child-b".
         let mut root = LGraph::new("root", LayeredOptions::default());
         for (holder, child, seed) in [("h0", "child-a", 3), ("h1", "child-b", 0)] {
-            let mut node = crate::LNode::new(holder, 10.0, 10.0, None);
+            let mut node = crate::graph::LNode::new(holder, 10.0, 10.0, None);
             let mut nested = LGraph::new(
                 child,
                 LayeredOptions {
@@ -184,7 +171,7 @@ mod tests {
                     ..Default::default()
                 },
             );
-            let mut inner = crate::LNode::new(format!("{holder}-inner"), 10.0, 10.0, None);
+            let mut inner = crate::graph::LNode::new(format!("{holder}-inner"), 10.0, 10.0, None);
             inner.nested_graph = Some(Box::new(LGraph::new(
                 format!("grandchild-{}", &child[6..]),
                 LayeredOptions {

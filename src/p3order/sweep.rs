@@ -3902,8 +3902,8 @@ mod tests {
             ),
             node_flexibility: crate::options::NodeFlexibility::None,
             ports_surrounding: None,
-            nested_options: Some(Box::new(crate::LayeredOptions {
-                spacing: crate::SpacingOptions::layered_base_value(30.0),
+            nested_options: Some(Box::new(crate::options::LayeredOptions {
+                spacing: crate::options::SpacingOptions::layered_base_value(30.0),
                 ..Default::default()
             })),
             labels: Vec::new(),

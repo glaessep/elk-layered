@@ -15,7 +15,6 @@ use super::options::{
     ElkDirection, GreedySwitchType, LayeredOptions, LayeringStrategy, NodePlacementStrategy,
     OrderingStrategy, PortConstraints, WrappingStrategy,
 };
-use crate::RandomSeedError;
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::configurator::{check_random_seeds, configure_graph_properties, configured_options};
 use crate::graph::{LGraph, LNode, LNodeKind, LPoint, LSize, PortSide};
@@ -46,6 +45,7 @@ use crate::p4nodes::{
     place_nodes_network_simplex, place_nodes_simple, process_in_layer_constraints,
 };
 use crate::p5edges::route_edges_orthogonal;
+use crate::random::RandomSeedError;
 use crate::selfloops::{
     postprocess_self_loops, preprocess_self_loops, restore_self_loop_ports, route_self_loops,
 };
@@ -110,6 +110,9 @@ pub struct ProcessorSlot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::enum_variant_names)]
+// The list names every ELK processor, ported or not, so an unported one can be reported by
+// name. The unported ones are never built yet.
+#[allow(dead_code)]
 pub enum ProcessorKind {
     DirectionPreprocessor,
     CommentPreprocessor,
@@ -466,6 +469,7 @@ fn intermediate_processor_order(kind: ProcessorKind) -> usize {
 /// This follows `GraphConfigurator.prepareGraphForLayout(...)` and the selected phases'
 /// `getLayoutProcessorConfiguration(...)` methods. It intentionally returns processor kinds rather
 /// than executing them so each Java phase can be ported independently.
+#[cfg(test)]
 pub fn assemble_processors(options: &LayeredOptions) -> Vec<ProcessorSlot> {
     assemble_processors_with_graph_size(options, 0, true)
 }
@@ -2973,26 +2977,26 @@ mod tests {
         for (separate, hierarchy, expected) in [
             (
                 true,
-                crate::HierarchyHandling::SeparateChildren,
+                crate::options::HierarchyHandling::SeparateChildren,
                 (160.0, 215.0),
             ),
             (
                 false,
-                crate::HierarchyHandling::SeparateChildren,
+                crate::options::HierarchyHandling::SeparateChildren,
                 (512.0, 61.0),
             ),
             (
                 true,
-                crate::HierarchyHandling::IncludeChildren,
+                crate::options::HierarchyHandling::IncludeChildren,
                 (512.0, 61.0),
             ),
         ] {
             let options = LayeredOptions {
                 direction: ElkDirection::Down,
-                spacing: crate::SpacingOptions::layered_base_value(40.0),
+                spacing: crate::options::SpacingOptions::layered_base_value(40.0),
                 separate_connected_components: separate,
                 hierarchy_handling: hierarchy,
-                padding: crate::ElkPadding::uniform(12.0),
+                padding: crate::options::ElkPadding::uniform(12.0),
                 ..Default::default()
             };
             let nodes = ["A", "B", "C"]
@@ -3018,7 +3022,7 @@ mod tests {
                 expected,
                 "{separate}/{hierarchy:?}"
             );
-            if separate && hierarchy == crate::HierarchyHandling::SeparateChildren {
+            if separate && hierarchy == crate::options::HierarchyHandling::SeparateChildren {
                 for (index, node) in graph.layerless_nodes.iter().enumerate() {
                     assert_eq!(
                         node.id,
@@ -3041,8 +3045,8 @@ mod tests {
     fn connected_components_translate_nodes_and_edges_together() {
         let options = LayeredOptions {
             direction: ElkDirection::Down,
-            spacing: crate::SpacingOptions::layered_base_value(40.0),
-            padding: crate::ElkPadding::uniform(12.0),
+            spacing: crate::options::SpacingOptions::layered_base_value(40.0),
+            padding: crate::options::ElkPadding::uniform(12.0),
             ..Default::default()
         };
         let mut nodes = Vec::new();
@@ -3067,7 +3071,7 @@ mod tests {
         execute_ported_processors(&mut graph).unwrap();
         assert_eq!(
             graph.exported_root_size(),
-            crate::LSize {
+            crate::graph::LSize {
                 width: 294.0,
                 height: 246.0
             }
@@ -3147,7 +3151,7 @@ mod tests {
         })
         .unwrap();
         let mut with_minimum = graph.clone();
-        let minimum = crate::LSize {
+        let minimum = crate::graph::LSize {
             width: 900.0,
             height: 800.0,
         };
@@ -3169,7 +3173,7 @@ mod tests {
                 for &edge in &port.incoming_edges {
                     assert_eq!(
                         graph.edges[edge].target,
-                        crate::PortRef {
+                        crate::graph::PortRef {
                             node: index,
                             port: port_index
                         }
@@ -3178,7 +3182,7 @@ mod tests {
                 for &edge in &port.outgoing_edges {
                     assert_eq!(
                         graph.edges[edge].source,
-                        crate::PortRef {
+                        crate::graph::PortRef {
                             node: index,
                             port: port_index
                         }
