@@ -1357,7 +1357,7 @@ mod tests {
     use super::*;
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::options::{ElkDirection, GreedySwitchType, LayeredOptions};
-    use crate::pipeline::{LayeredPhase, execute_processors_until};
+    use crate::pipeline::{LayeredPhase, run_processors_until_phase};
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
@@ -1408,8 +1408,10 @@ mod tests {
         })
         .unwrap();
 
-        execute_processors_until(&mut graph, LayeredPhase::P4NodePlacement).unwrap();
+        run_processors_until_phase(&mut graph, LayeredPhase::P4NodePlacement).unwrap();
 
+        // Every layer must keep its nodes apart in y, margins included.
+        assert!(!graph.layers.is_empty());
         for layer in &graph.layers {
             let mut bottom = f64::NEG_INFINITY;
             for node in &layer.nodes {

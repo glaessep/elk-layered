@@ -12,7 +12,6 @@ use std::collections::{HashMap, HashSet};
 
 use crate::graph::{LGraph, LNodeKind, PortRef, PortSide};
 use crate::options::{OrderingStrategy, PortConstraints, PortSortingStrategy};
-use crate::work::{WorkControl, WorkError, checked_add, checked_mul, checked_sum};
 
 pub mod counting;
 pub mod sweep;
@@ -193,34 +192,6 @@ fn port_order_indices_by_id(
     Some(order)
 }
 
-fn port_order_lookup_work_units(
-    graph: &LGraph,
-    node: usize,
-    keys: &[PortOrderKey],
-) -> Result<usize, WorkError> {
-    let ports = &graph.layerless_nodes[node].ports;
-    // Two key-kind scans, index construction, saved-key lookup, and two namespaces'
-    // enqueue/dequeue visits are all linear. Every queue entry is popped at most once.
-    let mut work = checked_mul(ports.len(), 8)?;
-    if keys
-        .iter()
-        .any(|key| key.crossing_minimization_id.is_none())
-    {
-        // Numeric crossing IDs need no string hashing. Fallback keys additionally read
-        // the current IDs once during indexing and the saved IDs once during lookup.
-        work = checked_sum([
-            work,
-            checked_sum(ports.iter().map(|port| port.id.len()))?,
-            checked_sum(
-                keys.iter()
-                    .filter(|key| key.crossing_minimization_id.is_none())
-                    .map(|key| key.fallback_id.len()),
-            )?,
-        ])?;
-    }
-    Ok(work)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphInfoHolder {
     pub current_node_order: Vec<Vec<usize>>,
@@ -380,10 +351,7 @@ pub fn sort_port_lists(graph: &mut LGraph) {
     }
 }
 
-pub fn sort_by_input_model(
-    graph: &mut LGraph,
-    work: &mut dyn WorkControl,
-) -> Result<(), WorkError> {
+pub fn sort_by_input_model(graph: &mut LGraph) {
     let mut layer_index = 0usize;
     while layer_index < graph.layers.len() {
         let previous_layer_index = if layer_index == 0 { 0 } else { layer_index - 1 };
@@ -395,28 +363,18 @@ pub fn sort_by_input_model(
             if constraints != PortConstraints::FixedOrder
                 && constraints != PortConstraints::FixedPos
             {
-                let target_orders = long_edge_target_node_preprocessing(graph, node, work)?;
-                let port_order = sorted_ports_by_model_order(
-                    graph,
-                    node,
-                    &previous_layer,
-                    &target_orders,
-                    work,
-                )?;
+                let target_orders = long_edge_target_node_preprocessing(graph, node);
+                let port_order =
+                    sorted_ports_by_model_order(graph, node, &previous_layer, &target_orders);
                 graph.reorder_node_ports(node, port_order);
             }
         }
 
-        let node_order = sorted_nodes_by_model_order(
-            graph,
-            &graph.layers[layer_index].nodes,
-            &previous_layer,
-            work,
-        )?;
+        let node_order =
+            sorted_nodes_by_model_order(graph, &graph.layers[layer_index].nodes, &previous_layer);
         graph.layers[layer_index].nodes = node_order;
         layer_index += 1;
     }
-    Ok(())
 }
 
 fn reorder_by_keys<K: Ord>(graph: &mut LGraph, node: usize, mut keys: Vec<(K, usize)>) {
@@ -543,43 +501,40 @@ fn port_side_order(side: PortSide) -> u8 {
 // fallback that returns Less for an unseen pair in either direction. Preserve the
 // exact comparison schedule for both node and port sorting; Rust's sort_by is not
 // interchangeable here. Source: elk-worker.js insertionSort/mergeSort_0/merge_1.
-fn sort_model_order(
-    order: &mut [usize],
-    mut compare: impl FnMut(usize, usize) -> Result<Ordering, WorkError>,
-) -> Result<(), WorkError> {
+fn sort_model_order(order: &mut [usize], mut compare: impl FnMut(usize, usize) -> Ordering) {
     fn merge_sort(
         source: &mut [usize],
         destination: &mut [usize],
-        compare: &mut impl FnMut(usize, usize) -> Result<Ordering, WorkError>,
-    ) -> Result<(), WorkError> {
+        compare: &mut impl FnMut(usize, usize) -> Ordering,
+    ) {
         if destination.len() < 7 {
             for index in 1..destination.len() {
                 let mut current = index;
                 while current > 0
-                    && compare(destination[current - 1], destination[current])? == Ordering::Greater
+                    && compare(destination[current - 1], destination[current]) == Ordering::Greater
                 {
                     destination.swap(current - 1, current);
                     current -= 1;
                 }
             }
-            return Ok(());
+            return;
         }
 
         let middle = destination.len() / 2;
         let (source_left, source_right) = source.split_at_mut(middle);
         let (destination_left, destination_right) = destination.split_at_mut(middle);
-        merge_sort(destination_left, source_left, compare)?;
-        merge_sort(destination_right, source_right, compare)?;
-        if compare(source[middle - 1], source[middle])? != Ordering::Greater {
+        merge_sort(destination_left, source_left, compare);
+        merge_sort(destination_right, source_right, compare);
+        if compare(source[middle - 1], source[middle]) != Ordering::Greater {
             destination.copy_from_slice(source);
-            return Ok(());
+            return;
         }
 
         let mut left = 0;
         let mut right = middle;
         for item in destination {
             if right >= source.len()
-                || (left < middle && compare(source[left], source[right])? != Ordering::Greater)
+                || (left < middle && compare(source[left], source[right]) != Ordering::Greater)
             {
                 *item = source[left];
                 left += 1;
@@ -588,11 +543,10 @@ fn sort_model_order(
                 right += 1;
             }
         }
-        Ok(())
     }
 
     let mut source = order.to_vec();
-    merge_sort(&mut source, order, &mut compare)
+    merge_sort(&mut source, order, &mut compare);
 }
 
 fn sorted_ports_by_model_order(
@@ -600,8 +554,7 @@ fn sorted_ports_by_model_order(
     node: usize,
     previous_layer: &[usize],
     target_node_model_order: &HashMap<usize, usize>,
-    work: &mut dyn WorkControl,
-) -> Result<Vec<usize>, WorkError> {
+) -> Vec<usize> {
     let mut order = (0..graph.layerless_nodes[node].ports.len()).collect::<Vec<_>>();
     // ELK's comparator records transitive relations while it compares, including equal-order
     // cases. Keep one comparator for this stable sort: key sorting, unstable sorting, or rebuilding
@@ -614,28 +567,15 @@ fn sorted_ports_by_model_order(
         target_node_model_order,
         graph.options.consider_model_order_port_model_order,
     );
-    sort_model_order(&mut order, |left, right| {
-        let units = model_order_relation_work(
-            left,
-            right,
-            &comparator.bigger_than,
-            &comparator.smaller_than,
-        )
-        .and_then(|units| checked_add(units, previous_layer.len()));
-        let units = units?;
-        work.check(units)?;
-        work.charge(units)?;
-        Ok(comparator.compare(left, right))
-    })?;
-    Ok(order)
+    sort_model_order(&mut order, |left, right| comparator.compare(left, right));
+    order
 }
 
 fn sorted_nodes_by_model_order(
     graph: &LGraph,
     nodes: &[usize],
     previous_layer: &[usize],
-    work: &mut dyn WorkControl,
-) -> Result<Vec<usize>, WorkError> {
+) -> Vec<usize> {
     let mut order = nodes.to_vec();
     // See sorted_ports_by_model_order: comparison order and shared comparator state are semantic.
     let mut comparator = ModelOrderNodeComparator::new(
@@ -643,67 +583,14 @@ fn sorted_nodes_by_model_order(
         previous_layer,
         graph.options.consider_model_order_strategy,
     );
-    sort_model_order(&mut order, |left, right| {
-        let units = model_order_relation_work(
-            left,
-            right,
-            &comparator.bigger_than,
-            &comparator.smaller_than,
-        )
-        .and_then(|units| {
-            let first = &graph.layerless_nodes[left];
-            let second = &graph.layerless_nodes[right];
-            let source_ports = last_previous_layer_source_port(graph, left)
-                .map_or(0, |port| graph.layerless_nodes[port.node].ports.len());
-            checked_sum([
-                units,
-                previous_layer.len(),
-                first.ports.len(),
-                second.ports.len(),
-                source_ports,
-            ])
-        });
-        let units = units?;
-        work.check(units)?;
-        work.charge(units)?;
-        Ok(comparator.compare(left, right))
-    })?;
-    Ok(order)
-}
-
-// The comparator updates a transitive relation only when a pair is not already cached. Bound
-// both possible update directions using the sets that exist for this comparison, preserving
-// the source stable-sort call order without a second sorting pass or an owner-wide square.
-fn model_order_relation_work(
-    first: usize,
-    second: usize,
-    bigger: &HashMap<usize, HashSet<usize>>,
-    smaller: &HashMap<usize, HashSet<usize>>,
-) -> Result<usize, WorkError> {
-    if bigger.get(&first).is_some_and(|set| set.contains(&second))
-        || bigger.get(&second).is_some_and(|set| set.contains(&first))
-        || smaller.get(&first).is_some_and(|set| set.contains(&second))
-        || smaller.get(&second).is_some_and(|set| set.contains(&first))
-    {
-        return Ok(1);
-    }
-    let update = |large, small| {
-        let a = bigger.get(&small).map_or(0, HashSet::len);
-        let b = smaller.get(&large).map_or(0, HashSet::len);
-        // Initial set clones and two inserts, then each relation's paired inserts plus
-        // clone/extend. Include possible growth from earlier iterations of this update.
-        let set_bound = checked_sum([a, b, 1])?;
-        let per_relation = checked_add(2, checked_mul(set_bound, 2)?)?;
-        checked_sum([a, b, 2, checked_mul(checked_add(a, b)?, per_relation)?])
-    };
-    checked_add(1, update(first, second)?.max(update(second, first)?))
+    sort_model_order(&mut order, |left, right| comparator.compare(left, right));
+    order
 }
 
 pub fn long_edge_target_node_preprocessing(
     graph: &mut LGraph,
     node: usize,
-    work: &mut dyn WorkControl,
-) -> Result<HashMap<usize, usize>, WorkError> {
+) -> HashMap<usize, usize> {
     let mut target_node_model_order: HashMap<usize, usize> = HashMap::new();
 
     for port in &mut graph.layerless_nodes[node].ports {
@@ -718,7 +605,7 @@ pub fn long_edge_target_node_preprocessing(
             continue;
         }
 
-        let Some(target_node) = target_node(graph, PortRef { node, port }, work)? else {
+        let Some(target_node) = target_node(graph, PortRef { node, port }) else {
             continue;
         };
         graph.layerless_nodes[node].ports[port].long_edge_target_node = Some(target_node);
@@ -733,7 +620,7 @@ pub fn long_edge_target_node_preprocessing(
         }
     }
 
-    Ok(target_node_model_order)
+    target_node_model_order
 }
 
 fn cached_long_edge_target_node_orders(graph: &LGraph, node: usize) -> HashMap<usize, usize> {
@@ -757,53 +644,33 @@ fn cached_long_edge_target_node_orders(graph: &LGraph, node: usize) -> HashMap<u
     target_node_model_order
 }
 
-pub fn target_node(
-    graph: &LGraph,
-    port: PortRef,
-    work: &mut dyn WorkControl,
-) -> Result<Option<usize>, WorkError> {
-    let Some(mut edge) = graph
+pub fn target_node(graph: &LGraph, port: PortRef) -> Option<usize> {
+    let mut edge = graph
         .layerless_nodes
         .get(port.node)
         .and_then(|node| node.ports.get(port.port))
         .and_then(|port| port.outgoing_edges.first())
-        .copied()
-    else {
-        return Ok(None);
-    };
+        .copied()?;
     let mut remaining_hops = graph.edges.len().saturating_add(1);
     while remaining_hops > 0 {
-        work.check(1)?;
-        work.charge(1)?;
         remaining_hops -= 1;
-        let Some(edge_data) = graph.edges.get(edge) else {
-            return Ok(None);
-        };
+        let edge_data = graph.edges.get(edge)?;
         let node = edge_data.target.node;
         if let Some(target) = graph.layerless_nodes[node]
             .long_edge_target
             .map(|port_ref| port_ref.node)
         {
-            return Ok(Some(target));
+            return Some(target);
         }
         if graph.layerless_nodes[node].kind == LNodeKind::Normal {
-            return Ok(Some(node));
+            return Some(node);
         }
-        let mut next_edge = None;
-        for port in &graph.layerless_nodes[node].ports {
-            work.check(1)?;
-            work.charge(1)?;
-            if let Some(next) = port.outgoing_edges.first().copied() {
-                next_edge = Some(next);
-                break;
-            }
-        }
-        match next_edge {
-            Some(next) => edge = next,
-            None => return Ok(None),
-        }
+        edge = graph.layerless_nodes[node]
+            .ports
+            .iter()
+            .find_map(|port| port.outgoing_edges.first().copied())?;
     }
-    Ok(None)
+    None
 }
 
 pub(super) fn count_model_order_node_changes(
@@ -1406,7 +1273,7 @@ mod tests {
     fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
         import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes,
             edges,
         })
@@ -1478,9 +1345,8 @@ mod tests {
             let mut calls = Vec::new();
             sort_model_order(&mut order, |left, right| {
                 calls.push((left, right));
-                Ok(left.cmp(&right))
-            })
-            .unwrap();
+                left.cmp(&right)
+            });
             assert_eq!(order, expected, "input={input:?}");
             assert_eq!(calls, expected_calls, "input={input:?}");
         }
@@ -1490,24 +1356,8 @@ mod tests {
     fn model_order_sort_preserves_equal_keys_across_recursive_merges() {
         let keys = [2, 1, 2, 0, 1, 0, 2, 1, 2, 0, 1, 0, 2, 1];
         let mut order = (0..keys.len()).collect::<Vec<_>>();
-        sort_model_order(&mut order, |left, right| Ok(keys[left].cmp(&keys[right]))).unwrap();
+        sort_model_order(&mut order, |left, right| keys[left].cmp(&keys[right]));
         assert_eq!(order, [3, 5, 9, 11, 1, 4, 7, 10, 13, 0, 2, 6, 8, 12]);
-    }
-
-    #[test]
-    fn model_order_sort_stops_at_comparator_work_error() {
-        let mut order = [2, 1, 0];
-        let mut calls = Vec::new();
-        let result = sort_model_order(&mut order, |left, right| {
-            calls.push((left, right));
-            if calls.len() == 2 {
-                Err(WorkError::ArithmeticOverflow)
-            } else {
-                Ok(left.cmp(&right))
-            }
-        });
-        assert_eq!(result, Err(WorkError::ArithmeticOverflow));
-        assert_eq!(calls, [(2, 1), (2, 0)]);
     }
 
     #[test]
@@ -1532,11 +1382,7 @@ mod tests {
                 false,
             );
             let mut order = (0..length).collect::<Vec<_>>();
-            sort_model_order(
-                &mut order,
-                |left, right| Ok(comparator.compare(left, right)),
-            )
-            .unwrap();
+            sort_model_order(&mut order, |left, right| comparator.compare(left, right));
             assert_eq!(order, (0..length).collect::<Vec<_>>());
             // The first source comparison records port 0 < port 1. Reversing
             // the first call (as Rust sort_by can do) records the opposite.
@@ -1560,11 +1406,7 @@ mod tests {
                 edge("edge1", "Active", "Active"),
             ],
         );
-        crate::pipeline::execute_ported_compound_processors_until(
-            &mut graph,
-            crate::pipeline::LayeredPhase::P3NodeOrdering,
-        )
-        .unwrap();
+        crate::pipeline::execute_ported_compound_processors(&mut graph).unwrap();
         let loop_edge = graph.edges.iter().find(|edge| edge.id == "edge1").unwrap();
         let parent_index = loop_edge.target.node;
         let parent = &graph.layerless_nodes[parent_index];
@@ -1573,9 +1415,11 @@ mod tests {
             .iter()
             .find(|edge| edge.id == "edge0" && edge.target.node == parent_index)
             .unwrap();
-        assert_eq!(parent.ports[loop_edge.source.port].side, PortSide::East);
-        assert_eq!(parent.ports[loop_edge.target.port].side, PortSide::West);
-        assert_eq!(parent.ports[cross_edge.target.port].side, PortSide::West);
+        // The graph flows downward, so the finished layout has turned east into south and west
+        // into north.
+        assert_eq!(parent.ports[loop_edge.source.port].side, PortSide::South);
+        assert_eq!(parent.ports[loop_edge.target.port].side, PortSide::North);
+        assert_eq!(parent.ports[cross_edge.target.port].side, PortSide::North);
         assert!(loop_edge.target.port < cross_edge.target.port);
         // Reordering must also keep each child external port's origin linked
         // to its corresponding parent port, including detached self-loop ports.
@@ -1901,20 +1745,6 @@ mod tests {
     }
 
     #[test]
-    fn model_order_relation_work_tracks_current_sets_and_cached_pairs() {
-        let mut bigger = HashMap::new();
-        let mut smaller = HashMap::new();
-        assert_eq!(model_order_relation_work(0, 1, &bigger, &smaller), Ok(3));
-        bigger.insert(0, HashSet::from([1]));
-        smaller.insert(1, HashSet::from([0]));
-        assert_eq!(model_order_relation_work(0, 1, &bigger, &smaller), Ok(1));
-        assert_eq!(model_order_relation_work(1, 0, &bigger, &smaller), Ok(1));
-        // Unrelated owners cannot inflate the cost of comparing this pair.
-        bigger.insert(99, (100..200).collect());
-        assert_eq!(model_order_relation_work(2, 3, &bigger, &smaller), Ok(3));
-    }
-
-    #[test]
     fn sort_by_input_model_orders_layers_by_model_order() {
         let mut graph = graph(
             vec![node("Top"), node("Bottom"), node("Left"), node("Right")],
@@ -1940,7 +1770,7 @@ mod tests {
         let target_layer = graph.layerless_nodes[left].layer_index.unwrap();
         graph.layers[target_layer].nodes = vec![right, left];
 
-        sort_by_input_model(&mut graph, &mut crate::work::NoopWorkControl).unwrap();
+        sort_by_input_model(&mut graph);
 
         assert_eq!(graph.layers[target_layer].nodes, vec![left, right]);
     }
@@ -1989,7 +1819,7 @@ mod tests {
     fn sort_by_input_model_matches_source_outgoing_second_port_order() {
         let mut graph = LGraph::new(
             "root",
-            LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         graph
             .layerless_nodes
@@ -2067,7 +1897,7 @@ mod tests {
             vec!["A:0", "A:1"]
         );
 
-        sort_by_input_model(&mut graph, &mut crate::work::NoopWorkControl).unwrap();
+        sort_by_input_model(&mut graph);
 
         assert_eq!(
             graph.layerless_nodes[0]
@@ -2103,9 +1933,7 @@ mod tests {
             .iter()
             .position(|node| node.id == "D")
             .unwrap();
-        let orders =
-            long_edge_target_node_preprocessing(&mut graph, a, &mut crate::work::NoopWorkControl)
-                .unwrap();
+        let orders = long_edge_target_node_preprocessing(&mut graph, a);
 
         assert_eq!(orders.get(&d), Some(&3));
         assert!(
@@ -2159,10 +1987,7 @@ mod tests {
             .add_edge(layered_edge("cycle", second_output, cycle_input))
             .unwrap();
 
-        assert_eq!(
-            target_node(&graph, source, &mut crate::work::NoopWorkControl),
-            Ok(None)
-        );
+        assert_eq!(target_node(&graph, source), None);
     }
 
     #[test]

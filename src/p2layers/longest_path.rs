@@ -4,13 +4,11 @@
 //! https://github.com/eclipse-elk/elk/tree/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers
 //! (`LongestPathLayerer.java`, `LongestPathSourceLayerer.java`).
 
-use super::{LayeringError, LayeringInput, LayeringResult, charge};
-use crate::work::WorkControl;
+use super::{LayeringError, LayeringInput, LayeringResult};
 
 pub(super) fn layer(
     input: &LayeringInput<'_>,
     from_sources: bool,
-    work: &mut dyn WorkControl,
 ) -> LayeringResult<Vec<Vec<usize>>> {
     let mut heights = vec![0usize; input.len()];
     let mut visiting = vec![false; input.len()];
@@ -29,7 +27,6 @@ pub(super) fn layer(
         stack.push((root, 0usize, 1usize));
         // An explicit DFS stack preserves Java's postorder without depending on native stack depth.
         while let Some((node, cursor, height)) = stack.last_mut() {
-            charge(work, 1)?;
             if let Some(&edge) = adjacency[*node].get(*cursor) {
                 let next = if from_sources {
                     input.source(edge)

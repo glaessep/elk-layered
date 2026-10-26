@@ -1,15 +1,21 @@
 //! Stretch-width layering translated from Eclipse ELK, EPL-2.0:
 //! https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/StretchWidthLayerer.java
 
-use super::{LayeringError, LayeringInput, LayeringResult, charge};
+use super::{LayeringError, LayeringInput, LayeringResult};
 use crate::graph::LNodeKind;
-use crate::work::{WorkControl, checked_n_log_n, checked_sum};
 use std::cmp::Reverse;
 
-pub(super) fn layer(
-    input: &LayeringInput<'_>,
-    work: &mut dyn WorkControl,
-) -> LayeringResult<Vec<Vec<usize>>> {
+/// Most times the adaptive loop may widen `max_width` and start over.
+///
+/// ELK has no such bound. Java's `StretchWidthLayerer` divides every size by the unclamped
+/// minimum but starts `maxWidth` from the clamped one. A normal node much shorter than one unit
+/// then leaves `maxWidth` far below the tallest node's size, and ELK adds 1 per retry until it
+/// catches up. Heights `1e-15` and `1` need about 1e15 retries. Each retry walks every node, so a
+/// layout that needs even a million of them does not finish in reasonable time in ELK either.
+/// The bound turns that case into an error and changes no layering ELK completes.
+const MAX_WIDTH_RETRIES: usize = 1_000_000;
+
+pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>> {
     if input.nodes.is_empty() {
         return Ok(Vec::new());
     }
@@ -20,7 +26,6 @@ pub(super) fn layer(
     let mut maximum = f64::NEG_INFINITY;
     let mut total_outgoing = 0.0;
     for &node in &input.nodes {
-        charge(work, checked_sum([input.incoming[node].len(), 1])?)?;
         outgoing[node] = input.outgoing[node].len();
         incoming[node] = input.incoming[node].len();
         ranks[node] = input.incoming[node]
@@ -35,7 +40,6 @@ pub(super) fn layer(
         }
     }
     let mut nodes = input.nodes.clone();
-    charge(work, checked_n_log_n(nodes.len())?)?;
     nodes.sort_by_key(|&node| Reverse(ranks[node]));
     // ELK normalizes nodes before clamping the minimum to one. A zero minimum together with a
     // positive height makes the adaptive retry loop infinite. Keep the all-zero case's NaN
@@ -57,8 +61,8 @@ pub(super) fn layer(
     let mut layers: Vec<Vec<usize>> = vec![Vec::new()];
     let mut width_current = 0.0;
     let mut width_up = 0.0;
+    let mut retries = 0;
     while !remaining.is_empty() {
-        charge(work, checked_sum([remaining.len(), 1])?)?;
         let selected = remaining
             .iter()
             .position(|&node| remaining_outgoing[node] == 0);
@@ -74,7 +78,6 @@ pub(super) fn layer(
                 return Err(LayeringError::CyclicGraph);
             }
             for &node in current.iter() {
-                charge(work, checked_sum([input.incoming[node].len(), 1])?)?;
                 for &edge in &input.incoming[node] {
                     remaining_outgoing[input.source(edge)] -= 1;
                 }
@@ -83,7 +86,6 @@ pub(super) fn layer(
             width_current = width_up;
             width_up = 0.0;
         } else if go_up {
-            charge(work, checked_sum([input.len(), nodes.len(), layers.len()])?)?;
             layers.clear();
             layers.push(Vec::new());
             width_current = 0.0;
@@ -93,6 +95,12 @@ pub(super) fn layer(
                 return Err(LayeringError::InvalidStretchWidthDimensions);
             }
             max_width = next;
+            retries += 1;
+            if retries > MAX_WIDTH_RETRIES {
+                return Err(LayeringError::StretchWidthRetryLimit {
+                    limit: MAX_WIDTH_RETRIES,
+                });
+            }
             remaining.clone_from(&nodes);
             remaining_outgoing.clone_from(&outgoing);
         } else {

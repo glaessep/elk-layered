@@ -14,7 +14,7 @@ fn external_raw_graph_execution_rejects_elk_zero_seed() {
 
     assert!(matches!(
         execute_ported_processors(&mut graph),
-        Err(PipelineError::RandomSeed(RandomSeedError::Unresolved { graph_path }))
-            if graph_path == "root"
+        Err(PipelineError::RandomSeed(RandomSeedError::ZeroSeed { graph_id }))
+            if graph_id == "root"
     ));
 }

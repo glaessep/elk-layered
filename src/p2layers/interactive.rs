@@ -1,8 +1,7 @@
 //! Interactive layering translated from Eclipse ELK, EPL-2.0:
 //! https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/InteractiveLayerer.java
 
-use super::{LayeringInput, LayeringResult, charge};
-use crate::work::{WorkControl, checked_add};
+use super::{LayeringInput, LayeringResult};
 use std::collections::VecDeque;
 
 struct Span {
@@ -11,15 +10,11 @@ struct Span {
     nodes: Vec<usize>,
 }
 
-pub(super) fn layer(
-    input: &LayeringInput<'_>,
-    work: &mut dyn WorkControl,
-) -> LayeringResult<Vec<Vec<usize>>> {
+pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>> {
     // Check the same DAG precondition as the other layerers before the shift-until-stable loop.
-    super::longest_path::layer(input, true, work)?;
+    super::longest_path::layer(input, true)?;
     let mut spans: Vec<Span> = Vec::new();
     for &node in &input.nodes {
-        charge(work, checked_add(input.nodes.len(), spans.len())?)?;
         let data = &input.graph.layerless_nodes[node];
         let start = data.position.x;
         let end = (start + data.size.width).max(start + 1.0);
@@ -77,12 +72,10 @@ pub(super) fn layer(
             checked[node] = true;
             let layer = assigned[node];
             for &edge in &input.outgoing[node] {
-                charge(work, 1)?;
                 let next = input.target(edge);
                 if next == node || assigned[next] > layer {
                     continue;
                 }
-                charge(work, layers[assigned[next]].len())?;
                 layers[assigned[next]].retain(|&entry| entry != next);
                 if layers.len() == layer + 1 {
                     layers.push(Vec::new());

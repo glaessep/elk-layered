@@ -7,7 +7,7 @@
 
 use super::tests::{edge, graph, node};
 use crate::options::{ElkDirection, LayeringStrategy};
-use crate::pipeline::{LayeredPhase, execute_processors_until};
+use crate::pipeline::{LayeredPhase, run_processors_until_phase};
 
 fn assert_oracle(
     strategy: LayeringStrategy,
@@ -48,7 +48,8 @@ fn assert_oracle(
     for (node, &(_, _, x)) in graph.layerless_nodes.iter_mut().zip(sizes) {
         node.position.x = x;
     }
-    execute_processors_until(&mut graph, LayeredPhase::P2Layering).unwrap();
+    // Run what elkjs ran: the configurator and every processor scheduled up to the layerer.
+    run_processors_until_phase(&mut graph, LayeredPhase::P2Layering).unwrap();
     let actual = graph
         .layers
         .iter()

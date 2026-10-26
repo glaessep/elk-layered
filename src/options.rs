@@ -80,6 +80,8 @@ pub enum CrossingMinimizationStrategy {
 pub enum NodePlacementStrategy {
     Simple,
     Interactive,
+    /// ELK's linear segments placer is not ported. Selecting it makes the pipeline fail with
+    /// `PipelineError::UnsupportedProcessor`.
     LinearSegments,
     #[default]
     BrandesKoepf,
@@ -568,11 +570,10 @@ impl LayeredOptions {
         Ok(())
     }
 
-    /// Options set by Mermaid's ELK adapter before calling `elk.layout(...)`.
-    ///
-    /// Source:
-    /// https://github.com/mermaid-js/mermaid/blob/41646dfd43ac83f001b03c70605feb036afae46d/packages/mermaid-layout-elk/src/render.ts
-    pub fn mermaid_flowchart_defaults(direction: ElkDirection) -> Self {
+    /// The option set most pinned elkjs 0.9.3 cases in the tests were captured with. Only tests
+    /// need it, so it is not part of the public API.
+    #[cfg(test)]
+    pub(crate) fn flowchart_test_defaults(direction: ElkDirection) -> Self {
         Self {
             direction,
             hierarchy_handling: HierarchyHandling::IncludeChildren,
@@ -583,7 +584,7 @@ impl LayeredOptions {
             consider_model_order_strategy: OrderingStrategy::NodesAndEdges,
             spacing: SpacingOptions::layered_base_value(40.0),
             unnecessary_bendpoints: true,
-            // Mermaid sets EQUALLY on the root graph, but ELK resolves this node-scoped
+            // The captured cases set EQUALLY on the root graph, but ELK resolves this node-scoped
             // option from each node's default (NORTH) unless a node overrides it.
             self_loop_distribution: SelfLoopDistributionStrategy::North,
             self_loop_ordering: SelfLoopOrderingStrategy::Stacked,
@@ -632,15 +633,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mermaid_flowchart_defaults_apply_layered_padding_default() {
-        let options = LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down);
+    fn layered_default_padding_is_twelve() {
+        let options = LayeredOptions::default();
 
         assert_eq!(options.padding, ElkPadding::uniform(12.0));
     }
 
     #[test]
-    fn mermaid_flowchart_defaults_apply_layered_spacing_base_value() {
-        let options = LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down);
+    fn layered_base_spacing_scales_every_spacing_from_the_node_spacing() {
+        let options = LayeredOptions {
+            spacing: SpacingOptions::layered_base_value(40.0),
+            ..LayeredOptions::default()
+        };
 
         assert_eq!(options.spacing.node_node, 40.0);
         assert_eq!(options.spacing.node_self_loop, 20.0);

@@ -1,0 +1,25 @@
+graph root size 250.0x101.75 padding 12.0 12.0 12.0 12.0
+  node a Normal at (0.0, 14.25) size 60.0x30.0
+    port a:1 East at (60.0, 21.75) anchor (0.0, 0.0)
+    port a:0 East at (60.0, 29.25) anchor (0.0, 0.0)
+    port a:2 East at (60.0, 36.75) anchor (0.0, 0.0)
+  node b Normal at (80.0, 11.75) size 70.0x35.0
+    port b:1 East at (150.0, 29.25) anchor (0.0, 0.0)
+    port b:0 West at (80.0, 29.25) anchor (0.0, 0.0)
+  node c Normal at (170.0, 0.0) size 80.0x30.0
+    port c:0 West at (170.0, 20.0) anchor (0.0, 0.0)
+    port c:1 West at (170.0, 10.0) anchor (0.0, 0.0)
+  node d Normal at (85.0, 66.75) size 60.0x35.0
+    port d:1 East at (145.0, 84.25) anchor (0.0, 0.0)
+    port d:0 West at (85.0, 84.25) anchor (0.0, 0.0)
+  node e Normal at (170.0, 69.25) size 70.0x30.0
+    port e:0 West at (170.0, 84.25) anchor (0.0, 0.0)
+  node longEdge:2:1 LongEdge at (115.0, 0.75) size 0.0x1.0
+    port longEdge:2:1:1 East at (115.0, 0.75) anchor (0.0, 0.0)
+    port longEdge:2:1:0 West at (115.0, 0.75) anchor (0.0, 0.0)
+  edge e0 from (60.0, 29.25) via [] to (80.0, 29.25)
+  edge e1 from (150.0, 29.25) via [(160.0, 29.25), (160.0, 20.0)] to (170.0, 20.0)
+  edge e2 from (170.0, 10.0) via [(160.0, 10.0), (160.0, 0.75), (70.0, 0.75), (70.0, 21.75)] to (60.0, 21.75)
+  edge e3 from (60.0, 36.75) via [(70.0, 36.75), (70.0, 84.25)] to (85.0, 84.25)
+  edge e4 from (145.0, 84.25) via [] to (170.0, 84.25)
+  edge e2 from (115.0, 0.75) via [(160.0, -56.0), (160.0, -46.75)] to (170.0, 10.0)

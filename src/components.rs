@@ -8,7 +8,6 @@
 use crate::graph::{LGraph, LLabel, LPoint, LSize, PortRef};
 use crate::options::{HierarchyHandling, PortConstraints};
 use crate::pipeline::PipelineResult;
-use crate::work::{WorkControl, checked_add, checked_mul, checked_n_log_n, checked_sum};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ComponentError {
@@ -32,11 +31,8 @@ pub(crate) struct Component {
 }
 
 /// The supplied graph has already passed GraphConfigurator. Component construction copies
-/// properties, not a new configuration or random seed. The caller charges the arena copy.
-pub(crate) fn split(
-    graph: &LGraph,
-    work: &mut dyn WorkControl,
-) -> PipelineResult<Option<Vec<Component>>> {
+/// properties, not a new configuration or random seed.
+pub(crate) fn split(graph: &LGraph) -> PipelineResult<Option<Vec<Component>>> {
     if !graph.options.separate_connected_components
         || graph.options.hierarchy_handling == HierarchyHandling::IncludeChildren
         || (graph.graph_properties.external_ports
@@ -53,10 +49,6 @@ pub(crate) fn split(
         return Err(ComponentError::HierarchyEdges.into());
     }
     let node_count = graph.layerless_nodes.len();
-    work.charge(checked_sum([
-        checked_mul(node_count, 8)?,
-        checked_mul(graph.edges.len(), 6)?,
-    ])?)?;
     let mut owners = vec![usize::MAX; node_count];
     let mut groups = Vec::<Vec<usize>>::new();
     let mut stack = Vec::new();
@@ -111,8 +103,6 @@ pub(crate) fn split(
     if graph.graph_properties.external_ports && groups.len() > 1 {
         return Err(ComponentError::ExternalPortGroups.into());
     }
-    crate::pipeline::charge_hierarchy_work(graph, work)?;
-    work.charge(checked_mul(groups.len(), graph.id.len())?)?;
     let mut components = groups
         .into_iter()
         .map(|original_nodes| {
@@ -346,20 +336,9 @@ fn offset_graph(graph: &mut LGraph, delta: LPoint) {
 
 /// Places completed components, then restores the caller's original dense indices. Java
 /// retains object identity while moving nodes; stable original indices are its Rust equivalent.
-pub(crate) fn combine(
-    target: &mut LGraph,
-    mut components: Vec<Component>,
-    work: &mut dyn WorkControl,
-) -> PipelineResult<()> {
+pub(crate) fn combine(target: &mut LGraph, mut components: Vec<Component>) -> PipelineResult<()> {
     let original_nodes = target.layerless_nodes.len();
     let original_edges = target.edges.len();
-    let node_count = checked_sum(components.iter().map(|c| c.graph.layerless_nodes.len()))?;
-    let edge_count = checked_sum(components.iter().map(|c| c.graph.edges.len()))?;
-    work.charge(checked_sum([
-        checked_mul(node_count, 5)?,
-        checked_mul(edge_count, 5)?,
-        checked_n_log_n(components.len())?,
-    ])?)?;
     let size = match components.len() {
         0 => LSize::default(),
         1 => {
@@ -430,6 +409,14 @@ pub(crate) fn combine(
             }
         }
     };
+    let node_count = components
+        .iter()
+        .map(|component| component.graph.layerless_nodes.len())
+        .sum::<usize>();
+    let edge_count = components
+        .iter()
+        .map(|component| component.graph.edges.len())
+        .sum::<usize>();
     let mut nodes = std::iter::repeat_with(|| None)
         .take(node_count)
         .collect::<Vec<_>>();
@@ -445,11 +432,11 @@ pub(crate) fn combine(
     for mut component in components {
         let mut node_map = component.original_nodes;
         let added_nodes = component.graph.layerless_nodes.len() - node_map.len();
-        node_map.extend(next_node..checked_add(next_node, added_nodes)?);
+        node_map.extend(next_node..next_node + added_nodes);
         next_node += added_nodes;
         let mut edge_map = component.original_edges;
         let added_edges = component.graph.edges.len() - edge_map.len();
-        edge_map.extend(next_edge..checked_add(next_edge, added_edges)?);
+        edge_map.extend(next_edge..next_edge + added_edges);
         next_edge += added_edges;
         component.graph.clear_layers();
         remap_references(&mut component.graph, &node_map, &edge_map)?;

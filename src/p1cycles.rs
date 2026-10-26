@@ -78,65 +78,11 @@ pub fn break_cycles_interactive(graph: &mut LGraph) {
 }
 
 pub fn break_cycles_model_order(graph: &mut LGraph) {
-    let mut rev_edges = Vec::new();
-    visit_model_order_feedback_edges(graph, |edge| {
-        rev_edges.push(edge);
-        false
-    });
+    let rev_edges = model_order_feedback_edges(graph);
     reverse_feedback_edges(graph, rev_edges, true);
 }
 
-pub(crate) fn depth_first_cycle_breaker_may_mutate(graph: &LGraph) -> bool {
-    !non_self_edges_follow_one_node_index_direction(graph)
-}
-
-pub(crate) fn interactive_cycle_breaker_may_mutate(graph: &LGraph) -> bool {
-    for (source, node) in graph.layerless_nodes.iter().enumerate() {
-        let source_x = interactive_reference_x(graph, source);
-        for port in &node.ports {
-            for &edge_index in &port.outgoing_edges {
-                let target = graph.edges[edge_index].target.node;
-                if target != source && interactive_reference_x(graph, target) < source_x {
-                    return true;
-                }
-            }
-        }
-    }
-
-    !non_self_edges_follow_one_node_index_direction(graph)
-}
-
-fn non_self_edges_follow_one_node_index_direction(graph: &LGraph) -> bool {
-    let mut increasing = true;
-    let mut decreasing = true;
-    for (source, node) in graph.layerless_nodes.iter().enumerate() {
-        for port in &node.ports {
-            for &edge_index in &port.outgoing_edges {
-                let Some(edge) = graph.edges.get(edge_index) else {
-                    return false;
-                };
-                let target = edge.target.node;
-                if target >= graph.layerless_nodes.len() {
-                    return false;
-                }
-                if source == target {
-                    continue;
-                }
-                increasing &= source < target;
-                decreasing &= source > target;
-                if !increasing && !decreasing {
-                    return false;
-                }
-            }
-        }
-    }
-    true
-}
-
-pub(crate) fn visit_model_order_feedback_edges(
-    graph: &LGraph,
-    mut visit: impl FnMut(usize) -> bool,
-) -> bool {
+fn model_order_feedback_edges(graph: &LGraph) -> Vec<usize> {
     // Keep this aligned with Mermaid's pinned elkjs 0.9.3 worker: the runtime seeds the offset
     // from the node count, raises it for explicit model order, and consumes FIRST_SEPARATE and
     // LAST_SEPARATE counters in edge traversal order. Caching one score per node changes behavior.
@@ -148,6 +94,7 @@ pub(crate) fn visit_model_order_feedback_edges(
         .unwrap_or(graph.layerless_nodes.len())
         .max(graph.layerless_nodes.len()) as i64;
     let mut context = ModelOrderContext::default();
+    let mut feedback_edges = Vec::new();
 
     for source in 0..graph.layerless_nodes.len() {
         let model_order_source = context.compute_constraint_model_order(graph, source, offset);
@@ -159,13 +106,13 @@ pub(crate) fn visit_model_order_feedback_edges(
                 }
                 let model_order_target =
                     context.compute_constraint_model_order(graph, target, offset);
-                if model_order_target < model_order_source && visit(edge_index) {
-                    return true;
+                if model_order_target < model_order_source {
+                    feedback_edges.push(edge_index);
                 }
             }
         }
     }
-    false
+    feedback_edges
 }
 
 pub fn break_cycles_greedy(graph: &mut LGraph) {
@@ -546,7 +493,7 @@ mod tests {
     fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
         import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes,
             edges,
         })
@@ -825,7 +772,7 @@ mod tests {
     fn reverse_edge_adapts_collector_ports_like_elk() {
         let mut input = ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![node("A"), node("B")],
             edges: vec![edge("A-B", "A", "B")],
         };

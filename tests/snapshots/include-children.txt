@@ -1,0 +1,24 @@
+graph root size 344.0x54.0 padding 12.0 12.0 12.0 12.0
+  node outer Normal at (85.0, 0.0) size 174.0x54.0
+    port y:1:source East at (264.0, 27.0) anchor (0.0, 0.0)
+    port x:0:target West at (80.0, 27.0) anchor (0.0, 0.0)
+  node p Normal at (0.0, 12.0) size 60.0x30.0
+    port p:0:source East at (60.0, 27.0) anchor (0.0, 0.0)
+  node q Normal at (284.0, 12.0) size 60.0x30.0
+    port q:1:target West at (284.0, 27.0) anchor (0.0, 0.0)
+  edge e0 from (60.0, 27.0) via [] to (80.0, 27.0)
+  edge e2 from (264.0, 27.0) via [] to (284.0, 27.0)
+  graph outer size 150.0x30.0 padding 12.0 12.0 12.0 12.0
+    node x Normal at (97.0, 12.0) size 60.0x30.0
+      port x:1 East at (157.0, 27.0) anchor (0.0, 0.0)
+      port x:0:target West at (97.0, 27.0) anchor (0.0, 0.0)
+    node y Normal at (177.0, 12.0) size 70.0x30.0
+      port y:1:source East at (247.0, 27.0) anchor (0.0, 0.0)
+      port y:1 West at (177.0, 27.0) anchor (0.0, 0.0)
+    node external:outer ExternalPort at (80.0, 27.0) size 0.0x0.0
+      port x:0:target East at (80.0, 27.0) anchor (0.0, 0.0)
+    node external:outer ExternalPort at (264.0, 27.0) size 0.0x0.0
+      port y:1:source West at (264.0, 27.0) anchor (0.0, 0.0)
+    edge e1 from (157.0, 27.0) via [] to (177.0, 27.0)
+    edge e0 from (80.0, 27.0) via [] to (97.0, 27.0)
+    edge e2 from (247.0, 27.0) via [] to (264.0, 27.0)

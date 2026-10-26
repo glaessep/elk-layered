@@ -2,8 +2,7 @@ use super::tests::{edge, graph, node};
 use super::{LayeringError, layer_with_strategy};
 use crate::graph::{LGraph, LNode};
 use crate::options::{ElkDirection, LayeredOptions, LayeringStrategy};
-use crate::pipeline::{PipelineError, execute_ported_processors};
-use crate::work::{NoopWorkControl, WorkControl, WorkError};
+use crate::pipeline::execute_ported_processors;
 
 const STRATEGIES: [LayeringStrategy; 6] = [
     LayeringStrategy::LongestPath,
@@ -13,68 +12,6 @@ const STRATEGIES: [LayeringStrategy; 6] = [
     LayeringStrategy::MinWidth,
     LayeringStrategy::StretchWidth,
 ];
-
-struct Budget {
-    remaining: usize,
-    charges: usize,
-    cancel_after: Option<usize>,
-}
-
-impl WorkControl for Budget {
-    fn check(&mut self, units: usize) -> Result<(), WorkError> {
-        if units > self.remaining || self.cancel_after.is_some_and(|limit| self.charges >= limit) {
-            Err(WorkError::Interrupted)
-        } else {
-            Ok(())
-        }
-    }
-    fn charge(&mut self, units: usize) -> Result<(), WorkError> {
-        self.check(units)?;
-        self.remaining -= units;
-        self.charges += 1;
-        Ok(())
-    }
-}
-
-fn sample() -> LGraph {
-    graph(
-        (0..6).map(|index| node(&index.to_string())).collect(),
-        vec![
-            edge("a", "0", "2"),
-            edge("b", "1", "2"),
-            edge("c", "2", "3"),
-            edge("d", "2", "4"),
-            edge("e", "4", "5"),
-        ],
-    )
-}
-
-#[test]
-fn layerers_admit_work_before_mutating_and_keep_interruptions_typed() {
-    for strategy in STRATEGIES {
-        for (remaining, cancel_after) in [(0, None), (usize::MAX, Some(3))] {
-            let mut graph = sample();
-            graph.set_node_layer(0, 0);
-            let before = graph.clone();
-            let mut budget = Budget {
-                remaining,
-                charges: 0,
-                cancel_after,
-            };
-            let error = layer_with_strategy(&mut graph, strategy, &mut budget).unwrap_err();
-            assert_eq!(
-                error,
-                LayeringError::Work(WorkError::Interrupted),
-                "{strategy:?}"
-            );
-            assert_eq!(
-                PipelineError::from(error),
-                PipelineError::Work(WorkError::Interrupted)
-            );
-            assert_eq!(graph, before, "{strategy:?} published a partial layering");
-        }
-    }
-}
 
 #[test]
 fn all_six_layerers_execute_the_complete_pipeline_with_self_loops() {
@@ -114,7 +51,7 @@ fn all_six_layerers_execute_the_complete_pipeline_with_self_loops() {
 fn empty_graphs_have_no_layers_for_every_added_strategy() {
     for strategy in STRATEGIES {
         let mut graph = LGraph::new("root", LayeredOptions::default());
-        layer_with_strategy(&mut graph, strategy, &mut NoopWorkControl).unwrap();
+        layer_with_strategy(&mut graph, strategy).unwrap();
         assert!(graph.layers.is_empty());
     }
 }
@@ -128,7 +65,7 @@ fn cyclic_raw_input_cannot_enter_an_unbounded_layering_search() {
         );
         let before = graph.clone();
         assert_eq!(
-            layer_with_strategy(&mut graph, strategy, &mut NoopWorkControl),
+            layer_with_strategy(&mut graph, strategy),
             Err(LayeringError::CyclicGraph),
             "{strategy:?}"
         );
@@ -147,13 +84,28 @@ fn zero_normal_height_rejects_stretch_widths_nonterminating_source_case() {
         .push(LNode::new("positive", 20.0, 30.0, None));
     let before = graph.clone();
     assert_eq!(
-        layer_with_strategy(
-            &mut graph,
-            LayeringStrategy::StretchWidth,
-            &mut NoopWorkControl
-        ),
+        layer_with_strategy(&mut graph, LayeringStrategy::StretchWidth),
         Err(LayeringError::InvalidStretchWidthDimensions)
     );
+    assert_eq!(graph, before);
+}
+
+#[test]
+fn tiny_normal_height_rejects_stretch_widths_endless_retries() {
+    // Sizes divide by the unclamped minimum (1e-15), but max_width starts from the clamped one,
+    // so ELK would add 1 to max_width about 1e15 times.
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    graph
+        .layerless_nodes
+        .push(LNode::new("tiny", 20.0, 1e-15, None));
+    graph
+        .layerless_nodes
+        .push(LNode::new("one", 20.0, 1.0, None));
+    let before = graph.clone();
+    assert!(matches!(
+        layer_with_strategy(&mut graph, LayeringStrategy::StretchWidth),
+        Err(LayeringError::StretchWidthRetryLimit { .. })
+    ));
     assert_eq!(graph, before);
 }
 
@@ -179,7 +131,7 @@ fn longest_path_uses_an_explicit_stack_for_deep_graphs() {
                 LayeringStrategy::LongestPath,
                 LayeringStrategy::LongestPathSource,
             ] {
-                layer_with_strategy(&mut graph, strategy, &mut NoopWorkControl).unwrap();
+                layer_with_strategy(&mut graph, strategy).unwrap();
                 assert_eq!(graph.layers.len(), COUNT);
                 assert_eq!(graph.layerless_nodes[0].layer_index, Some(0));
                 assert_eq!(

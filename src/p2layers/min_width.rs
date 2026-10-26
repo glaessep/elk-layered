@@ -1,15 +1,11 @@
 //! Minimum-width layering translated from Eclipse ELK, EPL-2.0:
 //! https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/MinWidthLayerer.java
 
-use super::{LayeringError, LayeringInput, LayeringResult, charge};
+use super::{LayeringError, LayeringInput, LayeringResult};
 use crate::graph::LNodeKind;
-use crate::work::{WorkControl, checked_n_log_n, checked_sum};
 use std::cmp::Reverse;
 
-pub(super) fn layer(
-    input: &LayeringInput<'_>,
-    work: &mut dyn WorkControl,
-) -> LayeringResult<Vec<Vec<usize>>> {
+pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>> {
     if input.nodes.is_empty() {
         return Ok(Vec::new());
     }
@@ -27,10 +23,6 @@ pub(super) fn layer(
     let mut sizes = vec![0.0; input.len()];
     let mut average = 0.0;
     for &node in &input.nodes {
-        charge(
-            work,
-            checked_sum([input.incoming[node].len(), input.outgoing[node].len(), 1])?,
-        )?;
         incoming[node] = input.incoming[node]
             .iter()
             .filter(|&&edge| input.source(edge) != node)
@@ -45,7 +37,6 @@ pub(super) fn layer(
     average /= input.nodes.len() as f64;
     let dummy_size = input.graph.options.spacing.edge_edge / minimum;
     let mut nodes = input.nodes.clone();
-    charge(work, checked_n_log_n(nodes.len())?)?;
     nodes.sort_by_key(|&node| Reverse(outgoing[node]));
     let width = input.graph.options.layering_min_width_upper_bound;
     let compensator = input
@@ -72,7 +63,6 @@ pub(super) fn layer(
                 dummy_size,
                 average * f64::from(width),
                 f64::from(compensator),
-                work,
             )?;
             if candidate_width < best_width
                 || (candidate_width == best_width && candidate.len() < best_count)
@@ -97,9 +87,7 @@ fn attempt(
     dummy_size: f64,
     width_bound: f64,
     compensator: f64,
-    work: &mut dyn WorkControl,
 ) -> LayeringResult<(f64, Vec<Vec<usize>>)> {
-    charge(work, checked_sum([nodes.len(), input.len()])?)?;
     let mut remaining = nodes.to_vec();
     let mut placed = vec![false; input.len()];
     let mut layers = Vec::new();
@@ -113,7 +101,6 @@ fn attempt(
     while !remaining.is_empty() {
         let mut selected = None;
         for (index, &node) in remaining.iter().enumerate() {
-            charge(work, checked_sum([input.outgoing[node].len(), 1])?)?;
             if input.outgoing[node]
                 .iter()
                 .all(|&edge| input.target(edge) == node || placed[input.target(edge)])
@@ -123,7 +110,6 @@ fn attempt(
             }
         }
         let node = if let Some(index) = selected {
-            charge(work, remaining.len())?;
             let node = remaining.remove(index);
             current.push(node);
             width_current += sizes[node] - outgoing[node] as f64 * dummy_size;
@@ -144,7 +130,6 @@ fn attempt(
             })
             || width_up >= compensator * width_bound
         {
-            charge(work, checked_sum([current.len(), 1])?)?;
             for &node in &current {
                 placed[node] = true;
             }

@@ -6,7 +6,6 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/IntermediateProcessorStrategy.java
 //! - https://github.com/eclipse-elk/elk/tree/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/graph
 
-pub mod algorithms;
 mod common;
 mod components;
 mod compound;
@@ -24,13 +23,11 @@ mod pipeline;
 mod random;
 mod selfloops;
 mod transform;
-mod work;
 
 // The source-port graph and phase implementations are deliberately private. A raw `LGraph`
 // may carry ELK's `randomSeed = 0` sentinel, so only public pipeline entry points are allowed to
-// execute it: they configure the graph first and either fail closed or resolve it from an
-// operation-owned seed. Keep phase helpers crate-private even when they are useful for parity
-// work; diagnostics must go through the guarded pipeline APIs below.
+// execute it: they configure the graph first and fail closed on that sentinel. Keep phase helpers
+// crate-private. There is no entry point that stops the pipeline half way.
 pub use common::networksimplex::NetworkSimplexError;
 pub use common::nodespacing::inside_top_center_micro_layout;
 pub use components::ComponentError;
@@ -43,13 +40,7 @@ pub use graph::{
 };
 pub use importer::{
     ElkInputEdge, ElkInputEdgeSegment, ElkInputEdgeSegmentEndpoint, ElkInputGraph, ElkInputLabel,
-    ElkInputNode, ImportError, ImportResult, import_graph,
-    import_graph_at_scope_and_segments_with_work_control,
-    import_graph_at_seed_scope_and_segments_with_work_control, import_graph_with_operation_seed,
-    import_graph_with_operation_seed_and_work_control, import_graph_with_operation_seed_at_scope,
-    import_graph_with_operation_seed_at_scope_and_segments_with_work_control,
-    import_graph_with_operation_seed_at_seed_scope_and_segments_with_work_control,
-    import_graph_with_work_control,
+    ElkInputNode, ImportError, ImportResult, import_graph, import_graph_with_segments,
 };
 pub use intermediate::IntermediateError;
 pub use options::{
@@ -61,25 +52,16 @@ pub use options::{
     SelfLoopDistributionStrategy, SelfLoopOrderingStrategy, SpacingMargin, SpacingOptions,
 };
 pub use p2layers::LayeringError;
-pub use p3order::sweep::{HierarchySweepDebugTrace, HierarchySweepNodeDebug};
 pub use pipeline::{
     GraphExecution, LayeredPhase, PipelineError, PipelineResult, ProcessorKind, ProcessorSlot,
     assemble_processors, assemble_processors_for_graph, execute_ported_compound_processors,
-    execute_ported_compound_processors_until, execute_ported_compound_processors_until_processor,
-    execute_ported_compound_processors_until_processor_with_work_control,
-    execute_ported_compound_processors_until_with_work_control,
-    execute_ported_compound_processors_with_work_control, execute_ported_processors,
-    execute_ported_processors_with_work_control, execute_processors_until,
-    execute_processors_until_processor, execute_processors_until_processor_with_work_control,
-    execute_processors_until_with_work_control, inspect_compound_crossings_after_processor,
-    inspect_compound_crossings_after_processor_with_work_control,
+    execute_ported_processors,
 };
-pub use random::{GraphSeedScope, OperationSeed, RandomSeedError};
-pub use work::{NoopWorkControl, WorkControl, WorkError};
+pub use random::RandomSeedError;
 
 /// Phase implementations are intentionally not public. In particular, this must fail to compile:
-/// a raw graph has not crossed the fallible configuration boundary that resolves or rejects
-/// ELK's `randomSeed = 0` sentinel.
+/// a raw graph has not crossed the fallible configuration boundary that rejects ELK's
+/// `randomSeed = 0` sentinel.
 ///
 /// ```compile_fail
 /// use elk_layered::{LGraph, LayeredOptions};
