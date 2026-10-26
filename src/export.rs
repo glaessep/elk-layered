@@ -11,7 +11,7 @@
 //!   `compound/CrossHierarchyEdgeComparator.java`
 //! - `graph/LGraphUtil.java`, `changeCoordSystem` and `isDescendant`
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::compound::compare_compound_segments;
 use crate::error::Error;
@@ -26,7 +26,7 @@ pub(crate) struct TransferInput<'a> {
     pub(crate) parents: &'a HashMap<String, String>,
     /// The ids of the nodes whose ELK size constraints are not empty. ELK writes the size of
     /// those nodes back.
-    pub(crate) sized_nodes: &'a HashMap<String, bool>,
+    pub(crate) sized_nodes: &'a HashSet<String>,
     /// The ids of the input edges laid out in this run, each with the id of the node ELK
     /// chose to contain it.
     pub(crate) edge_containers: &'a HashMap<String, String>,
@@ -501,7 +501,7 @@ fn node_layout(
     input: &TransferInput<'_>,
 ) -> NodeLayout {
     let node = &hierarchy.graph(at.0).layerless_nodes[at.1];
-    let sized = input.sized_nodes.get(&node.id).copied().unwrap_or(false);
+    let sized = input.sized_nodes.contains(&node.id);
     let size = (sized || node.nested_graph.is_some()).then_some(node.size);
     let node_has_placement = !node.node_label_placement.is_fixed();
     let labels = node
@@ -663,7 +663,7 @@ mod tests {
         let root = two_nested_graphs();
         let hierarchy = Hierarchy::new(&root);
         let parents = HashMap::new();
-        let sized_nodes = HashMap::new();
+        let sized_nodes = HashSet::new();
         let input = TransferInput {
             parents: &parents,
             sized_nodes: &sized_nodes,

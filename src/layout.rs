@@ -598,16 +598,17 @@ impl<'a, 't> Work<'a, 't> {
                 )
             })
             .collect();
-        let sized_nodes: HashMap<String, bool> = run_nodes
+        let sized_nodes: HashSet<String> = run_nodes
             .iter()
-            .map(|&node| {
+            .filter(|&&node| {
                 let constraints = if self.size_fixed[node] {
                     SizeConstraints::FIXED
                 } else {
                     self.sizing[node].constraints
                 };
-                (tree.nodes[node].node.id.clone(), !constraints.is_empty())
+                !constraints.is_empty()
             })
+            .map(|&node| tree.nodes[node].node.id.clone())
             .collect();
         let edge_containers: HashMap<String, String> = edges
             .iter()
