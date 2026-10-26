@@ -1273,7 +1273,7 @@ mod tests {
     fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
         import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes,
             edges,
         })
@@ -1819,7 +1819,7 @@ mod tests {
     fn sort_by_input_model_matches_source_outgoing_second_port_order() {
         let mut graph = LGraph::new(
             "root",
-            LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         graph
             .layerless_nodes

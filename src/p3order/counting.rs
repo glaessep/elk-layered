@@ -402,7 +402,7 @@ mod tests {
     fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes,
             edges,
         })

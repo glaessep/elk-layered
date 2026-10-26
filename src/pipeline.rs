@@ -2118,8 +2118,8 @@ mod tests {
     }
 
     #[test]
-    fn mermaid_flowchart_defaults_insert_direction_model_order_and_hierarchy_processors() {
-        let options = LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down);
+    fn flowchart_test_defaults_insert_direction_model_order_and_hierarchy_processors() {
+        let options = LayeredOptions::flowchart_test_defaults(ElkDirection::Down);
         assert_eq!(
             kinds(&options),
             vec![
@@ -2151,7 +2151,7 @@ mod tests {
 
     #[test]
     fn mermaid_wrapping_flags_do_not_enable_wrapping_processors_without_strategy() {
-        let options = LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down);
+        let options = LayeredOptions::flowchart_test_defaults(ElkDirection::Down);
         let processors = kinds(&options);
         assert!(!processors.contains(&ProcessorKind::BreakingPointInserter));
         assert!(!processors.contains(&ProcessorKind::BreakingPointProcessor));
@@ -2168,7 +2168,7 @@ mod tests {
         ] {
             assert_processors_are_source_ported(
                 &format!("Mermaid flowchart direction {direction:?}"),
-                kinds(&LayeredOptions::mermaid_flowchart_defaults(direction)),
+                kinds(&LayeredOptions::flowchart_test_defaults(direction)),
             );
         }
 
@@ -2183,7 +2183,7 @@ mod tests {
                 &format!("public cycleBreakingStrategy {cycle_breaking_strategy:?}"),
                 kinds(&LayeredOptions {
                     cycle_breaking_strategy,
-                    ..LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down)
+                    ..LayeredOptions::flowchart_test_defaults(ElkDirection::Down)
                 }),
             );
         }
@@ -2198,7 +2198,7 @@ mod tests {
                 &format!("public nodePlacementStrategy {node_placement_strategy:?}"),
                 kinds(&LayeredOptions {
                     node_placement_strategy,
-                    ..LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down)
+                    ..LayeredOptions::flowchart_test_defaults(ElkDirection::Down)
                 }),
             );
         }
@@ -2215,7 +2215,7 @@ mod tests {
                 &format!("public nodePlacementAlignment {node_placement_bk_fixed_alignment:?}"),
                 kinds(&LayeredOptions {
                     node_placement_bk_fixed_alignment,
-                    ..LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down)
+                    ..LayeredOptions::flowchart_test_defaults(ElkDirection::Down)
                 }),
             );
         }
@@ -2230,7 +2230,7 @@ mod tests {
                 &format!("public considerModelOrder {consider_model_order_strategy:?}"),
                 kinds(&LayeredOptions {
                     consider_model_order_strategy,
-                    ..LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down)
+                    ..LayeredOptions::flowchart_test_defaults(ElkDirection::Down)
                 }),
             );
         }
@@ -2239,7 +2239,7 @@ mod tests {
             "public forceNodeModelOrder",
             kinds(&LayeredOptions {
                 force_node_model_order: true,
-                ..LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down)
+                ..LayeredOptions::flowchart_test_defaults(ElkDirection::Down)
             }),
         );
 
@@ -2247,7 +2247,7 @@ mod tests {
             id: "root".to_string(),
             options: LayeredOptions {
                 merge_edges: true,
-                ..LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down)
+                ..LayeredOptions::flowchart_test_defaults(ElkDirection::Down)
             },
             nodes: vec![node("A"), node("B"), node("C")],
             edges: vec![
@@ -2266,7 +2266,7 @@ mod tests {
         constrained_entry.layer_constraint = Some(crate::options::LayerConstraint::First);
         let keep_entry_graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![constrained_entry, node("B"), node("C")],
             edges: vec![edge("A-B", "A", "B"), edge("B-C", "B", "C")],
         })
@@ -2282,7 +2282,7 @@ mod tests {
         end_label_edge.labels = vec![head];
         let label_and_self_loop_graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![node("A"), node("B")],
             edges: vec![
                 ElkInputEdge {
@@ -2304,7 +2304,7 @@ mod tests {
         child.parent = Some("cluster".to_string());
         let mut compound_graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![cluster, child, node("B")],
             edges: vec![edge("A-B", "A", "B")],
         })
@@ -2328,7 +2328,7 @@ mod tests {
     fn greedy_model_order_cycle_breaking_strategy_assembles_processor() {
         let options = LayeredOptions {
             cycle_breaking_strategy: CycleBreakingStrategy::GreedyModelOrder,
-            ..LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down)
+            ..LayeredOptions::flowchart_test_defaults(ElkDirection::Down)
         };
         assert!(kinds(&options).contains(&ProcessorKind::GreedyModelOrderCycleBreaker));
     }
@@ -2357,7 +2357,7 @@ mod tests {
         for (strategy, expected_processor) in cases {
             let options = LayeredOptions {
                 node_placement_strategy: strategy,
-                ..LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down)
+                ..LayeredOptions::flowchart_test_defaults(ElkDirection::Down)
             };
 
             assert!(
@@ -2373,7 +2373,7 @@ mod tests {
             id: "root".to_string(),
             options: LayeredOptions {
                 merge_edges: true,
-                ..LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down)
+                ..LayeredOptions::flowchart_test_defaults(ElkDirection::Down)
             },
             nodes: vec![node("A"), node("B"), node("C")],
             edges: vec![
@@ -2395,7 +2395,7 @@ mod tests {
     fn graph_properties_insert_label_self_loop_and_external_port_processors() {
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![
                 ElkInputNode {
                     id: "cluster".to_string(),
@@ -2478,7 +2478,7 @@ mod tests {
     fn inside_self_loops_enable_self_loop_processors_on_nested_graphs() {
         let mut input = ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![ElkInputNode {
                 id: "A".to_string(),
                 width: 80.0,
@@ -2648,7 +2648,7 @@ mod tests {
     #[test]
     fn assembler_schedules_the_direction_preprocessor_for_down_layouts() {
         let executed = kinds_through_phase(
-            &LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            &LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             LayeredPhase::P3NodeOrdering,
         );
 
@@ -2738,7 +2738,7 @@ mod tests {
     fn source_ported_self_loop_runs_through_self_loop_lifecycle() {
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![node("A")],
             edges: vec![edge("A-A", "A", "A")],
         })
@@ -2824,7 +2824,7 @@ mod tests {
         labelled.labels = vec![ElkInputLabel::center("choice", 48.0, 12.0)];
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![node("A"), node("B"), node("C")],
             edges: vec![edge("A-B", "A", "B"), edge("B-C", "B", "C"), labelled],
         })
@@ -3146,7 +3146,7 @@ mod tests {
     fn source_ported_mermaid_defaults_run_through_hierarchical_resizer_for_flat_graph() {
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![node("A"), node("B"), node("C")],
             edges: vec![edge("A-B", "A", "B"), edge("B-C", "B", "C")],
         })
@@ -3182,7 +3182,7 @@ mod tests {
         child_b.parent = Some("cluster".to_string());
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![cluster, child_a, child_b, node("C")],
             edges: vec![edge("A-B", "A", "B")],
         })
@@ -3231,7 +3231,7 @@ mod tests {
         child_a.parent = Some("cluster".to_string());
         let mut child_b = node("B");
         child_b.parent = Some("cluster".to_string());
-        let mut options = LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down);
+        let mut options = LayeredOptions::flowchart_test_defaults(ElkDirection::Down);
         options.greedy_switch_hierarchical_type = GreedySwitchType::TwoSided;
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
@@ -3275,7 +3275,7 @@ mod tests {
         child.parent = Some("cluster".to_string());
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![cluster, child],
             edges: vec![edge("cluster-A", "cluster", "A")],
         })

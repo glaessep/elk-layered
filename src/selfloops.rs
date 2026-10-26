@@ -2604,7 +2604,7 @@ mod tests {
     fn restore_hidden_one_side_ports_respects_sequenced_ordering() {
         let mut graph = LGraph::new(
             "root",
-            LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         graph.options.self_loop_distribution = SelfLoopDistributionStrategy::North;
         graph.options.self_loop_ordering = SelfLoopOrderingStrategy::Sequenced;
@@ -2629,7 +2629,7 @@ mod tests {
     fn restore_hidden_one_side_ports_respects_reverse_stacked_ordering() {
         let mut graph = LGraph::new(
             "root",
-            LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         graph.options.self_loop_distribution = SelfLoopDistributionStrategy::North;
         graph.options.self_loop_ordering = SelfLoopOrderingStrategy::ReverseStacked;
@@ -2672,7 +2672,7 @@ mod tests {
     fn preprocess_detaches_self_loop_edges_from_ports() {
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![node("A")],
             edges: vec![edge("A-A", "A", "A")],
         })
@@ -2690,7 +2690,7 @@ mod tests {
     fn restorer_assigns_first_equal_distribution_loop_to_north_side() {
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![node("A")],
             edges: vec![edge("A-A", "A", "A")],
         })
@@ -2715,7 +2715,7 @@ mod tests {
     fn restorer_defaults_to_north_distribution_for_multiple_loops() {
         let mut graph = LGraph::new(
             "root",
-            LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         let node = add_node(&mut graph, "A");
         let first_source = graph
@@ -2768,7 +2768,7 @@ mod tests {
     fn restorer_assigns_equal_distribution_targets_by_descending_loop_port_count() {
         let mut graph = LGraph::new(
             "root",
-            LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         // The Mermaid adapter default is node-scoped NORTH. Exercise the explicit
         // node strategy here so this test continues to cover EQUALLY assignment.
@@ -2826,7 +2826,7 @@ mod tests {
     fn routing_director_uses_penalty_for_two_side_opposing_loops() {
         let mut graph = LGraph::new(
             "root",
-            LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         let node = add_node(&mut graph, "A");
         let sink = add_node(&mut graph, "B");
@@ -2862,7 +2862,7 @@ mod tests {
     fn routing_director_splits_four_side_loops_at_highest_penalty_gap() {
         let mut graph = LGraph::new(
             "root",
-            LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         let node = add_node(&mut graph, "A");
         let sink = add_node(&mut graph, "B");
@@ -2902,7 +2902,7 @@ mod tests {
     fn routing_slot_assigner_uses_crossing_graph_dependencies() {
         let mut graph = LGraph::new(
             "root",
-            LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         let node = add_node(&mut graph, "A");
         let p0 = add_port(&mut graph, node, PortSide::North);
@@ -2941,7 +2941,7 @@ mod tests {
     fn routing_slot_assigner_separates_overlapping_self_loop_labels() {
         let mut graph = LGraph::new(
             "root",
-            LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         let node = add_node(&mut graph, "A");
         let p0 = add_port(&mut graph, node, PortSide::North);
@@ -3002,7 +3002,7 @@ mod tests {
     fn route_self_loops_writes_label_positions_and_expands_margins() {
         let mut graph = LGraph::new(
             "root",
-            LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         let node = add_node(&mut graph, "A");
         let source = add_port(&mut graph, node, PortSide::North);

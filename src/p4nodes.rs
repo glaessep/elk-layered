@@ -163,7 +163,7 @@ mod tests {
     fn label_dummy_represented_edge_labels_do_not_expand_node_margin() {
         let mut graph = LGraph::new(
             "root",
-            LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Right),
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Right),
         );
         let mut dummy = crate::graph::LNode::new("label", 13.0, 24.0, None);
         dummy.kind = LNodeKind::Label;

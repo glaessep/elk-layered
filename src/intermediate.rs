@@ -3913,7 +3913,7 @@ mod tests {
     fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
         import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes,
             edges,
         })
@@ -4002,7 +4002,7 @@ mod tests {
             id: "root".to_string(),
             options: LayeredOptions {
                 merge_edges: true,
-                ..LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down)
+                ..LayeredOptions::flowchart_test_defaults(ElkDirection::Down)
             },
             nodes: vec![node("F"), node("U"), first],
             edges,
@@ -4067,7 +4067,7 @@ mod tests {
     fn hyperedge_dummy_merger_coalesces_parallel_long_edge_segments() {
         let mut input_graph = ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![node("A"), node("B"), node("C"), node("D"), node("E")],
             edges: vec![
                 edge("A-B", "A", "B"),

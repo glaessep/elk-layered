@@ -3904,7 +3904,7 @@ mod tests {
     fn prepared_graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes,
             edges,
         })
@@ -3934,7 +3934,7 @@ mod tests {
             }
             let mut graph = import_graph(&ElkInputGraph {
                 id: "root".into(),
-                options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+                options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
                 nodes,
                 edges,
             })
@@ -4841,7 +4841,7 @@ mod tests {
     fn hierarchical_sweep_orders_nested_sources_by_child_boundary_ports() {
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![
                 nested_group("O", None),
                 nested_group("A", Some("O")),

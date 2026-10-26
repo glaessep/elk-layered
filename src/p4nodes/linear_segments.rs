@@ -174,7 +174,7 @@ mod tests {
     fn linear_segments_placer_aligns_dummy_chain() {
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
-            options: LayeredOptions::mermaid_flowchart_defaults(ElkDirection::Down),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![node("A"), node("B"), node("C"), node("D")],
             edges: vec![
                 edge("A-B", "A", "B"),
