@@ -645,7 +645,7 @@ fn create_east_port_side_dummy(
         return;
     };
 
-    set_dummy_node_properties(graph, dummy, edge_index, dummy_edge_index);
+    set_inverted_port_dummy_long_edge_ports(graph, dummy, edge_index, dummy_edge_index);
     move_head_labels(graph, edge_index, dummy_edge_index);
 }
 
@@ -674,8 +674,36 @@ fn create_west_port_side_dummy(
         return;
     };
 
-    set_dummy_node_properties(graph, dummy, edge_index, dummy_edge_index);
+    set_inverted_port_dummy_long_edge_ports(graph, dummy, edge_index, dummy_edge_index);
     move_head_labels(graph, edge_index, dummy_edge_index);
+}
+
+// Java: InvertedPortProcessor.setLongEdgeSourceAndTarget. This is not LongEdgeSplitter's
+// setDummyNodeProperties: only a neighbouring long edge dummy passes its ends on. A label dummy
+// neighbour is not copied from. The dummy then names that label dummy's own port, so the label
+// side selector sees a different long edge than the label dummy's. It also leaves
+// long_edge_has_label_dummies alone.
+fn set_inverted_port_dummy_long_edge_ports(
+    graph: &mut LGraph,
+    dummy_node: usize,
+    in_edge: usize,
+    out_edge: usize,
+) {
+    let source_port = graph.edges[in_edge].source;
+    let target_port = graph.edges[out_edge].target;
+
+    graph.layerless_nodes[dummy_node].long_edge_source =
+        if graph.layerless_nodes[source_port.node].kind == LNodeKind::LongEdge {
+            graph.layerless_nodes[source_port.node].long_edge_source
+        } else {
+            Some(source_port)
+        };
+    graph.layerless_nodes[dummy_node].long_edge_target =
+        if graph.layerless_nodes[target_port.node].kind == LNodeKind::LongEdge {
+            graph.layerless_nodes[target_port.node].long_edge_target
+        } else {
+            Some(target_port)
+        };
 }
 
 fn create_inverted_port_dummy(graph: &mut LGraph, edge_index: usize) -> usize {
