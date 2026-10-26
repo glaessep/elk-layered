@@ -613,7 +613,7 @@ impl<'a, 't> Work<'a, 't> {
             sized_nodes: &sized_nodes,
             edge_containers: &edge_containers,
         };
-        let result = export::apply_layout(&graph, &transfer);
+        let result = export::apply_layout(&graph, &transfer)?;
         self.write_result(scope, &edges, result);
         Ok(())
     }

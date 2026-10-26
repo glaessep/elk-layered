@@ -14,6 +14,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::compound::compare_compound_segments;
+use crate::error::Error;
 use crate::graph::{LGraph, LLabel, LNodeKind, LPoint, LSize, LayeredEdge, PortRef};
 
 /// `OrthogonalRoutingGenerator.TOLERANCE`.
@@ -356,7 +357,10 @@ struct EdgeToApply<'a> {
 /// Source: `ElkGraphLayoutTransferrer.applyLayout`, for the whole hierarchy.
 ///
 /// Ports `ElkGraphLayoutTransferrer.applyLayout`.
-pub(crate) fn apply_layout(root: &LGraph, input: &TransferInput<'_>) -> LayoutResult {
+pub(crate) fn apply_layout(
+    root: &LGraph,
+    input: &TransferInput<'_>,
+) -> Result<LayoutResult, Error> {
     let hierarchy = Hierarchy::new(root);
     let joined = join_cross_hierarchy_edges(&hierarchy);
 
@@ -413,9 +417,9 @@ pub(crate) fn apply_layout(root: &LGraph, input: &TransferInput<'_>) -> LayoutRe
         actual_size: actual_size(root),
     };
     for (graph_index, edges) in by_graph.into_iter().enumerate() {
-        apply_graph_layout(&hierarchy, graph_index, edges, input, &mut result);
+        apply_graph_layout(&hierarchy, graph_index, edges, input, &mut result)?;
     }
-    result
+    Ok(result)
 }
 
 /// Whether a layered edge is an input edge as the layout left it, not a dummy edge.
@@ -465,7 +469,7 @@ fn apply_graph_layout(
     edges: Vec<EdgeToApply<'_>>,
     input: &TransferInput<'_>,
     result: &mut LayoutResult,
-) {
+) -> Result<(), Error> {
     let graph = hierarchy.graph(graph_index);
     let offset = LPoint {
         x: graph.offset.x + graph.padding.left,
@@ -482,8 +486,9 @@ fn apply_graph_layout(
     for edge in edges {
         result
             .edges
-            .push(edge_layout(hierarchy, graph_index, edge, offset, input));
+            .push(edge_layout(hierarchy, edge, offset, input)?);
     }
+    Ok(())
 }
 
 /// Source: `ElkGraphLayoutTransferrer.applyNodeLayout`.
@@ -527,16 +532,15 @@ fn node_layout(
 /// Ports `ElkGraphLayoutTransferrer.applyEdgeLayout`.
 fn edge_layout(
     hierarchy: &Hierarchy<'_>,
-    graph_index: usize,
     edge: EdgeToApply<'_>,
     offset: LPoint,
     input: &TransferInput<'_>,
-) -> EdgeLayout {
+) -> Result<EdgeLayout, Error> {
     let source_node = (edge.source.graph, edge.source.port.node);
     let target_node = (edge.target.graph, edge.target.port.node);
 
     let mut edge_offset = offset;
-    let hierarchical = hierarchical_offset(hierarchy, source_node, target_node, edge.id, input);
+    let hierarchical = hierarchical_offset(hierarchy, source_node, target_node, edge.id, input)?;
     edge_offset.x += hierarchical.x;
     edge_offset.y += hierarchical.y;
 
@@ -576,14 +580,13 @@ fn edge_layout(
             })
         })
         .collect();
-    let _ = graph_index;
-    EdgeLayout {
+    Ok(EdgeLayout {
         id: edge.id.to_string(),
         start: shift(source_point),
         bend_points: edge.bend_points.iter().copied().map(shift).collect(),
         end: shift(target_point),
         labels,
-    }
+    })
 }
 
 /// The offset from the coordinates of the edge's source graph to those of the graph ELK
@@ -599,19 +602,24 @@ fn hierarchical_offset(
     target: NodeAt,
     edge_id: &str,
     input: &TransferInput<'_>,
-) -> LPoint {
+) -> Result<LPoint, Error> {
     // Siblings, or an edge into a descendant of its source, need no change.
     if source.0 == target.0 || hierarchy.is_descendant(target, source) {
-        return LPoint::default();
+        return Ok(LPoint::default());
     }
     // Otherwise the coordinates belong to the edge's container: the root graph, or the graph
     // inside the container's node.
+    // Every edge written has a container, and the container's graph is in the hierarchy. A
+    // miss would put the edge at the wrong place, so it is an error, not a zero offset.
     let Some(container) = input.edge_containers.get(edge_id) else {
-        return LPoint::default();
+        return Err(Error::Internal {
+            message: format!("edge \"{edge_id}\" has no container"),
+        });
     };
-    let target_graph = match hierarchy.by_id.get(container.as_str()) {
-        Some(&graph) => graph,
-        None => return LPoint::default(),
+    let Some(&target_graph) = hierarchy.by_id.get(container.as_str()) else {
+        return Err(Error::Internal {
+            message: format!("the container \"{container}\" of edge \"{edge_id}\" has no graph"),
+        });
     };
     let mut result = LPoint::default();
     let mut current = source.0;
@@ -630,5 +638,59 @@ fn hierarchical_offset(
         result.y += graph.padding.top;
         current = parent_graph;
     }
-    result
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::LNode;
+    use crate::options::LayeredOptions;
+
+    /// A root with two nodes, each holding a graph. A point in one of them has no ancestor
+    /// link to a point in the other, so the offset between them needs the edge's container.
+    fn two_nested_graphs() -> LGraph {
+        let mut root = LGraph::new("root", LayeredOptions::default());
+        for id in ["a", "b"] {
+            let mut node = LNode::new(id, 10.0, 10.0, None);
+            node.nested_graph = Some(Box::new(LGraph::new(id, LayeredOptions::default())));
+            root.layerless_nodes.push(node);
+        }
+        root
+    }
+
+    fn offset_error(containers: &HashMap<String, String>) -> Option<Error> {
+        let root = two_nested_graphs();
+        let hierarchy = Hierarchy::new(&root);
+        let parents = HashMap::new();
+        let sized_nodes = HashMap::new();
+        let input = TransferInput {
+            parents: &parents,
+            sized_nodes: &sized_nodes,
+            edge_containers: containers,
+        };
+        hierarchical_offset(&hierarchy, (1, 0), (2, 0), "e", &input).err()
+    }
+
+    // Mutation: return `Ok(LPoint::default())` when the edge has no container.
+    #[test]
+    fn an_edge_without_a_container_is_an_internal_error() {
+        let error = offset_error(&HashMap::new()).expect("an error");
+        assert!(matches!(error, Error::Internal { ref message } if message.contains("\"e\"")));
+    }
+
+    // Mutation: return `Ok(LPoint::default())` when the container has no graph.
+    #[test]
+    fn a_container_without_a_graph_is_an_internal_error() {
+        let containers = HashMap::from([("e".to_string(), "nowhere".to_string())]);
+        let error = offset_error(&containers).expect("an error");
+        assert!(matches!(error, Error::Internal { ref message } if message.contains("nowhere")));
+    }
+
+    // Mutation: return an error whenever the container is found.
+    #[test]
+    fn a_known_container_gives_no_error() {
+        let containers = HashMap::from([("e".to_string(), "root".to_string())]);
+        assert!(offset_error(&containers).is_none());
+    }
 }
