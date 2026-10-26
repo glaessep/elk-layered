@@ -40,13 +40,16 @@ The same graph gives the same layout, bit for bit, on every machine.
 
 ## Tests
 
-- **Test each feature for every equivalence class, boundary and error case.** One happy path
+- **Test each kind of input a change reads, each edge value, and each error.** One happy path
   is not enough. Example: a node width is tested at a normal value, at zero, which ELK accepts,
-  and at NaN, which `layout()` refuses with `Error::InvalidSize`.
+  and at NaN, which the crate refuses with an error. The inputs the change does not read need no
+  new test.
 - **Break the code each test guards once on purpose, and watch the test fail.** Then restore
-  the code. Name that mutation in a comment above the test:
-  `// Mutation: accept a NaN width.` A table-driven or snapshot test names one mutation that
-  fails it. The rule binds new and changed tests; an older test gets its comment when it changes.
+  the code.
+- **Name that mutation in a comment above the test**, such as `// Mutation: accept a NaN width.`
+  This comment is the one exception to "comments say why, not what". A table-driven or snapshot
+  test names one mutation per case it adds. The rule binds new and changed tests; an older test
+  gets its comment when it changes.
 
 ```bash
 cargo build
@@ -97,8 +100,8 @@ A review checks, in this order:
    the result.
 4. **Caller input.** Malformed input gives an error, never a panic: no `unwrap`, `expect` or
    indexing that a caller's graph can break.
-5. **Tests.** Each new feature is tested for every equivalence class, boundary and error case,
-   and each new or changed test names the mutation that broke it. A change to
+5. **Tests.** Each kind of input the change reads, each edge value and each error has a test.
+   Each new or changed test names a mutation of the code that makes it fail. A change to
    `tests/snapshots/` is explained in the pull request.
 6. **Scope.** The pull request does what its issue asks, and no more.
 
