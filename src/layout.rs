@@ -368,10 +368,8 @@ struct Level {
 struct Work<'a, 't> {
     tree: &'t Tree<'a>,
     out: ElkNode,
-    /// Whether ELK has fixed the node's size: `resizeNode` sets the constraints to fixed.
-    size_fixed: Vec<bool>,
     /// Size constraints and minimum size as ELK keeps them on the node, which
-    /// `calculateMinimumGraphSize` may change.
+    /// `calculateMinimumGraphSize` and `resizeNode` may change.
     sizing: Vec<crate::options::NodeSizing>,
     /// The node's hierarchy handling once ELK has resolved `INHERIT`.
     handling: Vec<HierarchyHandling>,
@@ -394,7 +392,6 @@ impl<'a, 't> Work<'a, 't> {
         Self {
             tree,
             out: graph.clone(),
-            size_fixed: vec![false; tree.nodes.len()],
             sizing: tree
                 .nodes
                 .iter()
@@ -647,14 +644,7 @@ impl<'a, 't> Work<'a, 't> {
             .collect();
         let sized_nodes: HashSet<String> = run_nodes
             .iter()
-            .filter(|&&node| {
-                let constraints = if self.size_fixed[node] {
-                    SizeConstraints::FIXED
-                } else {
-                    self.sizing[node].constraints
-                };
-                !constraints.is_empty()
-            })
+            .filter(|&&node| !self.sizing[node].constraints.is_empty())
             .map(|&node| tree.nodes[node].node.id.clone())
             .collect();
         let edge_containers: HashMap<String, String> = edges
@@ -696,10 +686,7 @@ impl<'a, 't> Work<'a, 't> {
             .parent
             .filter(|&parent| parent != scope && node != scope)
             .map(|parent| self.tree.nodes[parent].node.id.clone());
-        let mut node_size = self.sizing[node];
-        if self.size_fixed[node] {
-            node_size.constraints = SizeConstraints::FIXED;
-        }
+        let node_size = self.sizing[node];
         let hierarchy_handling = if info.children.is_empty() {
             info.settings.hierarchy_handling
         } else {
@@ -811,11 +798,7 @@ impl<'a, 't> Work<'a, 't> {
     ///
     /// Ports `ElkGraphLayoutTransferrer.applyParentNodeLayout` with `ElkUtil.resizeNode` and `effectiveMinSizeConstraintFor`.
     fn apply_parent_node_layout(&mut self, scope: usize, actual: LSize) {
-        let mut sizing = self.sizing[scope];
-        if self.size_fixed[scope] {
-            sizing.constraints = SizeConstraints::FIXED;
-        }
-        let mut new_size = sizing.effective_minimum().unwrap_or_default();
+        let mut new_size = self.sizing[scope].effective_minimum().unwrap_or_default();
         new_size.width = f64::max(new_size.width, actual.width);
         new_size.height = f64::max(new_size.height, actual.height);
         let node = self.out_node(scope);
@@ -842,7 +825,8 @@ impl<'a, 't> Work<'a, 't> {
                 }
             }
         }
-        self.size_fixed[scope] = true;
+        // `ElkUtil.resizeNode` sets the node's size constraints to fixed.
+        self.sizing[scope].constraints = SizeConstraints::FIXED;
     }
 
     /// Writes the edge routes and containers.
