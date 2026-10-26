@@ -15,7 +15,6 @@ use super::options::{
     ElkDirection, GreedySwitchType, LayeredOptions, LayeringStrategy, NodePlacementStrategy,
     OrderingStrategy, PortConstraints, WrappingStrategy,
 };
-use crate::RandomSeedError;
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::configurator::{check_random_seeds, configure_graph_properties, configured_options};
 use crate::graph::{LGraph, LNode, LNodeKind, LPoint, LSize, PortSide};
@@ -46,6 +45,7 @@ use crate::p4nodes::{
     place_nodes_network_simplex, place_nodes_simple, process_in_layer_constraints,
 };
 use crate::p5edges::route_edges_orthogonal;
+use crate::random::RandomSeedError;
 use crate::selfloops::{
     postprocess_self_loops, preprocess_self_loops, restore_self_loop_ports, route_self_loops,
 };
@@ -110,6 +110,9 @@ pub struct ProcessorSlot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::enum_variant_names)]
+// The list names every ELK processor, ported or not, so an unported one can be reported by
+// name. The unported ones are never built yet.
+#[allow(dead_code)]
 pub enum ProcessorKind {
     DirectionPreprocessor,
     CommentPreprocessor,
@@ -466,6 +469,7 @@ fn intermediate_processor_order(kind: ProcessorKind) -> usize {
 /// This follows `GraphConfigurator.prepareGraphForLayout(...)` and the selected phases'
 /// `getLayoutProcessorConfiguration(...)` methods. It intentionally returns processor kinds rather
 /// than executing them so each Java phase can be ported independently.
+#[cfg(test)]
 pub fn assemble_processors(options: &LayeredOptions) -> Vec<ProcessorSlot> {
     assemble_processors_with_graph_size(options, 0, true)
 }
@@ -643,10 +647,9 @@ pub fn execute_ported_processors(graph: &mut LGraph) -> PipelineResult<Vec<Proce
     }
 
     // Compound layout resizes through its scheduled HierarchicalNodeResizer. Flat layout
-    // applies ElkLayered.resizeGraph after direction postprocessing and component combination.
-    if graph.options.hierarchy_handling != super::options::HierarchyHandling::IncludeChildren
-        && graph.options.node_size_minimum.is_some()
-    {
+    // applies ElkLayered.resizeGraph after direction postprocessing and component combination,
+    // whether or not a minimum size is set: it recomputes the size from the padding either way.
+    if graph.options.hierarchy_handling != super::options::HierarchyHandling::IncludeChildren {
         resize_graph_to_minimum(graph)?;
     }
 
@@ -1289,6 +1292,8 @@ fn resize_layered_node(node: &mut LNode, new_size: LSize, move_ports: bool, move
     }
 
     node.size = new_size;
+    // `LGraphUtil.resizeNode` fixes the size: later processors keep it.
+    node.node_size.constraints = crate::options::SizeConstraints::FIXED;
 }
 
 fn ratio_or_one(numerator: f64, denominator: f64) -> f64 {
@@ -1709,6 +1714,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
             height: 40.0,
@@ -1718,11 +1724,14 @@ mod tests {
             layer_constraint: None,
             port_alignment: None,
             port_constraints: None,
-            node_label_placement: crate::options::NodeLabelPlacement::Fixed,
+            node_label_placement: crate::options::NodeLabelPlacement::FIXED,
             node_flexibility: crate::options::NodeFlexibility::None,
             ports_surrounding: None,
             nested_options: None,
-            label: None,
+            labels: Vec::new(),
+            node_size: Default::default(),
+            self_loop_distribution: Default::default(),
+            self_loop_ordering: Default::default(),
         }
     }
 
@@ -1738,6 +1747,7 @@ mod tests {
             priority_direction: 0,
             priority_shortness: 0,
             priority_straightness: 0,
+            container: None,
         }
     }
 
@@ -2485,6 +2495,7 @@ mod tests {
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![
                 ElkInputNode {
+                    parent_settings: Default::default(),
                     id: "cluster".to_string(),
                     width: 0.0,
                     height: 0.0,
@@ -2494,13 +2505,17 @@ mod tests {
                     layer_constraint: None,
                     port_alignment: None,
                     port_constraints: None,
-                    node_label_placement: crate::options::NodeLabelPlacement::Fixed,
+                    node_label_placement: crate::options::NodeLabelPlacement::FIXED,
                     node_flexibility: crate::options::NodeFlexibility::None,
                     ports_surrounding: None,
                     nested_options: None,
-                    label: None,
+                    labels: Vec::new(),
+                    node_size: Default::default(),
+                    self_loop_distribution: Default::default(),
+                    self_loop_ordering: Default::default(),
                 },
                 ElkInputNode {
+                    parent_settings: Default::default(),
                     id: "A".to_string(),
                     width: 80.0,
                     height: 40.0,
@@ -2510,11 +2525,14 @@ mod tests {
                     layer_constraint: None,
                     port_alignment: None,
                     port_constraints: None,
-                    node_label_placement: crate::options::NodeLabelPlacement::Fixed,
+                    node_label_placement: crate::options::NodeLabelPlacement::FIXED,
                     node_flexibility: crate::options::NodeFlexibility::None,
                     ports_surrounding: None,
                     nested_options: None,
-                    label: None,
+                    labels: Vec::new(),
+                    node_size: Default::default(),
+                    self_loop_distribution: Default::default(),
+                    self_loop_ordering: Default::default(),
                 },
             ],
             edges: vec![
@@ -2529,6 +2547,7 @@ mod tests {
                     priority_direction: 0,
                     priority_shortness: 0,
                     priority_straightness: 0,
+                    container: None,
                 },
                 ElkInputEdge {
                     id: "A-A".to_string(),
@@ -2541,6 +2560,7 @@ mod tests {
                     priority_direction: 0,
                     priority_shortness: 0,
                     priority_straightness: 0,
+                    container: None,
                 },
             ],
         })
@@ -2567,6 +2587,7 @@ mod tests {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![ElkInputNode {
+                parent_settings: Default::default(),
                 id: "A".to_string(),
                 width: 80.0,
                 height: 40.0,
@@ -2576,11 +2597,14 @@ mod tests {
                 layer_constraint: None,
                 port_alignment: None,
                 port_constraints: None,
-                node_label_placement: crate::options::NodeLabelPlacement::Fixed,
+                node_label_placement: crate::options::NodeLabelPlacement::FIXED,
                 node_flexibility: crate::options::NodeFlexibility::None,
                 ports_surrounding: None,
                 nested_options: None,
-                label: None,
+                labels: Vec::new(),
+                node_size: Default::default(),
+                self_loop_distribution: Default::default(),
+                self_loop_ordering: Default::default(),
             }],
             edges: vec![ElkInputEdge {
                 id: "A-A".to_string(),
@@ -2593,6 +2617,7 @@ mod tests {
                 priority_direction: 0,
                 priority_shortness: 0,
                 priority_straightness: 0,
+                container: None,
             }],
         };
         input.options.inside_self_loops_activate = true;
@@ -2956,26 +2981,26 @@ mod tests {
         for (separate, hierarchy, expected) in [
             (
                 true,
-                crate::HierarchyHandling::SeparateChildren,
+                crate::options::HierarchyHandling::SeparateChildren,
                 (160.0, 215.0),
             ),
             (
                 false,
-                crate::HierarchyHandling::SeparateChildren,
+                crate::options::HierarchyHandling::SeparateChildren,
                 (512.0, 61.0),
             ),
             (
                 true,
-                crate::HierarchyHandling::IncludeChildren,
+                crate::options::HierarchyHandling::IncludeChildren,
                 (512.0, 61.0),
             ),
         ] {
             let options = LayeredOptions {
                 direction: ElkDirection::Down,
-                spacing: crate::SpacingOptions::layered_base_value(40.0),
+                spacing: crate::options::SpacingOptions::layered_base_value(40.0),
                 separate_connected_components: separate,
                 hierarchy_handling: hierarchy,
-                padding: crate::ElkPadding::uniform(12.0),
+                padding: crate::options::ElkPadding::uniform(12.0),
                 ..Default::default()
             };
             let nodes = ["A", "B", "C"]
@@ -3001,7 +3026,7 @@ mod tests {
                 expected,
                 "{separate}/{hierarchy:?}"
             );
-            if separate && hierarchy == crate::HierarchyHandling::SeparateChildren {
+            if separate && hierarchy == crate::options::HierarchyHandling::SeparateChildren {
                 for (index, node) in graph.layerless_nodes.iter().enumerate() {
                     assert_eq!(
                         node.id,
@@ -3024,8 +3049,8 @@ mod tests {
     fn connected_components_translate_nodes_and_edges_together() {
         let options = LayeredOptions {
             direction: ElkDirection::Down,
-            spacing: crate::SpacingOptions::layered_base_value(40.0),
-            padding: crate::ElkPadding::uniform(12.0),
+            spacing: crate::options::SpacingOptions::layered_base_value(40.0),
+            padding: crate::options::ElkPadding::uniform(12.0),
             ..Default::default()
         };
         let mut nodes = Vec::new();
@@ -3050,7 +3075,7 @@ mod tests {
         execute_ported_processors(&mut graph).unwrap();
         assert_eq!(
             graph.exported_root_size(),
-            crate::LSize {
+            crate::graph::LSize {
                 width: 294.0,
                 height: 246.0
             }
@@ -3130,14 +3155,14 @@ mod tests {
         })
         .unwrap();
         let mut with_minimum = graph.clone();
-        let minimum = crate::LSize {
+        let minimum = crate::graph::LSize {
             width: 900.0,
             height: 800.0,
         };
-        with_minimum.options.node_size_minimum = Some(minimum);
+        with_minimum.options.node_size = crate::options::NodeSizing::with_minimum(minimum);
         execute_ported_processors(&mut graph).unwrap();
         execute_ported_processors(&mut with_minimum).unwrap();
-        assert_eq!(with_minimum.options.node_size_minimum, Some(minimum));
+        assert_eq!(with_minimum.options.node_size.minimum, minimum);
         assert_eq!(with_minimum.exported_root_size(), minimum);
         for (index, id) in ids.iter().enumerate() {
             assert_eq!(&graph.layerless_nodes[index].id, id);
@@ -3152,7 +3177,7 @@ mod tests {
                 for &edge in &port.incoming_edges {
                     assert_eq!(
                         graph.edges[edge].target,
-                        crate::PortRef {
+                        crate::graph::PortRef {
                             node: index,
                             port: port_index
                         }
@@ -3161,7 +3186,7 @@ mod tests {
                 for &edge in &port.outgoing_edges {
                     assert_eq!(
                         graph.edges[edge].source,
-                        crate::PortRef {
+                        crate::graph::PortRef {
                             node: index,
                             port: port_index
                         }
@@ -3436,7 +3461,7 @@ mod tests {
                     direction,
                     hierarchy_handling: handling,
                     padding: ElkPadding::uniform(0.0),
-                    node_size_minimum: Some(LSize {
+                    node_size: crate::options::NodeSizing::with_minimum(LSize {
                         width: 120.0,
                         height: 80.0,
                     }),
@@ -3473,12 +3498,21 @@ mod tests {
         let mut group = node("g");
         group.width = 0.0;
         group.height = 0.0;
-        group.node_label_placement = NodeLabelPlacement::InsideTopCenter;
-        group.label = Some(ElkInputLabel::center("label", 100.0, 10.0));
+        group.node_label_placement =
+            NodeLabelPlacement::from_location(crate::options::NodeLabelLocation::InsideTopCenter);
+        group.labels = vec![ElkInputLabel::center("label", 100.0, 10.0)];
+        group.node_size = crate::options::NodeSizing {
+            constraints: crate::options::SizeConstraints::NODE_LABELS
+                | crate::options::SizeConstraints::MINIMUM_SIZE,
+            ..Default::default()
+        };
         group.nested_options = Some(Box::new(LayeredOptions {
             padding: ElkPadding::uniform(0.0),
-            node_size_minimum: Some(LSize::default()),
-            node_size_include_labels: true,
+            node_size: crate::options::NodeSizing {
+                constraints: crate::options::SizeConstraints::NODE_LABELS
+                    | crate::options::SizeConstraints::MINIMUM_SIZE,
+                ..Default::default()
+            },
             ..Default::default()
         }));
         let mut child = node("a");
@@ -3525,7 +3559,7 @@ mod tests {
             let mut graph = import_graph(&ElkInputGraph {
                 id: "root".into(),
                 options: LayeredOptions {
-                    node_size_minimum: Some(LSize {
+                    node_size: crate::options::NodeSizing::with_minimum(LSize {
                         width,
                         height: 80.0,
                     }),
@@ -3542,19 +3576,6 @@ mod tests {
             ));
             assert_eq!(graph.offset, LPoint::default());
         }
-        let mut options = LayeredOptions {
-            node_size_include_labels: true,
-            ..Default::default()
-        };
-        assert!(
-            options
-                .include_inside_top_center_label_minimum(LSize {
-                    width: 40.0,
-                    height: f64::MAX
-                })
-                .is_err()
-        );
-        assert_eq!(options.node_size_minimum, None);
     }
 
     #[test]
@@ -3562,7 +3583,7 @@ mod tests {
         let mut graph = LGraph::new("root", LayeredOptions::default());
         resize_graph_to_minimum(&mut graph).unwrap();
         assert_eq!(actual_graph_size(&graph), LSize::default());
-        graph.options.node_size_minimum = Some(LSize {
+        graph.options.node_size = crate::options::NodeSizing::with_minimum(LSize {
             width: 0.0,
             height: -1.0,
         });

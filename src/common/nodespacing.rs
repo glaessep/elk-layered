@@ -5,103 +5,9 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/NodeLabelAndSizeCalculator.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/NodeMarginCalculator.java
 
-use crate::graph::{LGraph, LMargin, LPort, PortSide};
-use crate::options::{NodeLabelPlacement, PortAlignment, PortConstraints};
-
-/// The reachable `NodeMicroLayout` operation for one inside-top-center container title.
-/// A missing minimum denotes fixed constraints: the title is placed and may overhang,
-/// but must not resurrect constraints cleared by a previous provider's `resizeNode`.
-/// `NodeSizeCalculator` replaces active dimensions; it does not translate child contents.
-pub fn inside_top_center_micro_layout(
-    current: crate::LSize,
-    minimum: Option<crate::LSize>,
-    label: Option<crate::LSize>,
-) -> Result<(crate::LSize, crate::LMargin), crate::NodeSizeError> {
-    let mut size = current;
-    if let Some(minimum) = minimum {
-        let mut options = crate::LayeredOptions {
-            node_size_minimum: Some(minimum),
-            node_size_include_labels: true,
-            ..Default::default()
-        };
-        options.validate_node_size_minimum()?;
-        if let Some(label) = label {
-            options.include_inside_top_center_label_minimum(label)?;
-        }
-        size = options.effective_node_size_minimum().unwrap_or_default();
-    }
-    if !size.width.is_finite()
-        || !size.height.is_finite()
-        || size.width < 0.0
-        || size.height < 0.0
-        || label.is_some_and(|label| {
-            !label.width.is_finite()
-                || !label.height.is_finite()
-                || label.width < 0.0
-                || label.height < 0.0
-        })
-    {
-        return Err(crate::NodeSizeError);
-    }
-    let mut margin = crate::LMargin::default();
-    if let Some(label) = label {
-        // NodeLabelCellCreator's default label padding is five on each side. For a
-        // fixed narrow node the centered label protrudes equally on the left and right.
-        margin.left = ((label.width - size.width) / 2.0).max(0.0);
-        margin.right = margin.left;
-        margin.bottom = (5.0 + label.height - size.height).max(0.0);
-    }
-    Ok((size, margin))
-}
-
-#[cfg(test)]
-mod micro_layout_tests {
-    use super::*;
-
-    #[test]
-    fn active_title_uses_symmetric_grid_but_fixed_title_only_overhangs() {
-        // elkjs 0.9.3: an explicit Radial group with a 30x30 title and minimum60x60
-        // becomes60x70 under NodeMicroLayout, while Box's resizeNode alone yields60x60.
-        let (size, _) = inside_top_center_micro_layout(
-            crate::LSize {
-                width: 147.0,
-                height: 90.0,
-            },
-            Some(crate::LSize {
-                width: 60.0,
-                height: 60.0,
-            }),
-            Some(crate::LSize {
-                width: 30.0,
-                height: 30.0,
-            }),
-        )
-        .unwrap();
-        assert_eq!(
-            size,
-            crate::LSize {
-                width: 60.0,
-                height: 70.0
-            }
-        );
-        let current = crate::LSize {
-            width: 180.0,
-            height: 72.0,
-        };
-        let (size, margins) = inside_top_center_micro_layout(
-            current,
-            None,
-            Some(crate::LSize {
-                width: 300.0,
-                height: 10.0,
-            }),
-        )
-        .unwrap();
-        assert_eq!(size, current);
-        assert_eq!(margins.left, 60.0);
-        assert_eq!(margins.right, 60.0);
-    }
-}
+use super::cells::{self, CellLabel, CellNode};
+use crate::graph::{LGraph, LMargin, LPadding, LPort, PortSide};
+use crate::options::{PortAlignment, PortConstraints};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct Rect {
@@ -124,10 +30,14 @@ impl Rect {
     }
 }
 
+/// Sizes each node and places its ports and labels.
+///
+/// Source: `NodeLabelAndSizeCalculator.process(graph, node, true, false)`. ELK places the ports
+/// with the node size it has just computed, so the size comes first here too.
 pub fn calculate_label_and_node_sizes(graph: &mut LGraph, nodes: impl IntoIterator<Item = usize>) {
     for node in nodes {
+        size_node_and_place_labels(graph, node);
         place_ports(graph, node);
-        place_node_labels(graph, node);
     }
 }
 
@@ -160,144 +70,44 @@ fn place_ports(graph: &mut LGraph, node: usize) {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum HorizontalLabelAlignment {
-    Left,
-    Center,
-    Right,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum VerticalLabelAlignment {
-    Top,
-    Center,
-    Bottom,
-}
-
-fn place_node_labels(graph: &mut LGraph, node: usize) {
-    let Some((horizontal_alignment, vertical_alignment)) =
-        inside_label_alignment(graph.layerless_nodes[node].node_label_placement)
-    else {
-        return;
-    };
-    if graph.layerless_nodes[node].labels.is_empty() {
-        return;
-    }
-
-    let padding = graph.options.node_labels_padding;
-    let gap = graph.options.spacing.label_label;
+/// Runs ELK's cell system on one node: its size, when its size constraints are not fixed, and
+/// the positions of the labels it places.
+fn size_node_and_place_labels(graph: &mut LGraph, node: usize) {
     let horizontal_layout_mode = !graph.options.direction.is_vertical();
-    let node = &mut graph.layerless_nodes[node];
-    let content_left = padding.left;
-    let content_top = padding.top;
-    let content_width = node.size.width - padding.left - padding.right;
-    let content_height = node.size.height - padding.top - padding.bottom;
-
-    if horizontal_layout_mode {
-        let labels_height = node
+    let data = &graph.layerless_nodes[node];
+    let cell_node = CellNode {
+        size: data.size,
+        sizing: data.node_size,
+        placement: data.node_label_placement,
+        labels: data
             .labels
             .iter()
-            .map(|label| label.size.height)
-            .sum::<f64>()
-            + gap * node.labels.len().saturating_sub(1) as f64;
-        let mut y = aligned_position(
-            content_top,
-            content_height,
-            labels_height,
-            vertical_alignment,
-        );
-
-        for label in &mut node.labels {
-            label.position.x = aligned_position(
-                content_left,
-                content_width,
-                label.size.width,
-                horizontal_alignment,
-            );
-            label.position.y = y;
-            y += label.size.height + gap;
-        }
-    } else {
-        let labels_width = node
-            .labels
-            .iter()
-            .map(|label| label.size.width)
-            .sum::<f64>()
-            + gap * node.labels.len().saturating_sub(1) as f64;
-        let mut x = aligned_position(
-            content_left,
-            content_width,
-            labels_width,
-            horizontal_alignment,
-        );
-
-        for label in &mut node.labels {
-            label.position.x = x;
-            label.position.y = aligned_position(
-                content_top,
-                content_height,
-                label.size.height,
-                vertical_alignment,
-            );
-            x += label.size.width + gap;
+            .map(|label| CellLabel {
+                size: label.size,
+                placement: label.node_label_placement,
+            })
+            .collect(),
+        node_labels_padding: graph.options.node_labels_padding,
+        label_node_spacing: graph.options.spacing.label_node,
+        label_label_spacing: graph.options.spacing.label_label,
+        fixed_graph_size: false,
+    };
+    let result = cells::process(&cell_node, horizontal_layout_mode, true);
+    let data = &mut graph.layerless_nodes[node];
+    data.size = result.size;
+    for (label, position) in data.labels.iter_mut().zip(result.label_positions) {
+        if let Some(position) = position {
+            label.position = position;
         }
     }
-}
-
-fn inside_label_alignment(
-    placement: NodeLabelPlacement,
-) -> Option<(HorizontalLabelAlignment, VerticalLabelAlignment)> {
-    use HorizontalLabelAlignment::{Center as HCenter, Left, Right};
-    use NodeLabelPlacement::*;
-    use VerticalLabelAlignment::{Bottom, Center as VCenter, Top};
-
-    match placement {
-        InsideTopLeft => Some((Left, Top)),
-        InsideTopCenter => Some((HCenter, Top)),
-        InsideTopRight => Some((Right, Top)),
-        InsideCenterLeft => Some((Left, VCenter)),
-        InsideCenter => Some((HCenter, VCenter)),
-        InsideCenterRight => Some((Right, VCenter)),
-        InsideBottomLeft => Some((Left, Bottom)),
-        InsideBottomCenter => Some((HCenter, Bottom)),
-        InsideBottomRight => Some((Right, Bottom)),
-        Fixed | OutsideTopLeft | OutsideTopCenter | OutsideTopRight | OutsideBottomLeft
-        | OutsideBottomCenter | OutsideBottomRight | OutsideLeftTop | OutsideLeftCenter
-        | OutsideLeftBottom | OutsideRightTop | OutsideRightCenter | OutsideRightBottom => None,
+    if let Some(padding) = result.padding {
+        data.padding = LPadding {
+            top: padding.top,
+            right: padding.right,
+            bottom: padding.bottom,
+            left: padding.left,
+        };
     }
-}
-
-trait LabelAlignment: Copy {
-    fn factor(self) -> f64;
-}
-
-impl LabelAlignment for HorizontalLabelAlignment {
-    fn factor(self) -> f64 {
-        match self {
-            Self::Left => 0.0,
-            Self::Center => 0.5,
-            Self::Right => 1.0,
-        }
-    }
-}
-
-impl LabelAlignment for VerticalLabelAlignment {
-    fn factor(self) -> f64 {
-        match self {
-            Self::Top => 0.0,
-            Self::Center => 0.5,
-            Self::Bottom => 1.0,
-        }
-    }
-}
-
-fn aligned_position(
-    content_start: f64,
-    content_size: f64,
-    item_size: f64,
-    alignment: impl LabelAlignment,
-) -> f64 {
-    content_start + (content_size - item_size) * alignment.factor()
 }
 
 fn place_fixed_pos_ports(graph: &mut LGraph, node: usize, side: PortSide) {
@@ -568,6 +378,7 @@ mod tests {
             end_label_edge: None,
             original_label_edge: None,
             source_index: None,
+            node_label_placement: None,
         }
     }
 
@@ -575,7 +386,8 @@ mod tests {
     fn label_and_node_size_calculation_places_inside_top_center_node_labels() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
         let mut node = LNode::new("group", 100.3125, 105.0, None);
-        node.node_label_placement = NodeLabelPlacement::InsideTopCenter;
+        node.node_label_placement =
+            NodeLabelPlacement::from_location(crate::options::NodeLabelLocation::InsideTopCenter);
         node.labels.push(LLabel {
             text: "three".to_string(),
             size: LSize {
@@ -593,6 +405,7 @@ mod tests {
             end_label_edge: None,
             original_label_edge: None,
             source_index: None,
+            node_label_placement: None,
         });
         graph.layerless_nodes.push(node);
         graph.set_node_layer(0, 0);
@@ -616,7 +429,8 @@ mod tests {
         graph.options.direction = ElkDirection::Right;
         graph.options.spacing.label_label = 3.0;
         let mut node = LNode::new("group", 100.0, 80.0, None);
-        node.node_label_placement = NodeLabelPlacement::InsideTopCenter;
+        node.node_label_placement =
+            NodeLabelPlacement::from_location(crate::options::NodeLabelLocation::InsideTopCenter);
         node.labels.push(node_label(20.0, 10.0));
         node.labels.push(node_label(30.0, 12.0));
         graph.layerless_nodes.push(node);
@@ -639,7 +453,8 @@ mod tests {
         graph.options.direction = ElkDirection::Down;
         graph.options.spacing.label_label = 3.0;
         let mut node = LNode::new("group", 80.0, 100.0, None);
-        node.node_label_placement = NodeLabelPlacement::InsideCenterLeft;
+        node.node_label_placement =
+            NodeLabelPlacement::from_location(crate::options::NodeLabelLocation::InsideCenterLeft);
         node.labels.push(node_label(10.0, 20.0));
         node.labels.push(node_label(12.0, 30.0));
         graph.layerless_nodes.push(node);
@@ -785,6 +600,7 @@ mod tests {
                 end_label_edge: None,
                 original_label_edge: None,
                 source_index: None,
+                node_label_placement: None,
             });
 
         calculate_node_margins(&mut graph, [node]);

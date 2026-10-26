@@ -77,6 +77,7 @@ mod tests {
 
     fn node(id: &str, width: f64, height: f64) -> ElkInputNode {
         ElkInputNode {
+            parent_settings: Default::default(),
             id: id.to_string(),
             width,
             height,
@@ -86,11 +87,14 @@ mod tests {
             layer_constraint: None,
             port_alignment: None,
             port_constraints: None,
-            node_label_placement: crate::options::NodeLabelPlacement::Fixed,
+            node_label_placement: crate::options::NodeLabelPlacement::FIXED,
             node_flexibility: crate::options::NodeFlexibility::None,
             ports_surrounding: None,
             nested_options: None,
-            label: None,
+            labels: Vec::new(),
+            node_size: Default::default(),
+            self_loop_distribution: Default::default(),
+            self_loop_ordering: Default::default(),
         }
     }
 
@@ -106,6 +110,7 @@ mod tests {
             priority_direction: 0,
             priority_shortness: 0,
             priority_straightness: 0,
+            container: None,
         }
     }
 

@@ -7,9 +7,7 @@
 use crate::graph::{
     InLayerConstraint, LGraph, LLabel, LNode, LNodeKind, LPadding, LPoint, LPort, LSize, PortSide,
 };
-use crate::options::{
-    Alignment, DirectionCongruency, ElkDirection, ElkPadding, LayerConstraint, NodeLabelPlacement,
-};
+use crate::options::{Alignment, DirectionCongruency, ElkDirection, ElkPadding, LayerConstraint};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphTransformMode {
@@ -93,7 +91,7 @@ fn mirror_all_x(graph: &mut LGraph) {
 fn mirror_node_x(node: &mut LNode, offset: f64) {
     node.position.mirror_x(offset - node.size.width);
     node.padding.swap_left_right();
-    node.node_label_placement = mirror_node_label_placement_x(node.node_label_placement);
+    node.node_label_placement = node.node_label_placement.mirror_x();
     node.node_alignment = mirror_alignment_x(node.node_alignment);
     for port in &mut node.ports {
         mirror_port_x(port, node.size.width);
@@ -103,6 +101,7 @@ fn mirror_node_x(node: &mut LNode, offset: f64) {
         node.external_port_side = mirror_port_side_x(node.external_port_side);
     }
     for label in &mut node.labels {
+        label.node_label_placement = label.node_label_placement.map(|p| p.mirror_x());
         mirror_label_x_within_node(label, node.size.width);
     }
 }
@@ -138,7 +137,7 @@ fn mirror_all_y(graph: &mut LGraph) {
 fn mirror_node_y(node: &mut LNode, offset: f64) {
     node.position.mirror_y(offset - node.size.height);
     node.padding.swap_top_bottom();
-    node.node_label_placement = mirror_node_label_placement_y(node.node_label_placement);
+    node.node_label_placement = node.node_label_placement.mirror_y();
     node.node_alignment = mirror_alignment_y(node.node_alignment);
     node.in_layer_constraint = match node.in_layer_constraint {
         InLayerConstraint::Top => InLayerConstraint::Bottom,
@@ -152,6 +151,7 @@ fn mirror_node_y(node: &mut LNode, offset: f64) {
         mirror_port_y(port, node.size.height);
     }
     for label in &mut node.labels {
+        label.node_label_placement = label.node_label_placement.map(|p| p.mirror_y());
         mirror_label_y_within_node(label, node.size.height);
     }
 }
@@ -190,7 +190,9 @@ fn transpose_node(node: &mut LNode) {
     node.position.transpose();
     node.size.transpose();
     node.padding.transpose();
-    node.node_label_placement = transpose_node_label_placement(node.node_label_placement);
+    node.node_label_placement = node.node_label_placement.transpose();
+    // `GraphTransformer.transposeProperties` swaps the minimum size too.
+    node.node_size.minimum.transpose();
     node.node_alignment = transpose_alignment(node.node_alignment);
     for port in &mut node.ports {
         transpose_port(port);
@@ -200,6 +202,7 @@ fn transpose_node(node: &mut LNode) {
         node.external_port_side = transpose_port_side(node.external_port_side);
     }
     for label in &mut node.labels {
+        label.node_label_placement = label.node_label_placement.map(|p| p.transpose());
         transpose_label(label);
     }
 }
@@ -260,93 +263,6 @@ fn mirror_label_y_within_node(label: &mut LLabel, node_height: f64) {
 fn transpose_label(label: &mut LLabel) {
     label.position.transpose();
     label.size.transpose();
-}
-
-fn mirror_node_label_placement_x(placement: NodeLabelPlacement) -> NodeLabelPlacement {
-    use NodeLabelPlacement::*;
-
-    match placement {
-        Fixed => Fixed,
-        InsideTopLeft => InsideTopRight,
-        InsideTopCenter => InsideTopCenter,
-        InsideTopRight => InsideTopLeft,
-        InsideCenterLeft => InsideCenterRight,
-        InsideCenter => InsideCenter,
-        InsideCenterRight => InsideCenterLeft,
-        InsideBottomLeft => InsideBottomRight,
-        InsideBottomCenter => InsideBottomCenter,
-        InsideBottomRight => InsideBottomLeft,
-        OutsideTopLeft => OutsideTopRight,
-        OutsideTopCenter => OutsideTopCenter,
-        OutsideTopRight => OutsideTopLeft,
-        OutsideBottomLeft => OutsideBottomRight,
-        OutsideBottomCenter => OutsideBottomCenter,
-        OutsideBottomRight => OutsideBottomLeft,
-        OutsideLeftTop => OutsideRightTop,
-        OutsideLeftCenter => OutsideRightCenter,
-        OutsideLeftBottom => OutsideRightBottom,
-        OutsideRightTop => OutsideLeftTop,
-        OutsideRightCenter => OutsideLeftCenter,
-        OutsideRightBottom => OutsideLeftBottom,
-    }
-}
-
-fn mirror_node_label_placement_y(placement: NodeLabelPlacement) -> NodeLabelPlacement {
-    use NodeLabelPlacement::*;
-
-    match placement {
-        Fixed => Fixed,
-        InsideTopLeft => InsideBottomLeft,
-        InsideTopCenter => InsideBottomCenter,
-        InsideTopRight => InsideBottomRight,
-        InsideCenterLeft => InsideCenterLeft,
-        InsideCenter => InsideCenter,
-        InsideCenterRight => InsideCenterRight,
-        InsideBottomLeft => InsideTopLeft,
-        InsideBottomCenter => InsideTopCenter,
-        InsideBottomRight => InsideTopRight,
-        OutsideTopLeft => OutsideBottomLeft,
-        OutsideTopCenter => OutsideBottomCenter,
-        OutsideTopRight => OutsideBottomRight,
-        OutsideBottomLeft => OutsideTopLeft,
-        OutsideBottomCenter => OutsideTopCenter,
-        OutsideBottomRight => OutsideTopRight,
-        OutsideLeftTop => OutsideLeftBottom,
-        OutsideLeftCenter => OutsideLeftCenter,
-        OutsideLeftBottom => OutsideLeftTop,
-        OutsideRightTop => OutsideRightBottom,
-        OutsideRightCenter => OutsideRightCenter,
-        OutsideRightBottom => OutsideRightTop,
-    }
-}
-
-fn transpose_node_label_placement(placement: NodeLabelPlacement) -> NodeLabelPlacement {
-    use NodeLabelPlacement::*;
-
-    match placement {
-        Fixed => Fixed,
-        InsideTopLeft => InsideTopLeft,
-        InsideTopCenter => InsideCenterLeft,
-        InsideTopRight => InsideBottomLeft,
-        InsideCenterLeft => InsideTopCenter,
-        InsideCenter => InsideCenter,
-        InsideCenterRight => InsideBottomCenter,
-        InsideBottomLeft => InsideTopRight,
-        InsideBottomCenter => InsideCenterRight,
-        InsideBottomRight => InsideBottomRight,
-        OutsideTopLeft => OutsideLeftTop,
-        OutsideTopCenter => OutsideLeftCenter,
-        OutsideTopRight => OutsideLeftBottom,
-        OutsideBottomLeft => OutsideRightTop,
-        OutsideBottomCenter => OutsideRightCenter,
-        OutsideBottomRight => OutsideRightBottom,
-        OutsideLeftTop => OutsideTopLeft,
-        OutsideLeftCenter => OutsideTopCenter,
-        OutsideLeftBottom => OutsideTopRight,
-        OutsideRightTop => OutsideBottomLeft,
-        OutsideRightCenter => OutsideBottomCenter,
-        OutsideRightBottom => OutsideBottomRight,
-    }
 }
 
 fn mirror_alignment_x(alignment: Alignment) -> Alignment {
@@ -533,7 +449,12 @@ mod tests {
 
     #[test]
     fn node_label_placement_primitives_cover_every_axis_mapping() {
-        use NodeLabelPlacement::*;
+        use crate::options::NodeLabelLocation::*;
+        use crate::options::{NodeLabelLocation, NodeLabelPlacement};
+        let set = NodeLabelPlacement::from_location;
+        let mx = |l: NodeLabelLocation| set(l).mirror_x().location();
+        let my = |l: NodeLabelLocation| set(l).mirror_y().location();
+        let tr = |l: NodeLabelLocation| set(l).transpose().location();
 
         for (placement, mirrored_x, mirrored_y, transposed) in [
             (Fixed, Fixed, Fixed, Fixed),
@@ -659,13 +580,13 @@ mod tests {
                 OutsideBottomRight,
             ),
         ] {
-            assert_eq!(mirror_node_label_placement_x(placement), mirrored_x);
-            assert_eq!(mirror_node_label_placement_y(placement), mirrored_y);
-            assert_eq!(transpose_node_label_placement(placement), transposed);
+            assert_eq!(mx(placement), mirrored_x);
+            assert_eq!(my(placement), mirrored_y);
+            assert_eq!(tr(placement), transposed);
 
-            assert_eq!(mirror_node_label_placement_x(mirrored_x), placement);
-            assert_eq!(mirror_node_label_placement_y(mirrored_y), placement);
-            assert_eq!(transpose_node_label_placement(transposed), placement);
+            assert_eq!(mx(mirrored_x), placement);
+            assert_eq!(my(mirrored_y), placement);
+            assert_eq!(tr(transposed), placement);
         }
     }
 
@@ -733,7 +654,8 @@ mod tests {
         };
 
         let mut top_left = LNode::new("top-left", 20.0, 10.0, None);
-        top_left.node_label_placement = NodeLabelPlacement::InsideTopLeft;
+        top_left.node_label_placement =
+            NodeLabelPlacement::from_location(crate::options::NodeLabelLocation::InsideTopLeft);
         top_left.node_alignment = Alignment::Left;
         top_left.padding = LPadding {
             top: 5.0,
@@ -754,10 +676,12 @@ mod tests {
             end_label_edge: None,
             original_label_edge: None,
             source_index: None,
+            node_label_placement: None,
         });
 
         let mut bottom_right = LNode::new("bottom-right", 20.0, 10.0, None);
-        bottom_right.node_label_placement = NodeLabelPlacement::InsideBottomRight;
+        bottom_right.node_label_placement =
+            NodeLabelPlacement::from_location(crate::options::NodeLabelLocation::InsideBottomRight);
         bottom_right.node_alignment = Alignment::Bottom;
         bottom_right.labels.push(LLabel {
             text: "bottom-right".to_string(),
@@ -772,6 +696,7 @@ mod tests {
             end_label_edge: None,
             original_label_edge: None,
             source_index: None,
+            node_label_placement: None,
         });
 
         graph.add_node_for_test(top_left);
@@ -802,12 +727,12 @@ mod tests {
 
         assert_eq!(graph.options.node_labels_padding, expectation.padding);
         assert_eq!(
-            graph.layerless_nodes[0].node_label_placement,
-            expectation.top_left_placement
+            graph.layerless_nodes[0].node_label_placement.location(),
+            expectation.top_left_placement.location()
         );
         assert_eq!(
-            graph.layerless_nodes[1].node_label_placement,
-            expectation.bottom_right_placement
+            graph.layerless_nodes[1].node_label_placement.location(),
+            expectation.bottom_right_placement.location()
         );
         assert_eq!(
             graph.layerless_nodes[0].node_alignment,
@@ -842,8 +767,12 @@ mod tests {
                     bottom: 3.0,
                     left: 4.0,
                 },
-                top_left_placement: NodeLabelPlacement::InsideTopLeft,
-                bottom_right_placement: NodeLabelPlacement::InsideBottomRight,
+                top_left_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideTopLeft,
+                ),
+                bottom_right_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideBottomRight,
+                ),
                 top_left_alignment: Alignment::Left,
                 bottom_right_alignment: Alignment::Bottom,
                 top_left_label_position: LPoint { x: 1.0, y: 2.0 },
@@ -860,8 +789,12 @@ mod tests {
                     bottom: 3.0,
                     left: 2.0,
                 },
-                top_left_placement: NodeLabelPlacement::InsideTopRight,
-                bottom_right_placement: NodeLabelPlacement::InsideBottomLeft,
+                top_left_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideTopRight,
+                ),
+                bottom_right_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideBottomLeft,
+                ),
                 top_left_alignment: Alignment::Right,
                 bottom_right_alignment: Alignment::Bottom,
                 top_left_label_position: LPoint { x: 15.0, y: 2.0 },
@@ -878,8 +811,12 @@ mod tests {
                     bottom: 2.0,
                     left: 1.0,
                 },
-                top_left_placement: NodeLabelPlacement::InsideTopLeft,
-                bottom_right_placement: NodeLabelPlacement::InsideBottomRight,
+                top_left_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideTopLeft,
+                ),
+                bottom_right_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideBottomRight,
+                ),
                 top_left_alignment: Alignment::Top,
                 bottom_right_alignment: Alignment::Right,
                 top_left_label_position: LPoint { x: 2.0, y: 1.0 },
@@ -896,8 +833,12 @@ mod tests {
                     bottom: 4.0,
                     left: 1.0,
                 },
-                top_left_placement: NodeLabelPlacement::InsideBottomLeft,
-                bottom_right_placement: NodeLabelPlacement::InsideTopRight,
+                top_left_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideBottomLeft,
+                ),
+                bottom_right_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideTopRight,
+                ),
                 top_left_alignment: Alignment::Bottom,
                 bottom_right_alignment: Alignment::Right,
                 top_left_label_position: LPoint { x: 2.0, y: 15.0 },
@@ -922,8 +863,12 @@ mod tests {
                     bottom: 3.0,
                     left: 4.0,
                 },
-                top_left_placement: NodeLabelPlacement::InsideTopLeft,
-                bottom_right_placement: NodeLabelPlacement::InsideBottomRight,
+                top_left_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideTopLeft,
+                ),
+                bottom_right_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideBottomRight,
+                ),
                 top_left_alignment: Alignment::Left,
                 bottom_right_alignment: Alignment::Bottom,
                 top_left_label_position: LPoint { x: 1.0, y: 2.0 },
@@ -940,8 +885,12 @@ mod tests {
                     bottom: 1.0,
                     left: 2.0,
                 },
-                top_left_placement: NodeLabelPlacement::InsideBottomRight,
-                bottom_right_placement: NodeLabelPlacement::InsideTopLeft,
+                top_left_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideBottomRight,
+                ),
+                bottom_right_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideTopLeft,
+                ),
                 top_left_alignment: Alignment::Right,
                 bottom_right_alignment: Alignment::Top,
                 top_left_label_position: LPoint { x: 15.0, y: 6.0 },
@@ -958,8 +907,12 @@ mod tests {
                     bottom: 2.0,
                     left: 3.0,
                 },
-                top_left_placement: NodeLabelPlacement::InsideTopRight,
-                bottom_right_placement: NodeLabelPlacement::InsideBottomLeft,
+                top_left_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideTopRight,
+                ),
+                bottom_right_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideBottomLeft,
+                ),
                 top_left_alignment: Alignment::Top,
                 bottom_right_alignment: Alignment::Left,
                 top_left_label_position: LPoint { x: 6.0, y: 1.0 },
@@ -976,8 +929,12 @@ mod tests {
                     bottom: 4.0,
                     left: 1.0,
                 },
-                top_left_placement: NodeLabelPlacement::InsideBottomLeft,
-                bottom_right_placement: NodeLabelPlacement::InsideTopRight,
+                top_left_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideBottomLeft,
+                ),
+                bottom_right_placement: NodeLabelPlacement::from_location(
+                    crate::options::NodeLabelLocation::InsideTopRight,
+                ),
                 top_left_alignment: Alignment::Bottom,
                 bottom_right_alignment: Alignment::Right,
                 top_left_label_position: LPoint { x: 2.0, y: 15.0 },
@@ -1167,6 +1124,7 @@ mod tests {
                 end_label_edge: None,
                 original_label_edge: None,
                 source_index: None,
+                node_label_placement: None,
             }],
             minlen: 1,
             reversed: false,
