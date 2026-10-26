@@ -954,19 +954,26 @@ impl<'a> Context<'a> {
             if only_inside && !location.is_inside() {
                 continue;
             }
-            let cell = context.label_cell(location, horizontal_layout_mode);
+            let Some(cell) = context.label_cell(location, horizontal_layout_mode) else {
+                continue;
+            };
             context.cells.add_label(cell, index);
         }
         context
     }
 
     /// Source: `NodeLabelCellCreator.retrieveNodeLabelCell`.
-    fn label_cell(&mut self, location: NodeLabelLocation, horizontal_layout_mode: bool) -> CellId {
+    ///
+    /// A fixed location has no cell, so it gives `None`.
+    fn label_cell(
+        &mut self,
+        location: NodeLabelLocation,
+        horizontal_layout_mode: bool,
+    ) -> Option<CellId> {
         if let Some((_, cell)) = self.label_cells.iter().find(|(l, _)| *l == location) {
-            return *cell;
+            return Some(*cell);
         }
-        let (horizontal, vertical, row, column) =
-            location_cell(location).expect("a fixed location has no cell");
+        let (horizontal, vertical, row, column) = location_cell(location)?;
         let cell = self.cells.add(Kind::Label {
             horizontal_layout_mode,
             horizontal,
@@ -1006,7 +1013,7 @@ impl<'a> Context<'a> {
                 }
             }
         }
-        cell
+        Some(cell)
     }
 
     /// Source: `InsidePortLabelCellCreator.createInsidePortLabelCells`. A node without ports
