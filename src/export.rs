@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::compound::compare_compound_segments;
 use crate::error::Error;
-use crate::graph::{LGraph, LLabel, LNodeKind, LPoint, LSize, LayeredEdge, PortRef};
+use crate::graph::{LGraph, LLabel, LNodeKind, LPoint, LSize, PortRef};
 
 /// `OrthogonalRoutingGenerator.TOLERANCE`.
 const TOLERANCE: f64 = 1e-3;
@@ -80,6 +80,8 @@ struct PortAt {
 
 struct Hierarchy<'a> {
     graphs: Vec<GraphEntry<'a>>,
+    /// For each graph and each of its nodes, the graph inside the node. Indexed like `graphs`.
+    nested_graphs: Vec<Vec<Option<usize>>>,
     by_id: HashMap<&'a str, usize>,
 }
 
@@ -90,17 +92,21 @@ impl<'a> Hierarchy<'a> {
             graph: root,
             parent: None,
         }];
+        let mut nested_graphs = Vec::new();
         let mut cursor = 0;
         while cursor < graphs.len() {
             let graph = graphs[cursor].graph;
+            let mut nested_here = vec![None; graph.layerless_nodes.len()];
             for (index, node) in graph.layerless_nodes.iter().enumerate() {
                 if let Some(nested) = node.nested_graph.as_deref() {
+                    nested_here[index] = Some(graphs.len());
                     graphs.push(GraphEntry {
                         graph: nested,
                         parent: Some((cursor, index)),
                     });
                 }
             }
+            nested_graphs.push(nested_here);
             cursor += 1;
         }
         let by_id = graphs
@@ -108,7 +114,11 @@ impl<'a> Hierarchy<'a> {
             .enumerate()
             .map(|(index, entry)| (entry.graph.id.as_str(), index))
             .collect();
-        Self { graphs, by_id }
+        Self {
+            graphs,
+            nested_graphs,
+            by_id,
+        }
     }
 
     /// No ELK counterpart: an arena lookup.
@@ -120,9 +130,7 @@ impl<'a> Hierarchy<'a> {
     ///
     /// Ports `LNode.getNestedGraph`.
     fn nested(&self, node: NodeAt) -> Option<usize> {
-        self.graphs
-            .iter()
-            .position(|entry| entry.parent == Some(node))
+        self.nested_graphs[node.0][node.1]
     }
 
     /// Ports `LGraphUtil.isDescendant(child, parent)`: whether `child` lies, at any depth, inside
@@ -360,8 +368,8 @@ pub(crate) fn apply_layout(
     let mut by_graph: Vec<Vec<EdgeToApply<'_>>> =
         (0..hierarchy.graphs.len()).map(|_| Vec::new()).collect();
     for (graph_index, entry) in hierarchy.graphs.iter().enumerate() {
-        for edge in &entry.graph.edges {
-            if !is_original_edge(entry.graph, edge, input) {
+        for (edge_index, edge) in entry.graph.edges.iter().enumerate() {
+            if !is_original_edge(entry.graph, edge_index, input) {
                 continue;
             }
             by_graph[graph_index].push(EdgeToApply {
@@ -415,7 +423,8 @@ pub(crate) fn apply_layout(
 /// Whether a layered edge is an input edge as the layout left it, not a dummy edge.
 ///
 /// Ports `ElkGraphLayoutTransferrer.applyEdgeLayout`'s `ORIGIN` check: only input edges are written.
-fn is_original_edge(graph: &LGraph, edge: &LayeredEdge, input: &TransferInput<'_>) -> bool {
+fn is_original_edge(graph: &LGraph, index: usize, input: &TransferInput<'_>) -> bool {
+    let edge = &graph.edges[index];
     if edge.compound_segment.is_some() || !input.edge_containers.contains_key(&edge.id) {
         return false;
     }
@@ -430,7 +439,7 @@ fn is_original_edge(graph: &LGraph, edge: &LayeredEdge, input: &TransferInput<'_
                 } else {
                     &data.incoming_edges
                 };
-                list.iter().any(|&e| std::ptr::eq(&graph.edges[e], edge))
+                list.contains(&index)
             })
     };
     attached(edge.source, true)
