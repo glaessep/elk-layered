@@ -768,16 +768,20 @@ fn apply_node_option(s: &mut NodeSettings, id: &str, value: &str) -> Result<(), 
             refuse_true(parse_bool(value)?, INSIDE_SELF_LOOPS)?;
         }
         "org.eclipse.elk.edgeRouting" => {
+            // Layered routes `UNDEFINED` orthogonally, but other steps treat it apart from
+            // `ORTHOGONAL`, which elk-layered does not model.
             o.edge_routing = parse_enum(
                 value,
                 &[
-                    // Layered routes an undefined style orthogonally.
-                    ("UNDEFINED", EdgeRouting::Orthogonal),
-                    ("POLYLINE", EdgeRouting::Polyline),
-                    ("ORTHOGONAL", EdgeRouting::Orthogonal),
-                    ("SPLINES", EdgeRouting::Splines),
+                    ("UNDEFINED", None),
+                    ("POLYLINE", Some(EdgeRouting::Polyline)),
+                    ("ORTHOGONAL", Some(EdgeRouting::Orthogonal)),
+                    ("SPLINES", Some(EdgeRouting::Splines)),
                 ],
-            )?;
+            )?
+            .ok_or(OptionProblem::Unsupported(
+                "the UNDEFINED edge routing is not ported",
+            ))?;
         }
         "org.eclipse.elk.padding" => o.padding = parse_spacing(value)?,
         "org.eclipse.elk.nodeLabels.padding" => o.node_labels_padding = parse_spacing(value)?,

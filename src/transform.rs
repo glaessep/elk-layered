@@ -191,6 +191,8 @@ fn transpose_node(node: &mut LNode) {
     node.size.transpose();
     node.padding.transpose();
     node.node_label_placement = node.node_label_placement.transpose();
+    // `GraphTransformer.transposeProperties` swaps the minimum size too.
+    node.node_size.minimum.transpose();
     node.node_alignment = transpose_alignment(node.node_alignment);
     for port in &mut node.ports {
         transpose_port(port);

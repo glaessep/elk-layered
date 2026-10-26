@@ -486,7 +486,9 @@ impl<'a, 't> Work<'a, 't> {
                 // leaves edges into other levels unrouted.
                 let siblings = tree.nodes[edge.source].parent == Some(scope)
                     && tree.nodes[edge.target].parent == Some(scope);
-                let to_graph = edge.source == scope || edge.target == scope;
+                let to_graph = (tree.nodes[edge.source].parent == Some(scope)
+                    && edge.target == scope)
+                    ^ (tree.nodes[edge.target].parent == Some(scope) && edge.source == scope);
                 if to_graph {
                     return Err(Error::Unsupported {
                         element,
@@ -666,6 +668,7 @@ impl<'a, 't> Work<'a, 't> {
             priority_direction: info.settings.priority_direction,
             priority_shortness: info.settings.priority_shortness,
             priority_straightness: info.settings.priority_straightness,
+            container: Some(self.tree.nodes[info.container].node.id.clone()),
         }
     }
 

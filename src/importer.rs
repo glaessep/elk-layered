@@ -75,6 +75,10 @@ pub struct ElkInputEdge {
     pub priority_direction: i32,
     pub priority_shortness: i32,
     pub priority_straightness: i32,
+    /// The node that owns the edge, as `ElkGraphUtil.findBestEdgeContainment` chooses it; the
+    /// graph's own id for the root. `None` leaves the choice to the importer, which takes the
+    /// shared parent or the endpoint that holds the other one, and the root otherwise.
+    pub container: Option<String>,
 }
 
 /// One endpoint of a hierarchy edge segment materialized by an outer recursive-layout owner.
@@ -953,6 +957,9 @@ fn input_edge_containing_parent<'a>(
     index: &InputIndex<'a>,
     edge: &'a ElkInputEdge,
 ) -> Option<&'a str> {
+    if let Some(container) = edge.container.as_deref() {
+        return index.nodes.contains_key(container).then_some(container);
+    }
     let source_parent = index.node_parent(edge.source.as_str());
     let target_parent = index.node_parent(edge.target.as_str());
     if source_parent == target_parent {
@@ -1862,6 +1869,7 @@ mod tests {
             priority_direction: 0,
             priority_shortness: 0,
             priority_straightness: 0,
+            container: None,
         }
     }
 

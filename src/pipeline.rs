@@ -1742,6 +1742,7 @@ mod tests {
             priority_direction: 0,
             priority_shortness: 0,
             priority_straightness: 0,
+            container: None,
         }
     }
 
@@ -2539,6 +2540,7 @@ mod tests {
                     priority_direction: 0,
                     priority_shortness: 0,
                     priority_straightness: 0,
+                    container: None,
                 },
                 ElkInputEdge {
                     id: "A-A".to_string(),
@@ -2551,6 +2553,7 @@ mod tests {
                     priority_direction: 0,
                     priority_shortness: 0,
                     priority_straightness: 0,
+                    container: None,
                 },
             ],
         })
@@ -2606,6 +2609,7 @@ mod tests {
                 priority_direction: 0,
                 priority_shortness: 0,
                 priority_straightness: 0,
+                container: None,
             }],
         };
         input.options.inside_self_loops_activate = true;

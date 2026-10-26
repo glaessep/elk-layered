@@ -3910,6 +3910,7 @@ mod tests {
             priority_direction: 0,
             priority_shortness: 0,
             priority_straightness: 0,
+            container: None,
         }
     }
 
