@@ -24,18 +24,28 @@ fn cases_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/elkjs")
 }
 
+/// Every input: the hand-written cases in `tests/elkjs/`, then the random ones in
+/// `tests/elkjs/random/`, which `oracle/random.mjs` writes.
 fn cases() -> Vec<PathBuf> {
-    let mut inputs: Vec<PathBuf> = std::fs::read_dir(cases_dir())
-        .expect("tests/elkjs exists")
-        .map(|entry| entry.expect("a readable entry").path())
-        .filter(|path| path.to_string_lossy().ends_with(".input.json"))
-        .collect();
-    inputs.sort();
+    let mut inputs = Vec::new();
+    for dir in [cases_dir(), cases_dir().join("random")] {
+        let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|_| panic!("{} exists", dir.display()))
+            .map(|entry| entry.expect("a readable entry").path())
+            .filter(|path| path.to_string_lossy().ends_with(".input.json"))
+            .collect();
+        found.sort();
+        inputs.extend(found);
+    }
     inputs
 }
 
+/// The case's path below `tests/elkjs/` without the suffix, such as `chain` or `random/r007`.
 fn name(input: &Path) -> String {
-    let file = input.file_name().unwrap().to_string_lossy();
+    let relative = input
+        .strip_prefix(cases_dir())
+        .expect("a case below tests/elkjs");
+    let file = relative.to_string_lossy().replace('\\', "/");
     file.trim_end_matches(".input.json").to_owned()
 }
 
