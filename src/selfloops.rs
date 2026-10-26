@@ -40,6 +40,7 @@ pub fn preprocess_self_loops(graph: &mut LGraph) {
 pub fn restore_self_loop_ports(graph: &mut LGraph) {
     let mut holders = std::mem::take(&mut graph.self_loop_holders);
     for holder in &mut holders {
+        unhide_ports(graph, holder);
         if holder.ports_hidden && !holder.original_port_constraints.is_side_fixed() {
             assign_hidden_port_sides(graph, holder);
         }
@@ -115,6 +116,7 @@ fn install_self_loop_holder(graph: &LGraph, node: usize) -> SelfLoopHolder {
         node,
         hyper_loops,
         ports_hidden: false,
+        hidden_ports: Vec::new(),
         original_port_constraints: graph.layerless_nodes[node].port_constraints,
     }
 }
@@ -277,7 +279,7 @@ fn hide_self_loop_edges(graph: &mut LGraph, holder: &SelfLoopHolder) {
     }
 }
 
-fn hide_ports(graph: &LGraph, holder: &mut SelfLoopHolder) {
+fn hide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
     let order_fixed = holder.original_port_constraints.is_order_fixed();
     let hierarchy_mode = graph.layerless_nodes[holder.node]
         .nested_graph
@@ -296,6 +298,47 @@ fn hide_ports(graph: &LGraph, holder: &mut SelfLoopHolder) {
             }
         }
     }
+
+    if !holder.ports_hidden {
+        return;
+    }
+
+    // SelfLoopPreProcessor.hidePorts takes the port off its node (`lPort.setNode(null)`), so no
+    // later phase sees it. Here the hidden ports move to the end of the port list and then off
+    // it. Their indices stay valid for the hidden edges and for `restore_hidden_ports`, which
+    // puts them back at the same indices first.
+    let mut hidden_indices = holder
+        .hyper_loops
+        .iter()
+        .flat_map(|hyper_loop| hyper_loop.ports.iter())
+        .filter(|port| port.hidden)
+        .map(|port| port.port)
+        .collect::<Vec<_>>();
+    hidden_indices.sort_unstable();
+    hidden_indices.dedup();
+
+    let port_count = graph.layerless_nodes[holder.node].ports.len();
+    let mut new_order = (0..port_count)
+        .filter(|port| hidden_indices.binary_search(port).is_err())
+        .collect::<Vec<_>>();
+    new_order.extend(hidden_indices.iter().copied());
+
+    let Some(old_to_new) = graph.reorder_node_ports_with_map(holder.node, new_order) else {
+        return;
+    };
+    remap_holder_ports(holder, &old_to_new);
+
+    let visible_count = port_count - hidden_indices.len();
+    holder.hidden_ports = graph.layerless_nodes[holder.node]
+        .ports
+        .split_off(visible_count);
+}
+
+/// Puts the ports that `hide_ports` took off the node back at the end of its port list.
+fn unhide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
+    graph.layerless_nodes[holder.node]
+        .ports
+        .append(&mut holder.hidden_ports);
 }
 
 fn assign_hidden_port_sides(graph: &mut LGraph, holder: &SelfLoopHolder) {
@@ -2542,6 +2585,7 @@ mod tests {
             node,
             hyper_loops: vec![hyper_loop],
             ports_hidden: false,
+            hidden_ports: Vec::new(),
             original_port_constraints: PortConstraints::FixedSide,
         }
     }
@@ -2926,6 +2970,7 @@ mod tests {
             node,
             hyper_loops: vec![outer, inner],
             ports_hidden: false,
+            hidden_ports: Vec::new(),
             original_port_constraints: PortConstraints::FixedSide,
         };
 
@@ -2991,6 +3036,7 @@ mod tests {
             node,
             hyper_loops: vec![left, right],
             ports_hidden: false,
+            hidden_ports: Vec::new(),
             original_port_constraints: PortConstraints::FixedSide,
         };
 

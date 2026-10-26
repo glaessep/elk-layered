@@ -476,6 +476,9 @@ pub struct SelfLoopHolder {
     pub node: usize,
     pub hyper_loops: Vec<SelfHyperLoop>,
     pub ports_hidden: bool,
+    /// Ports taken off the node while they are hidden, in the order of their node-local indices
+    /// (`SelfLoopPort::port`), which are the last indices of the node's port list.
+    pub hidden_ports: Vec<LPort>,
     pub original_port_constraints: PortConstraints,
 }
 
@@ -1068,15 +1071,15 @@ impl LGraph {
 
         for edge in &mut self.edges {
             if edge.source.node == node_index {
-                edge.source.port = old_to_new[edge.source.port];
+                edge.source.port = remap_port_index(&old_to_new, edge.source.port);
             }
             if edge.target.node == node_index {
-                edge.target.port = old_to_new[edge.target.port];
+                edge.target.port = remap_port_index(&old_to_new, edge.target.port);
             }
             if let Some(port) = edge.original_opposite_port.as_mut()
                 && port.node == node_index
             {
-                port.port = old_to_new[port.port];
+                port.port = remap_port_index(&old_to_new, port.port);
             }
         }
 
@@ -1086,11 +1089,11 @@ impl LGraph {
             }
             for hyper_loop in &mut holder.hyper_loops {
                 for port in &mut hyper_loop.ports {
-                    port.port = old_to_new[port.port];
+                    port.port = remap_port_index(&old_to_new, port.port);
                 }
                 for edge in &mut hyper_loop.edges {
-                    edge.source_port = old_to_new[edge.source_port];
-                    edge.target_port = old_to_new[edge.target_port];
+                    edge.source_port = remap_port_index(&old_to_new, edge.source_port);
+                    edge.target_port = remap_port_index(&old_to_new, edge.target_port);
                 }
             }
         }
@@ -1106,12 +1109,12 @@ impl LGraph {
             if let Some(port) = node.long_edge_source.as_mut()
                 && port.node == node_index
             {
-                port.port = old_to_new[port.port];
+                port.port = remap_port_index(&old_to_new, port.port);
             }
             if let Some(port) = node.long_edge_target.as_mut()
                 && port.node == node_index
             {
-                port.port = old_to_new[port.port];
+                port.port = remap_port_index(&old_to_new, port.port);
             }
             if let Some(nested_graph) = node.nested_graph.as_deref_mut() {
                 update_graph_port_refs_after_reorder(
@@ -1231,6 +1234,12 @@ fn centered_port_position(node_size: LSize, side: PortSide) -> LPoint {
     }
 }
 
+/// Maps a node-local port index after a reorder. An index past the node's port list belongs to a
+/// port hidden by the self-loop pre-processor. It is not part of the reorder, so it stays.
+fn remap_port_index(old_to_new: &[usize], port: usize) -> usize {
+    old_to_new.get(port).copied().unwrap_or(port)
+}
+
 fn update_graph_port_ref_after_reorder(
     graph_ref: &mut Option<GraphPortRef>,
     graph_id: &str,
@@ -1241,7 +1250,7 @@ fn update_graph_port_ref_after_reorder(
         && port_ref.graph_id == graph_id
         && port_ref.port.node == node_index
     {
-        port_ref.port.port = old_to_new[port_ref.port.port];
+        port_ref.port.port = remap_port_index(old_to_new, port_ref.port.port);
     }
 }
 
