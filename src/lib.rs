@@ -26,9 +26,8 @@ mod transform;
 
 // The source-port graph and phase implementations are deliberately private. A raw `LGraph`
 // may carry ELK's `randomSeed = 0` sentinel, so only public pipeline entry points are allowed to
-// execute it: they configure the graph first and either fail closed or resolve it from an
-// operation-owned seed. Keep phase helpers crate-private even when they are useful for parity
-// work; diagnostics must go through the guarded pipeline APIs below.
+// execute it: they configure the graph first and fail closed on that sentinel. Keep phase helpers
+// crate-private. There is no entry point that stops the pipeline half way.
 pub use common::networksimplex::NetworkSimplexError;
 pub use common::nodespacing::inside_top_center_micro_layout;
 pub use components::ComponentError;
