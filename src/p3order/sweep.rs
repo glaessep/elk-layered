@@ -3029,6 +3029,10 @@ fn minimize_barycenter(graph: &mut LGraph) -> bool {
 
 fn minimize_two_sided_greedy_switch(graph: &mut LGraph) -> bool {
     let mut graph_info = GraphInfoHolder::new(graph);
+    // LayerSweepCrossingMinimizer.initialize draws a seed for every cross-min type, also for
+    // the greedy switch. This one is never used, but the draw moves the shared Random on for
+    // the next connected component. ISweepPortDistributor.create draws nothing for two-sided.
+    graph.random.next_long();
     let mut heuristic = GreedySwitchHeuristic::new(CrossMinType::TwoSidedGreedySwitch);
     let mut is_forward_sweep = graph.random.next_bool();
 
@@ -3060,6 +3064,11 @@ fn minimize_two_sided_greedy_switch(graph: &mut LGraph) -> bool {
 
 fn minimize_one_sided_greedy_switch(graph: &mut LGraph) -> bool {
     let mut graph_info = GraphInfoHolder::new(graph);
+    // LayerSweepCrossingMinimizer.initialize draws a seed, then ISweepPortDistributor.create
+    // draws a boolean for every type but two-sided. Neither value is used here, but the draws
+    // move the shared Random on for the next connected component.
+    graph.random.next_long();
+    graph.random.next_bool();
     let mut heuristic = GreedySwitchHeuristic::new(CrossMinType::OneSidedGreedySwitch);
     let mut is_forward_sweep = graph.random.next_bool();
 
