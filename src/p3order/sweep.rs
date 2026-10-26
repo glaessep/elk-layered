@@ -4874,6 +4874,83 @@ mod tests {
     }
 
     #[test]
+    fn hierarchical_barycenter_keeps_current_order_between_randomized_tries() {
+        let mut graph = import_graph(&ElkInputGraph {
+            id: "root".to_string(),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
+            nodes: vec![
+                nested_group("bar", None),
+                nested_group("foo", None),
+                nested_node("A", None),
+                nested_node("B", None),
+                nested_node("G", None),
+                nested_node("E", Some("bar")),
+                nested_node("F", Some("bar")),
+                nested_node("C", Some("foo")),
+                nested_node("D", Some("foo")),
+            ],
+            edges: vec![
+                edge("L_A_B_0", "A", "B"),
+                edge("L_B_C_0", "B", "C"),
+                edge("L_C_D_0", "C", "D"),
+                edge("L_B_D_0", "B", "D"),
+                edge("L_D_E_0", "D", "E"),
+                edge("L_E_A_0", "E", "A"),
+                edge("L_E_F_0", "E", "F"),
+                edge("L_F_D_0", "F", "D"),
+                edge("L_F_G_0", "F", "G"),
+                edge("L_B_G_0", "B", "G"),
+                edge("L_G_D_0", "G", "D"),
+            ],
+        })
+        .unwrap();
+        graph.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
+
+        crate::pipeline::execute_ported_compound_processors(&mut graph).unwrap();
+
+        // Pinned elkjs 0.9.3: the inverted L_D_E port dummy comes before both groups. The old
+        // test read the layers after the sweep: [dummy, bar, B] and [dummy, foo]. The layout is
+        // top to bottom, so the order inside a layer is the order along x. Assigning SECOND_TRY a
+        // distinct Property ID instead gives [bar, B, dummy] and [foo, dummy]. The dummies stay in
+        // the node list after the long edge joiner and keep the x their layer gave them.
+        let find = |id: &str| {
+            graph
+                .layerless_nodes
+                .iter()
+                .find(|node| node.id == id)
+                .unwrap()
+        };
+        let (bar, foo, b) = (find("bar"), find("foo"), find("B"));
+        let mut dummies = graph
+            .layerless_nodes
+            .iter()
+            .filter(|node| node.id.starts_with("invertedPort:"))
+            .collect::<Vec<_>>();
+        assert_eq!(dummies.len(), 2);
+        dummies.sort_by(|a, b| a.position.y.total_cmp(&b.position.y));
+        let (first_dummy, last_dummy) = (dummies[0], dummies[1]);
+        // Layers run along y. A node is in the layer of the group whose vertical extent holds it.
+        let spans = |group: &LNode, other: &LNode| {
+            group.position.y <= other.position.y
+                && other.position.y <= group.position.y + group.size.height
+        };
+        assert!(spans(bar, first_dummy) && spans(foo, last_dummy) && spans(bar, b));
+        assert!(
+            first_dummy.position.x < bar.position.x && bar.position.x < b.position.x,
+            "first layer along x: dummy {}, bar {}, B {}",
+            first_dummy.position.x,
+            bar.position.x,
+            b.position.x
+        );
+        assert!(
+            last_dummy.position.x < foo.position.x,
+            "last layer along x: dummy {}, foo {}",
+            last_dummy.position.x,
+            foo.position.x
+        );
+    }
+
+    #[test]
     fn forster_constraints_restore_successor_order_after_barycenter_sort() {
         let mut graph = prepared_graph(
             vec![node("A"), node("B"), node("C")],
