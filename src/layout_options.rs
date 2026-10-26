@@ -488,6 +488,17 @@ pub(crate) struct OptionError {
     pub(crate) problem: OptionProblem,
 }
 
+/// Whether `suffix` is `id` or the end of `id` after a dot, such as `direction` of
+/// `org.eclipse.elk.direction`. An empty suffix is none.
+///
+/// Source: the suffix match of `LayoutMetaDataService.getOptionDataBySuffix` and
+/// `getAlgorithmDataBySuffix`.
+pub(crate) fn is_id_suffix(id: &str, suffix: &str) -> bool {
+    !suffix.is_empty()
+        && id.ends_with(suffix)
+        && (id.len() == suffix.len() || id.as_bytes()[id.len() - suffix.len() - 1] == b'.')
+}
+
 /// Finds the option a key names.
 ///
 /// Source: `LayoutMetaDataService.getOptionDataBySuffix`. ELK's one legacy id is for an
@@ -503,7 +514,7 @@ pub(crate) fn resolve(key: &str) -> Option<(&'static str, u8)> {
         if id == key {
             return Some((id, targets));
         }
-        if id.ends_with(key) && id.as_bytes()[id.len() - key.len() - 1] == b'.' {
+        if is_id_suffix(id, key) {
             if found.is_some() {
                 return None;
             }
@@ -1456,6 +1467,18 @@ mod tests {
 
     fn node(pairs: &[(&str, &str)]) -> Result<NodeSettings, OptionProblem> {
         node_settings(&map(pairs)).map_err(|error| error.problem)
+    }
+
+    // Mutation: drop the dot check in `is_id_suffix`.
+    #[test]
+    fn an_id_suffix_is_the_id_or_the_part_after_a_dot() {
+        let id = "org.eclipse.elk.layered";
+        assert!(is_id_suffix(id, id));
+        assert!(is_id_suffix(id, "layered"));
+        assert!(is_id_suffix(id, "elk.layered"));
+        assert!(!is_id_suffix(id, "ayered"));
+        assert!(!is_id_suffix(id, "xorg.eclipse.elk.layered"));
+        assert!(!is_id_suffix(id, ""));
     }
 
     // Mutation: drop the dot check in `resolve`.

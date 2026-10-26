@@ -408,11 +408,7 @@ impl<'a, 't> Work<'a, 't> {
         if let Some(algorithm) = &self.tree.nodes[node].settings.algorithm {
             // `LayoutMetaDataService.getAlgorithmDataBySuffix`: the id or a suffix after a dot.
             let id = "org.eclipse.elk.layered";
-            let layered = !algorithm.is_empty()
-                && id.ends_with(algorithm.as_str())
-                && (algorithm.len() == id.len()
-                    || id.as_bytes()[id.len() - algorithm.len() - 1] == b'.');
-            if !layered {
+            if !layout_options::is_id_suffix(id, algorithm) {
                 return Err(Error::Unsupported {
                     element: node_element(&self.tree.nodes[node].node.id),
                     feature: format!("the layout algorithm \"{algorithm}\""),
