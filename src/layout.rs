@@ -153,6 +153,9 @@ fn label_settings(labels: &[ElkLabel], owner: &str) -> Result<Vec<LabelSettings>
         .collect()
 }
 
+/// The most levels a node may sit below the root.
+const MAX_NESTING_DEPTH: usize = 1300;
+
 impl<'a> Tree<'a> {
     /// Ports `JsonImporter.transform`: nodes in JSON order, then edges depth first, each moved by `ElkGraphUtil.updateContainment`.
     fn new(root: &'a ElkNode) -> Result<Self, Error> {
@@ -163,6 +166,15 @@ impl<'a> Tree<'a> {
             vec![(root, None, Vec::new())];
         while let Some((node, parent, path)) = stack.pop() {
             let element = node_element(&node.id);
+            // The graph types clone and drop their children recursively, and a debug build in
+            // a 2 MB thread overflows its stack at about 1600 levels. Refuse earlier, with an
+            // error, rather than abort.
+            if path.len() > MAX_NESTING_DEPTH {
+                return Err(Error::Unsupported {
+                    element,
+                    feature: format!("a graph nested deeper than {MAX_NESTING_DEPTH} levels"),
+                });
+            }
             if by_id.insert(node.id.as_str(), nodes.len()).is_some() {
                 return Err(Error::DuplicateId {
                     id: node.id.clone(),
@@ -345,6 +357,13 @@ struct EdgeRoute {
     end: LPoint,
 }
 
+/// One node `layout_recursively` is working through: the children still to visit, in order.
+struct Level {
+    node: usize,
+    include: bool,
+    pending: VecDeque<usize>,
+}
+
 /// The layout in progress: a copy of the input that runs write into.
 struct Work<'a, 't> {
     tree: &'t Tree<'a>,
@@ -435,34 +454,51 @@ impl<'a, 't> Work<'a, 't> {
     /// Source: `RecursiveGraphLayoutEngine.layoutRecursively`.
     ///
     /// Ports `RecursiveGraphLayoutEngine.layoutRecursively`, without top-down layout and inside self-loops.
-    fn layout_recursively(&mut self, node: usize) -> Result<(), Error> {
-        if self.tree.nodes[node].children.is_empty() {
-            return Ok(());
+    /// Java recurses once per nesting level. This keeps the same visiting order on a work
+    /// list, so a deeply nested graph cannot overflow Rust's stack.
+    fn layout_recursively(&mut self, root: usize) -> Result<(), Error> {
+        let tree = self.tree;
+        let mut stack: Vec<Level> = Vec::new();
+        stack.extend(self.enter_level(root)?);
+        while let Some(level) = stack.last_mut() {
+            let Some(child) = level.pending.pop_front() else {
+                if let Some(Level { node, include, .. }) = stack.pop() {
+                    self.run_layered(node, include)?;
+                }
+                continue;
+            };
+            if !level.include {
+                stack.extend(self.enter_level(child)?);
+                continue;
+            }
+            self.evaluate_handling(child);
+            if self.handling[child] == HierarchyHandling::SeparateChildren {
+                stack.extend(self.enter_level(child)?);
+            } else {
+                if !tree.nodes[child].children.is_empty() {
+                    self.check_algorithm(child)?;
+                }
+                level
+                    .pending
+                    .extend(tree.nodes[child].children.iter().copied());
+            }
+        }
+        Ok(())
+    }
+
+    /// The start of `layoutRecursively` for one node: a node without children has no level.
+    fn enter_level(&mut self, node: usize) -> Result<Option<Level>, Error> {
+        let tree = self.tree;
+        if tree.nodes[node].children.is_empty() {
+            return Ok(None);
         }
         self.check_algorithm(node)?;
         self.evaluate_handling(node);
-        let include = self.handling[node] == HierarchyHandling::IncludeChildren;
-        if include {
-            let mut queue: VecDeque<usize> =
-                self.tree.nodes[node].children.iter().copied().collect();
-            while let Some(child) = queue.pop_front() {
-                self.evaluate_handling(child);
-                let stops = self.handling[child] == HierarchyHandling::SeparateChildren;
-                if stops {
-                    self.layout_recursively(child)?;
-                } else {
-                    if !self.tree.nodes[child].children.is_empty() {
-                        self.check_algorithm(child)?;
-                    }
-                    queue.extend(self.tree.nodes[child].children.iter().copied());
-                }
-            }
-        } else {
-            for child in self.tree.nodes[node].children.clone() {
-                self.layout_recursively(child)?;
-            }
-        }
-        self.run_layered(node, include)
+        Ok(Some(Level {
+            node,
+            include: self.handling[node] == HierarchyHandling::IncludeChildren,
+            pending: tree.nodes[node].children.iter().copied().collect(),
+        }))
     }
 
     /// The nodes one run of layered lays out: the scope's children, and, with

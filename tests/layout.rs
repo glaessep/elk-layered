@@ -887,3 +887,59 @@ fn edges_are_imported_in_the_order_of_their_containers() {
     assert_eq!(size(&laid, "n3"), (218.0, 160.0));
     assert_eq!(at(&laid, "n2"), (12.0, 146.666_666_666_666_69));
 }
+
+/// A root with `levels` groups nested in it, and a node at the bottom.
+fn nested_chain(levels: usize) -> ElkNode {
+    let mut inner = node("leaf", 30.0, 20.0);
+    for level in (0..levels).rev() {
+        inner = group(&format!("g{level}"), vec![inner]);
+    }
+    root(vec![inner], vec![])
+}
+
+/// Runs in a thread with Rust's default 2 MB test stack, as an overflow would abort the run.
+fn in_small_thread<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(work)
+        .expect("a thread starts")
+        .join()
+        .expect("the thread did not overflow")
+}
+
+// Mutation: make `layout_recursively` call itself once per level again. A debug build then
+// overflows the stack at about 1200 levels, below the limit.
+#[test]
+fn the_deepest_allowed_nesting_lays_out() {
+    // The root plus 1299 groups plus the leaf: the leaf sits 1300 levels below the root.
+    for include in [false, true] {
+        let laid_out = in_small_thread(move || {
+            let mut graph = nested_chain(1299);
+            if include {
+                graph = include_children(graph);
+            }
+            let result = layout(&graph);
+            std::mem::forget(graph);
+            result.map(|graph| graph.width)
+        });
+        assert!(laid_out.expect("it lays out") > 30.0);
+    }
+}
+
+// Mutation: raise `MAX_NESTING_DEPTH` to 1301.
+#[test]
+fn a_graph_nested_one_level_deeper_is_refused() {
+    let error = in_small_thread(|| {
+        let graph = nested_chain(1300);
+        let error = layout(&graph).expect_err("it is refused");
+        std::mem::forget(graph);
+        error
+    });
+    assert_eq!(
+        error,
+        Error::Unsupported {
+            element: "node \"leaf\"".into(),
+            feature: "a graph nested deeper than 1300 levels".into(),
+        }
+    );
+}
