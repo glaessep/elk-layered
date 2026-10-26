@@ -41,6 +41,8 @@ use crate::pipeline::{self, PipelineError};
 /// Returns an [`Error`] for a graph elk-layered cannot lay out exactly as elkjs does: one
 /// that uses ports, an option elk-layered does not support or cannot read, an id used twice
 /// or not found, or a size that is no finite, non-negative number.
+///
+/// Ports `RecursiveGraphLayoutEngine.layout` with the JSON round trip of elkjs's `JsonImporter`.
 pub fn layout(graph: &ElkNode) -> Result<ElkNode, Error> {
     let tree = Tree::new(graph)?;
     let mut work = Work::new(graph, &tree);
@@ -81,14 +83,17 @@ struct Tree<'a> {
     edges: Vec<EdgeInfo<'a>>,
 }
 
+/// No ELK counterpart: names a node in an error.
 fn node_element(id: &str) -> String {
     format!("node \"{id}\"")
 }
 
+/// No ELK counterpart: names an edge in an error.
 fn edge_element(id: &str) -> String {
     format!("edge \"{id}\"")
 }
 
+/// No ELK counterpart: turns a refused option into an `Error`.
 fn option_error(element: String, error: OptionError) -> Error {
     match error.problem {
         OptionProblem::Unknown => Error::UnknownOption {
@@ -114,6 +119,7 @@ fn option_error(element: String, error: OptionError) -> Error {
     }
 }
 
+/// No ELK counterpart: elkjs reads a NaN or infinite number as zero, elk-layered refuses it.
 fn check_number(element: &str, field: &'static str, value: f64, size: bool) -> Result<(), Error> {
     if !value.is_finite() || (size && value < 0.0) {
         return Err(Error::InvalidSize {
@@ -125,6 +131,7 @@ fn check_number(element: &str, field: &'static str, value: f64, size: bool) -> R
     Ok(())
 }
 
+/// No ELK counterpart: checks and reads the labels of one element.
 fn label_settings(labels: &[ElkLabel], owner: &str) -> Result<Vec<LabelSettings>, Error> {
     labels
         .iter()
@@ -142,6 +149,7 @@ fn label_settings(labels: &[ElkLabel], owner: &str) -> Result<Vec<LabelSettings>
 }
 
 impl<'a> Tree<'a> {
+    /// Ports `JsonImporter.transform`: nodes in JSON order, then edges depth first, each moved by `ElkGraphUtil.updateContainment`.
     fn new(root: &'a ElkNode) -> Result<Self, Error> {
         let mut nodes: Vec<NodeInfo<'a>> = Vec::new();
         let mut by_id: HashMap<&'a str, usize> = HashMap::new();
@@ -252,6 +260,7 @@ impl<'a> Tree<'a> {
         Ok(tree)
     }
 
+    /// Ports `ElkGraphUtil.isDescendant`.
     fn is_descendant(&self, child: usize, ancestor: usize) -> bool {
         let mut current = child;
         while let Some(parent) = self.nodes[current].parent {
@@ -264,6 +273,8 @@ impl<'a> Tree<'a> {
     }
 
     /// Source: `ElkGraphUtil.findBestEdgeContainment` for one source and one target.
+    ///
+    /// Ports `ElkGraphUtil.findBestEdgeContainment`.
     fn best_containment(&self, source: usize, target: usize) -> usize {
         let source_parent = self.nodes[source].parent;
         let target_parent = self.nodes[target].parent;
@@ -290,6 +301,8 @@ impl<'a> Tree<'a> {
 
     /// Source: `ElkGraphUtil.findLowestCommonAncestor`, which counts a node as its own
     /// ancestor.
+    ///
+    /// Ports `ElkGraphUtil.findLowestCommonAncestor`.
     fn lowest_common_ancestor(&self, a: usize, b: usize) -> usize {
         let ancestors = |mut node: usize| {
             let mut list = vec![node];
@@ -336,6 +349,7 @@ struct Work<'a, 't> {
 }
 
 impl<'a, 't> Work<'a, 't> {
+    /// No ELK counterpart: copies the input to write the layout into, as elkjs writes into its JSON.
     fn new(graph: &ElkNode, tree: &'t Tree<'a>) -> Self {
         let handling = tree
             .nodes
@@ -361,6 +375,7 @@ impl<'a, 't> Work<'a, 't> {
         }
     }
 
+    /// No ELK counterpart: finds a node of the output tree.
     fn out_node(&mut self, index: usize) -> &mut ElkNode {
         let mut node = &mut self.out;
         for &step in &self.tree.nodes[index].path {
@@ -369,6 +384,7 @@ impl<'a, 't> Work<'a, 't> {
         node
     }
 
+    /// No ELK counterpart: finds a node of the output tree.
     fn out_node_ref(&self, index: usize) -> &ElkNode {
         let mut node = &self.out;
         for &step in &self.tree.nodes[index].path {
@@ -378,6 +394,8 @@ impl<'a, 't> Work<'a, 't> {
     }
 
     /// Source: `RecursiveGraphLayoutEngine.evaluateHierarchyHandlingInheritance`.
+    ///
+    /// Ports `RecursiveGraphLayoutEngine.evaluateHierarchyHandlingInheritance`.
     fn evaluate_handling(&mut self, node: usize) {
         if self.handling[node] == HierarchyHandling::Inherit {
             self.handling[node] = match self.tree.nodes[node].parent {
@@ -387,6 +405,7 @@ impl<'a, 't> Work<'a, 't> {
         }
     }
 
+    /// Ports the algorithm check of `ElkGraphImporter.importHierarchicalGraph` and `LayoutMetaDataService.getAlgorithmDataBySuffix`.
     fn check_algorithm(&self, node: usize) -> Result<(), Error> {
         if let Some(algorithm) = &self.tree.nodes[node].settings.algorithm {
             // `LayoutMetaDataService.getAlgorithmDataBySuffix`: the id or a suffix after a dot.
@@ -406,6 +425,8 @@ impl<'a, 't> Work<'a, 't> {
     }
 
     /// Source: `RecursiveGraphLayoutEngine.layoutRecursively`.
+    ///
+    /// Ports `RecursiveGraphLayoutEngine.layoutRecursively`, without top-down layout and inside self-loops.
     fn layout_recursively(&mut self, node: usize) -> Result<(), Error> {
         if self.tree.nodes[node].children.is_empty() {
             return Ok(());
@@ -438,6 +459,8 @@ impl<'a, 't> Work<'a, 't> {
 
     /// The nodes one run of layered lays out: the scope's children, and, with
     /// `INCLUDE_CHILDREN`, the children of each node that does not lay out its own.
+    ///
+    /// Ports the node walk of `ElkGraphImporter.importHierarchicalGraph` and `importFlatGraph`.
     fn run_nodes(&self, scope: usize, include: bool) -> Vec<usize> {
         let mut nodes = Vec::new();
         let mut stack: Vec<usize> = self.tree.nodes[scope]
@@ -458,6 +481,8 @@ impl<'a, 't> Work<'a, 't> {
     /// Lays out one scope with layered and writes the result.
     ///
     /// Source: `LayeredLayoutProvider.layout`.
+    ///
+    /// Ports `LayeredLayoutProvider.layout`, with `ElkGraphImporter.importGraph`'s edge selection and `calculateMinimumGraphSize`.
     fn run_layered(&mut self, scope: usize, include: bool) -> Result<(), Error> {
         let tree = self.tree;
         let scope_info = &tree.nodes[scope];
@@ -594,6 +619,8 @@ impl<'a, 't> Work<'a, 't> {
     }
 
     /// The direction the node's parent sets itself, or `Undefined`.
+    ///
+    /// No ELK counterpart: `graph.hasProperty(DIRECTION)` in `NodeLabelAndSizeCalculator.process`.
     fn parent_direction(&self, node: usize) -> ElkDirection {
         self.tree.nodes[node]
             .parent
@@ -602,6 +629,8 @@ impl<'a, 't> Work<'a, 't> {
     }
 
     /// The node as the importer takes it, in a run whose top node is `scope`.
+    ///
+    /// No ELK counterpart: maps the elkjs JSON tree onto the importer's input.
     fn input_node(&self, node: usize, scope: usize) -> ElkInputNode {
         let info = &self.tree.nodes[node];
         let current = self.out_node_ref(node);
@@ -646,6 +675,7 @@ impl<'a, 't> Work<'a, 't> {
         }
     }
 
+    /// No ELK counterpart: maps the elkjs JSON tree onto the importer's input.
     fn input_edge(&self, edge: usize) -> ElkInputEdge {
         let info = &self.tree.edges[edge];
         ElkInputEdge {
@@ -673,6 +703,8 @@ impl<'a, 't> Work<'a, 't> {
     }
 
     /// Writes one run's result into the output graph.
+    ///
+    /// Ports the writes of `ElkGraphLayoutTransferrer.applyNodeLayout` into the input graph.
     fn write_result(&mut self, scope: usize, edges: &[usize], result: LayoutResult) {
         let index_of: HashMap<&str, usize> = self
             .tree
@@ -725,6 +757,8 @@ impl<'a, 't> Work<'a, 't> {
     /// Source: `ElkGraphLayoutTransferrer.applyParentNodeLayout` for the top graph of a run,
     /// with `ElkUtil.resizeNode(node, width, height, true, true)`. Without ports, there is
     /// no port to move.
+    ///
+    /// Ports `ElkGraphLayoutTransferrer.applyParentNodeLayout` with `ElkUtil.resizeNode` and `effectiveMinSizeConstraintFor`.
     fn apply_parent_node_layout(&mut self, scope: usize, actual: LSize) {
         let sizing = self.sizing[scope];
         let constraints = if self.size_fixed[scope] {
@@ -775,6 +809,8 @@ impl<'a, 't> Work<'a, 't> {
     }
 
     /// Writes the edge routes and containers.
+    ///
+    /// Ports `JsonImporter.transferLayout` for edges and `ElkGraphUtil.firstEdgeSection`.
     fn finish(mut self) -> ElkNode {
         let tree = self.tree;
         for (index, info) in tree.edges.iter().enumerate() {
@@ -815,10 +851,12 @@ impl<'a, 't> Work<'a, 't> {
     }
 }
 
+/// No ELK counterpart: converts a point.
 fn point(p: LPoint) -> ElkPoint {
     ElkPoint { x: p.x, y: p.y }
 }
 
+/// Ports `ElkGraphImporter.transformLabel`.
 fn input_label(index: usize, label: &ElkLabel, settings: &LabelSettings) -> ElkInputLabel {
     ElkInputLabel {
         source_index: Some(index),
@@ -834,6 +872,7 @@ fn input_label(index: usize, label: &ElkLabel, settings: &LabelSettings) -> ElkI
     }
 }
 
+/// No ELK counterpart: turns a pipeline error into an `Error`.
 fn pipeline_error(scope: &str, error: PipelineError) -> Error {
     match error {
         PipelineError::RandomSeed(crate::random::RandomSeedError::ZeroSeed { graph_id }) => {

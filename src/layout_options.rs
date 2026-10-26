@@ -492,6 +492,8 @@ pub(crate) struct OptionError {
 ///
 /// Source: `LayoutMetaDataService.getOptionDataBySuffix`. ELK's one legacy id is for an
 /// internal option, so legacy ids are left out.
+///
+/// Ports `LayoutMetaDataService.getOptionDataBySuffix`.
 pub(crate) fn resolve(key: &str) -> Option<(&'static str, u8)> {
     if key.is_empty() {
         return None;
@@ -521,6 +523,7 @@ pub(crate) enum ElementKind {
 }
 
 impl ElementKind {
+    /// Ports `LayoutOptionData.Target` as a bit set.
     fn targets(self) -> u8 {
         match self {
             Self::Node => PARENTS | NODES,
@@ -532,6 +535,8 @@ impl ElementKind {
 
 /// Resolves every key of an option map, checks it targets this kind of element, and refuses
 /// two keys that name the same option. Returns `(option id, key, value)` in key order.
+///
+/// Ports `JsonImporter.transformProperties`, which resolves each key with `getOptionDataBySuffix`.
 fn resolve_all(
     options: &BTreeMap<String, String>,
     kind: ElementKind,
@@ -599,6 +604,7 @@ pub(crate) struct LabelSettings {
 }
 
 impl Default for LabelSettings {
+    /// Ports the defaults of `edgeLabels.placement` and `edgeLabels.inline` in `Core.melk`.
     fn default() -> Self {
         Self {
             placement: EdgeLabelPlacement::Center,
@@ -609,6 +615,8 @@ impl Default for LabelSettings {
 }
 
 /// Reads a node's options.
+///
+/// Ports `JsonImporter.setOption` for a node.
 pub(crate) fn node_settings(
     options: &BTreeMap<String, String>,
 ) -> Result<NodeSettings, OptionError> {
@@ -638,6 +646,8 @@ pub(crate) fn node_settings(
 }
 
 /// Reads an edge's options.
+///
+/// Ports `JsonImporter.setOption` for an edge.
 pub(crate) fn edge_settings(
     options: &BTreeMap<String, String>,
 ) -> Result<EdgeSettings, OptionError> {
@@ -668,6 +678,8 @@ pub(crate) fn edge_settings(
 }
 
 /// Reads a label's options.
+///
+/// Ports `JsonImporter.setOption` for a label.
 pub(crate) fn label_settings(
     options: &BTreeMap<String, String>,
 ) -> Result<LabelSettings, OptionError> {
@@ -705,6 +717,7 @@ const INTERACTIVE: &str = "interactive strategies need input positions, which ar
 const INSIDE_SELF_LOOPS: &str = "inside self-loops are not supported";
 const JUNCTION_POINTS: &str = "merged edges need junction points, which are not ported";
 
+/// No ELK counterpart: refuses a value whose effect is not ported.
 fn refuse_true(value: bool, reason: &'static str) -> Result<(), OptionProblem> {
     if value {
         Err(OptionProblem::Unsupported(reason))
@@ -713,6 +726,7 @@ fn refuse_true(value: bool, reason: &'static str) -> Result<(), OptionProblem> {
     }
 }
 
+/// Ports `LayoutOptionData.parseValue` and `IPropertyHolder.setProperty` for each node option.
 #[allow(clippy::too_many_lines)]
 fn apply_node_option(s: &mut NodeSettings, id: &str, value: &str) -> Result<(), OptionProblem> {
     let o = &mut s.options;
@@ -1223,6 +1237,7 @@ fn apply_node_option(s: &mut NodeSettings, id: &str, value: &str) -> Result<(), 
     Ok(())
 }
 
+/// Ports `LayoutOptionData.parseValue` for a spacing, remembering it was set for `ElkSpacings.AbstractSpacingsBuilder`.
 fn spacing(
     options: &mut LayeredOptions,
     flag: ExplicitSpacings,
@@ -1234,6 +1249,7 @@ fn spacing(
     Ok(())
 }
 
+/// Ports `LayoutOptionData.enumForString` for `GreedySwitchType`.
 fn parse_greedy_switch(value: &str) -> Result<GreedySwitchType, OptionProblem> {
     parse_enum(
         value,
@@ -1245,6 +1261,7 @@ fn parse_greedy_switch(value: &str) -> Result<GreedySwitchType, OptionProblem> {
     )
 }
 
+/// Ports `LayoutOptionData.enumSetForStringArray` and `NodeLabelPlacement.isValid`.
 fn parse_node_label_placement(value: &str) -> Result<NodeLabelPlacement, OptionProblem> {
     let names = NodeLabelPlacementFlag::ALL.map(|flag| (flag.name(), flag));
     let placement = parse_flags(value, &names, NodeLabelPlacement::FIXED, |mut set, flag| {
@@ -1259,6 +1276,8 @@ fn parse_node_label_placement(value: &str) -> Result<NodeLabelPlacement, OptionP
 }
 
 /// Source: `LayoutOptionData.parseValue`, case `BOOLEAN`.
+///
+/// Ports `LayoutOptionData.parseValue`, case `BOOLEAN`.
 pub(crate) fn parse_bool(value: &str) -> Result<bool, OptionProblem> {
     if value.eq_ignore_ascii_case("true") {
         Ok(true)
@@ -1270,6 +1289,8 @@ pub(crate) fn parse_bool(value: &str) -> Result<bool, OptionProblem> {
 }
 
 /// Source: `LayoutOptionData.parseValue`, case `INT`: `Integer.valueOf`.
+///
+/// Ports `LayoutOptionData.parseValue`, case `INT`.
 pub(crate) fn parse_int(value: &str) -> Result<i32, OptionProblem> {
     let digits = value.strip_prefix(['+', '-']).unwrap_or(value);
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
@@ -1283,6 +1304,8 @@ pub(crate) fn parse_int(value: &str) -> Result<i32, OptionProblem> {
 /// Source: `LayoutOptionData.parseValue`, case `DOUBLE`, as GWT's `Double.valueOf` parses:
 /// `^\s*[+-]?(NaN|Infinity|((\d+\.?\d*)|(\.\d+))([eE][+-]?\d+)?[dDfF]?)\s*$`. A value that
 /// is not finite is refused too, because no layout can use it.
+///
+/// Ports `LayoutOptionData.parseValue`, case `DOUBLE`.
 pub(crate) fn parse_double(value: &str) -> Result<f64, OptionProblem> {
     let trimmed = value.trim_matches(|c: char| c.is_whitespace());
     let body = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
@@ -1321,6 +1344,8 @@ pub(crate) fn parse_double(value: &str) -> Result<f64, OptionProblem> {
 
 /// Source: `LayoutOptionData.enumForString`: the exact constant name, or its ordinal. elkjs
 /// compares names case-sensitively, so `down` is no direction.
+///
+/// Ports `LayoutOptionData.enumForString`.
 fn parse_enum<T: Copy>(value: &str, values: &[(&str, T)]) -> Result<T, OptionProblem> {
     if let Some((_, v)) = values.iter().find(|(name, _)| *name == value) {
         return Ok(*v);
@@ -1335,6 +1360,8 @@ fn parse_enum<T: Copy>(value: &str, values: &[(&str, T)]) -> Result<T, OptionPro
 
 /// Source: `LayoutOptionData.enumSetForStringArray`: the value splits at
 /// `[\[\]\s,]+`, and every part must name a constant.
+///
+/// Ports `LayoutOptionData.enumSetForStringArray`.
 fn parse_flags<T: Copy, S>(
     value: &str,
     values: &[(&str, T)],
@@ -1352,6 +1379,8 @@ fn parse_flags<T: Copy, S>(
 }
 
 /// `String.split` the Java way: trailing empty strings are dropped.
+///
+/// Ports Java's `String.split`, which drops trailing empty strings.
 fn java_split(value: &str, separator: impl Fn(char) -> bool) -> Vec<&str> {
     let mut parts: Vec<&str> = value.split(separator).collect();
     while parts.last().is_some_and(|part| part.is_empty()) {
@@ -1361,6 +1390,8 @@ fn java_split(value: &str, separator: impl Fn(char) -> bool) -> Vec<&str> {
 }
 
 /// Strips the brackets and quotes `Spacing.parse` and `KVector.parse` skip at both ends.
+///
+/// Ports the delimiter skipping of `Spacing.parse` and `KVector.parse`.
 fn strip_delimiters(value: &str) -> &str {
     value
         .trim_start_matches(['(', '[', '{', '"', '\'', ' ', '\t', '\r', '\n'])
@@ -1369,6 +1400,8 @@ fn strip_delimiters(value: &str) -> &str {
 
 /// Source: `Spacing.parse`, which `ElkPadding` and `ElkMargin` share. Keys it does not know
 /// are skipped; sides not named stay zero.
+///
+/// Ports `Spacing.parse`.
 pub(crate) fn parse_spacing(value: &str) -> Result<ElkPadding, OptionProblem> {
     let mut padding = ElkPadding::uniform(0.0);
     let inner = strip_delimiters(value);
@@ -1393,6 +1426,8 @@ pub(crate) fn parse_spacing(value: &str) -> Result<ElkPadding, OptionProblem> {
 }
 
 /// Source: `KVector.parse`: exactly two numbers.
+///
+/// Ports `KVector.parse`.
 pub(crate) fn parse_vector(value: &str) -> Result<(f64, f64), OptionProblem> {
     let inner = strip_delimiters(value);
     if inner.is_empty() {

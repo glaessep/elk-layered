@@ -83,6 +83,7 @@ struct Hierarchy<'a> {
 }
 
 impl<'a> Hierarchy<'a> {
+    /// No ELK counterpart: indexes the nested graphs that ELK reaches through `LNode.getNestedGraph`.
     fn new(root: &'a LGraph) -> Self {
         let mut graphs = vec![GraphEntry {
             graph: root,
@@ -109,11 +110,14 @@ impl<'a> Hierarchy<'a> {
         Self { graphs, by_id }
     }
 
+    /// No ELK counterpart: an arena lookup.
     fn graph(&self, index: usize) -> &'a LGraph {
         self.graphs[index].graph
     }
 
     /// The graph inside a node, if any.
+    ///
+    /// Ports `LNode.getNestedGraph`.
     fn nested(&self, node: NodeAt) -> Option<usize> {
         self.graphs
             .iter()
@@ -122,6 +126,8 @@ impl<'a> Hierarchy<'a> {
 
     /// Source: `LGraphUtil.isDescendant(child, parent)`: whether `child` lies, at any depth,
     /// inside `parent`.
+    ///
+    /// Ports `LGraphUtil.isDescendant`.
     fn is_descendant(&self, child: NodeAt, parent: NodeAt) -> bool {
         let mut graph = child.0;
         while let Some(node) = self.graphs[graph].parent {
@@ -134,6 +140,8 @@ impl<'a> Hierarchy<'a> {
     }
 
     /// `LPort.getAbsoluteAnchor`: the anchor relative to the port's graph.
+    ///
+    /// Ports `LPort.getAbsoluteAnchor`.
     fn absolute_anchor(&self, port: PortAt) -> LPoint {
         let node = &self.graph(port.graph).layerless_nodes[port.port.node];
         let data = &node.ports[port.port.port];
@@ -145,6 +153,8 @@ impl<'a> Hierarchy<'a> {
     }
 
     /// Source: `LGraphUtil.changeCoordSystem`.
+    ///
+    /// Ports `LGraphUtil.changeCoordSystem`.
     fn change_coord_system(&self, point: &mut LPoint, old: usize, new: usize) {
         if old == new {
             return;
@@ -183,6 +193,8 @@ impl<'a> Hierarchy<'a> {
 
     /// Source: `CrossHierarchyEdge.getActualSource`: the port of an external port dummy is
     /// the port on the compound node it stands for.
+    ///
+    /// Ports `CrossHierarchyEdge.getActualSource` and `getActualTarget`.
     fn actual_end(&self, graph: usize, port: PortRef) -> PortAt {
         let node = &self.graph(graph).layerless_nodes[port.node];
         if node.kind == LNodeKind::ExternalPort
@@ -212,6 +224,8 @@ struct JoinedEdge {
 ///
 /// Source: `CompoundGraphPostprocessor.process`. Junction points are not ported, so there
 /// are none to copy.
+///
+/// Ports `CompoundGraphPostprocessor.process`, with `CrossHierarchyEdgeComparator.compare`.
 fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, JoinedEdge> {
     // Pieces by original edge id, in hierarchy order.
     let mut pieces: BTreeMap<&str, Vec<(usize, &crate::graph::CrossHierarchyEdge)>> =
@@ -340,6 +354,8 @@ struct EdgeToApply<'a> {
 }
 
 /// Source: `ElkGraphLayoutTransferrer.applyLayout`, for the whole hierarchy.
+///
+/// Ports `ElkGraphLayoutTransferrer.applyLayout`.
 pub(crate) fn apply_layout(root: &LGraph, input: &TransferInput<'_>) -> LayoutResult {
     let hierarchy = Hierarchy::new(root);
     let joined = join_cross_hierarchy_edges(&hierarchy);
@@ -403,6 +419,8 @@ pub(crate) fn apply_layout(root: &LGraph, input: &TransferInput<'_>) -> LayoutRe
 }
 
 /// Whether a layered edge is an input edge as the layout left it, not a dummy edge.
+///
+/// Ports `ElkGraphLayoutTransferrer.applyEdgeLayout`'s `ORIGIN` check: only input edges are written.
 fn is_original_edge(graph: &LGraph, edge: &LayeredEdge, input: &TransferInput<'_>) -> bool {
     if edge.compound_segment.is_some() || !input.edge_containers.contains_key(&edge.id) {
         return false;
@@ -428,6 +446,8 @@ fn is_original_edge(graph: &LGraph, edge: &LayeredEdge, input: &TransferInput<'_
 }
 
 /// `LGraph.getActualSize`.
+///
+/// Ports `LGraph.getActualSize`.
 fn actual_size(graph: &LGraph) -> LSize {
     LSize {
         width: graph.size.width + graph.padding.left + graph.padding.right,
@@ -437,6 +457,8 @@ fn actual_size(graph: &LGraph) -> LSize {
 
 /// Source: `ElkGraphLayoutTransferrer.applyLayout` for one graph, without the recursion and
 /// without `applyParentNodeLayout`, which [`crate::layout`] runs on the input node.
+///
+/// Ports `ElkGraphLayoutTransferrer.applyLayout` for one graph.
 fn apply_graph_layout(
     hierarchy: &Hierarchy<'_>,
     graph_index: usize,
@@ -465,6 +487,8 @@ fn apply_graph_layout(
 }
 
 /// Source: `ElkGraphLayoutTransferrer.applyNodeLayout`.
+///
+/// Ports `ElkGraphLayoutTransferrer.applyNodeLayout`.
 fn node_layout(
     hierarchy: &Hierarchy<'_>,
     at: NodeAt,
@@ -499,6 +523,8 @@ fn node_layout(
 }
 
 /// Source: `ElkGraphLayoutTransferrer.applyEdgeLayout` and `calculateHierarchicalOffset`.
+///
+/// Ports `ElkGraphLayoutTransferrer.applyEdgeLayout`.
 fn edge_layout(
     hierarchy: &Hierarchy<'_>,
     graph_index: usize,
@@ -565,6 +591,8 @@ fn edge_layout(
 ///
 /// Source: `ElkGraphImporter.findCoordinateSystemOrigin`, which sets the target graph at
 /// import, and `ElkGraphLayoutTransferrer.calculateHierarchicalOffset`, which walks there.
+///
+/// Ports `ElkGraphLayoutTransferrer.calculateHierarchicalOffset` and `ElkGraphImporter.findCoordinateSystemOrigin`.
 fn hierarchical_offset(
     hierarchy: &Hierarchy<'_>,
     source: NodeAt,
