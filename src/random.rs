@@ -137,16 +137,12 @@ pub enum RandomSeedError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RandomSeedPhase {
     GraphConfigurator,
-    Force,
-    SporeOverlap,
 }
 
 impl RandomSeedPhase {
     const fn domain_label(self) -> &'static str {
         match self {
             Self::GraphConfigurator => "GraphConfigurator.configureGraphProperties",
-            Self::Force => "ForceLayoutProvider.layout",
-            Self::SporeOverlap => "SPOrE.Math.random",
         }
     }
 }
