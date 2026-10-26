@@ -5,6 +5,11 @@
 //! write the JSON elkjs reads and writes: field names in camel case, missing numbers as zero,
 //! missing lists as empty, and empty lists left out.
 //!
+//! elkjs also reads the options from a legacy `properties` key (`transformProperties` in the
+//! importer below). Every type that has `layout_options` takes that key as an alias. elkjs
+//! reads `properties` only when `layoutOptions` is missing. A graph with both keys is a serde
+//! error here, where elkjs would quietly ignore `properties`.
+//!
 //! Source: `org.eclipse.elk.graph.json/src/org/eclipse/elk/graph/json/JsonImporter.xtend`,
 //! which reads this JSON and writes the layout back into it.
 
@@ -64,6 +69,7 @@ pub struct ElkNode {
         feature = "serde",
         serde(
             default,
+            alias = "properties",
             skip_serializing_if = "BTreeMap::is_empty",
             deserialize_with = "options::deserialize"
         )
@@ -101,6 +107,7 @@ pub struct ElkPort {
         feature = "serde",
         serde(
             default,
+            alias = "properties",
             skip_serializing_if = "BTreeMap::is_empty",
             deserialize_with = "options::deserialize"
         )
@@ -132,6 +139,7 @@ pub struct ElkEdge {
         feature = "serde",
         serde(
             default,
+            alias = "properties",
             skip_serializing_if = "BTreeMap::is_empty",
             deserialize_with = "options::deserialize"
         )
@@ -222,6 +230,7 @@ pub struct ElkLabel {
         feature = "serde",
         serde(
             default,
+            alias = "properties",
             skip_serializing_if = "BTreeMap::is_empty",
             deserialize_with = "options::deserialize"
         )

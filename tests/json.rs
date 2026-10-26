@@ -87,3 +87,47 @@ fn every_field_reads_and_writes_in_camel_case() {
     let back: Value = serde_json::to_value(&graph).unwrap();
     assert_eq!(back, text);
 }
+
+// Mutation: drop `alias = "properties"` from `ElkNode::layout_options`.
+#[test]
+fn the_legacy_properties_key_reads_like_layout_options() {
+    let graph = |key: &str| -> ElkNode {
+        serde_json::from_value(json!({
+            "id": "root",
+            key: {"elk.direction": "DOWN"},
+            "children": [
+                {"id": "a", "width": 60, "height": 30},
+                {"id": "b", "width": 60, "height": 30}
+            ],
+            "edges": [{"id": "e", "sources": ["a"], "targets": ["b"]}]
+        }))
+        .unwrap()
+    };
+    let legacy = graph("properties");
+    assert_eq!(legacy.layout_options["elk.direction"], "DOWN");
+    let got = layout(&legacy).unwrap();
+    assert_eq!(got, layout(&graph("layoutOptions")).unwrap());
+    // DOWN stacks the nodes: the second sits below the first, not to its right.
+    assert!(got.children[1].y > got.children[0].y);
+    assert_eq!(got.children[1].x, got.children[0].x);
+}
+
+// Mutation: drop `alias = "properties"` from `ElkPort::layout_options`.
+#[test]
+fn the_legacy_properties_key_reads_on_ports_edges_and_labels() {
+    let graph: ElkNode = serde_json::from_value(json!({
+        "id": "root",
+        "ports": [{"id": "p", "properties": {"a": "1"}, "labels": [{"text": "t", "properties": {"d": "4"}}]}],
+        "edges": [{"id": "e", "properties": {"b": "2"}}]
+    }))
+    .unwrap();
+    assert_eq!(graph.ports[0].layout_options["a"], "1");
+    assert_eq!(graph.ports[0].labels[0].layout_options["d"], "4");
+    assert_eq!(graph.edges[0].layout_options["b"], "2");
+}
+
+#[test]
+fn a_graph_with_both_option_keys_is_an_error() {
+    let both = json!({"id": "r", "layoutOptions": {}, "properties": {}});
+    assert!(serde_json::from_value::<ElkNode>(both).is_err());
+}
