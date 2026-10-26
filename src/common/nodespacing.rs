@@ -1,0 +1,795 @@
+//! Common node dimension calculation utilities.
+//!
+//! Source references:
+//! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/NodeDimensionCalculation.java
+//! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/NodeLabelAndSizeCalculator.java
+//! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/NodeMarginCalculator.java
+
+use crate::graph::{LGraph, LMargin, LPort, PortSide};
+use crate::options::{NodeLabelPlacement, PortAlignment, PortConstraints};
+
+/// The reachable `NodeMicroLayout` operation for one inside-top-center container title.
+/// A missing minimum denotes fixed constraints: the title is placed and may overhang,
+/// but must not resurrect constraints cleared by a previous provider's `resizeNode`.
+/// `NodeSizeCalculator` replaces active dimensions; it does not translate child contents.
+pub fn inside_top_center_micro_layout(
+    current: crate::LSize,
+    minimum: Option<crate::LSize>,
+    label: Option<crate::LSize>,
+) -> Result<(crate::LSize, crate::LMargin), crate::NodeSizeError> {
+    let mut size = current;
+    if let Some(minimum) = minimum {
+        let mut options = crate::LayeredOptions {
+            node_size_minimum: Some(minimum),
+            node_size_include_labels: true,
+            ..Default::default()
+        };
+        options.validate_node_size_minimum()?;
+        if let Some(label) = label {
+            options.include_inside_top_center_label_minimum(label)?;
+        }
+        size = options.effective_node_size_minimum().unwrap_or_default();
+    }
+    if !size.width.is_finite()
+        || !size.height.is_finite()
+        || size.width < 0.0
+        || size.height < 0.0
+        || label.is_some_and(|label| {
+            !label.width.is_finite()
+                || !label.height.is_finite()
+                || label.width < 0.0
+                || label.height < 0.0
+        })
+    {
+        return Err(crate::NodeSizeError);
+    }
+    let mut margin = crate::LMargin::default();
+    if let Some(label) = label {
+        // NodeLabelCellCreator's default label padding is five on each side. For a
+        // fixed narrow node the centered label protrudes equally on the left and right.
+        margin.left = ((label.width - size.width) / 2.0).max(0.0);
+        margin.right = margin.left;
+        margin.bottom = (5.0 + label.height - size.height).max(0.0);
+    }
+    Ok((size, margin))
+}
+
+#[cfg(test)]
+mod micro_layout_tests {
+    use super::*;
+
+    #[test]
+    fn active_title_uses_symmetric_grid_but_fixed_title_only_overhangs() {
+        // elkjs 0.9.3: an explicit Radial group with a 30x30 title and minimum60x60
+        // becomes60x70 under NodeMicroLayout, while Box's resizeNode alone yields60x60.
+        let (size, _) = inside_top_center_micro_layout(
+            crate::LSize {
+                width: 147.0,
+                height: 90.0,
+            },
+            Some(crate::LSize {
+                width: 60.0,
+                height: 60.0,
+            }),
+            Some(crate::LSize {
+                width: 30.0,
+                height: 30.0,
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            size,
+            crate::LSize {
+                width: 60.0,
+                height: 70.0
+            }
+        );
+        let current = crate::LSize {
+            width: 180.0,
+            height: 72.0,
+        };
+        let (size, margins) = inside_top_center_micro_layout(
+            current,
+            None,
+            Some(crate::LSize {
+                width: 300.0,
+                height: 10.0,
+            }),
+        )
+        .unwrap();
+        assert_eq!(size, current);
+        assert_eq!(margins.left, 60.0);
+        assert_eq!(margins.right, 60.0);
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct Rect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+impl Rect {
+    fn union(&mut self, other: Self) {
+        let min_x = self.x.min(other.x);
+        let min_y = self.y.min(other.y);
+        let max_x = (self.x + self.width).max(other.x + other.width);
+        let max_y = (self.y + self.height).max(other.y + other.height);
+        self.x = min_x;
+        self.y = min_y;
+        self.width = max_x - min_x;
+        self.height = max_y - min_y;
+    }
+}
+
+pub fn calculate_label_and_node_sizes(graph: &mut LGraph, nodes: impl IntoIterator<Item = usize>) {
+    for node in nodes {
+        place_ports(graph, node);
+        place_node_labels(graph, node);
+    }
+}
+
+pub fn calculate_node_margins(graph: &mut LGraph, nodes: impl IntoIterator<Item = usize>) {
+    for node in nodes {
+        process_node_margin(graph, node);
+    }
+}
+
+fn place_ports(graph: &mut LGraph, node: usize) {
+    match graph.layerless_nodes[node].port_constraints {
+        PortConstraints::FixedPos => {
+            place_fixed_pos_ports(graph, node, PortSide::North);
+            place_fixed_pos_ports(graph, node, PortSide::South);
+            place_fixed_pos_ports(graph, node, PortSide::East);
+            place_fixed_pos_ports(graph, node, PortSide::West);
+        }
+        PortConstraints::FixedRatio => {
+            place_fixed_ratio_ports(graph, node, PortSide::North);
+            place_fixed_ratio_ports(graph, node, PortSide::South);
+            place_fixed_ratio_ports(graph, node, PortSide::East);
+            place_fixed_ratio_ports(graph, node, PortSide::West);
+        }
+        _ => {
+            place_free_ports(graph, node, PortSide::North);
+            place_free_ports(graph, node, PortSide::South);
+            place_free_ports(graph, node, PortSide::East);
+            place_free_ports(graph, node, PortSide::West);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum HorizontalLabelAlignment {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum VerticalLabelAlignment {
+    Top,
+    Center,
+    Bottom,
+}
+
+fn place_node_labels(graph: &mut LGraph, node: usize) {
+    let Some((horizontal_alignment, vertical_alignment)) =
+        inside_label_alignment(graph.layerless_nodes[node].node_label_placement)
+    else {
+        return;
+    };
+    if graph.layerless_nodes[node].labels.is_empty() {
+        return;
+    }
+
+    let padding = graph.options.node_labels_padding;
+    let gap = graph.options.spacing.label_label;
+    let horizontal_layout_mode = !graph.options.direction.is_vertical();
+    let node = &mut graph.layerless_nodes[node];
+    let content_left = padding.left;
+    let content_top = padding.top;
+    let content_width = node.size.width - padding.left - padding.right;
+    let content_height = node.size.height - padding.top - padding.bottom;
+
+    if horizontal_layout_mode {
+        let labels_height = node
+            .labels
+            .iter()
+            .map(|label| label.size.height)
+            .sum::<f64>()
+            + gap * node.labels.len().saturating_sub(1) as f64;
+        let mut y = aligned_position(
+            content_top,
+            content_height,
+            labels_height,
+            vertical_alignment,
+        );
+
+        for label in &mut node.labels {
+            label.position.x = aligned_position(
+                content_left,
+                content_width,
+                label.size.width,
+                horizontal_alignment,
+            );
+            label.position.y = y;
+            y += label.size.height + gap;
+        }
+    } else {
+        let labels_width = node
+            .labels
+            .iter()
+            .map(|label| label.size.width)
+            .sum::<f64>()
+            + gap * node.labels.len().saturating_sub(1) as f64;
+        let mut x = aligned_position(
+            content_left,
+            content_width,
+            labels_width,
+            horizontal_alignment,
+        );
+
+        for label in &mut node.labels {
+            label.position.x = x;
+            label.position.y = aligned_position(
+                content_top,
+                content_height,
+                label.size.height,
+                vertical_alignment,
+            );
+            x += label.size.width + gap;
+        }
+    }
+}
+
+fn inside_label_alignment(
+    placement: NodeLabelPlacement,
+) -> Option<(HorizontalLabelAlignment, VerticalLabelAlignment)> {
+    use HorizontalLabelAlignment::{Center as HCenter, Left, Right};
+    use NodeLabelPlacement::*;
+    use VerticalLabelAlignment::{Bottom, Center as VCenter, Top};
+
+    match placement {
+        InsideTopLeft => Some((Left, Top)),
+        InsideTopCenter => Some((HCenter, Top)),
+        InsideTopRight => Some((Right, Top)),
+        InsideCenterLeft => Some((Left, VCenter)),
+        InsideCenter => Some((HCenter, VCenter)),
+        InsideCenterRight => Some((Right, VCenter)),
+        InsideBottomLeft => Some((Left, Bottom)),
+        InsideBottomCenter => Some((HCenter, Bottom)),
+        InsideBottomRight => Some((Right, Bottom)),
+        Fixed | OutsideTopLeft | OutsideTopCenter | OutsideTopRight | OutsideBottomLeft
+        | OutsideBottomCenter | OutsideBottomRight | OutsideLeftTop | OutsideLeftCenter
+        | OutsideLeftBottom | OutsideRightTop | OutsideRightCenter | OutsideRightBottom => None,
+    }
+}
+
+trait LabelAlignment: Copy {
+    fn factor(self) -> f64;
+}
+
+impl LabelAlignment for HorizontalLabelAlignment {
+    fn factor(self) -> f64 {
+        match self {
+            Self::Left => 0.0,
+            Self::Center => 0.5,
+            Self::Right => 1.0,
+        }
+    }
+}
+
+impl LabelAlignment for VerticalLabelAlignment {
+    fn factor(self) -> f64 {
+        match self {
+            Self::Top => 0.0,
+            Self::Center => 0.5,
+            Self::Bottom => 1.0,
+        }
+    }
+}
+
+fn aligned_position(
+    content_start: f64,
+    content_size: f64,
+    item_size: f64,
+    alignment: impl LabelAlignment,
+) -> f64 {
+    content_start + (content_size - item_size) * alignment.factor()
+}
+
+fn place_fixed_pos_ports(graph: &mut LGraph, node: usize, side: PortSide) {
+    let size = graph.layerless_nodes[node].size;
+    let port_indices = ports_on_side(graph, node, side);
+    for port in port_indices {
+        match side {
+            PortSide::North | PortSide::South => {
+                graph.layerless_nodes[node].ports[port].position.y =
+                    horizontal_port_y(&graph.layerless_nodes[node].ports[port]);
+            }
+            PortSide::East | PortSide::West => {
+                graph.layerless_nodes[node].ports[port].position.x =
+                    vertical_port_x(&graph.layerless_nodes[node].ports[port], size.width);
+            }
+            PortSide::Undefined => {}
+        }
+    }
+}
+
+fn place_fixed_ratio_ports(graph: &mut LGraph, node: usize, side: PortSide) {
+    let size = graph.layerless_nodes[node].size;
+    let port_indices = ports_on_side(graph, node, side);
+    for port in port_indices {
+        let ratio = graph.layerless_nodes[node].ports[port].ratio_or_position;
+        match side {
+            PortSide::North | PortSide::South => {
+                graph.layerless_nodes[node].ports[port].position.x = size.width * ratio;
+                graph.layerless_nodes[node].ports[port].position.y =
+                    horizontal_port_y(&graph.layerless_nodes[node].ports[port]);
+            }
+            PortSide::East | PortSide::West => {
+                graph.layerless_nodes[node].ports[port].position.x =
+                    vertical_port_x(&graph.layerless_nodes[node].ports[port], size.width);
+                graph.layerless_nodes[node].ports[port].position.y = size.height * ratio;
+            }
+            PortSide::Undefined => {}
+        }
+    }
+}
+
+fn place_free_ports(graph: &mut LGraph, node: usize, side: PortSide) {
+    let port_indices = ports_on_side(graph, node, side);
+    if port_indices.is_empty() {
+        return;
+    }
+
+    let node_size = graph.layerless_nodes[node].size;
+    let alignment = graph.layerless_nodes[node]
+        .port_alignment
+        .unwrap_or(graph.options.port_alignment_default);
+    let spacing = graph.options.spacing.port_port;
+    let surrounding = graph.options.spacing.ports_surrounding;
+
+    match side {
+        PortSide::North | PortSide::South => {
+            let available = node_size.width - surrounding.left - surrounding.right;
+            let port_span = port_indices
+                .iter()
+                .map(|port| graph.layerless_nodes[node].ports[*port].size.width)
+                .sum::<f64>()
+                + spacing * port_indices.len().saturating_sub(1) as f64;
+            let (mut x, space_between_ports) = placement_start_and_spacing(
+                available,
+                port_span,
+                spacing,
+                port_indices.len(),
+                alignment,
+            );
+            x += surrounding.left;
+
+            for port in port_indices {
+                graph.layerless_nodes[node].ports[port].position.x = x;
+                graph.layerless_nodes[node].ports[port].position.y =
+                    horizontal_port_y(&graph.layerless_nodes[node].ports[port]);
+                x += graph.layerless_nodes[node].ports[port].size.width + space_between_ports;
+            }
+        }
+        PortSide::East | PortSide::West => {
+            // InsidePortLabelCellCreator reserves vertical label spacing even for
+            // empty north/south cells. CellSystemConfigurator deducts that space
+            // from the east/west surrounding margins before placing free ports.
+            let border_offset = graph.options.spacing.label_port_vertical.max(0.0)
+                + 2.0 * graph.options.spacing.label_label;
+            let top = (surrounding.top - border_offset).max(0.0);
+            let bottom = (surrounding.bottom - border_offset).max(0.0);
+            let available = node_size.height - top - bottom;
+            let port_span = port_indices
+                .iter()
+                .map(|port| graph.layerless_nodes[node].ports[*port].size.height)
+                .sum::<f64>()
+                + spacing * port_indices.len().saturating_sub(1) as f64;
+            let (mut y, space_between_ports) = placement_start_and_spacing(
+                available,
+                port_span,
+                spacing,
+                port_indices.len(),
+                alignment,
+            );
+            y += top;
+
+            for port in port_indices {
+                graph.layerless_nodes[node].ports[port].position.x =
+                    vertical_port_x(&graph.layerless_nodes[node].ports[port], node_size.width);
+                graph.layerless_nodes[node].ports[port].position.y = y;
+                y += graph.layerless_nodes[node].ports[port].size.height + space_between_ports;
+            }
+        }
+        PortSide::Undefined => {}
+    }
+}
+
+fn placement_start_and_spacing(
+    available_space: f64,
+    placement_span: f64,
+    port_spacing: f64,
+    port_count: usize,
+    alignment: PortAlignment,
+) -> (f64, f64) {
+    let alignment = if matches!(
+        alignment,
+        PortAlignment::Distributed | PortAlignment::Justified
+    ) && port_count == 1
+    {
+        PortAlignment::Center
+    } else {
+        alignment
+    };
+
+    // PortPlacementCalculator's default (no PORTS_OVERHANG) branch keeps the initial
+    // coordinate when the content cell is too small. In particular a single port on a
+    // negative-width cell stays at the leading surrounding margin, rather than recentering.
+    // Multiple ports may require negative spacing; clamping it changes the source geometry.
+    let calculated_span = if alignment == PortAlignment::Distributed {
+        placement_span + 2.0 * port_spacing
+    } else {
+        placement_span
+    };
+    if available_space < calculated_span {
+        if alignment == PortAlignment::Distributed {
+            let spacing =
+                port_spacing + (available_space - calculated_span) / (port_count + 1) as f64;
+            return (spacing, spacing);
+        }
+        let spacing = if port_count > 1 {
+            port_spacing + (available_space - calculated_span) / (port_count - 1) as f64
+        } else {
+            // The source divides by zero here, but the spacing is never used for one port.
+            port_spacing
+        };
+        return (0.0, spacing);
+    }
+
+    match alignment {
+        PortAlignment::Begin => (0.0, port_spacing),
+        PortAlignment::Center => ((available_space - placement_span) / 2.0, port_spacing),
+        PortAlignment::End => (available_space - placement_span, port_spacing),
+        PortAlignment::Distributed => {
+            let distributed_span = placement_span + 2.0 * port_spacing;
+            let additional = (available_space - distributed_span) / (port_count + 1) as f64;
+            let spacing = (port_spacing + additional).max(0.0);
+            (spacing, spacing)
+        }
+        PortAlignment::Justified => {
+            let spacing = if port_count > 1 {
+                (port_spacing + (available_space - placement_span) / (port_count - 1) as f64)
+                    .max(0.0)
+            } else {
+                port_spacing
+            };
+            (0.0, spacing)
+        }
+    }
+}
+
+fn horizontal_port_y(port: &LPort) -> f64 {
+    let offset = port.border_offset.unwrap_or(0.0);
+    match port.side {
+        PortSide::North => -port.size.height - offset,
+        PortSide::South => offset,
+        _ => port.position.y,
+    }
+}
+
+fn vertical_port_x(port: &LPort, node_width: f64) -> f64 {
+    let offset = port.border_offset.unwrap_or(0.0);
+    match port.side {
+        PortSide::West => -port.size.width - offset,
+        PortSide::East => node_width + offset,
+        _ => port.position.x,
+    }
+}
+
+fn ports_on_side(graph: &LGraph, node: usize, side: PortSide) -> Vec<usize> {
+    let mut ports = graph.layerless_nodes[node]
+        .ports
+        .iter()
+        .enumerate()
+        .filter_map(|(port, port_data)| (port_data.side == side).then_some(port))
+        .collect::<Vec<_>>();
+    if matches!(side, PortSide::South | PortSide::West) {
+        ports.reverse();
+    }
+    ports
+}
+
+fn process_node_margin(graph: &mut LGraph, node: usize) {
+    let position = graph.layerless_nodes[node].position;
+    let size = graph.layerless_nodes[node].size;
+    let mut bounds = Rect {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+    };
+
+    for label in &graph.layerless_nodes[node].labels {
+        bounds.union(Rect {
+            x: position.x + label.position.x,
+            y: position.y + label.position.y,
+            width: label.size.width,
+            height: label.size.height,
+        });
+    }
+
+    for port in &graph.layerless_nodes[node].ports {
+        let port_x = position.x + port.position.x;
+        let port_y = position.y + port.position.y;
+        bounds.union(Rect {
+            x: port_x,
+            y: port_y,
+            width: port.size.width,
+            height: port.size.height,
+        });
+
+        for label in &port.labels {
+            bounds.union(Rect {
+                x: port_x + label.position.x,
+                y: port_y + label.position.y,
+                width: label.size.width,
+                height: label.size.height,
+            });
+        }
+    }
+
+    graph.layerless_nodes[node].margin = LMargin {
+        top: (position.y - bounds.y).max(0.0),
+        bottom: (bounds.y + bounds.height - (position.y + size.height)).max(0.0),
+        left: (position.x - bounds.x).max(0.0),
+        right: (bounds.x + bounds.width - (position.x + size.width)).max(0.0),
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{EdgeLabelPlacement, LLabel, LNode, LPoint, LSize, PortType};
+    use crate::options::{ElkDirection, LayeredOptions, NodeLabelPlacement};
+
+    fn node_label(width: f64, height: f64) -> LLabel {
+        LLabel {
+            text: "label".to_string(),
+            size: LSize { width, height },
+            position: LPoint::default(),
+            placement: EdgeLabelPlacement::Center,
+            inline: false,
+            label_side: None,
+            end_label_edge: None,
+            original_label_edge: None,
+            source_index: None,
+        }
+    }
+
+    #[test]
+    fn label_and_node_size_calculation_places_inside_top_center_node_labels() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        let mut node = LNode::new("group", 100.3125, 105.0, None);
+        node.node_label_placement = NodeLabelPlacement::InsideTopCenter;
+        node.labels.push(LLabel {
+            text: "three".to_string(),
+            size: LSize {
+                width: 38.765625,
+                height: 22.0,
+            },
+            // LEFT direction preprocessing mirrors an unplaced label to this position.
+            position: LPoint {
+                x: -38.765625,
+                y: 0.0,
+            },
+            placement: EdgeLabelPlacement::Center,
+            inline: false,
+            label_side: None,
+            end_label_edge: None,
+            original_label_edge: None,
+            source_index: None,
+        });
+        graph.layerless_nodes.push(node);
+        graph.set_node_layer(0, 0);
+
+        calculate_label_and_node_sizes(&mut graph, [0]);
+        calculate_node_margins(&mut graph, [0]);
+
+        assert_eq!(
+            graph.layerless_nodes[0].labels[0].position,
+            LPoint {
+                x: 30.7734375,
+                y: 5.0,
+            }
+        );
+        assert_eq!(graph.layerless_nodes[0].margin, LMargin::default());
+    }
+
+    #[test]
+    fn horizontal_layout_mode_stacks_multiple_node_labels_vertically() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        graph.options.direction = ElkDirection::Right;
+        graph.options.spacing.label_label = 3.0;
+        let mut node = LNode::new("group", 100.0, 80.0, None);
+        node.node_label_placement = NodeLabelPlacement::InsideTopCenter;
+        node.labels.push(node_label(20.0, 10.0));
+        node.labels.push(node_label(30.0, 12.0));
+        graph.layerless_nodes.push(node);
+
+        calculate_label_and_node_sizes(&mut graph, [0]);
+
+        assert_eq!(
+            graph.layerless_nodes[0].labels[0].position,
+            LPoint { x: 40.0, y: 5.0 }
+        );
+        assert_eq!(
+            graph.layerless_nodes[0].labels[1].position,
+            LPoint { x: 35.0, y: 18.0 }
+        );
+    }
+
+    #[test]
+    fn vertical_layout_mode_stacks_transposed_node_labels_horizontally() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        graph.options.direction = ElkDirection::Down;
+        graph.options.spacing.label_label = 3.0;
+        let mut node = LNode::new("group", 80.0, 100.0, None);
+        node.node_label_placement = NodeLabelPlacement::InsideCenterLeft;
+        node.labels.push(node_label(10.0, 20.0));
+        node.labels.push(node_label(12.0, 30.0));
+        graph.layerless_nodes.push(node);
+
+        calculate_label_and_node_sizes(&mut graph, [0]);
+
+        assert_eq!(
+            graph.layerless_nodes[0].labels[0].position,
+            LPoint { x: 5.0, y: 40.0 }
+        );
+        assert_eq!(
+            graph.layerless_nodes[0].labels[1].position,
+            LPoint { x: 18.0, y: 35.0 }
+        );
+    }
+
+    #[test]
+    fn label_and_node_size_calculation_places_free_ports_on_node_border() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        graph
+            .layerless_nodes
+            .push(LNode::new("A", 80.0, 40.0, None));
+        let node = 0;
+        graph.set_node_layer(node, 0);
+        let port = graph
+            .add_port(
+                node,
+                PortType::Output,
+                PortSide::East,
+                crate::graph::LPoint::default(),
+            )
+            .unwrap();
+        graph.layerless_nodes[node].ports[port.port].set_side(PortSide::East);
+
+        calculate_label_and_node_sizes(&mut graph, [node]);
+
+        let port = &graph.layerless_nodes[node].ports[port.port];
+        assert_eq!(port.position.x, graph.layerless_nodes[node].size.width);
+        assert!(port.position.y > 0.0);
+        assert!(port.position.y < graph.layerless_nodes[node].size.height);
+    }
+
+    #[test]
+    fn label_and_node_size_calculation_crams_distributed_ports_when_overhang_disabled() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        graph
+            .layerless_nodes
+            .push(LNode::new("C", 69.578125, 54.0, None));
+        let node = 0;
+        graph.set_node_layer(node, 0);
+
+        for _ in 0..5 {
+            let port = graph
+                .add_port(
+                    node,
+                    PortType::Output,
+                    PortSide::South,
+                    crate::graph::LPoint::default(),
+                )
+                .unwrap();
+            graph.layerless_nodes[node].ports[port.port].set_side(PortSide::South);
+        }
+
+        calculate_label_and_node_sizes(&mut graph, [node]);
+
+        let expected_spacing = graph.layerless_nodes[node].size.width / 6.0;
+        for (index, port) in graph.layerless_nodes[node].ports.iter().enumerate() {
+            let expected_x = expected_spacing * (5 - index) as f64;
+            assert!(
+                (port.position.x - expected_x).abs() < 1e-9,
+                "port {index} x: expected {expected_x}, got {}",
+                port.position.x
+            );
+            assert_eq!(port.position.y, 0.0);
+        }
+    }
+
+    #[test]
+    fn label_and_node_size_calculation_places_west_ports_top_to_bottom() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        graph
+            .layerless_nodes
+            .push(LNode::new("A", 80.0, 70.0, None));
+        let node = 0;
+        graph.set_node_layer(node, 0);
+
+        for id in ["bottom", "middle", "top"] {
+            let port = graph
+                .add_port(
+                    node,
+                    PortType::Input,
+                    PortSide::West,
+                    crate::graph::LPoint::default(),
+                )
+                .unwrap();
+            graph.layerless_nodes[node].ports[port.port].id = id.to_string();
+            graph.layerless_nodes[node].ports[port.port].set_side(PortSide::West);
+        }
+
+        calculate_label_and_node_sizes(&mut graph, [node]);
+
+        let y_positions = graph.layerless_nodes[node]
+            .ports
+            .iter()
+            .map(|port| (port.id.as_str(), port.position.y))
+            .collect::<Vec<_>>();
+        assert!(y_positions[2].1 < y_positions[1].1);
+        assert!(y_positions[1].1 < y_positions[0].1);
+    }
+
+    #[test]
+    fn node_margin_calculation_includes_ports_and_port_labels() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        let node = graph.layerless_nodes.len();
+        graph
+            .layerless_nodes
+            .push(LNode::new("A", 80.0, 40.0, None));
+        graph.set_node_layer(node, 0);
+        let port = graph
+            .add_port(
+                node,
+                PortType::Output,
+                PortSide::East,
+                crate::graph::LPoint { x: 80.0, y: 10.0 },
+            )
+            .unwrap();
+        graph.layerless_nodes[node].ports[port.port].size = LSize {
+            width: 8.0,
+            height: 8.0,
+        };
+        graph.layerless_nodes[node].ports[port.port]
+            .labels
+            .push(crate::graph::LLabel {
+                text: "p".to_string(),
+                size: LSize {
+                    width: 12.0,
+                    height: 6.0,
+                },
+                position: crate::graph::LPoint { x: 10.0, y: 0.0 },
+                placement: crate::graph::EdgeLabelPlacement::Center,
+                inline: false,
+                label_side: None,
+                end_label_edge: None,
+                original_label_edge: None,
+                source_index: None,
+            });
+
+        calculate_node_margins(&mut graph, [node]);
+
+        assert_eq!(graph.layerless_nodes[node].margin.left, 0.0);
+        assert!(graph.layerless_nodes[node].margin.right >= 22.0);
+    }
+}
