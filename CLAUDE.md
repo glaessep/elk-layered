@@ -40,13 +40,19 @@ The same graph gives the same layout, bit for bit, on every machine.
 
 ## Tests
 
-- **Each feature gets at least one test that shows it works.** It does not need full coverage,
-  but it must fail when the feature breaks.
+- **Test each kind of input a change reads, each edge value, and each error.** One happy path
+  is not enough. Example: a node width is tested at a normal value, at zero, which ELK accepts,
+  and at NaN, which the crate refuses with an error. The inputs the change does not read need no
+  new test.
 - **The elkjs parity suite runs in CI.** `tests/elkjs/` holds ELK graphs and what elkjs 0.9.3
   returns for them; `tests/elkjs_parity.rs` holds `layout()` to them, number for number.
   `oracle/record.mjs` records a new case. Never edit an expected file by hand.
-- Before you call a test done, break the code it guards and watch the test fail. Then restore
+- **Break the code each test guards once on purpose, and watch the test fail.** Then restore
   the code.
+- **Name that mutation in a comment above the test**, such as `// Mutation: accept a NaN width.`
+  This comment is the one exception to "comments say why, not what". A table-driven or snapshot
+  test names one mutation per case it adds. The rule binds new and changed tests; an older test
+  gets its comment when it changes.
 
 ```bash
 cargo build
@@ -97,7 +103,8 @@ A review checks, in this order:
    the result.
 4. **Caller input.** Malformed input gives an error, never a panic: no `unwrap`, `expect` or
    indexing that a caller's graph can break.
-5. **Tests.** Each new feature has a test that fails when the feature breaks. A change to
+5. **Tests.** Each kind of input the change reads, each edge value and each error has a test.
+   Each new or changed test names a mutation of the code that makes it fail. A change to
    `tests/snapshots/` is explained in the pull request.
 6. **Scope.** The pull request does what its issue asks, and no more.
 
