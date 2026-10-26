@@ -40,10 +40,12 @@ The same graph gives the same layout, bit for bit, on every machine.
 
 ## Tests
 
-- **Each feature gets at least one test that shows it works.** It does not need full coverage,
-  but it must fail when the feature breaks.
-- Before you call a test done, break the code it guards and watch the test fail. Then restore
-  the code.
+- **Test each feature for every equivalence class, boundary and error case.** One happy path
+  is not enough. Example: an option that takes a number gets a test for a valid value, for zero,
+  for a negative value, and for text that is no number.
+- **Break every test once on purpose and watch it fail.** Then restore the code. Name the
+  mutation in a comment above the test, such as `// Mutation: drop the zero check in
+  parse_spacing.`
 
 ```bash
 cargo build
