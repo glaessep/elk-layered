@@ -1370,11 +1370,14 @@ mod tests {
             layer_constraint: None,
             port_alignment: None,
             port_constraints: None,
-            node_label_placement: crate::options::NodeLabelPlacement::Fixed,
+            node_label_placement: crate::options::NodeLabelPlacement::FIXED,
             node_flexibility: crate::options::NodeFlexibility::None,
             ports_surrounding: None,
             nested_options: None,
-            label: None,
+            labels: Vec::new(),
+            node_size: Default::default(),
+            self_loop_distribution: Default::default(),
+            self_loop_ordering: Default::default(),
         }
     }
 

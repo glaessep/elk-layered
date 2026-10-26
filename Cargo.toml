@@ -13,3 +13,11 @@ categories = ["visualization"]
 
 [dependencies]
 thiserror = "2.0.21"
+serde = { version = "1.0.229", features = ["derive"], optional = true }
+
+[features]
+# Reads and writes the graph types as elkjs's JSON.
+serde = ["dep:serde"]
+
+[dev-dependencies]
+serde_json = "1.0.154"

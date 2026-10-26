@@ -6,7 +6,7 @@
 use super::vertical_spacing;
 use crate::common::networksimplex::{NGraph, NetworkSimplex, NetworkSimplexError, coordinate};
 use crate::graph::{LGraph, LNodeKind, PortRef, PortSide};
-use crate::options::{NodeFlexibility, NodeLabelPlacement};
+use crate::options::{NodeFlexibility, NodeLabelLocation};
 
 #[derive(Clone, Copy)]
 struct NodeRep {
@@ -208,20 +208,20 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
                     port.position.y = aux.graph.nodes[*position].layer as f64 - y;
                 }
             }
-            let label_shift = match data.node_label_placement {
-                NodeLabelPlacement::InsideBottomLeft
-                | NodeLabelPlacement::InsideBottomCenter
-                | NodeLabelPlacement::InsideBottomRight
-                | NodeLabelPlacement::OutsideBottomLeft
-                | NodeLabelPlacement::OutsideBottomCenter
-                | NodeLabelPlacement::OutsideBottomRight
-                | NodeLabelPlacement::OutsideLeftBottom
-                | NodeLabelPlacement::OutsideRightBottom => size_delta,
-                NodeLabelPlacement::InsideCenterLeft
-                | NodeLabelPlacement::InsideCenter
-                | NodeLabelPlacement::InsideCenterRight
-                | NodeLabelPlacement::OutsideLeftCenter
-                | NodeLabelPlacement::OutsideRightCenter => size_delta / 2.0,
+            let label_shift = match data.node_label_placement.location() {
+                NodeLabelLocation::InsideBottomLeft
+                | NodeLabelLocation::InsideBottomCenter
+                | NodeLabelLocation::InsideBottomRight
+                | NodeLabelLocation::OutsideBottomLeft
+                | NodeLabelLocation::OutsideBottomCenter
+                | NodeLabelLocation::OutsideBottomRight
+                | NodeLabelLocation::OutsideLeftBottom
+                | NodeLabelLocation::OutsideRightBottom => size_delta,
+                NodeLabelLocation::InsideCenterLeft
+                | NodeLabelLocation::InsideCenter
+                | NodeLabelLocation::InsideCenterRight
+                | NodeLabelLocation::OutsideLeftCenter
+                | NodeLabelLocation::OutsideRightCenter => size_delta / 2.0,
                 _ => 0.0,
             };
             for label in &mut data.labels {
@@ -674,11 +674,14 @@ mod tests {
             layer_constraint: None,
             port_alignment: None,
             port_constraints: None,
-            node_label_placement: crate::options::NodeLabelPlacement::Fixed,
+            node_label_placement: crate::options::NodeLabelPlacement::FIXED,
             node_flexibility: crate::options::NodeFlexibility::None,
             ports_surrounding: None,
             nested_options: None,
-            label: None,
+            labels: Vec::new(),
+            node_size: Default::default(),
+            self_loop_distribution: Default::default(),
+            self_loop_ordering: Default::default(),
         }
     }
 
@@ -780,7 +783,7 @@ mod tests {
 
     #[test]
     fn flexible_large_coordinates_and_bottom_labels_remain_source_aligned() {
-        use NodeLabelPlacement::*;
+        use NodeLabelLocation::*;
         for height in [160.5, 100_000_000.5] {
             for placement in [
                 InsideBottomLeft,
@@ -794,7 +797,8 @@ mod tests {
             ] {
                 let mut middle = node("X", 80.0, height);
                 middle.node_flexibility = NodeFlexibility::PortPosition;
-                middle.node_label_placement = placement;
+                middle.node_label_placement =
+                    crate::options::NodeLabelPlacement::from_location(placement);
                 let mut graph = graph(
                     vec![node("A", 40.0, 20.0), middle, node("B", 40.0, 20.0)],
                     vec![edge("A-X", "A", "X"), edge("X-B", "X", "B")],

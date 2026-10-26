@@ -299,7 +299,7 @@ fn hide_ports(graph: &LGraph, holder: &mut SelfLoopHolder) {
 }
 
 fn assign_hidden_port_sides(graph: &mut LGraph, holder: &SelfLoopHolder) {
-    match graph.options.self_loop_distribution {
+    match graph.layerless_nodes[holder.node].self_loop_distribution {
         SelfLoopDistributionStrategy::North => assign_hidden_ports_to_north(graph, holder),
         SelfLoopDistributionStrategy::NorthSouth => {
             assign_hidden_ports_to_north_or_south(graph, holder)
@@ -547,7 +547,9 @@ fn process_one_side_loops(
         .iter()
         .filter(|hyper_loop| hyper_loop.self_loop_type == Some(SelfLoopType::OneSide))
         .collect::<Vec<_>>();
-    if graph.options.self_loop_ordering == SelfLoopOrderingStrategy::ReverseStacked {
+    if graph.layerless_nodes[holder.node].self_loop_ordering
+        == SelfLoopOrderingStrategy::ReverseStacked
+    {
         one_side_loops.reverse();
     }
 
@@ -562,7 +564,7 @@ fn process_one_side_loops(
 
         let mut sorted_ports = hyper_loop.ports.clone();
         sorted_ports.sort_by_key(|port| self_loop_port_net_flow(hyper_loop, port.port));
-        match graph.options.self_loop_ordering {
+        match graph.layerless_nodes[holder.node].self_loop_ordering {
             SelfLoopOrderingStrategy::Sequenced => {
                 target_areas.add_port_list(
                     sorted_ports
@@ -2477,11 +2479,14 @@ mod tests {
             layer_constraint: None,
             port_alignment: None,
             port_constraints: None,
-            node_label_placement: crate::options::NodeLabelPlacement::Fixed,
+            node_label_placement: crate::options::NodeLabelPlacement::FIXED,
             node_flexibility: crate::options::NodeFlexibility::None,
             ports_surrounding: None,
             nested_options: None,
-            label: None,
+            labels: Vec::new(),
+            node_size: Default::default(),
+            self_loop_distribution: Default::default(),
+            self_loop_ordering: Default::default(),
         }
     }
 
@@ -2606,10 +2611,9 @@ mod tests {
             "root",
             LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
-        graph.options.self_loop_distribution = SelfLoopDistributionStrategy::North;
-        graph.options.self_loop_ordering = SelfLoopOrderingStrategy::Sequenced;
-
         let node = add_node(&mut graph, "A");
+        graph.layerless_nodes[node].self_loop_distribution = SelfLoopDistributionStrategy::North;
+        graph.layerless_nodes[node].self_loop_ordering = SelfLoopOrderingStrategy::Sequenced;
         let source = add_port(&mut graph, node, PortSide::North);
         let target = add_port(&mut graph, node, PortSide::North);
         graph.add_edge(self_loop_edge("loop", "A", source, target));
@@ -2631,10 +2635,9 @@ mod tests {
             "root",
             LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
-        graph.options.self_loop_distribution = SelfLoopDistributionStrategy::North;
-        graph.options.self_loop_ordering = SelfLoopOrderingStrategy::ReverseStacked;
-
         let node = add_node(&mut graph, "A");
+        graph.layerless_nodes[node].self_loop_distribution = SelfLoopDistributionStrategy::North;
+        graph.layerless_nodes[node].self_loop_ordering = SelfLoopOrderingStrategy::ReverseStacked;
         let p0 = add_port(&mut graph, node, PortSide::North);
         let p1 = add_port(&mut graph, node, PortSide::North);
         let p2 = add_port(&mut graph, node, PortSide::North);
@@ -2772,8 +2775,8 @@ mod tests {
         );
         // The Mermaid adapter default is node-scoped NORTH. Exercise the explicit
         // node strategy here so this test continues to cover EQUALLY assignment.
-        graph.options.self_loop_distribution = SelfLoopDistributionStrategy::Equally;
         let node = add_node(&mut graph, "A");
+        graph.layerless_nodes[node].self_loop_distribution = SelfLoopDistributionStrategy::Equally;
         let single_port = graph
             .add_port(
                 node,

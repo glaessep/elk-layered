@@ -643,10 +643,9 @@ pub fn execute_ported_processors(graph: &mut LGraph) -> PipelineResult<Vec<Proce
     }
 
     // Compound layout resizes through its scheduled HierarchicalNodeResizer. Flat layout
-    // applies ElkLayered.resizeGraph after direction postprocessing and component combination.
-    if graph.options.hierarchy_handling != super::options::HierarchyHandling::IncludeChildren
-        && graph.options.node_size_minimum.is_some()
-    {
+    // applies ElkLayered.resizeGraph after direction postprocessing and component combination,
+    // whether or not a minimum size is set: it recomputes the size from the padding either way.
+    if graph.options.hierarchy_handling != super::options::HierarchyHandling::IncludeChildren {
         resize_graph_to_minimum(graph)?;
     }
 
@@ -1289,6 +1288,8 @@ fn resize_layered_node(node: &mut LNode, new_size: LSize, move_ports: bool, move
     }
 
     node.size = new_size;
+    // `LGraphUtil.resizeNode` fixes the size: later processors keep it.
+    node.node_size.constraints = crate::options::SizeConstraints::FIXED;
 }
 
 fn ratio_or_one(numerator: f64, denominator: f64) -> f64 {
@@ -1718,11 +1719,14 @@ mod tests {
             layer_constraint: None,
             port_alignment: None,
             port_constraints: None,
-            node_label_placement: crate::options::NodeLabelPlacement::Fixed,
+            node_label_placement: crate::options::NodeLabelPlacement::FIXED,
             node_flexibility: crate::options::NodeFlexibility::None,
             ports_surrounding: None,
             nested_options: None,
-            label: None,
+            labels: Vec::new(),
+            node_size: Default::default(),
+            self_loop_distribution: Default::default(),
+            self_loop_ordering: Default::default(),
         }
     }
 
@@ -2494,11 +2498,14 @@ mod tests {
                     layer_constraint: None,
                     port_alignment: None,
                     port_constraints: None,
-                    node_label_placement: crate::options::NodeLabelPlacement::Fixed,
+                    node_label_placement: crate::options::NodeLabelPlacement::FIXED,
                     node_flexibility: crate::options::NodeFlexibility::None,
                     ports_surrounding: None,
                     nested_options: None,
-                    label: None,
+                    labels: Vec::new(),
+                    node_size: Default::default(),
+                    self_loop_distribution: Default::default(),
+                    self_loop_ordering: Default::default(),
                 },
                 ElkInputNode {
                     id: "A".to_string(),
@@ -2510,11 +2517,14 @@ mod tests {
                     layer_constraint: None,
                     port_alignment: None,
                     port_constraints: None,
-                    node_label_placement: crate::options::NodeLabelPlacement::Fixed,
+                    node_label_placement: crate::options::NodeLabelPlacement::FIXED,
                     node_flexibility: crate::options::NodeFlexibility::None,
                     ports_surrounding: None,
                     nested_options: None,
-                    label: None,
+                    labels: Vec::new(),
+                    node_size: Default::default(),
+                    self_loop_distribution: Default::default(),
+                    self_loop_ordering: Default::default(),
                 },
             ],
             edges: vec![
@@ -2576,11 +2586,14 @@ mod tests {
                 layer_constraint: None,
                 port_alignment: None,
                 port_constraints: None,
-                node_label_placement: crate::options::NodeLabelPlacement::Fixed,
+                node_label_placement: crate::options::NodeLabelPlacement::FIXED,
                 node_flexibility: crate::options::NodeFlexibility::None,
                 ports_surrounding: None,
                 nested_options: None,
-                label: None,
+                labels: Vec::new(),
+                node_size: Default::default(),
+                self_loop_distribution: Default::default(),
+                self_loop_ordering: Default::default(),
             }],
             edges: vec![ElkInputEdge {
                 id: "A-A".to_string(),
@@ -3134,10 +3147,10 @@ mod tests {
             width: 900.0,
             height: 800.0,
         };
-        with_minimum.options.node_size_minimum = Some(minimum);
+        with_minimum.options.node_size = crate::options::NodeSizing::with_minimum(minimum);
         execute_ported_processors(&mut graph).unwrap();
         execute_ported_processors(&mut with_minimum).unwrap();
-        assert_eq!(with_minimum.options.node_size_minimum, Some(minimum));
+        assert_eq!(with_minimum.options.node_size.minimum, minimum);
         assert_eq!(with_minimum.exported_root_size(), minimum);
         for (index, id) in ids.iter().enumerate() {
             assert_eq!(&graph.layerless_nodes[index].id, id);
@@ -3436,7 +3449,7 @@ mod tests {
                     direction,
                     hierarchy_handling: handling,
                     padding: ElkPadding::uniform(0.0),
-                    node_size_minimum: Some(LSize {
+                    node_size: crate::options::NodeSizing::with_minimum(LSize {
                         width: 120.0,
                         height: 80.0,
                     }),
@@ -3473,12 +3486,21 @@ mod tests {
         let mut group = node("g");
         group.width = 0.0;
         group.height = 0.0;
-        group.node_label_placement = NodeLabelPlacement::InsideTopCenter;
-        group.label = Some(ElkInputLabel::center("label", 100.0, 10.0));
+        group.node_label_placement =
+            NodeLabelPlacement::from_location(crate::options::NodeLabelLocation::InsideTopCenter);
+        group.labels = vec![ElkInputLabel::center("label", 100.0, 10.0)];
+        group.node_size = crate::options::NodeSizing {
+            constraints: crate::options::SizeConstraints::NODE_LABELS
+                | crate::options::SizeConstraints::MINIMUM_SIZE,
+            ..Default::default()
+        };
         group.nested_options = Some(Box::new(LayeredOptions {
             padding: ElkPadding::uniform(0.0),
-            node_size_minimum: Some(LSize::default()),
-            node_size_include_labels: true,
+            node_size: crate::options::NodeSizing {
+                constraints: crate::options::SizeConstraints::NODE_LABELS
+                    | crate::options::SizeConstraints::MINIMUM_SIZE,
+                ..Default::default()
+            },
             ..Default::default()
         }));
         let mut child = node("a");
@@ -3525,7 +3547,7 @@ mod tests {
             let mut graph = import_graph(&ElkInputGraph {
                 id: "root".into(),
                 options: LayeredOptions {
-                    node_size_minimum: Some(LSize {
+                    node_size: crate::options::NodeSizing::with_minimum(LSize {
                         width,
                         height: 80.0,
                     }),
@@ -3542,19 +3564,6 @@ mod tests {
             ));
             assert_eq!(graph.offset, LPoint::default());
         }
-        let mut options = LayeredOptions {
-            node_size_include_labels: true,
-            ..Default::default()
-        };
-        assert!(
-            options
-                .include_inside_top_center_label_minimum(LSize {
-                    width: 40.0,
-                    height: f64::MAX
-                })
-                .is_err()
-        );
-        assert_eq!(options.node_size_minimum, None);
     }
 
     #[test]
@@ -3562,7 +3571,7 @@ mod tests {
         let mut graph = LGraph::new("root", LayeredOptions::default());
         resize_graph_to_minimum(&mut graph).unwrap();
         assert_eq!(actual_graph_size(&graph), LSize::default());
-        graph.options.node_size_minimum = Some(LSize {
+        graph.options.node_size = crate::options::NodeSizing::with_minimum(LSize {
             width: 0.0,
             height: -1.0,
         });

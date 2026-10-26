@@ -36,7 +36,10 @@ fn node(id: &str, width: f64, height: f64, parent: Option<&str>) -> ElkInputNode
         node_flexibility: NodeFlexibility::default(),
         ports_surrounding: None,
         nested_options: None,
-        label: None,
+        labels: Vec::new(),
+        node_size: Default::default(),
+        self_loop_distribution: Default::default(),
+        self_loop_ordering: Default::default(),
     }
 }
 

@@ -6,13 +6,18 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/IntermediateProcessorStrategy.java
 //! - https://github.com/eclipse-elk/elk/tree/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/graph
 
+mod api;
 mod common;
 mod components;
 mod compound;
 mod configurator;
+mod error;
+mod export;
 mod graph;
 mod importer;
 mod intermediate;
+mod layout;
+mod layout_options;
 mod options;
 mod p1cycles;
 mod p2layers;
@@ -28,10 +33,11 @@ mod transform;
 // may carry ELK's `randomSeed = 0` sentinel, so only public pipeline entry points are allowed to
 // execute it: they configure the graph first and fail closed on that sentinel. Keep phase helpers
 // crate-private. There is no entry point that stops the pipeline half way.
+pub use api::{ElkEdge, ElkEdgeSection, ElkLabel, ElkNode, ElkPoint, ElkPort};
 pub use common::networksimplex::NetworkSimplexError;
-pub use common::nodespacing::inside_top_center_micro_layout;
 pub use components::ComponentError;
 pub use configurator::{LayeredSpacings, configure_graph_properties, configured_options};
+pub use error::Error;
 pub use graph::{
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphProperties, LGraph, LLabel,
     LMargin, LNode, LNodeKind, LPadding, LPoint, LPort, LSize, LabelSide, Layer, LayeredEdge,
@@ -43,6 +49,7 @@ pub use importer::{
     ElkInputNode, ImportError, ImportResult, import_graph, import_graph_with_segments,
 };
 pub use intermediate::IntermediateError;
+pub use layout::layout;
 pub use options::{
     Alignment, ContentAlignment, CycleBreakingStrategy, DirectionCongruency,
     EdgeLabelSideSelection, EdgeRouting, ElkDirection, ElkPadding, FixedAlignment,
