@@ -1778,11 +1778,35 @@ fn place_end_label_cells_for_node(
     }
 
     if vertical_layout {
-        remove_end_label_overlaps(graph, node, PortSide::East, 2.0 * label_label_spacing);
-        remove_end_label_overlaps(graph, node, PortSide::West, 2.0 * label_label_spacing);
+        remove_end_label_overlaps(
+            graph,
+            node,
+            PortSide::East,
+            2.0 * label_label_spacing,
+            edge_label_spacing,
+        );
+        remove_end_label_overlaps(
+            graph,
+            node,
+            PortSide::West,
+            2.0 * label_label_spacing,
+            edge_label_spacing,
+        );
     } else {
-        remove_end_label_overlaps(graph, node, PortSide::North, 2.0 * label_label_spacing);
-        remove_end_label_overlaps(graph, node, PortSide::South, 2.0 * label_label_spacing);
+        remove_end_label_overlaps(
+            graph,
+            node,
+            PortSide::North,
+            2.0 * label_label_spacing,
+            edge_label_spacing,
+        );
+        remove_end_label_overlaps(
+            graph,
+            node,
+            PortSide::South,
+            2.0 * label_label_spacing,
+            edge_label_spacing,
+        );
     }
 
     update_end_label_node_margin(graph, node);
@@ -1916,142 +1940,137 @@ fn max_incident_edge_thickness(graph: &LGraph, port: &crate::graph::LPort) -> f6
         .fold(0.0, f64::max)
 }
 
-fn remove_end_label_overlaps(graph: &mut LGraph, node: usize, port_side: PortSide, gap: f64) {
-    let mut ports = graph.layerless_nodes[node]
-        .ports
-        .iter()
-        .enumerate()
-        .filter_map(|(port, port_data)| {
-            (port_data.side == port_side && port_data.end_label_cell.is_some()).then_some(port)
-        })
-        .collect::<Vec<_>>();
+/// A label cell inside the strip overlap remover, in the remover's own coordinates.
+///
+/// Ports `RectangleStripOverlapRemover.RectangleNode` at commit `62d5909`.
+struct StripRectangle {
+    port: usize,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    overlapping: Vec<usize>,
+    placed: bool,
+}
 
-    if ports.len() <= 1 {
+/// Ports `EndLabelPreprocessor.removeLabelOverlaps` and `calculateOverlapStartCoordinate` at
+/// commit `62d5909`. It hands the label cells of one port side to `RectangleStripOverlapRemover`
+/// with its default greedy strategy (`GreedyRectangleStripOverlapRemover`).
+///
+/// Only cells that overlap across the side (north and south: in x) are pushed apart. Two cells
+/// side by side keep their place. Every cell is moved, even a lone one, as in Java.
+fn remove_end_label_overlaps(
+    graph: &mut LGraph,
+    node: usize,
+    port_side: PortSide,
+    gap: f64,
+    edge_label_spacing: f64,
+) {
+    let node_size = graph.layerless_nodes[node].size;
+    let node_margin = graph.layerless_nodes[node].margin;
+    let start = match port_side {
+        PortSide::North => -node_margin.top - edge_label_spacing,
+        PortSide::South => node_size.height + node_margin.bottom + edge_label_spacing,
+        PortSide::East => node_size.width + node_margin.right + edge_label_spacing,
+        PortSide::West => -node_margin.left - edge_label_spacing,
+        PortSide::Undefined => return,
+    };
+    let sideways = matches!(port_side, PortSide::East | PortSide::West);
+
+    // Import the rectangles (`importRectangle`): for east and west the strip axis is x, so the
+    // rectangle is turned by 90 degrees.
+    let mut rects = Vec::new();
+    for (port_index, port) in graph.layerless_nodes[node].ports.iter().enumerate() {
+        if port.side != port_side {
+            continue;
+        }
+        let Some(cell) = port.end_label_cell else {
+            continue;
+        };
+        let (x, y, width, height) = if sideways {
+            (cell.position.y, 0.0, cell.size.height, cell.size.width)
+        } else {
+            (
+                cell.position.x,
+                cell.position.y,
+                cell.size.width,
+                cell.size.height,
+            )
+        };
+        rects.push(StripRectangle {
+            port: port_index,
+            x,
+            y,
+            width,
+            height,
+            overlapping: Vec::new(),
+            placed: false,
+        });
+    }
+    if rects.is_empty() {
         return;
     }
 
-    match port_side {
-        PortSide::North => {
-            ports.sort_by(|a, b| {
-                graph.layerless_nodes[node].ports[*b]
-                    .end_label_cell
-                    .unwrap()
-                    .position
-                    .y
-                    .total_cmp(
-                        &graph.layerless_nodes[node].ports[*a]
-                            .end_label_cell
-                            .unwrap()
-                            .position
-                            .y,
-                    )
-            });
-            let mut limit = f64::INFINITY;
-            for port in ports {
-                let mut cell = graph.layerless_nodes[node].ports[port]
-                    .end_label_cell
-                    .unwrap();
-                let max_y = if limit.is_finite() {
-                    limit - gap - cell.size.height
-                } else {
-                    cell.position.y
-                };
-                cell.position.y = cell.position.y.min(max_y);
-                limit = cell.position.y;
-                graph.layerless_nodes[node].ports[port].end_label_cell = Some(cell);
+    // removeOverlaps: a stable sort by left border (Java's List.sort, also stable in GWT).
+    rects.sort_by(|a, b| a.x.total_cmp(&b.x));
+
+    // computeOverlaps: scanline over the left borders. Java keeps the cells that touch the
+    // scanline in a TreeSet ordered by right border, so a cell whose right border equals one
+    // already in the set is not added to it. Touching borders count as overlapping.
+    let mut intersecting: Vec<usize> = Vec::new();
+    for current in 0..rects.len() {
+        let scanline = rects[current].x;
+        while let Some(&first) = intersecting.first() {
+            if rects[first].x + rects[first].width < scanline {
+                intersecting.remove(0);
+            } else {
+                break;
             }
         }
-        PortSide::South => {
-            ports.sort_by(|a, b| {
-                graph.layerless_nodes[node].ports[*a]
-                    .end_label_cell
-                    .unwrap()
-                    .position
-                    .y
-                    .total_cmp(
-                        &graph.layerless_nodes[node].ports[*b]
-                            .end_label_cell
-                            .unwrap()
-                            .position
-                            .y,
-                    )
-            });
-            let mut limit = f64::NEG_INFINITY;
-            for port in ports {
-                let mut cell = graph.layerless_nodes[node].ports[port]
-                    .end_label_cell
-                    .unwrap();
-                let min_y = if limit.is_finite() {
-                    limit + gap
-                } else {
-                    cell.position.y
-                };
-                cell.position.y = cell.position.y.max(min_y);
-                limit = cell.position.y + cell.size.height;
-                graph.layerless_nodes[node].ports[port].end_label_cell = Some(cell);
+        for &other in &intersecting {
+            rects[other].overlapping.push(current);
+            rects[current].overlapping.push(other);
+        }
+        let right = rects[current].x + rects[current].width;
+        if let Err(position) = intersecting
+            .binary_search_by(|&other| (rects[other].x + rects[other].width).total_cmp(&right))
+        {
+            intersecting.insert(position, current);
+        }
+    }
+
+    // GreedyRectangleStripOverlapRemover.removeOverlaps: lowest position that clears every
+    // already placed cell it overlaps.
+    for current in 0..rects.len() {
+        let mut y_pos = 0.0;
+        let mut overlapping = std::mem::take(&mut rects[current].overlapping);
+        overlapping.sort_by(|&a, &b| rects[a].y.total_cmp(&rects[b].y));
+        for &other in &overlapping {
+            if rects[other].placed
+                && y_pos < rects[other].y + rects[other].height + gap
+                && y_pos + rects[current].height + gap > rects[other].y
+            {
+                y_pos = rects[other].y + rects[other].height + gap;
             }
         }
-        PortSide::East => {
-            ports.sort_by(|a, b| {
-                graph.layerless_nodes[node].ports[*a]
-                    .end_label_cell
-                    .unwrap()
-                    .position
-                    .x
-                    .total_cmp(
-                        &graph.layerless_nodes[node].ports[*b]
-                            .end_label_cell
-                            .unwrap()
-                            .position
-                            .x,
-                    )
-            });
-            let mut limit = f64::NEG_INFINITY;
-            for port in ports {
-                let mut cell = graph.layerless_nodes[node].ports[port]
-                    .end_label_cell
-                    .unwrap();
-                let min_x = if limit.is_finite() {
-                    limit + gap
-                } else {
-                    cell.position.x
-                };
-                cell.position.x = cell.position.x.max(min_x);
-                limit = cell.position.x + cell.size.width;
-                graph.layerless_nodes[node].ports[port].end_label_cell = Some(cell);
-            }
+        rects[current].overlapping = overlapping;
+        rects[current].y = y_pos;
+        rects[current].placed = true;
+    }
+
+    // exportRectangle
+    for rect in &rects {
+        let Some(mut cell) = graph.layerless_nodes[node].ports[rect.port].end_label_cell else {
+            continue;
+        };
+        match port_side {
+            PortSide::North => cell.position.y = start - rect.height - rect.y,
+            PortSide::South => cell.position.y = rect.y + start,
+            PortSide::West => cell.position.x = start - rect.height - rect.y,
+            PortSide::East => cell.position.x = start + rect.y,
+            PortSide::Undefined => {}
         }
-        PortSide::West => {
-            ports.sort_by(|a, b| {
-                graph.layerless_nodes[node].ports[*b]
-                    .end_label_cell
-                    .unwrap()
-                    .position
-                    .x
-                    .total_cmp(
-                        &graph.layerless_nodes[node].ports[*a]
-                            .end_label_cell
-                            .unwrap()
-                            .position
-                            .x,
-                    )
-            });
-            let mut limit = f64::INFINITY;
-            for port in ports {
-                let mut cell = graph.layerless_nodes[node].ports[port]
-                    .end_label_cell
-                    .unwrap();
-                let max_x = if limit.is_finite() {
-                    limit - gap - cell.size.width
-                } else {
-                    cell.position.x
-                };
-                cell.position.x = cell.position.x.min(max_x);
-                limit = cell.position.x;
-                graph.layerless_nodes[node].ports[port].end_label_cell = Some(cell);
-            }
-        }
-        PortSide::Undefined => {}
+        graph.layerless_nodes[node].ports[rect.port].end_label_cell = Some(cell);
     }
 }
 
