@@ -2055,29 +2055,45 @@ fn remove_end_label_overlaps(graph: &mut LGraph, node: usize, port_side: PortSid
     }
 }
 
+/// Source: `EndLabelPreprocessor.updateNodeMargins`. ELK keeps the margin as a rectangle with
+/// an x, a y, a width and a height, and reads the right and bottom margin back from the width
+/// and height. This is not the same as reading them from the far corner.
 fn update_end_label_node_margin(graph: &mut LGraph, node: usize) {
+    // ELK skips nodes without end label cells.
+    if graph.layerless_nodes[node]
+        .ports
+        .iter()
+        .all(|port| port.end_label_cell.is_none())
+    {
+        return;
+    }
+
     let node_size = graph.layerless_nodes[node].size;
     let node_margin = graph.layerless_nodes[node].margin;
     let mut min_x = -node_margin.left;
     let mut min_y = -node_margin.top;
-    let mut max_x = node_size.width + node_margin.right;
-    let mut max_y = node_size.height + node_margin.bottom;
+    let mut width = node_margin.left + node_size.width + node_margin.right;
+    let mut height = node_margin.top + node_size.height + node_margin.bottom;
 
     for port in &graph.layerless_nodes[node].ports {
         if let Some(cell) = port.end_label_cell {
-            min_x = min_x.min(cell.position.x);
-            min_y = min_y.min(cell.position.y);
-            max_x = max_x.max(cell.position.x + cell.size.width);
-            max_y = max_y.max(cell.position.y + cell.size.height);
+            // ElkRectangle.union
+            let x1 = min_x.min(cell.position.x);
+            let y1 = min_y.min(cell.position.y);
+            let x2 = (min_x + width).max(cell.position.x + cell.size.width);
+            let y2 = (min_y + height).max(cell.position.y + cell.size.height);
+            min_x = x1;
+            min_y = y1;
+            width = x2 - x1;
+            height = y2 - y1;
         }
     }
 
-    graph.layerless_nodes[node].margin.left = (-min_x).max(0.0);
-    graph.layerless_nodes[node].margin.top = (-min_y).max(0.0);
-    graph.layerless_nodes[node].margin.right =
-        (max_x - graph.layerless_nodes[node].margin.left - node_size.width).max(0.0);
-    graph.layerless_nodes[node].margin.bottom =
-        (max_y - graph.layerless_nodes[node].margin.top - node_size.height).max(0.0);
+    let margin = &mut graph.layerless_nodes[node].margin;
+    margin.left = -min_x;
+    margin.top = -min_y;
+    margin.right = width - margin.left - node_size.width;
+    margin.bottom = height - margin.top - node_size.height;
 }
 
 pub fn sort_end_labels(graph: &mut LGraph) {
