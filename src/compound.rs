@@ -1091,12 +1091,29 @@ fn introduce_hierarchical_edge_segment(
         }
     }
 
+    // `createExternalPortDummy` takes the net flow of the parent's own port from
+    // `calculateNetFlow(outsidePort)`. That count votes the other way when the edge's far end is
+    // not a direct child of the parent node (an edge to a grandchild, say). The count covers
+    // every edge on that port. Here a port carries this one edge only: the importer gives each
+    // edge its own port, and `mergeEdges`, which would share them, is refused as not ported.
+    let far_end_is_direct_child = match (&pending.source, &pending.target) {
+        (
+            PendingSegmentEndpoint::LocalNode { node_id, .. },
+            PendingSegmentEndpoint::ParentBoundary { .. },
+        ) => node_id == &edge.source_node_id,
+        (
+            PendingSegmentEndpoint::ParentBoundary { .. },
+            PendingSegmentEndpoint::LocalNode { node_id, .. },
+        ) => node_id == &edge.target_node_id,
+        _ => true,
+    };
     let source = ensure_segment_endpoint_port(
         graph,
         local_ports,
         &pending.source,
         PortType::Output,
         parent_offsets,
+        far_end_is_direct_child,
     );
     let target = ensure_segment_endpoint_port(
         graph,
@@ -1104,6 +1121,7 @@ fn introduce_hierarchical_edge_segment(
         &pending.target,
         PortType::Input,
         parent_offsets,
+        far_end_is_direct_child,
     );
 
     if source.node == target.node {
@@ -1191,6 +1209,7 @@ fn ensure_segment_endpoint_port(
     endpoint: &PendingSegmentEndpoint,
     port_type: PortType,
     parent_offsets: &ParentPortBorderOffsets,
+    far_end_is_direct_child: bool,
 ) -> PortRef {
     match endpoint {
         PendingSegmentEndpoint::LocalNode { node_id, port_key } => local_ports
@@ -1204,11 +1223,12 @@ fn ensure_segment_endpoint_port(
             endpoint_parent_port_type(endpoint, port_type),
             endpoint_port_key(endpoint).unwrap_or_default(),
             endpoint_connects_parent_node(endpoint).then(|| {
-                parent_offsets
+                let border_offset = parent_offsets
                     .get(&endpoint_parent_port_type(endpoint, port_type))
                     .and_then(|ports| ports.get(endpoint_port_key(endpoint).unwrap_or_default()))
                     .copied()
-                    .unwrap_or(0.0)
+                    .unwrap_or(0.0);
+                (border_offset, far_end_is_direct_child)
             }),
         ),
     }
@@ -1696,9 +1716,13 @@ fn create_parent_boundary_port(
     dummy_port_type: PortType,
     parent_port_type: PortType,
     parent_port_key: &str,
-    original_parent_border_offset: Option<f64>,
+    // `Some((original border offset, far end is a direct child))` when the edge ends at the parent
+    // node itself.
+    parent_end: Option<(f64, bool)>,
 ) -> PortRef {
-    let connects_parent_node = original_parent_border_offset.is_some();
+    let connects_parent_node = parent_end.is_some();
+    let original_parent_border_offset = parent_end.map(|(offset, _)| offset);
+    let far_end_is_direct_child = parent_end.is_none_or(|(_, direct)| direct);
     graph.graph_properties.external_ports = true;
     graph.graph_properties.non_free_ports = true;
     graph.options.port_constraints = if graph.options.port_constraints.is_side_fixed() {
@@ -1739,9 +1763,12 @@ fn create_parent_boundary_port(
         dummy_port_type,
         graph.options.port_constraints,
         port_side,
-        match dummy_port_type {
-            PortType::Input => -1,
-            PortType::Output => 1,
+        // CompoundGraphPreprocessor#createExternalPortDummy, parent-node branch: the net flow is
+        // `calculateNetFlow(outsidePort)`. Only an edge to a direct child counts as the port's
+        // flow into the nested graph. Any deeper end counts the other way.
+        match (dummy_port_type, !far_end_is_direct_child) {
+            (PortType::Input, false) | (PortType::Output, true) => -1,
+            (PortType::Output, false) | (PortType::Input, true) => 1,
         },
         Default::default(),
         LSize::default(),
