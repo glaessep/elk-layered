@@ -1,0 +1,191 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+    "elk.randomSeed": "22942",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "29",
+    "elk.separateConnectedComponents": "false"
+  },
+  "children": [
+    {
+      "id": "g0",
+      "children": [
+        {
+          "id": "n0",
+          "width": 42,
+          "height": 53,
+          "labels": [
+            {
+              "text": "Sensor",
+              "width": 39,
+              "height": 14,
+              "x": 1.5,
+              "y": 19.5
+            }
+          ],
+          "layoutOptions": {
+            "elk.nodeLabels.placement": "[H_CENTER, V_CENTER, INSIDE]"
+          },
+          "$H": 281,
+          "x": 82,
+          "y": 31
+        },
+        {
+          "id": "n1",
+          "width": 32.5,
+          "height": 40,
+          "$H": 284,
+          "x": 86.75,
+          "y": 104
+        }
+      ],
+      "labels": [
+        {
+          "text": "Controller",
+          "width": 65,
+          "height": 14,
+          "x": 5,
+          "y": 5
+        }
+      ],
+      "layoutOptions": {
+        "elk.nodeLabels.placement": "[H_LEFT, V_TOP, INSIDE]",
+        "elk.nodeSize.constraints": "[NODE_LABELS]"
+      },
+      "$H": 277,
+      "x": 12,
+      "y": 74.25,
+      "width": 140,
+      "height": 156
+    },
+    {
+      "id": "n2",
+      "width": 67,
+      "height": 31.5,
+      "$H": 286,
+      "x": 85,
+      "y": 22.75
+    },
+    {
+      "id": "n3",
+      "width": 91,
+      "height": 60,
+      "labels": [
+        {
+          "text": "Sensor",
+          "width": 39,
+          "height": 14,
+          "x": 26,
+          "y": 23
+        }
+      ],
+      "layoutOptions": {
+        "elk.nodeLabels.placement": "[H_CENTER, V_CENTER, INSIDE]"
+      },
+      "$H": 288,
+      "x": 290,
+      "y": 122.25
+    },
+    {
+      "id": "n4",
+      "width": 20.5,
+      "height": 53,
+      "$H": 291,
+      "x": 290,
+      "y": 12
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "sources": [
+        "n2"
+      ],
+      "targets": [
+        "n4"
+      ],
+      "labels": [
+        {
+          "text": "pedal %",
+          "width": 45.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "CENTER"
+          },
+          "x": 181,
+          "y": 21.5
+        }
+      ],
+      "sections": [
+        {
+          "id": "e0_s0",
+          "startPoint": {
+            "x": 152,
+            "y": 38.5
+          },
+          "endPoint": {
+            "x": 290,
+            "y": 38.5
+          },
+          "incomingShape": "n2",
+          "outgoingShape": "n4"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e1",
+      "sources": [
+        "g0"
+      ],
+      "targets": [
+        "n3"
+      ],
+      "labels": [
+        {
+          "text": "req",
+          "width": 19.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "CENTER"
+          },
+          "x": 194,
+          "y": 155.25
+        },
+        {
+          "text": "speed",
+          "width": 32.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "HEAD"
+          },
+          "x": 255.5,
+          "y": 155.25
+        }
+      ],
+      "sections": [
+        {
+          "id": "e1_s0",
+          "startPoint": {
+            "x": 152,
+            "y": 152.25
+          },
+          "endPoint": {
+            "x": 290,
+            "y": 152.25
+          },
+          "incomingShape": "g0",
+          "outgoingShape": "n3"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 393,
+  "height": 242.25
+}

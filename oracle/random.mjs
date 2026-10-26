@@ -3,20 +3,24 @@
 // `layout()` to it.
 //
 //   cd oracle && npm install && node random.mjs ../tests/elkjs/random && node record.mjs ../tests/elkjs/random
+//   node random.mjs ../tests/elkjs/random-group-ends --group-ends && node record.mjs ../tests/elkjs/random-group-ends
+//
+// With `--group-ends`, an edge may also start or end at a group, not only at a leaf. elkjs
+// refuses some of those graphs; record.mjs then records the refusal.
 //
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
 // a feature, and then write and record the whole corpus again.
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const COUNT = 200;
-const SEED = 0x5eed;
-
 const dir = process.argv[2];
 if (!dir) {
-  console.error("usage: node random.mjs <directory>");
+  console.error("usage: node random.mjs <directory> [--group-ends]");
   process.exit(2);
 }
+const groupEnds = process.argv[3] === "--group-ends";
+const COUNT = groupEnds ? 120 : 200;
+const SEED = groupEnds ? 0x6eed : 0x5eed;
 
 // mulberry32: a small generator with a fixed seed. Its numbers only pick the graphs, so any
 // generator with a fixed seed would do.
@@ -121,6 +125,7 @@ function graph() {
   };
 
   const ends = leaves.map((n) => n.id);
+  if (groupEnds) ends.push(...groups.map((g) => g.id));
   let e = 0;
   const addEdge = (source, target) => {
     const edge = { id: `e${e++}`, sources: [source], targets: [target] };
