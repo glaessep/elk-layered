@@ -243,8 +243,7 @@ impl CrossingsCounter {
                         && dummy.graph_id == graph.id
                     {
                         // Its western and eastern port.
-                        for (index, _) in graph.layerless_nodes[dummy.node].ports.iter().enumerate()
-                        {
+                        for (index, _) in graph.layerless_nodes[dummy.node].ports.iter_with_ids() {
                             let target = PortRef {
                                 node: dummy.node,
                                 port: index,
@@ -255,7 +254,7 @@ impl CrossingsCounter {
                 }
                 LNodeKind::LongEdge => {
                     // An edge to the other port of the dummy.
-                    if let Some(index) = (0..node.ports.len()).find(|&index| index != port.port) {
+                    if let Some(index) = node.ports.ids().find(|&index| index != port.port) {
                         let target = PortRef {
                             node: port.node,
                             port: index,
@@ -349,8 +348,7 @@ impl CrossingsCounter {
                 LNodeKind::LongEdge => {
                     for port in node
                         .ports
-                        .iter()
-                        .enumerate()
+                        .iter_with_ids()
                         .filter(|(_, port)| port.side == PortSide::West)
                         .map(|(port, _)| PortRef {
                             node: current,
@@ -461,7 +459,7 @@ impl CrossingsCounter {
         let mut ports = self.connected_ports_sorted_by_position(graph, upper_port, lower_port);
         // Java reads `indexTree` here and fails with a null pointer if the counter was not set up.
         // A missing tree is a bug in the caller, never caller input. It stays loud in release
-        // builds, as `remap_port_index` does. An empty tree would count wrong without a sign.
+        // builds: an empty tree would count wrong without a sign.
         let mut index_tree = self.index_tree.take().expect(
             "count_crossings_between_ports_in_both_orders needs init_for_counting_between or \
              init_port_positions_for_in_layer_crossings_with_tree first",
@@ -675,7 +673,7 @@ impl CrossingsCounter {
         // Assign index values to the ports of the left layer, in the order north - east - south - west.
         let mut source_count = 0usize;
         for node in left_layer {
-            for (port_index, port) in graph.layerless_nodes[*node].ports.iter().enumerate() {
+            for (port_index, port) in graph.layerless_nodes[*node].ports.iter_with_ids() {
                 let has_edge = port
                     .outgoing_edges
                     .iter()
@@ -710,7 +708,7 @@ impl CrossingsCounter {
                 .filter(|port| enters_from_other_layer(port))
                 .count();
             let mut other_input_ports = 0usize;
-            for (port_index, port) in ports.iter().enumerate().rev() {
+            for (port_index, port) in ports.iter_with_ids().rev() {
                 if !enters_from_other_layer(port) {
                     continue;
                 }
@@ -738,7 +736,7 @@ impl CrossingsCounter {
         let mut alive: Vec<usize> = Vec::new();
         let mut port_to_hyperedge: HashMap<PortRef, usize> = HashMap::new();
         for node in left_layer {
-            for (port_index, port) in graph.layerless_nodes[*node].ports.iter().enumerate() {
+            for (port_index, port) in graph.layerless_nodes[*node].ports.iter_with_ids() {
                 let source_port = PortRef {
                     node: *node,
                     port: port_index,
@@ -875,8 +873,7 @@ pub(crate) fn north_south_ports_with_incident_edges(
 ) -> impl Iterator<Item = PortRef> + '_ {
     graph.layerless_nodes[node]
         .ports
-        .iter()
-        .enumerate()
+        .iter_with_ids()
         .filter(move |(_, port)| port.side == side && port.port_dummy.is_some())
         .map(move |(port, _)| PortRef { node, port })
 }
@@ -885,9 +882,9 @@ pub(crate) fn north_south_ports_with_incident_edges(
 pub(crate) fn first_port_on_side(graph: &LGraph, node: usize, side: PortSide) -> Option<PortRef> {
     graph.layerless_nodes[node]
         .ports
-        .iter()
-        .position(|port| port.side == side)
-        .map(|port| PortRef { node, port })
+        .iter_with_ids()
+        .find(|(_, port)| port.side == side)
+        .map(|(port, _)| PortRef { node, port })
 }
 
 /// The number of edges at a port, in and out. A port that is not in the graph has none.
@@ -1004,8 +1001,7 @@ pub fn ports_in_north_south_east_west_order(
 ) -> Vec<PortRef> {
     let mut ports = graph.layerless_nodes[node]
         .ports
-        .iter()
-        .enumerate()
+        .iter_with_ids()
         .filter_map(|(port_index, port)| {
             (port.side == side).then_some(PortRef {
                 node,
@@ -1022,8 +1018,7 @@ pub fn ports_in_north_south_east_west_order(
 fn ports_for_side(graph: &LGraph, node: usize, side: PortSide, top_down: bool) -> Vec<PortRef> {
     let ports = graph.layerless_nodes[node]
         .ports
-        .iter()
-        .enumerate()
+        .iter_with_ids()
         .filter_map(|(port_index, port)| {
             (port.side == side).then_some(PortRef {
                 node,
@@ -1074,6 +1069,7 @@ fn other_end_of(graph: &LGraph, edge: usize, port: PortRef) -> Option<PortRef> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::PortId;
     use crate::graph::{LGraph, LNode, LPoint, LayeredEdge, PortType};
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::options::{ElkDirection, LayeredOptions, PortConstraints};
@@ -1464,7 +1460,7 @@ mod tests {
         // for `b` is the last one, at 4.
         counter.count_crossings_between_layers(&graph, &order[0], &order[1]);
         // The sweep moves that port to the front of `n`. It keeps its id and so its position 4.
-        assert!(graph.reorder_node_ports(2, [2, 0, 1]));
+        assert!(graph.reorder_node_ports(2, crate::graph::port_ids([2, 0, 1])));
         // The last pair holds three ports, so its tree has no place 4: the count is NaN. The port
         // that now sits at the old place of the front port would read 2 and give 0.
         assert!(
@@ -1630,7 +1626,7 @@ mod tests {
     }
 
     fn dummy_for(graph: &LGraph, node: usize, port: usize) -> usize {
-        graph.layerless_nodes[node].ports[port]
+        graph.layerless_nodes[node].ports[PortId::new(port)]
             .port_dummy
             .as_ref()
             .unwrap()
@@ -1649,7 +1645,7 @@ mod tests {
         let ports = graph
             .layerless_nodes
             .iter_mut()
-            .flat_map(|node| &mut node.ports);
+            .flat_map(|node| node.ports.slots_mut());
         for (id, port) in ports.enumerate() {
             port.crossing_minimization_id = Some(id);
         }
@@ -1667,18 +1663,24 @@ mod tests {
             "ea",
             PortRef {
                 node: neighbour,
-                port: 0,
+                port: PortId::new(0),
             },
-            PortRef { node: a, port: 0 },
+            PortRef {
+                node: a,
+                port: PortId::new(0),
+            },
         ));
         for index in 0..edges_b {
             graph.add_edge(layered_edge(
                 &format!("eb{index}"),
                 PortRef {
                     node: neighbour,
-                    port: 1 + index,
+                    port: PortId::new(1 + index),
                 },
-                PortRef { node: b, port: 0 },
+                PortRef {
+                    node: b,
+                    port: PortId::new(0),
+                },
             ));
         }
         crate::north_south::preprocess_north_south_ports(&mut graph);
@@ -1731,7 +1733,7 @@ mod tests {
             "into-long",
             PortRef {
                 node: neighbour,
-                port: 3,
+                port: PortId::new(3),
             },
             west,
         ));
@@ -1758,9 +1760,12 @@ mod tests {
             "ea",
             PortRef {
                 node: neighbour,
-                port: 0,
+                port: PortId::new(0),
             },
-            PortRef { node: a, port: 0 },
+            PortRef {
+                node: a,
+                port: PortId::new(0),
+            },
         ));
         crate::north_south::preprocess_north_south_ports(&mut graph);
         let da = dummy_for(&graph, a, 0);
@@ -1785,9 +1790,12 @@ mod tests {
             "ea",
             PortRef {
                 node: neighbour,
-                port: 0,
+                port: PortId::new(0),
             },
-            PortRef { node: a, port: 0 },
+            PortRef {
+                node: a,
+                port: PortId::new(0),
+            },
         ));
         crate::north_south::preprocess_north_south_ports(&mut graph);
         let da = dummy_for(&graph, a, 0);
@@ -1810,14 +1818,18 @@ mod tests {
                 &format!("e{port}"),
                 PortRef {
                     node: neighbour,
-                    port,
+                    port: PortId::new(port),
                 },
-                PortRef { node: a, port },
+                PortRef {
+                    node: a,
+                    port: PortId::new(port),
+                },
             ));
         }
         crate::north_south::preprocess_north_south_ports(&mut graph);
-        // The first port of the list is the eastern one, so its dummy is the last in the layer.
-        let (east, west) = (dummy_for(&graph, a, 0), dummy_for(&graph, a, 1));
+        // The first port of the list is the eastern one, which is port 1. Its dummy is the last in
+        // the layer.
+        let (east, west) = (dummy_for(&graph, a, 1), dummy_for(&graph, a, 0));
         assert_eq!(graph.layers[1].nodes, vec![a, west, east]);
         assert_eq!(ns_crossings(&graph), 0.0);
 
@@ -1836,19 +1848,25 @@ mod tests {
         // The south port of `a` has an outgoing edge, so its dummy has an eastern port only.
         graph.add_edge(layered_edge(
             "from-a",
-            PortRef { node: a, port: 0 },
+            PortRef {
+                node: a,
+                port: PortId::new(0),
+            },
             PortRef {
                 node: neighbour,
-                port: 1,
+                port: PortId::new(1),
             },
         ));
         graph.add_edge(layered_edge(
             "to-b",
             PortRef {
                 node: neighbour,
-                port: 0,
+                port: PortId::new(0),
             },
-            PortRef { node: b, port: 0 },
+            PortRef {
+                node: b,
+                port: PortId::new(0),
+            },
         ));
         crate::north_south::preprocess_north_south_ports(&mut graph);
         let da = dummy_for(&graph, a, 0);
@@ -1863,10 +1881,22 @@ mod tests {
         // `a`'s southern port, the eastern port of its dummy, the western port of the dummy of
         // `b`, then the northern port of `b`.
         let expected = vec![
-            PortRef { node: a, port: 0 },
-            PortRef { node: da, port: 0 },
-            PortRef { node: db, port: 0 },
-            PortRef { node: b, port: 0 },
+            PortRef {
+                node: a,
+                port: PortId::new(0),
+            },
+            PortRef {
+                node: da,
+                port: PortId::new(0),
+            },
+            PortRef {
+                node: db,
+                port: PortId::new(0),
+            },
+            PortRef {
+                node: b,
+                port: PortId::new(0),
+            },
         ];
         assert_eq!(ports, expected);
         assert_eq!(counter.position_of(&graph, expected[1]), 1);
@@ -1914,22 +1944,22 @@ mod tests {
             "a",
             PortRef {
                 node: nodes[0],
-                port: 0,
+                port: PortId::new(0),
             },
             PortRef {
                 node: nodes[2],
-                port: 0,
+                port: PortId::new(0),
             },
         ));
         graph.add_edge(layered_edge(
             "b",
             PortRef {
                 node: nodes[1],
-                port: 0,
+                port: PortId::new(0),
             },
             PortRef {
                 node: nodes[3],
-                port: 0,
+                port: PortId::new(0),
             },
         ));
 
@@ -1976,22 +2006,22 @@ mod tests {
         let left_ports = [
             PortRef {
                 node: left,
-                port: 0,
+                port: PortId::new(0),
             },
             PortRef {
                 node: left,
-                port: 1,
+                port: PortId::new(1),
             },
         ];
         // The list of the west side runs from bottom to top: port 1 is the upper one.
         let right_ports = [
             PortRef {
                 node: right,
-                port: 1,
+                port: PortId::new(1),
             },
             PortRef {
                 node: right,
-                port: 0,
+                port: PortId::new(0),
             },
         ];
         for (index, (from, to)) in edges.into_iter().enumerate() {

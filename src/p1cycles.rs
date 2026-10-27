@@ -242,8 +242,13 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
     }
 
     for node_index in 0..node_count {
-        let port_count = graph.layerless_nodes[node_index].ports.len();
-        for port_index in 0..port_count {
+        // `reverse_edge` with `adapt_ports` can add a collector port to the node's list, so the
+        // loop walks a copy of the ids.
+        let port_ids = graph.layerless_nodes[node_index]
+            .ports
+            .ids()
+            .collect::<Vec<_>>();
+        for port_index in port_ids {
             let outgoing_edges = graph.layerless_nodes[node_index].ports[port_index]
                 .outgoing_edges
                 .clone();
@@ -397,7 +402,7 @@ fn update_neighbors(
     sources: &mut VecDeque<usize>,
     sinks: &mut VecDeque<usize>,
 ) {
-    for (port_index, port) in graph.layerless_nodes[node_index].ports.iter().enumerate() {
+    for (port_index, port) in graph.layerless_nodes[node_index].ports.iter_with_ids() {
         let port_ref = PortRef {
             node: node_index,
             port: port_index,

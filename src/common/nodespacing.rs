@@ -6,7 +6,7 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/NodeMarginCalculator.java
 
 use super::cells::{self, CellLabel, CellNode};
-use crate::graph::{LGraph, LMargin, LPadding, LPort, PortSide};
+use crate::graph::{LGraph, LMargin, LPadding, LPort, PortId, PortSide};
 use crate::options::{PortAlignment, PortConstraints};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -314,11 +314,10 @@ fn vertical_port_x(port: &LPort, node_width: f64) -> f64 {
     }
 }
 
-fn ports_on_side(graph: &LGraph, node: usize, side: PortSide) -> Vec<usize> {
+fn ports_on_side(graph: &LGraph, node: usize, side: PortSide) -> Vec<PortId> {
     let mut ports = graph.layerless_nodes[node]
         .ports
-        .iter()
-        .enumerate()
+        .iter_with_ids()
         .filter_map(|(port, port_data)| (port_data.side == side).then_some(port))
         .collect::<Vec<_>>();
     if matches!(side, PortSide::South | PortSide::West) {
@@ -580,11 +579,12 @@ mod tests {
         calculate_label_and_node_sizes(&mut graph, [node]);
 
         let expected_spacing = graph.layerless_nodes[node].size.width / 6.0;
-        for (index, port) in graph.layerless_nodes[node].ports.iter().enumerate() {
-            let expected_x = expected_spacing * (5 - index) as f64;
+        for (index, port) in graph.layerless_nodes[node].ports.iter_with_ids() {
+            let expected_x = expected_spacing * (5 - index.index()) as f64;
             assert!(
                 (port.position.x - expected_x).abs() < 1e-9,
-                "port {index} x: expected {expected_x}, got {}",
+                "port {} x: expected {expected_x}, got {}",
+                index.index(),
                 port.position.x
             );
             assert_eq!(port.position.y, 54.0);

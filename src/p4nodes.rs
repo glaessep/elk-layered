@@ -106,6 +106,7 @@ pub fn calculate_innermost_node_margins(graph: &mut LGraph) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::PortId;
     use crate::graph::{EdgeLabelPlacement, LLabel, LSize, PortSide};
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::options::{ElkDirection, LayeredOptions};
@@ -230,11 +231,11 @@ mod tests {
             .unwrap();
         graph.set_node_layer(a, 0);
         graph.set_node_layer(b, 1);
-        graph.layerless_nodes[a].ports[0].set_side(PortSide::East);
+        graph.layerless_nodes[a].ports[PortId::new(0)].set_side(PortSide::East);
 
         calculate_label_and_node_sizes(&mut graph);
 
-        let port = &graph.layerless_nodes[a].ports[0];
+        let port = &graph.layerless_nodes[a].ports[PortId::new(0)];
         assert_eq!(port.position.x, graph.layerless_nodes[a].size.width);
         assert!(port.position.y > 0.0);
         assert!(port.position.y < graph.layerless_nodes[a].size.height);

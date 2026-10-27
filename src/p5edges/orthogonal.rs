@@ -592,8 +592,7 @@ fn create_hyperedge_segments(
         let Some(lnode) = graph.layerless_nodes.get(*node) else {
             continue;
         };
-        for port_index in 0..lnode.ports.len() {
-            let port = &lnode.ports[port_index];
+        for (port_index, port) in lnode.ports.iter_with_ids() {
             let port_ref = PortRef {
                 node: *node,
                 port: port_index,

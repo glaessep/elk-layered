@@ -233,7 +233,7 @@ fn map_labels(labels: &mut [LLabel], edges: &[usize]) -> Result<(), ComponentErr
 }
 
 /// Maps every arena reference, including processor-created dummies and detached edges.
-/// Port ordinals are node-local and are deliberately unchanged.
+/// Port ids are node-local and are deliberately unchanged.
 fn remap_references(
     graph: &mut LGraph,
     nodes: &[usize],
@@ -261,7 +261,7 @@ fn remap_references(
         }
         map_labels(&mut node.labels, edges)?;
         map_labels(&mut node.represented_labels, edges)?;
-        for port in &mut node.ports {
+        for port in node.ports.slots_mut() {
             port.node = map_index(nodes, port.node, "port owner")?;
             map_optional(&mut port.long_edge_target_node, nodes, "long edge target")?;
             if let Some(origin) = &mut port.origin_port {
@@ -310,7 +310,7 @@ fn remap_references(
             {
                 map_port(&mut origin.port, nodes)?;
             }
-            for port in &mut node.ports {
+            for port in node.ports.slots_mut() {
                 if let Some(dummy) = &mut port.port_dummy
                     && dummy.graph_id == graph_id
                 {
@@ -525,6 +525,7 @@ pub(crate) fn combine(target: &mut LGraph, mut components: Vec<Component>) -> Pi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::PortId;
     use crate::graph::{GraphNodeRef, LNode, LPoint, LayeredEdge, PortSide, PortType};
     use crate::options::LayeredOptions;
 
@@ -587,11 +588,14 @@ mod tests {
         assert_eq!(second.layerless_nodes.len(), 2);
         // The dummy is node 1 here, and the node it was made for is node 0.
         assert_eq!(
-            second.layerless_nodes[1].ports[0].origin_port,
-            Some(PortRef { node: 0, port: 0 })
+            second.layerless_nodes[1].ports[PortId::new(0)].origin_port,
+            Some(PortRef {
+                node: 0,
+                port: PortId::new(0)
+            })
         );
         assert_eq!(
-            second.layerless_nodes[0].ports[0]
+            second.layerless_nodes[0].ports[PortId::new(0)]
                 .port_dummy
                 .as_ref()
                 .map(|dummy| dummy.node),
