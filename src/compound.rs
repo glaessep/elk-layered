@@ -2567,6 +2567,8 @@ mod tests {
         }
     }
 
+    // Mutation: skip the `origin_port` branch of `parent_port_for_external_dummy`, so the port is
+    // found by its name and the first port of that name wins.
     #[test]
     fn compound_endpoint_link_uses_exact_port_identity_when_ids_repeat() {
         let mut graph = import_graph(&compound_fanout_graph(1)).expect("compound fixture import");
@@ -2595,9 +2597,8 @@ mod tests {
         duplicate.port_dummy = None;
         let duplicate_port = PortRef {
             node: group,
-            port: PortId::new(graph.layerless_nodes[group].ports.len()),
+            port: graph.layerless_nodes[group].ports.push(duplicate),
         };
-        graph.layerless_nodes[group].ports.push(duplicate);
         if graph.edges[edge_index].source == original_port {
             assert!(graph.set_edge_source(edge_index, duplicate_port));
         } else {
