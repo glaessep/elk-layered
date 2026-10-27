@@ -42,6 +42,9 @@ struct HierarchyGraphInfo {
     barycenter_heuristic: Option<BarycenterHeuristic>,
     /// `GraphInfoHolder.crossingsCounter`, whose port positions outlive each count.
     crossings_counter: CrossingsCounter,
+    /// `GraphInfoHolder.portDistributor` of the two-sided greedy switch. The other crossing
+    /// minimizers distribute ports with the barycenter heuristic.
+    greedy_port_distributor: GreedyPortDistributor,
     random: JavaRandom,
     child_paths: Vec<GraphPath>,
     parent_path: Option<GraphPath>,
@@ -73,6 +76,7 @@ impl HierarchyGraphInfo {
             best_node_and_port_order: None,
             barycenter_heuristic,
             crossings_counter: CrossingsCounter::default(),
+            greedy_port_distributor: GreedyPortDistributor::default(),
             random,
             child_paths: Vec::new(),
             parent_path: None,
@@ -924,9 +928,11 @@ impl HierarchySweep {
             return false;
         }
 
+        let mut improved =
+            self.distribute_greedy_ports(root, info_index, first_index(forward, length), forward);
         let first_layer =
             self.infos[info_index].current_node_order[first_index(forward, length)].clone();
-        let mut improved =
+        improved |=
             self.sweep_in_hierarchical_nodes(root, info_index, &first_layer, forward, false);
         let mut index = first_free(forward, length);
         while is_not_end(length, index, forward) {
@@ -940,6 +946,7 @@ impl HierarchySweep {
                     forward,
                 );
             }
+            improved |= self.distribute_greedy_ports(root, info_index, free_layer_index, forward);
             let layer = self.infos[info_index].current_node_order[free_layer_index].clone();
             improved |= self.sweep_in_hierarchical_nodes(root, info_index, &layer, forward, false);
             index = next_index(index, forward);
@@ -947,6 +954,26 @@ impl HierarchySweep {
 
         self.changed.insert(info_index);
         improved
+    }
+
+    /// The port distribution of `LayerSweepCrossingMinimizer.sweepReducingCrossings` for the
+    /// two-sided greedy switch. The one-sided type has a barycenter port distributor in ELK, which
+    /// this sweep does not run.
+    fn distribute_greedy_ports(
+        &mut self,
+        root: &mut LGraph,
+        info_index: usize,
+        layer_index: usize,
+        forward: bool,
+    ) -> bool {
+        if self.cross_min_type != CrossMinType::TwoSidedGreedySwitch {
+            return false;
+        }
+        let order = self.infos[info_index].current_node_order.clone();
+        let graph = graph_mut_at_path(root, &self.infos[info_index].path);
+        self.infos[info_index]
+            .greedy_port_distributor
+            .distribute_ports_while_sweeping(graph, &order, layer_index, forward)
     }
 
     fn sweep_in_hierarchical_nodes(
@@ -2907,6 +2934,207 @@ impl SwitchDecider {
     }
 }
 
+/// Ports `GreedyPortDistributor`: puts the ports of each node on the side that faces the sweep in
+/// the order that has the fewest crossings, switching neighbours one pair at a time.
+///
+/// ELK uses it for the two-sided greedy switch. The other crossing minimizers use a barycenter
+/// port distributor.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct GreedyPortDistributor {
+    /// The counter keeps the port positions of every count it has made, as ELK's counter does:
+    /// it owns an array that lives as long as the graph's `GraphInfoHolder`.
+    crossings_counter: CrossingsCounter,
+}
+
+impl GreedyPortDistributor {
+    /// `GreedyPortDistributor.distributePortsWhileSweeping`.
+    fn distribute_ports_while_sweeping(
+        &mut self,
+        graph: &mut LGraph,
+        order: &[Vec<usize>],
+        current_index: usize,
+        forward: bool,
+    ) -> bool {
+        if current_index >= order.len() {
+            return false;
+        }
+        self.initialize(graph, order, current_index, forward);
+        self.distribute_ports_in_layer(graph, order, current_index, forward)
+    }
+
+    /// `GreedyPortDistributor.initialize`: numbers the ports the counts will compare.
+    fn initialize(
+        &mut self,
+        graph: &LGraph,
+        order: &[Vec<usize>],
+        current_index: usize,
+        forward: bool,
+    ) {
+        if forward && current_index > 0 {
+            self.crossings_counter.init_for_counting_between(
+                graph,
+                &order[current_index - 1],
+                &order[current_index],
+            );
+        } else if !forward && current_index + 1 < order.len() {
+            self.crossings_counter.init_for_counting_between(
+                graph,
+                &order[current_index],
+                &order[current_index + 1],
+            );
+        } else {
+            self.crossings_counter
+                .init_port_positions_for_in_layer_crossings_with_tree(
+                    graph,
+                    &order[current_index],
+                    if forward {
+                        PortSide::West
+                    } else {
+                        PortSide::East
+                    },
+                );
+        }
+    }
+
+    fn distribute_ports_in_layer(
+        &mut self,
+        graph: &mut LGraph,
+        order: &[Vec<usize>],
+        current_index: usize,
+        forward: bool,
+    ) -> bool {
+        let side = if forward {
+            PortSide::West
+        } else {
+            PortSide::East
+        };
+        let mut improved = false;
+        for &node in &order[current_index] {
+            if graph.layerless_nodes[node]
+                .port_constraints
+                .is_order_fixed()
+            {
+                continue;
+            }
+            improved |= self.distribute_ports_on_node(graph, node, side, forward);
+        }
+        improved
+    }
+
+    /// `GreedyPortDistributor.distributePortsOnNode`.
+    fn distribute_ports_on_node(
+        &mut self,
+        graph: &mut LGraph,
+        node: usize,
+        side: PortSide,
+        forward: bool,
+    ) -> bool {
+        // The ports of the side in the order of the node's port list. A southern or western
+        // side is read from the other end.
+        let slots = graph.layerless_nodes[node]
+            .ports
+            .iter()
+            .enumerate()
+            .filter(|(_, port)| port.side == side)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let mut ports = slots.clone();
+        if matches!(side, PortSide::South | PortSide::West) {
+            ports.reverse();
+        }
+
+        // A node with children counts the crossings of its ports inside the node as well.
+        let nested_graph = if ports.is_empty() {
+            None
+        } else {
+            graph.layerless_nodes[node].nested_graph.take()
+        };
+        let inner_layers = nested_graph
+            .as_deref()
+            .filter(|nested| !nested.layers.is_empty())
+            .map(|nested| {
+                nested
+                    .layers
+                    .iter()
+                    .map(|layer| layer.nodes.clone())
+                    .collect::<Vec<_>>()
+            });
+        let mut hierarchical_counter = BetweenLayerEdgeTwoNodeCrossingsCounter::new();
+        let inner_free_layer = inner_layers
+            .as_ref()
+            .map(|layers| if forward { 0 } else { layers.len() - 1 });
+
+        let mut improved = false;
+        loop {
+            let mut continue_switching = false;
+            for index in 0..ports.len().saturating_sub(1) {
+                let upper_port = PortRef {
+                    node,
+                    port: ports[index],
+                };
+                let lower_port = PortRef {
+                    node,
+                    port: ports[index + 1],
+                };
+                let (mut upper_lower, mut lower_upper) = self
+                    .crossings_counter
+                    .count_crossings_between_ports_in_both_orders(graph, upper_port, lower_port);
+                if let (Some(nested), Some(layers), Some(free_layer)) = (
+                    nested_graph.as_deref(),
+                    inner_layers.as_ref(),
+                    inner_free_layer,
+                ) {
+                    let dummy_of = |port: PortRef| {
+                        graph.layerless_nodes[node].ports[port.port]
+                            .port_dummy
+                            .as_ref()
+                            .filter(|dummy| dummy.graph_id == nested.id)
+                            .map(|dummy| dummy.node)
+                    };
+                    if let (Some(upper_node), Some(lower_node)) =
+                        (dummy_of(upper_port), dummy_of(lower_port))
+                    {
+                        hierarchical_counter.count_both_side_crossings(
+                            nested, layers, free_layer, upper_node, lower_node,
+                        );
+                        upper_lower += hierarchical_counter.upper_lower_crossings as f64;
+                        lower_upper += hierarchical_counter.lower_upper_crossings as f64;
+                    }
+                }
+                if upper_lower > lower_upper {
+                    improved = true;
+                    // The counter learns of the switch. The port list changes below, once.
+                    self.crossings_counter.switch_ports(upper_port, lower_port);
+                    ports.swap(index, index + 1);
+                    continue_switching = true;
+                }
+            }
+            if !continue_switching {
+                break;
+            }
+        }
+
+        if nested_graph.is_some() {
+            graph.layerless_nodes[node].nested_graph = nested_graph;
+        }
+
+        if improved {
+            // Write the new order of the side back to the node's port list.
+            if matches!(side, PortSide::South | PortSide::West) {
+                ports.reverse();
+            }
+            let mut new_order = (0..graph.layerless_nodes[node].ports.len()).collect::<Vec<_>>();
+            for (slot, port) in slots.iter().zip(&ports) {
+                new_order[*slot] = *port;
+            }
+            if let Some(old_to_new) = graph.reorder_node_ports_with_map(node, new_order) {
+                self.crossings_counter.remap_node_ports(node, &old_to_new);
+            }
+        }
+        improved
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GreedySwitchHeuristic {
     greedy_switch_type: CrossMinType,
@@ -3123,6 +3351,7 @@ fn minimize_two_sided_greedy_switch(graph: &mut LGraph) -> bool {
     // the next connected component. ISweepPortDistributor.create draws nothing for two-sided.
     graph.random.next_long();
     let mut heuristic = GreedySwitchHeuristic::new(CrossMinType::TwoSidedGreedySwitch);
+    let mut port_distributor = GreedyPortDistributor::default();
     let mut is_forward_sweep = graph.random.next_bool();
 
     loop {
@@ -3135,6 +3364,7 @@ fn minimize_two_sided_greedy_switch(graph: &mut LGraph) -> bool {
             graph,
             &mut graph_info,
             &mut heuristic,
+            Some(&mut port_distributor),
             is_forward_sweep,
         );
         if !sweep_improved {
@@ -3162,7 +3392,13 @@ fn minimize_one_sided_greedy_switch(graph: &mut LGraph) -> bool {
     let mut is_forward_sweep = graph.random.next_bool();
 
     heuristic.set_first_layer_order(graph, &mut graph_info.current_node_order, is_forward_sweep);
-    sweep_reducing_crossings_greedy(graph, &mut graph_info, &mut heuristic, is_forward_sweep);
+    sweep_reducing_crossings_greedy(
+        graph,
+        &mut graph_info,
+        &mut heuristic,
+        None,
+        is_forward_sweep,
+    );
 
     let mut crossings_in_graph = graph_info
         .crossings_counter
@@ -3175,7 +3411,13 @@ fn minimize_one_sided_greedy_switch(graph: &mut LGraph) -> bool {
 
         is_forward_sweep = !is_forward_sweep;
         let old_number_of_crossings = crossings_in_graph;
-        sweep_reducing_crossings_greedy(graph, &mut graph_info, &mut heuristic, is_forward_sweep);
+        sweep_reducing_crossings_greedy(
+            graph,
+            &mut graph_info,
+            &mut heuristic,
+            None,
+            is_forward_sweep,
+        );
         crossings_in_graph = graph_info
             .crossings_counter
             .count_all_crossings_in_order(graph, &graph_info.current_node_order);
@@ -3293,9 +3535,10 @@ fn sweep_reducing_crossings(
 }
 
 fn sweep_reducing_crossings_greedy(
-    graph: &LGraph,
+    graph: &mut LGraph,
     graph_info: &mut GraphInfoHolder,
     heuristic: &mut GreedySwitchHeuristic,
+    mut port_distributor: Option<&mut GreedyPortDistributor>,
     forward: bool,
 ) -> bool {
     let length = graph_info.current_node_order.len();
@@ -3304,6 +3547,14 @@ fn sweep_reducing_crossings_greedy(
     }
 
     let mut improved = false;
+    if let Some(distributor) = port_distributor.as_deref_mut() {
+        improved |= distributor.distribute_ports_while_sweeping(
+            graph,
+            &graph_info.current_node_order,
+            first_index(forward, length),
+            forward,
+        );
+    }
     let mut index = first_free(forward, length);
     while is_not_end(length, index, forward) {
         let free_layer_index = index as usize;
@@ -3313,6 +3564,14 @@ fn sweep_reducing_crossings_greedy(
             free_layer_index,
             forward,
         );
+        if let Some(distributor) = port_distributor.as_deref_mut() {
+            improved |= distributor.distribute_ports_while_sweeping(
+                graph,
+                &graph_info.current_node_order,
+                free_layer_index,
+                forward,
+            );
+        }
         index = next_index(index, forward);
     }
     improved
@@ -5670,5 +5929,448 @@ mod north_south_tests {
         let heuristic = BarycenterHeuristic::new(&graph, JavaRandom::new(1), distributor);
         // The dummy is above the node in the layer, so it comes first.
         assert_eq!(heuristic.layout_units[&a], vec![north_a, a]);
+    }
+}
+
+/// Tests of `GreedyPortDistributor`.
+#[cfg(test)]
+mod greedy_port_distributor_tests {
+    use super::*;
+    use crate::graph::{GraphNodeRef, LPoint, LayeredEdge};
+    use crate::options::{ElkDirection, LayeredOptions};
+
+    fn graph(id: &str) -> LGraph {
+        LGraph::new(
+            id,
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Right),
+        )
+    }
+
+    fn port(node: usize, port: usize) -> PortRef {
+        PortRef { node, port }
+    }
+
+    fn add_edge(graph: &mut LGraph, source: PortRef, target: PortRef) {
+        let id = format!("e{}", graph.edges.len());
+        graph
+            .add_edge(LayeredEdge {
+                id,
+                source,
+                target,
+                source_node_id: String::new(),
+                target_node_id: String::new(),
+                labels: Vec::new(),
+                minlen: 1,
+                reversed: false,
+                bend_points: Vec::new(),
+                junction_points: Vec::new(),
+                model_order: None,
+                priority_direction: 0,
+                priority_shortness: 0,
+                priority_straightness: 0,
+                thickness: 0.0,
+                original_opposite_port: None,
+                compound_segment: None,
+            })
+            .expect("both ports exist");
+    }
+
+    /// A node on `layer` with one port per side given, in the given order of the port list.
+    fn add_node(
+        graph: &mut LGraph,
+        id: &str,
+        layer: usize,
+        constraints: PortConstraints,
+        sides: &[PortSide],
+    ) -> usize {
+        let index = graph.layerless_nodes.len();
+        let mut node = LNode::new(id, 40.0, 20.0, None);
+        node.port_constraints = constraints;
+        graph.layerless_nodes.push(node);
+        graph.set_node_layer(index, layer);
+        for (position, side) in sides.iter().enumerate() {
+            let port_type = if matches!(side, PortSide::East) {
+                PortType::Output
+            } else {
+                PortType::Input
+            };
+            let added = graph
+                .add_port(index, port_type, *side, LPoint::default())
+                .unwrap();
+            graph.layerless_nodes[index].ports[added.port].id = format!("{id}.p{position}");
+        }
+        index
+    }
+
+    fn order(graph: &LGraph) -> Vec<Vec<usize>> {
+        graph
+            .layers
+            .iter()
+            .map(|layer| layer.nodes.clone())
+            .collect()
+    }
+
+    fn port_ids(graph: &LGraph, node: usize) -> Vec<String> {
+        graph.layerless_nodes[node]
+            .ports
+            .iter()
+            .map(|port| port.id.clone())
+            .collect()
+    }
+
+    /// Two nodes `top` and `bottom` in layer 0, one node `a` in layer 1. The ports of `a` are the
+    /// west ports `a.p0` and `a.p1`, listed from bottom to top. `top` connects to `a.p0`, so to
+    /// the lower port, and `bottom` to `a.p1`: the edges cross.
+    fn crossed(constraints: PortConstraints) -> (LGraph, usize) {
+        let mut graph = graph("g");
+        let top = add_node(
+            &mut graph,
+            "top",
+            0,
+            PortConstraints::FixedSide,
+            &[PortSide::East],
+        );
+        let bottom = add_node(
+            &mut graph,
+            "bottom",
+            0,
+            PortConstraints::FixedSide,
+            &[PortSide::East],
+        );
+        let a = add_node(
+            &mut graph,
+            "a",
+            1,
+            constraints,
+            &[PortSide::West, PortSide::West],
+        );
+        add_edge(&mut graph, port(top, 0), port(a, 0));
+        add_edge(&mut graph, port(bottom, 0), port(a, 1));
+        crate::p3order::initialize_crossing_minimization_port_ids(&mut graph);
+        (graph, a)
+    }
+
+    // Mutation: never switch, or switch when the crossings would stay the same.
+    #[test]
+    fn crossed_ports_on_the_side_of_the_sweep_switch_places() {
+        let (mut graph, a) = crossed(PortConstraints::FixedSide);
+        let order = order(&graph);
+        let mut distributor = GreedyPortDistributor::default();
+
+        let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
+
+        assert!(improved);
+        // The list runs from bottom to top, so the upper edge now ends at the second port.
+        assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
+        // The edges followed their ports.
+        let top_edge = &graph.edges[0];
+        let bottom_edge = &graph.edges[1];
+        assert_eq!(top_edge.target, port(a, 1));
+        assert_eq!(bottom_edge.target, port(a, 0));
+        assert_eq!(graph.layerless_nodes[a].ports[1].incoming_edges, vec![0]);
+    }
+
+    // Mutation: switch ports that do not cross.
+    #[test]
+    fn ports_that_do_not_cross_stay_where_they_are() {
+        let (mut graph, a) = crossed(PortConstraints::FixedSide);
+        let order = order(&graph);
+        let mut distributor = GreedyPortDistributor::default();
+        distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
+        assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
+
+        // A second pass finds nothing to improve.
+        let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
+
+        assert!(!improved);
+        assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
+    }
+
+    // Mutation: ignore the port constraints of the node.
+    #[test]
+    fn a_node_with_a_fixed_port_order_keeps_its_ports() {
+        for constraints in [PortConstraints::FixedOrder, PortConstraints::FixedPos] {
+            let (mut graph, a) = crossed(constraints);
+            let order = order(&graph);
+            let mut distributor = GreedyPortDistributor::default();
+
+            let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
+
+            assert!(!improved, "{constraints:?}");
+            assert_eq!(port_ids(&graph, a), ["a.p0", "a.p1"], "{constraints:?}");
+        }
+    }
+
+    // Mutation: distribute the ports of the west side in a backward sweep.
+    #[test]
+    fn only_the_side_that_faces_the_sweep_is_distributed() {
+        let (mut graph, a) = crossed(PortConstraints::FixedSide);
+        let order = order(&graph);
+        let mut distributor = GreedyPortDistributor::default();
+
+        let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, false);
+
+        assert!(!improved);
+        assert_eq!(port_ids(&graph, a), ["a.p0", "a.p1"]);
+    }
+
+    // Mutation: read the ports of an east side from the other end of the list.
+    #[test]
+    fn crossed_ports_on_the_east_side_switch_places_in_a_backward_sweep() {
+        let mut graph = graph("g");
+        let a = add_node(
+            &mut graph,
+            "a",
+            0,
+            PortConstraints::FixedSide,
+            &[PortSide::East, PortSide::East],
+        );
+        let top = add_node(
+            &mut graph,
+            "top",
+            1,
+            PortConstraints::FixedSide,
+            &[PortSide::West],
+        );
+        let bottom = add_node(
+            &mut graph,
+            "bottom",
+            1,
+            PortConstraints::FixedSide,
+            &[PortSide::West],
+        );
+        // The list of the east side runs from top to bottom. `a.p0` is the upper port and goes
+        // to the lower node.
+        add_edge(&mut graph, port(a, 0), port(bottom, 0));
+        add_edge(&mut graph, port(a, 1), port(top, 0));
+        crate::p3order::initialize_crossing_minimization_port_ids(&mut graph);
+        let order = order(&graph);
+        let mut distributor = GreedyPortDistributor::default();
+
+        let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 0, false);
+
+        assert!(improved);
+        assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
+    }
+
+    // Mutation: switch ports whose counts are equal. The loop would then never end.
+    #[test]
+    fn ports_without_edges_stay_where_they_are() {
+        let mut graph = graph("g");
+        let a = add_node(
+            &mut graph,
+            "a",
+            0,
+            PortConstraints::FixedSide,
+            &[PortSide::West, PortSide::West],
+        );
+        let b = add_node(
+            &mut graph,
+            "b",
+            1,
+            PortConstraints::FixedSide,
+            &[PortSide::West],
+        );
+        crate::p3order::initialize_crossing_minimization_port_ids(&mut graph);
+        let order = order(&graph);
+        let mut distributor = GreedyPortDistributor::default();
+
+        let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 0, true);
+
+        assert!(!improved);
+        assert_eq!(port_ids(&graph, a), ["a.p0", "a.p1"]);
+        assert_eq!(port_ids(&graph, b), ["b.p0"]);
+    }
+
+    // Mutation: leave the positions of the counter at the slot of a port that moved.
+    #[test]
+    fn the_positions_of_the_counter_move_with_the_ports() {
+        let (mut graph, a) = crossed(PortConstraints::FixedSide);
+        let order = order(&graph);
+        let mut distributor = GreedyPortDistributor::default();
+        distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
+
+        // The west ports of layer 1 are numbered after the east ports of layer 0, so they get 2
+        // and 3. The port that was `a.p0` (position 2 before the switch) is the second now, and
+        // the switch gave it the position of the other one.
+        let counter = &distributor.crossings_counter;
+        assert_eq!(graph.layerless_nodes[a].ports[0].id, "a.p1");
+        assert_eq!(counter.position_of(port(a, 0)), 2);
+        assert_eq!(counter.position_of(port(a, 1)), 3);
+    }
+
+    // Mutation: leave the positions of the counter at the slot of a port that moved, so that the
+    // next count reads the position of the wrong port.
+    #[test]
+    fn the_counter_follows_the_ports_that_moved() {
+        let (mut graph, a) = crossed(PortConstraints::FixedSide);
+        let order = order(&graph);
+        let mut distributor = GreedyPortDistributor::default();
+        distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
+
+        // The port that was first is second now. In the numbering of the west side of layer 1, a
+        // west port further down the list is further up, so the first port of the list is the
+        // lower one.
+        distributor
+            .crossings_counter
+            .init_for_counting_between(&graph, &order[0], &order[1]);
+        let counts = distributor
+            .crossings_counter
+            .count_crossings_between_ports_in_both_orders(&graph, port(a, 0), port(a, 1));
+        // The edges are parallel now. Switching the two ports makes them cross.
+        assert_eq!(counts, (0.0, 1.0));
+    }
+
+    /// A node `x` in layer 0 whose two east ports cannot move, and a node `a` in layer 1 with
+    /// two west ports that can. The edges cross until the ports of `a` switch places.
+    fn crossed_between_two_nodes() -> (LGraph, usize) {
+        let mut graph = graph("g");
+        let x = add_node(
+            &mut graph,
+            "x",
+            0,
+            PortConstraints::FixedOrder,
+            &[PortSide::East, PortSide::East],
+        );
+        let a = add_node(
+            &mut graph,
+            "a",
+            1,
+            PortConstraints::FixedSide,
+            &[PortSide::West, PortSide::West],
+        );
+        // `x.p0` is the upper port of `x`, and `a.p0` is the lower port of `a`.
+        add_edge(&mut graph, port(x, 0), port(a, 0));
+        add_edge(&mut graph, port(x, 1), port(a, 1));
+        (graph, a)
+    }
+
+    /// A seed for which the first sweep of the two-sided greedy switch runs forward: the minimizer
+    /// draws one long and then the direction. A backward first sweep would distribute the east
+    /// ports only, and these cannot move.
+    fn seed_for_a_forward_first_sweep() -> i64 {
+        (0..)
+            .find(|seed| {
+                let mut random = JavaRandom::new(*seed);
+                random.next_long();
+                random.next_bool()
+            })
+            .unwrap()
+    }
+
+    // Mutation: do not call the port distributor in the flat sweep of the two-sided greedy switch.
+    #[test]
+    fn the_flat_two_sided_sweep_distributes_ports() {
+        let (mut graph, a) = crossed_between_two_nodes();
+        graph.random = JavaRandom::new(seed_for_a_forward_first_sweep());
+        minimize_crossings_layer_sweep_with_type(&mut graph, CrossMinType::TwoSidedGreedySwitch);
+        assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
+    }
+
+    // Mutation: do not call the port distributor in the hierarchical sweep of the two-sided
+    // greedy switch, or call it for the one-sided type too.
+    #[test]
+    fn the_hierarchical_two_sided_sweep_distributes_ports_and_the_one_sided_does_not() {
+        let (mut graph, a) = crossed_between_two_nodes();
+        graph.random = JavaRandom::new(seed_for_a_forward_first_sweep());
+        minimize_crossings_layer_sweep_hierarchical_with_type(
+            &mut graph,
+            CrossMinType::TwoSidedGreedySwitch,
+        );
+        assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
+
+        let (mut graph, a) = crossed_between_two_nodes();
+        graph.random = JavaRandom::new(seed_for_a_forward_first_sweep());
+        minimize_crossings_layer_sweep_hierarchical_with_type(
+            &mut graph,
+            CrossMinType::OneSidedGreedySwitch,
+        );
+        assert_eq!(port_ids(&graph, a), ["a.p0", "a.p1"]);
+    }
+
+    /// A parent node `p` in layer 0 with two west ports and a nested graph. The nested graph has
+    /// the dummies of the ports in layer 0 and two nodes in layer 1, joined so that the edges
+    /// cross when the ports stay as they are. The parent has no edge outside.
+    fn parent_with_crossing_inside() -> (LGraph, usize) {
+        let mut inner = graph("inner");
+        let first = inner.layerless_nodes.len();
+        inner.layerless_nodes.push(LNode::new("d0", 1.0, 1.0, None));
+        inner.layerless_nodes[first].kind = LNodeKind::ExternalPort;
+        inner.set_node_layer(first, 0);
+        inner.add_port(first, PortType::Output, PortSide::East, LPoint::default());
+        let second = inner.layerless_nodes.len();
+        inner.layerless_nodes.push(LNode::new("d1", 1.0, 1.0, None));
+        inner.layerless_nodes[second].kind = LNodeKind::ExternalPort;
+        inner.set_node_layer(second, 0);
+        inner.add_port(second, PortType::Output, PortSide::East, LPoint::default());
+        let c0 = add_node(
+            &mut inner,
+            "c0",
+            1,
+            PortConstraints::FixedSide,
+            &[PortSide::West],
+        );
+        let c1 = add_node(
+            &mut inner,
+            "c1",
+            1,
+            PortConstraints::FixedSide,
+            &[PortSide::West],
+        );
+        // `d1` is below `d0`. `d1` goes to the lower node and `d0` to the upper one.
+        add_edge(&mut inner, port(second, 0), port(c1, 0));
+        add_edge(&mut inner, port(first, 0), port(c0, 0));
+        // The ports of the parent, in the order of the list, stand for d0 and d1.
+        let mut outer = graph("outer");
+        let parent = add_node(
+            &mut outer,
+            "p",
+            0,
+            PortConstraints::FixedSide,
+            &[PortSide::West, PortSide::West],
+        );
+        for (port_index, dummy) in [first, second].into_iter().enumerate() {
+            outer.layerless_nodes[parent].ports[port_index].port_dummy = Some(GraphNodeRef {
+                graph_id: "inner".to_string(),
+                node: dummy,
+            });
+        }
+        outer.layerless_nodes[parent].nested_graph = Some(Box::new(inner));
+        crate::p3order::initialize_crossing_minimization_port_ids(&mut outer);
+        (outer, parent)
+    }
+
+    // Mutation: leave out the crossings inside the node, or drop the nested graph from the node
+    // after the count.
+    #[test]
+    fn the_crossings_inside_a_node_with_children_decide_the_order_of_its_ports() {
+        let (mut graph, parent) = parent_with_crossing_inside();
+        let order = order(&graph);
+        let mut distributor = GreedyPortDistributor::default();
+
+        let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 0, true);
+
+        assert!(improved);
+        assert_eq!(port_ids(&graph, parent), ["p.p1", "p.p0"]);
+        assert!(graph.layerless_nodes[parent].nested_graph.is_some());
+        // The dummies keep their ports.
+        let dummies = graph.layerless_nodes[parent]
+            .ports
+            .iter()
+            .map(|port| port.port_dummy.as_ref().unwrap().node)
+            .collect::<Vec<_>>();
+        assert_eq!(dummies, vec![1, 0]);
+    }
+
+    // Mutation: take the nested graph out of a node and not put it back.
+    #[test]
+    fn a_node_without_ports_on_the_side_keeps_its_nested_graph() {
+        let (mut graph, parent) = parent_with_crossing_inside();
+        let order = order(&graph);
+        let mut distributor = GreedyPortDistributor::default();
+
+        distributor.distribute_ports_while_sweeping(&mut graph, &order, 0, false);
+
+        assert!(graph.layerless_nodes[parent].nested_graph.is_some());
     }
 }

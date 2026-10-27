@@ -62,6 +62,13 @@ impl BinaryIndexedTree {
         self.size
     }
 
+    /// `BinaryIndexedTree.clear`: removes every entry.
+    pub fn clear(&mut self) {
+        self.binary_sums.fill(0);
+        self.nums_per_index.fill(0);
+        self.size = 0;
+    }
+
     pub fn remove_all(&mut self, index: usize) {
         let Some(num_entries) = self.nums_per_index.get_mut(index) else {
             return;
@@ -93,6 +100,9 @@ impl BinaryIndexedTree {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CrossingsCounter {
     port_positions: HashMap<PortRef, usize>,
+    /// The tree that `initForCountingBetween` and `initPortPositionsForInLayerCrossings` make for
+    /// the counts of single port pairs.
+    index_tree: Option<BinaryIndexedTree>,
 }
 
 impl CrossingsCounter {
@@ -377,6 +387,118 @@ impl CrossingsCounter {
         self.count_in_layer_crossings_on_ports(graph, &ports, &mut index_tree)
     }
 
+    /// `CrossingsCounter.initForCountingBetween`: numbers the ports between two layers, for
+    /// `count_crossings_between_ports_in_both_orders`.
+    pub fn init_for_counting_between(
+        &mut self,
+        graph: &LGraph,
+        left_layer_nodes: &[usize],
+        right_layer_nodes: &[usize],
+    ) {
+        let ports =
+            self.init_port_positions_counter_clockwise(graph, left_layer_nodes, right_layer_nodes);
+        self.index_tree = Some(BinaryIndexedTree::new(ports.len()));
+    }
+
+    /// `CrossingsCounter.initPortPositionsForInLayerCrossings`: numbers the ports of one side of a
+    /// layer, for `count_crossings_between_ports_in_both_orders`.
+    pub fn init_port_positions_for_in_layer_crossings_with_tree(
+        &mut self,
+        graph: &LGraph,
+        nodes: &[usize],
+        side: PortSide,
+    ) {
+        let ports = self.init_port_positions_for_in_layer_crossings(graph, nodes, side);
+        self.index_tree = Some(BinaryIndexedTree::new(ports.len()));
+    }
+
+    /// `CrossingsCounter.switchPorts`: swaps the positions of two ports.
+    pub fn switch_ports(&mut self, top_port: PortRef, bottom_port: PortRef) {
+        let top_position = self.position_of(top_port);
+        let bottom_position = self.position_of(bottom_port);
+        self.port_positions.insert(top_port, bottom_position);
+        self.port_positions.insert(bottom_port, top_position);
+    }
+
+    /// The positions follow the ports of a node that moved in its port list. ELK keeps them in an
+    /// array indexed by the port's id, which does not change when the port moves.
+    pub fn remap_node_ports(&mut self, node: usize, old_to_new: &[usize]) {
+        let moved = self
+            .port_positions
+            .iter()
+            .filter(|(port, _)| port.node == node)
+            .map(|(port, position)| (port.port, *position))
+            .collect::<Vec<_>>();
+        for (port, _) in &moved {
+            self.port_positions.remove(&PortRef { node, port: *port });
+        }
+        for (port, position) in moved {
+            let port = old_to_new.get(port).copied().unwrap_or(port);
+            self.port_positions.insert(PortRef { node, port }, position);
+        }
+    }
+
+    /// `CrossingsCounter.countCrossingsBetweenPortsInBothOrders`: the crossings of the edges of
+    /// two ports with the order of the ports as it is, and with the two ports switched. The
+    /// counter must be set up with `init_for_counting_between` or
+    /// `init_port_positions_for_in_layer_crossings_with_tree`.
+    pub fn count_crossings_between_ports_in_both_orders(
+        &mut self,
+        graph: &LGraph,
+        upper_port: PortRef,
+        lower_port: PortRef,
+    ) -> (f64, f64) {
+        let mut ports = self.connected_ports_sorted_by_position(graph, upper_port, lower_port);
+        let mut index_tree = self
+            .index_tree
+            .take()
+            .unwrap_or_else(|| BinaryIndexedTree::new(0));
+        let upper_lower_crossings = self.count_crossings_on_ports(graph, &ports, &mut index_tree);
+        // The count may add the end of an edge whose port is not in the list, so the tree must be
+        // cleared explicitly.
+        index_tree.clear();
+        self.switch_ports(upper_port, lower_port);
+        // A stable sort by the new positions.
+        ports.sort_by_key(|port| self.position_of(*port));
+        let lower_upper_crossings = self.count_crossings_on_ports(graph, &ports, &mut index_tree);
+        index_tree.clear();
+        self.switch_ports(lower_port, upper_port);
+        self.index_tree = Some(index_tree);
+        (upper_lower_crossings, lower_upper_crossings)
+    }
+
+    /// `CrossingsCounter.connectedPortsSortedByPosition`. ELK collects the ports in a `TreeSet`
+    /// ordered by position, so of two ports at one position only the first one stays.
+    fn connected_ports_sorted_by_position(
+        &self,
+        graph: &LGraph,
+        upper_port: PortRef,
+        lower_port: PortRef,
+    ) -> Vec<PortRef> {
+        let mut ports: Vec<PortRef> = Vec::new();
+        let add = |ports: &mut Vec<PortRef>, port: PortRef| {
+            let position = self.position_of(port);
+            match ports.binary_search_by_key(&position, |other| self.position_of(*other)) {
+                Ok(_) => {}
+                Err(index) => ports.insert(index, port),
+            }
+        };
+        for port in [upper_port, lower_port] {
+            add(&mut ports, port);
+            for edge in connected_edges(graph, port) {
+                let data = &graph.edges[edge];
+                // A self-loop of a port.
+                if data.source == data.target {
+                    continue;
+                }
+                if let Some(other_end) = other_end_of(graph, edge, port) {
+                    add(&mut ports, other_end);
+                }
+            }
+        }
+        ports
+    }
+
     fn init_port_positions_counter_clockwise(
         &mut self,
         graph: &LGraph,
@@ -500,7 +622,7 @@ impl CrossingsCounter {
     }
 
     /// `CrossingsCounter.positionOf`: a port nobody numbered yet is at 0.
-    fn position_of(&self, port: PortRef) -> usize {
+    pub(crate) fn position_of(&self, port: PortRef) -> usize {
         self.port_positions.get(&port).copied().unwrap_or(0)
     }
 
@@ -1613,5 +1735,155 @@ mod tests {
         ));
 
         assert_eq!(CrossingsCounter::default().count_all_crossings(&graph), 1.0);
+    }
+
+    // --- Counts for a pair of ports. ---
+
+    // Mutation: leave the sums or the size alone in `clear`.
+    #[test]
+    fn clearing_a_binary_indexed_tree_removes_every_entry() {
+        let mut tree = BinaryIndexedTree::new(4);
+        tree.add(1);
+        tree.add(1);
+        tree.add(3);
+        tree.clear();
+        assert_eq!(tree.size(), 0);
+        assert_eq!(tree.rank(4), Some(0));
+        tree.add(2);
+        assert_eq!(tree.rank(3), Some(1));
+        assert_eq!(tree.rank(2), Some(0));
+    }
+
+    /// Two nodes, `left` with two east ports and `right` with two west ports. The ports of
+    /// `right` are listed from bottom to top. `left.0` is the upper port of `left`.
+    /// Returns the graph and the four ports as (left upper, left lower, right upper, right lower).
+    fn two_by_two(edges: [(usize, usize); 2]) -> (LGraph, [PortRef; 4]) {
+        let mut graph = ns_graph();
+        let left = graph.layerless_nodes.len();
+        graph
+            .layerless_nodes
+            .push(LNode::new("left", 10.0, 10.0, None));
+        graph.set_node_layer(left, 0);
+        let right = graph.layerless_nodes.len();
+        graph
+            .layerless_nodes
+            .push(LNode::new("right", 10.0, 10.0, None));
+        graph.set_node_layer(right, 1);
+        for _ in 0..2 {
+            graph.add_port(left, PortType::Output, PortSide::East, LPoint::default());
+            graph.add_port(right, PortType::Input, PortSide::West, LPoint::default());
+        }
+        let left_ports = [
+            PortRef {
+                node: left,
+                port: 0,
+            },
+            PortRef {
+                node: left,
+                port: 1,
+            },
+        ];
+        // The list of the west side runs from bottom to top: port 1 is the upper one.
+        let right_ports = [
+            PortRef {
+                node: right,
+                port: 1,
+            },
+            PortRef {
+                node: right,
+                port: 0,
+            },
+        ];
+        for (index, (from, to)) in edges.into_iter().enumerate() {
+            graph.add_edge(layered_edge(
+                &format!("e{index}"),
+                left_ports[from],
+                right_ports[to],
+            ));
+        }
+        (
+            graph,
+            [left_ports[0], left_ports[1], right_ports[0], right_ports[1]],
+        )
+    }
+
+    // Mutation: report the crossings of the switched order first, or leave the ports switched
+    // after the count.
+    #[test]
+    fn a_pair_of_ports_is_counted_in_both_orders_and_left_as_it_was() {
+        // The upper left port goes to the lower right port, and the other way round: crossing.
+        let (graph, [left_upper, left_lower, right_upper, right_lower]) =
+            two_by_two([(0, 1), (1, 0)]);
+        let mut counter = CrossingsCounter::default();
+        counter.init_for_counting_between(&graph, &[0], &[1]);
+        let before = (
+            counter.position_of(left_upper),
+            counter.position_of(left_lower),
+        );
+
+        let counts =
+            counter.count_crossings_between_ports_in_both_orders(&graph, left_upper, left_lower);
+
+        // As they are the edges cross once; switched they do not.
+        assert_eq!(counts, (1.0, 0.0));
+        assert_eq!(
+            (
+                counter.position_of(left_upper),
+                counter.position_of(left_lower)
+            ),
+            before
+        );
+        // The tree is clear for the next count, which finds the same.
+        assert_eq!(
+            counter.count_crossings_between_ports_in_both_orders(&graph, left_upper, left_lower),
+            (1.0, 0.0)
+        );
+        // Without a crossing it is the other way round.
+        let (graph, [left_upper, left_lower, ..]) = two_by_two([(0, 0), (1, 1)]);
+        let mut counter = CrossingsCounter::default();
+        counter.init_for_counting_between(&graph, &[0], &[1]);
+        assert_eq!(
+            counter.count_crossings_between_ports_in_both_orders(&graph, left_upper, left_lower),
+            (0.0, 1.0)
+        );
+        let _ = (right_upper, right_lower);
+    }
+
+    // Mutation: swap one position and leave the other.
+    #[test]
+    fn switching_two_ports_swaps_their_positions() {
+        let (graph, [left_upper, left_lower, ..]) = two_by_two([(0, 0), (1, 1)]);
+        let mut counter = CrossingsCounter::default();
+        counter.init_for_counting_between(&graph, &[0], &[1]);
+        let (upper, lower) = (
+            counter.position_of(left_upper),
+            counter.position_of(left_lower),
+        );
+        assert_ne!(upper, lower);
+
+        counter.switch_ports(left_upper, left_lower);
+
+        assert_eq!(counter.position_of(left_upper), lower);
+        assert_eq!(counter.position_of(left_lower), upper);
+    }
+
+    // Mutation: leave the positions of a node where they are when its ports change places, or
+    // move the ports of other nodes too.
+    #[test]
+    fn the_positions_of_a_node_follow_its_ports_when_they_are_reordered() {
+        let (graph, [left_upper, left_lower, right_upper, right_lower]) =
+            two_by_two([(0, 0), (1, 1)]);
+        let mut counter = CrossingsCounter::default();
+        counter.init_for_counting_between(&graph, &[0], &[1]);
+        let positions = [left_upper, left_lower, right_upper, right_lower]
+            .map(|port| counter.position_of(port));
+
+        // The two ports of the left node trade slots.
+        counter.remap_node_ports(0, &[1, 0]);
+
+        assert_eq!(counter.position_of(left_upper), positions[1]);
+        assert_eq!(counter.position_of(left_lower), positions[0]);
+        assert_eq!(counter.position_of(right_upper), positions[2]);
+        assert_eq!(counter.position_of(right_lower), positions[3]);
     }
 }
