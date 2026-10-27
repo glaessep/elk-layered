@@ -110,6 +110,9 @@ pub struct CrossingsCounter {
     /// when it builds the counter. The first count sets it here, and no later count reads the
     /// ports again: the edges at a port do not change during the sweep.
     has_hyperedges_east_of_index: Option<Vec<bool>>,
+    /// `AllCrossingsCounter.hasNorthSouthPorts`, set in `initAtNodeLevel` when ELK builds the
+    /// counter. The first count sets it here, like `has_hyperedges_east_of_index`.
+    has_north_south_ports: Option<Vec<bool>>,
     /// The tree that `initForCountingBetween` and `initPortPositionsForInLayerCrossings` make for
     /// the counts of single port pairs.
     index_tree: Option<BinaryIndexedTree>,
@@ -156,6 +159,10 @@ impl CrossingsCounter {
             .has_hyperedges_east_of_index
             .take()
             .unwrap_or_else(|| has_hyperedges_east_of_index(graph, current_order));
+        let has_north_south_ports = self
+            .has_north_south_ports
+            .take()
+            .unwrap_or_else(|| has_north_south_ports(graph, current_order));
         let mut crossings =
             self.count_in_layer_crossings_on_side(graph, &current_order[0], PortSide::West);
         crossings += self.count_in_layer_crossings_on_side(
@@ -182,14 +189,12 @@ impl CrossingsCounter {
             }
 
             // The north and south port dummies of the layer cross the edges that pass it.
-            let has_north_south_ports = left_layer
-                .iter()
-                .any(|&node| graph.layerless_nodes[node].kind == LNodeKind::NorthSouthPort);
-            if has_north_south_ports {
+            if has_north_south_ports[layer_index] {
                 crossings += self.count_north_south_port_crossings_in_layer(graph, left_layer);
             }
         }
         self.has_hyperedges_east_of_index = Some(has_hyperedges_east_of_index);
+        self.has_north_south_ports = Some(has_north_south_ports);
         crossings
     }
 
@@ -904,6 +909,19 @@ fn rank_or_nan(rank: Option<usize>) -> f64 {
     rank.map_or(f64::NAN, |rank| rank as f64)
 }
 
+/// `AllCrossingsCounter.initAtNodeLevel`: `hasNorthSouthPorts[l]` is set when layer `l` has a
+/// north or south port dummy.
+fn has_north_south_ports(graph: &LGraph, order: &[Vec<usize>]) -> Vec<bool> {
+    order
+        .iter()
+        .map(|layer| {
+            layer
+                .iter()
+                .any(|&node| graph.layerless_nodes[node].kind == LNodeKind::NorthSouthPort)
+        })
+        .collect()
+}
+
 /// `AllCrossingsCounter.initAtPortLevel`: `hasHyperEdgesEastOfIndex[l]` is set when an east port of
 /// layer `l`, or a west port of layer `l + 1`, has more than one edge. Only real ports can have
 /// that; a port ELK makes up for a plain edge has exactly one.
@@ -1477,6 +1495,33 @@ mod tests {
         // The old counter keeps the flags it set, as ELK's counter keeps those of its construction.
         counter.count_all_crossings_in_order(&graph, &order);
         assert_eq!(counter.has_hyperedges_east_of_index, Some(vec![false; 2]));
+    }
+
+    // Mutation: look for north and south port dummies again at each count, instead of keeping the
+    // flags of the first count. The old counter then sees the dummy that came later.
+    #[test]
+    fn the_north_south_flags_are_set_by_the_first_count_only() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        graph
+            .layerless_nodes
+            .push(LNode::new("a", 10.0, 10.0, None));
+        graph.set_node_layer(0, 0);
+        crate::p3order::initialize_crossing_minimization_port_ids(&mut graph);
+        let order = vec![vec![0]];
+
+        let mut counter = CrossingsCounter::default();
+        assert_eq!(counter.has_north_south_ports, None);
+        counter.count_all_crossings_in_order(&graph, &order);
+        assert_eq!(counter.has_north_south_ports, Some(vec![false]));
+
+        // A dummy that shows up later is seen by a new counter at once.
+        graph.layerless_nodes[0].kind = LNodeKind::NorthSouthPort;
+        let mut fresh = CrossingsCounter::default();
+        fresh.count_all_crossings_in_order(&graph, &order);
+        assert_eq!(fresh.has_north_south_ports, Some(vec![true]));
+        // The old counter keeps the flags it set, as ELK's counter keeps those of its construction.
+        counter.count_all_crossings_in_order(&graph, &order);
+        assert_eq!(counter.has_north_south_ports, Some(vec![false]));
     }
 
     // Mutation: clamp the sum of `count_overlapping_areas` at 0, as the port did. The span that
