@@ -315,6 +315,15 @@ fn hide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
 }
 
 /// Puts the ports that `hide_ports` took off the node back at the end of its port list.
+///
+/// Java has no such step. `PortRestorer.restorePorts` (called by `SelfLoopPortRestorer`) clears
+/// the node's port list and puts every port back with `lPort.setNode(lNode)`. It visits the
+/// hidden ports in the order of its target areas (north start, north middle, and so on), never
+/// by their old index. Here the hidden ports come back first, in ascending index order, because
+/// the indices `hide_ports` gave them are what the holder's ports and edges, and so the target
+/// areas, refer to. `restore_hidden_ports` then reorders the whole list by those indices, in
+/// Java's order. Its `restored_port_order` leaves the hidden ports out of the old ports it walks
+/// in bursts. So the order they come back in does not reach the result. Only their indices do.
 fn unhide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
     let node = &mut graph.layerless_nodes[holder.node];
     node.ports.append(&mut holder.hidden_ports);
