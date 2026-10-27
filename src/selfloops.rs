@@ -1049,13 +1049,34 @@ fn graph_by_id<'a>(graph: &'a LGraph, id: &str) -> Option<&'a LGraph> {
         .find_map(|nested| graph_by_id(nested, id))
 }
 
-/// Where a port stands in its node's port list. A self-loop port is back in the list, restored,
-/// by the time anything compares places.
-fn place_of(graph: &LGraph, node: usize, port: PortId) -> usize {
-    graph.layerless_nodes[node]
-        .ports
-        .position(port)
-        .expect("a self-loop port is in its node's port list once the ports are restored")
+/// Where each port stands in its node's port list, read once so that a lookup is not a scan.
+///
+/// A port the node does not list has no place. Callers decide what that means for them, and
+/// none panics: a self-loop port is back in the list once the ports are restored, but this table
+/// does not rely on it.
+struct PortPlaces {
+    /// The place of each port, indexed by `PortId::index`.
+    places: Vec<Option<usize>>,
+    /// How many ports the list holds.
+    listed: usize,
+}
+
+impl PortPlaces {
+    fn new(ports: &NodePorts) -> Self {
+        let mut places = vec![None; ports.slot_count()];
+        for (place, id) in ports.ids().enumerate() {
+            places[id.index()] = Some(place);
+        }
+        Self {
+            places,
+            listed: ports.len(),
+        }
+    }
+
+    /// The place of this port in the list, or `None` if the list does not hold it.
+    fn of(&self, port: PortId) -> Option<usize> {
+        self.places.get(port.index()).copied().flatten()
+    }
 }
 
 fn self_loop_port_net_flow(hyper_loop: &SelfHyperLoop, port: PortId) -> isize {
@@ -1329,14 +1350,13 @@ fn compute_label_coordinates(graph: &LGraph, node: usize, hyper_loop: &mut SelfH
 
 fn determine_loop_routes(graph: &LGraph, holder: &mut SelfLoopHolder) {
     let port_penalties = compute_port_penalties(graph, holder.node);
+    let places = PortPlaces::new(&graph.layerless_nodes[holder.node].ports);
 
     for hyper_loop in &mut holder.hyper_loops {
         // Java's `slPortsBySide.keySet()` lists the sides in the order the loop's ports were
         // added, so read it before the ports are sorted by id.
         let sides_in_port_order = loop_sides_in_port_order(graph, holder.node, hyper_loop);
-        hyper_loop
-            .ports
-            .sort_by_key(|port| place_of(graph, holder.node, port.port));
+        hyper_loop.ports.sort_by_key(|port| places.of(port.port));
 
         let Some(loop_type) = hyper_loop.self_loop_type else {
             continue;
@@ -1345,18 +1365,33 @@ fn determine_loop_routes(graph: &LGraph, holder: &mut SelfLoopHolder) {
         match loop_type {
             SelfLoopType::OneSide => {
                 let side = graph.layerless_nodes[holder.node].ports[hyper_loop.ports[0].port].side;
-                assign_leftmost_rightmost_ports(graph, holder.node, hyper_loop, side, side);
+                assign_leftmost_rightmost_ports(
+                    graph,
+                    &places,
+                    holder.node,
+                    hyper_loop,
+                    side,
+                    side,
+                );
             }
             SelfLoopType::TwoSidesCorner => {
                 if let Some((left, right)) =
                     sorted_two_side_loop_port_sides(graph, holder.node, hyper_loop)
                 {
-                    assign_leftmost_rightmost_ports(graph, holder.node, hyper_loop, left, right);
+                    assign_leftmost_rightmost_ports(
+                        graph,
+                        &places,
+                        holder.node,
+                        hyper_loop,
+                        left,
+                        right,
+                    );
                 }
             }
             SelfLoopType::TwoSidesOpposing => {
                 determine_two_side_opposing_loop_route(
                     graph,
+                    &places,
                     holder.node,
                     hyper_loop,
                     &sides_in_port_order,
@@ -1366,11 +1401,18 @@ fn determine_loop_routes(graph: &LGraph, holder: &mut SelfLoopHolder) {
             SelfLoopType::ThreeSides => {
                 if let Some((left, right)) = three_side_route_sides(graph, holder.node, hyper_loop)
                 {
-                    assign_leftmost_rightmost_ports(graph, holder.node, hyper_loop, left, right);
+                    assign_leftmost_rightmost_ports(
+                        graph,
+                        &places,
+                        holder.node,
+                        hyper_loop,
+                        left,
+                        right,
+                    );
                 }
             }
             SelfLoopType::FourSides => {
-                determine_four_side_loop_route(graph, holder.node, hyper_loop, &port_penalties);
+                determine_four_side_loop_route(&places, hyper_loop, &port_penalties);
             }
         }
 
@@ -1384,6 +1426,7 @@ fn determine_loop_routes(graph: &LGraph, holder: &mut SelfLoopHolder) {
 // sorted. A tie between the two options goes to option 1, so this order picks the loop's route.
 fn determine_two_side_opposing_loop_route(
     graph: &LGraph,
+    places: &PortPlaces,
     node: usize,
     hyper_loop: &mut SelfHyperLoop,
     sides: &[PortSide],
@@ -1393,31 +1436,35 @@ fn determine_two_side_opposing_loop_route(
         return;
     }
 
-    let Some(option1_leftmost_port) = lowest_port_on_side(graph, node, hyper_loop, sides[0]) else {
+    let Some(option1_leftmost_port) =
+        lowest_port_on_side(graph, places, node, hyper_loop, sides[0])
+    else {
         return;
     };
-    let Some(option1_rightmost_port) = highest_port_on_side(graph, node, hyper_loop, sides[1])
+    let Some(option1_rightmost_port) =
+        highest_port_on_side(graph, places, node, hyper_loop, sides[1])
     else {
         return;
     };
     let option1_penalty = compute_edge_penalty(
-        graph,
-        node,
+        places,
         option1_leftmost_port,
         option1_rightmost_port,
         port_penalties,
     );
 
-    let Some(option2_leftmost_port) = lowest_port_on_side(graph, node, hyper_loop, sides[1]) else {
+    let Some(option2_leftmost_port) =
+        lowest_port_on_side(graph, places, node, hyper_loop, sides[1])
+    else {
         return;
     };
-    let Some(option2_rightmost_port) = highest_port_on_side(graph, node, hyper_loop, sides[0])
+    let Some(option2_rightmost_port) =
+        highest_port_on_side(graph, places, node, hyper_loop, sides[0])
     else {
         return;
     };
     let option2_penalty = compute_edge_penalty(
-        graph,
-        node,
+        places,
         option2_leftmost_port,
         option2_rightmost_port,
         port_penalties,
@@ -1433,8 +1480,7 @@ fn determine_two_side_opposing_loop_route(
 }
 
 fn determine_four_side_loop_route(
-    graph: &LGraph,
-    node: usize,
+    places: &PortPlaces,
     hyper_loop: &mut SelfHyperLoop,
     port_penalties: &[usize],
 ) {
@@ -1444,20 +1490,14 @@ fn determine_four_side_loop_route(
     let Some(mut worst_right_port) = hyper_loop.ports.first().map(|port| port.port) else {
         return;
     };
-    let mut worst_penalty = compute_edge_penalty(
-        graph,
-        node,
-        worst_left_port,
-        worst_right_port,
-        port_penalties,
-    );
+    let mut worst_penalty =
+        compute_edge_penalty(places, worst_left_port, worst_right_port, port_penalties);
 
     for ports in hyper_loop.ports.windows(2) {
         let current_left_port = ports[0].port;
         let current_right_port = ports[1].port;
         let current_penalty = compute_edge_penalty(
-            graph,
-            node,
+            places,
             current_left_port,
             current_right_port,
             port_penalties,
@@ -1545,6 +1585,7 @@ fn loop_sides(graph: &LGraph, node: usize, hyper_loop: &SelfHyperLoop) -> Vec<Po
 
 fn assign_leftmost_rightmost_ports(
     graph: &LGraph,
+    places: &PortPlaces,
     node: usize,
     hyper_loop: &mut SelfHyperLoop,
     leftmost_side: PortSide,
@@ -1555,17 +1596,18 @@ fn assign_leftmost_rightmost_ports(
         .iter()
         .filter(|port| graph.layerless_nodes[node].ports[port.port].side == leftmost_side)
         .map(|port| port.port)
-        .min_by_key(|port| place_of(graph, node, *port));
+        .min_by_key(|port| places.of(*port));
     hyper_loop.rightmost_port = hyper_loop
         .ports
         .iter()
         .filter(|port| graph.layerless_nodes[node].ports[port.port].side == rightmost_side)
         .map(|port| port.port)
-        .max_by_key(|port| place_of(graph, node, *port));
+        .max_by_key(|port| places.of(*port));
 }
 
 fn lowest_port_on_side(
     graph: &LGraph,
+    places: &PortPlaces,
     node: usize,
     hyper_loop: &SelfHyperLoop,
     side: PortSide,
@@ -1575,11 +1617,12 @@ fn lowest_port_on_side(
         .iter()
         .filter(|port| graph.layerless_nodes[node].ports[port.port].side == side)
         .map(|port| port.port)
-        .min_by_key(|port| place_of(graph, node, *port))
+        .min_by_key(|port| places.of(*port))
 }
 
 fn highest_port_on_side(
     graph: &LGraph,
+    places: &PortPlaces,
     node: usize,
     hyper_loop: &SelfHyperLoop,
     side: PortSide,
@@ -1589,7 +1632,7 @@ fn highest_port_on_side(
         .iter()
         .filter(|port| graph.layerless_nodes[node].ports[port.port].side == side)
         .map(|port| port.port)
-        .max_by_key(|port| place_of(graph, node, *port))
+        .max_by_key(|port| places.of(*port))
 }
 
 fn compute_port_penalties(graph: &LGraph, node: usize) -> Vec<usize> {
@@ -1609,18 +1652,17 @@ fn compute_port_penalties(graph: &LGraph, node: usize) -> Vec<usize> {
 }
 
 fn compute_edge_penalty(
-    graph: &LGraph,
-    node: usize,
+    places: &PortPlaces,
     leftmost_port: PortId,
     rightmost_port: PortId,
     port_penalties: &[usize],
 ) -> usize {
-    let ports = &graph.layerless_nodes[node].ports;
-    let port_count = ports.len();
-    let (Some(leftmost_port), Some(rightmost_port)) = (
-        ports.position(leftmost_port),
-        ports.position(rightmost_port),
-    ) else {
+    let port_count = places.listed;
+    // A port off the list has no place, and so no penalty. A place is below `port_count` and
+    // `port_count` is above 0 whenever there is a place, so no other range check is needed.
+    let (Some(leftmost_port), Some(rightmost_port)) =
+        (places.of(leftmost_port), places.of(rightmost_port))
+    else {
         return 0;
     };
     if port_count == 0
@@ -1776,11 +1818,12 @@ fn create_self_loop_crossing_graph(
     for _ in &holder.hyper_loops {
         graph.add_segment(HyperEdgeSegment::new());
     }
+    let places = PortPlaces::new(ports);
 
     for first in 0..holder.hyper_loops.len().saturating_sub(1) {
         for second in (first + 1)..holder.hyper_loops.len() {
             create_self_loop_slot_dependencies(
-                ports,
+                &places,
                 holder,
                 activity_over_ports,
                 label_crossing_matrix,
@@ -1804,6 +1847,7 @@ fn compute_loop_activity(graph: &LGraph, holder: &SelfLoopHolder) -> Vec<Vec<boo
 /// For each loop, which places of the node's port list the loop runs over.
 fn compute_loop_activity_for_ports(holder: &SelfLoopHolder, ports: &NodePorts) -> Vec<Vec<bool>> {
     let port_count = ports.len();
+    let places = PortPlaces::new(ports);
     holder
         .hyper_loops
         .iter()
@@ -1814,13 +1858,10 @@ fn compute_loop_activity_for_ports(holder: &SelfLoopHolder, ports: &NodePorts) -
             else {
                 return activity;
             };
-            if port_count == 0 {
-                return activity;
-            }
-            let (Some(leftmost_port), Some(rightmost_port)) = (
-                ports.position(leftmost_port),
-                ports.position(rightmost_port),
-            ) else {
+            // `port_count` is above 0 whenever the list has a place to find.
+            let (Some(leftmost_port), Some(rightmost_port)) =
+                (places.of(leftmost_port), places.of(rightmost_port))
+            else {
                 return activity;
             };
 
@@ -1835,7 +1876,7 @@ fn compute_loop_activity_for_ports(holder: &SelfLoopHolder, ports: &NodePorts) -
 }
 
 fn create_self_loop_slot_dependencies(
-    ports: &NodePorts,
+    places: &PortPlaces,
     holder: &SelfLoopHolder,
     activity_over_ports: &[Vec<bool>],
     label_crossing_matrix: &[Vec<bool>],
@@ -1844,12 +1885,12 @@ fn create_self_loop_slot_dependencies(
     second: usize,
 ) {
     let first_above_second = count_self_loop_slot_crossings(
-        ports,
+        places,
         &holder.hyper_loops[first],
         &activity_over_ports[second],
     );
     let second_above_first = count_self_loop_slot_crossings(
-        ports,
+        places,
         &holder.hyper_loops[second],
         &activity_over_ports[first],
     );
@@ -1875,7 +1916,7 @@ fn create_self_loop_slot_dependencies(
 }
 
 fn count_self_loop_slot_crossings(
-    ports: &NodePorts,
+    places: &PortPlaces,
     upper_loop: &SelfHyperLoop,
     lower_loop_activity: &[bool],
 ) -> usize {
@@ -1883,8 +1924,8 @@ fn count_self_loop_slot_crossings(
         .ports
         .iter()
         .filter(|port| {
-            ports
-                .position(port.port)
+            places
+                .of(port.port)
                 .is_some_and(|place| lower_loop_activity.get(place).copied().unwrap_or(false))
         })
         .count()
@@ -2062,10 +2103,12 @@ fn port_range_on_side(graph: &LGraph, node: usize, side: PortSide) -> Option<(us
 fn route_self_loop_holder(graph: &mut LGraph, holder: &SelfLoopHolder) {
     let mut new_margins = graph.layerless_nodes[holder.node].margin;
     let routing_slot_positions = compute_routing_slot_positions(graph, holder);
+    let places = PortPlaces::new(&graph.layerless_nodes[holder.node].ports);
 
     for hyper_loop in &holder.hyper_loops {
         for sl_edge in &hyper_loop.edges {
-            let direction = compute_edge_routing_direction(graph, holder.node, hyper_loop, sl_edge);
+            let direction =
+                compute_edge_routing_direction(graph, &places, holder.node, hyper_loop, sl_edge);
             let bend_points = compute_orthogonal_bend_points(
                 graph,
                 holder.node,
@@ -2097,6 +2140,7 @@ enum EdgeRoutingDirection {
 
 fn compute_edge_routing_direction(
     graph: &LGraph,
+    places: &PortPlaces,
     node: usize,
     hyper_loop: &SelfHyperLoop,
     sl_edge: &SelfLoopEdge,
@@ -2105,7 +2149,7 @@ fn compute_edge_routing_direction(
     let target_side = graph.layerless_nodes[node].ports[sl_edge.target_port].side;
 
     if source_side == target_side {
-        if place_of(graph, node, sl_edge.source_port) < place_of(graph, node, sl_edge.target_port) {
+        if places.of(sl_edge.source_port) < places.of(sl_edge.target_port) {
             EdgeRoutingDirection::Clockwise
         } else {
             EdgeRoutingDirection::CounterClockwise
@@ -2919,6 +2963,85 @@ mod tests {
             graph.layerless_nodes[node].ports[graph.edges[1].target.port].side,
             PortSide::North
         );
+    }
+
+    // Mutation: index the table by the place of a port instead of by `PortId::index`.
+    #[test]
+    fn port_places_follow_the_list_after_a_reorder_and_an_unlist() {
+        let mut graph = LGraph::new(
+            "root",
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
+        );
+        let node = add_node(&mut graph, "A");
+        let first = add_port(&mut graph, node, PortSide::North).port;
+        let second = add_port(&mut graph, node, PortSide::North).port;
+        let third = add_port(&mut graph, node, PortSide::North).port;
+        let fourth = add_port(&mut graph, node, PortSide::North).port;
+        let ports = &mut graph.layerless_nodes[node].ports;
+        ports.unlist(&[second]);
+        assert!(ports.set_order(&[fourth, first, third]));
+
+        let places = PortPlaces::new(ports);
+
+        assert_eq!(places.of(fourth), Some(0));
+        assert_eq!(places.of(first), Some(1));
+        assert_eq!(places.of(third), Some(2));
+        assert_eq!(places.of(second), None);
+        assert_eq!(places.of(PortId::new(9)), None);
+    }
+
+    // Mutation: treat a port off the list as place 0 instead of as "no place".
+    #[test]
+    fn a_port_off_the_list_has_no_penalty_and_no_activity() {
+        let mut graph = LGraph::new(
+            "root",
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
+        );
+        let node = add_node(&mut graph, "A");
+        let listed = add_port(&mut graph, node, PortSide::North);
+        let off_list = add_port(&mut graph, node, PortSide::North);
+        let last = add_port(&mut graph, node, PortSide::North);
+        graph.layerless_nodes[node].ports.unlist(&[off_list.port]);
+        let places = PortPlaces::new(&graph.layerless_nodes[node].ports);
+
+        assert_eq!(
+            compute_edge_penalty(&places, off_list.port, last.port, &[4, 9]),
+            0
+        );
+        assert_eq!(
+            compute_edge_penalty(&places, listed.port, off_list.port, &[4, 9]),
+            0
+        );
+
+        let mut hyper_loop = hyper_loop_with_ports(&[listed, off_list], SelfLoopType::OneSide);
+        hyper_loop.leftmost_port = Some(off_list.port);
+        hyper_loop.rightmost_port = Some(last.port);
+        let holder = empty_self_loop_holder(node, hyper_loop);
+        let activity = compute_loop_activity_for_ports(&holder, &graph.layerless_nodes[node].ports);
+        assert_eq!(activity, vec![vec![false, false]]);
+    }
+
+    // Mutation: expect every self-loop port to be in the node's list, and panic when one is not.
+    #[test]
+    fn routing_a_loop_with_a_port_off_the_list_does_not_panic() {
+        let mut graph = LGraph::new(
+            "root",
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
+        );
+        let node = add_node(&mut graph, "A");
+        let listed = add_port(&mut graph, node, PortSide::North);
+        let off_list = add_port(&mut graph, node, PortSide::North);
+        graph.layerless_nodes[node].ports.unlist(&[off_list.port]);
+        let hyper_loop = hyper_loop_with_ports(&[listed, off_list], SelfLoopType::OneSide);
+        let mut holder = empty_self_loop_holder(node, hyper_loop);
+
+        determine_loop_routes(&graph, &mut holder);
+
+        // A port off the list has no place, so it sorts before the listed ones.
+        let hyper_loop = &holder.hyper_loops[0];
+        assert_eq!(hyper_loop.ports[0].port, off_list.port);
+        assert_eq!(hyper_loop.leftmost_port, Some(off_list.port));
+        assert_eq!(hyper_loop.rightmost_port, Some(listed.port));
     }
 
     #[test]
