@@ -1385,6 +1385,16 @@ pub fn select_label_sides(graph: &mut LGraph) {
     }
 }
 
+/// Ports `EndLabelPreprocessor.process` and `processNode` at commit `62d5909`.
+///
+/// Java visits every node in every layer, dummy nodes too. A north or south port dummy gathers
+/// the end labels of the edges that were moved to it, so its margins grow like the margins of the
+/// real node. Only a real node keeps its label cells for `EndLabelPostprocessor`, which skips
+/// dummy nodes. Here the cell of a dummy node only changes its margin, then it is dropped.
+///
+/// Java leaves the labels on their edges. This crate moves the labels of a real node into its
+/// ports instead, after every node has gathered its labels: a label that a north or south port
+/// dummy and the real port both gather must still be on its edge when the second one looks.
 pub fn preprocess_end_labels(graph: &mut LGraph) {
     let edge_label_spacing = graph.options.spacing.edge_label;
     let label_label_spacing = graph.options.spacing.label_label;
@@ -1395,22 +1405,30 @@ pub fn preprocess_end_labels(graph: &mut LGraph) {
         .flat_map(|layer| layer.nodes.iter().copied())
         .collect::<Vec<_>>();
 
+    let mut moved_labels = Vec::new();
     for node in nodes {
-        if !matches!(
-            graph.layerless_nodes[node].kind,
-            LNodeKind::Normal | LNodeKind::ExternalPort
-        ) {
-            continue;
-        }
-        gather_end_labels_for_node(graph, node);
+        let gathered = gather_end_labels_for_node(graph, node);
         place_end_label_cells_for_node(
             graph,
             node,
+            &gathered.max_edge_thickness,
             label_label_spacing,
             edge_label_spacing,
             vertical_layout,
         );
+        if matches!(
+            graph.layerless_nodes[node].kind,
+            LNodeKind::Normal | LNodeKind::ExternalPort
+        ) {
+            moved_labels.extend(gathered.labels);
+        } else {
+            for port in &mut graph.layerless_nodes[node].ports {
+                port.labels.clear();
+                port.end_label_cell = None;
+            }
+        }
     }
+    remove_gathered_end_labels(graph, moved_labels);
 }
 
 fn same_side(graph: &mut LGraph, label_side: LabelSide) {
@@ -1623,7 +1641,7 @@ fn apply_label_sides_to_label_dummy_run(
 }
 
 fn smart_for_regular_node(graph: &mut LGraph, node: usize, default_side: LabelSide) {
-    let mut end_label_queue = VecDeque::new();
+    let mut end_label_queue: VecDeque<Vec<EndLabelRef>> = VecDeque::new();
     let mut current_port_side = None;
     let port_count = graph.layerless_nodes[node].ports.len();
 
@@ -1633,7 +1651,6 @@ fn smart_for_regular_node(graph: &mut LGraph, node: usize, default_side: LabelSi
             if !end_label_queue.is_empty() {
                 smart_for_regular_node_port_end_labels(
                     graph,
-                    node,
                     &mut end_label_queue,
                     current_port_side,
                     default_side,
@@ -1644,15 +1661,15 @@ fn smart_for_regular_node(graph: &mut LGraph, node: usize, default_side: LabelSi
             current_port_side = Some(port_side);
         }
 
-        if port_has_incident_end_labels(graph, node, port_index) {
-            end_label_queue.push_back(port_index);
+        // A port with an edge counts, even when no end label sits on that edge.
+        if let Some(gathered) = gather_end_labels(graph, node, port_index) {
+            end_label_queue.push_back(gathered.labels);
         }
     }
 
     if !end_label_queue.is_empty() {
         smart_for_regular_node_port_end_labels(
             graph,
-            node,
             &mut end_label_queue,
             current_port_side,
             default_side,
@@ -1662,8 +1679,7 @@ fn smart_for_regular_node(graph: &mut LGraph, node: usize, default_side: LabelSi
 
 fn smart_for_regular_node_port_end_labels(
     graph: &mut LGraph,
-    node: usize,
-    end_label_queue: &mut VecDeque<usize>,
+    end_label_queue: &mut VecDeque<Vec<EndLabelRef>>,
     port_side: Option<PortSide>,
     default_side: LabelSide,
 ) {
@@ -1673,46 +1689,29 @@ fn smart_for_regular_node_port_end_labels(
     };
 
     if end_label_queue.len() == 2 {
-        if matches!(port_side, PortSide::North | PortSide::East) {
-            if let Some(port_index) = end_label_queue.pop_front() {
-                apply_label_side_to_port_labels(graph, node, port_index, LabelSide::Above);
-            }
-            if let Some(port_index) = end_label_queue.pop_front() {
-                apply_label_side_to_port_labels(graph, node, port_index, LabelSide::Below);
-            }
+        let (first, second) = if matches!(port_side, PortSide::North | PortSide::East) {
+            (LabelSide::Above, LabelSide::Below)
         } else {
-            if let Some(port_index) = end_label_queue.pop_front() {
-                apply_label_side_to_port_labels(graph, node, port_index, LabelSide::Below);
-            }
-            if let Some(port_index) = end_label_queue.pop_front() {
-                apply_label_side_to_port_labels(graph, node, port_index, LabelSide::Above);
-            }
+            (LabelSide::Below, LabelSide::Above)
+        };
+        if let Some(labels) = end_label_queue.pop_front() {
+            apply_label_side_to_end_labels(graph, &labels, first);
+        }
+        if let Some(labels) = end_label_queue.pop_front() {
+            apply_label_side_to_end_labels(graph, &labels, second);
         }
     } else {
-        for port_index in end_label_queue.iter().copied() {
-            apply_label_side_to_port_labels(graph, node, port_index, default_side);
+        for labels in end_label_queue.iter() {
+            apply_label_side_to_end_labels(graph, labels, default_side);
         }
     }
 
     end_label_queue.clear();
 }
 
-fn apply_label_side_to_port_labels(
-    graph: &mut LGraph,
-    node: usize,
-    port_index: usize,
-    side: LabelSide,
-) {
-    for edge in incident_end_label_edges_for_port(graph, node, port_index) {
-        let placement = end_label_placement_for_port(graph, edge, node, port_index);
-        for label in &mut graph.edges[edge].labels {
-            if Some(label.placement) == placement {
-                label.label_side = Some(side);
-            }
-        }
-    }
-    for label in &mut graph.layerless_nodes[node].ports[port_index].labels {
-        label.label_side = Some(side);
+fn apply_label_side_to_end_labels(graph: &mut LGraph, labels: &[EndLabelRef], side: LabelSide) {
+    for label in labels {
+        graph.edges[label.edge].labels[label.index].label_side = Some(side);
     }
 }
 
@@ -1722,82 +1721,158 @@ fn apply_label_side_to_edge(graph: &mut LGraph, edge: usize, side: LabelSide) {
     }
 }
 
-fn port_has_incident_end_labels(graph: &LGraph, node: usize, port_index: usize) -> bool {
-    incident_end_label_edges_for_port(graph, node, port_index)
-        .into_iter()
-        .any(|edge| {
-            let placement = end_label_placement_for_port(graph, edge, node, port_index);
-            graph.edges[edge]
-                .labels
-                .iter()
-                .any(|label| Some(label.placement) == placement)
-        })
+/// Where one end label sits: the edge that holds it and its index in that edge's label list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EndLabelRef {
+    edge: usize,
+    index: usize,
 }
 
-fn incident_end_label_edges_for_port(graph: &LGraph, node: usize, port_index: usize) -> Vec<usize> {
+/// What `EndLabelPreprocessor.gatherLabels` finds at one port.
+struct GatheredEndLabels {
+    labels: Vec<EndLabelRef>,
+    /// The greatest thickness of any edge at the port, the port's dummy included.
+    max_edge_thickness: f64,
+}
+
+/// Ports `EndLabelPreprocessor.NO_INCIDENT_EDGE_THICKNESS`.
+const NO_INCIDENT_EDGE_THICKNESS: f64 = -1.0;
+
+/// Ports `EndLabelPreprocessor.gatherLabels(LPort)` at commit `62d5909`. `LabelSideSelector` uses
+/// it too.
+///
+/// A north or south port gave its edges to a port dummy. The labels of those edges belong to the
+/// port, so this also reads the ports of the dummy whose origin is this port (`PORT_DUMMY` and
+/// `ORIGIN` in Java). Like Java, it sets `end_label_edge` of a label that has none, and it
+/// returns `None` when no edge is connected.
+fn gather_end_labels(
+    graph: &mut LGraph,
+    node: usize,
+    port_index: usize,
+) -> Option<GatheredEndLabels> {
+    let mut labels = Vec::new();
+    let mut max_edge_thickness = gather_port_end_labels(graph, node, port_index, &mut labels);
+
+    let dummy = graph.layerless_nodes[node].ports[port_index]
+        .port_dummy
+        .as_ref()
+        .filter(|dummy| dummy.graph_id == graph.id)
+        .map(|dummy| dummy.node);
+    if let Some(dummy) = dummy {
+        let origin = PortRef {
+            node,
+            port: port_index,
+        };
+        for dummy_port in 0..graph.layerless_nodes[dummy].ports.len() {
+            if graph.layerless_nodes[dummy].ports[dummy_port].origin_port == Some(origin) {
+                max_edge_thickness = max_edge_thickness.max(gather_port_end_labels(
+                    graph,
+                    dummy,
+                    dummy_port,
+                    &mut labels,
+                ));
+            }
+        }
+    }
+
+    (max_edge_thickness != NO_INCIDENT_EDGE_THICKNESS).then_some(GatheredEndLabels {
+        labels,
+        max_edge_thickness,
+    })
+}
+
+/// Ports `EndLabelPreprocessor.gatherLabels(LPort, List)`: the tail labels of the outgoing edges
+/// and the head labels of the incoming edges, edge by edge. Returns the greatest thickness of an
+/// incident edge, or `NO_INCIDENT_EDGE_THICKNESS` when there is none.
+fn gather_port_end_labels(
+    graph: &mut LGraph,
+    node: usize,
+    port_index: usize,
+    target: &mut Vec<EndLabelRef>,
+) -> f64 {
+    let mut max_edge_thickness = NO_INCIDENT_EDGE_THICKNESS;
     let port = &graph.layerless_nodes[node].ports[port_index];
-    port.incoming_edges
+    // `LPort.getConnectedEdges`: the incoming edges, then the outgoing edges.
+    let incident = port
+        .incoming_edges
         .iter()
         .chain(port.outgoing_edges.iter())
         .copied()
-        .collect()
-}
+        .collect::<Vec<_>>();
 
-fn end_label_placement_for_port(
-    graph: &LGraph,
-    edge: usize,
-    node: usize,
-    port_index: usize,
-) -> Option<EdgeLabelPlacement> {
-    if graph.edges[edge].source.node == node && graph.edges[edge].source.port == port_index {
-        Some(EdgeLabelPlacement::Tail)
-    } else if graph.edges[edge].target.node == node && graph.edges[edge].target.port == port_index {
-        Some(EdgeLabelPlacement::Head)
-    } else {
-        None
+    for edge in incident {
+        max_edge_thickness = max_edge_thickness.max(graph.edges[edge].thickness);
+        let source = graph.edges[edge].source;
+        let placement = if source.node == node && source.port == port_index {
+            EdgeLabelPlacement::Tail
+        } else {
+            EdgeLabelPlacement::Head
+        };
+        for (index, label) in graph.edges[edge].labels.iter_mut().enumerate() {
+            if label.placement == placement {
+                if label.end_label_edge.is_none() {
+                    label.end_label_edge = Some(edge);
+                }
+                target.push(EndLabelRef { edge, index });
+            }
+        }
     }
+    max_edge_thickness
 }
 
-fn gather_end_labels_for_node(graph: &mut LGraph, node: usize) {
+/// What `gather_end_labels_for_node` found at the ports of one node.
+struct NodeEndLabels {
+    /// The greatest edge thickness per port. Only a port that has labels reads it.
+    max_edge_thickness: Vec<f64>,
+    /// Every label that was copied into a port of the node.
+    labels: Vec<EndLabelRef>,
+}
+
+/// Copies the end labels of each port of `node` into the port, in the order Java gathers them.
+/// The originals stay on their edges until `remove_gathered_end_labels` takes them off.
+fn gather_end_labels_for_node(graph: &mut LGraph, node: usize) -> NodeEndLabels {
     let port_count = graph.layerless_nodes[node].ports.len();
+    let mut result = NodeEndLabels {
+        max_edge_thickness: vec![NO_INCIDENT_EDGE_THICKNESS; port_count],
+        labels: Vec::new(),
+    };
     for port_index in 0..port_count {
         graph.layerless_nodes[node].ports[port_index].labels.clear();
         graph.layerless_nodes[node].ports[port_index].end_label_cell = None;
-        let incident_edges = incident_end_label_edges_for_port(graph, node, port_index);
-        for edge in incident_edges {
-            let Some(placement) = end_label_placement_for_port(graph, edge, node, port_index)
-            else {
-                continue;
-            };
+        let Some(gathered) = gather_end_labels(graph, node, port_index) else {
+            continue;
+        };
+        result.max_edge_thickness[port_index] = gathered.max_edge_thickness;
+        let copies = gathered
+            .labels
+            .iter()
+            .map(|label| graph.edges[label.edge].labels[label.index].clone())
+            .collect::<Vec<_>>();
+        graph.layerless_nodes[node].ports[port_index].labels = copies;
+        result.labels.extend(gathered.labels);
+    }
+    result
+}
 
-            let labels = std::mem::take(&mut graph.edges[edge].labels);
-            let mut retained = Vec::with_capacity(labels.len());
-            for mut label in labels {
-                if label.placement == placement {
-                    if label.end_label_edge.is_none() {
-                        label.end_label_edge = Some(edge);
-                    }
-                    graph.layerless_nodes[node].ports[port_index]
-                        .labels
-                        .push(label);
-                } else {
-                    retained.push(label);
-                }
-            }
-            graph.edges[edge].labels = retained;
-        }
+/// Takes the labels that ports now hold off their edges. The postprocessor puts them back.
+fn remove_gathered_end_labels(graph: &mut LGraph, mut labels: Vec<EndLabelRef>) {
+    // Highest index first, so a removal never shifts an index that is still to come.
+    labels.sort_by_key(|label| std::cmp::Reverse((label.edge, label.index)));
+    labels.dedup();
+    for label in labels {
+        graph.edges[label.edge].labels.remove(label.index);
     }
 }
 
 fn place_end_label_cells_for_node(
     graph: &mut LGraph,
     node: usize,
+    max_edge_thickness: &[f64],
     label_label_spacing: f64,
     edge_label_spacing: f64,
     vertical_layout: bool,
 ) {
-    let port_count = graph.layerless_nodes[node].ports.len();
-    for port_index in 0..port_count {
+    for (port_index, &port_thickness) in max_edge_thickness.iter().enumerate() {
         if graph.layerless_nodes[node].ports[port_index]
             .labels
             .is_empty()
@@ -1810,7 +1885,7 @@ fn place_end_label_cells_for_node(
             vertical_layout,
         );
         graph.layerless_nodes[node].ports[port_index].end_label_cell = Some(cell);
-        place_end_label_cell_for_port(graph, node, port_index, edge_label_spacing);
+        place_end_label_cell_for_port(graph, node, port_index, port_thickness, edge_label_spacing);
     }
 
     // `EndLabelPreprocessor.process`: east and west in a vertical layout, else north and south.
@@ -1871,6 +1946,7 @@ fn place_end_label_cell_for_port(
     graph: &mut LGraph,
     node: usize,
     port_index: usize,
+    max_edge_thickness: f64,
     edge_label_spacing: f64,
 ) {
     let node_size = graph.layerless_nodes[node].size;
@@ -1883,7 +1959,6 @@ fn place_end_label_cell_for_port(
         x: port.position.x + port.anchor.x,
         y: port.position.y + port.anchor.y,
     };
-    let max_edge_thickness = max_incident_edge_thickness(graph, &port);
     let label_side = port
         .labels
         .first()
@@ -1943,14 +2018,6 @@ fn place_end_label_cell_for_port(
     }
 
     graph.layerless_nodes[node].ports[port_index].end_label_cell = Some(cell);
-}
-
-fn max_incident_edge_thickness(graph: &LGraph, port: &crate::graph::LPort) -> f64 {
-    port.incoming_edges
-        .iter()
-        .chain(port.outgoing_edges.iter())
-        .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.thickness.max(0.0)))
-        .fold(0.0, f64::max)
 }
 
 /// A label cell inside the strip overlap remover, in the remover's own coordinates.
@@ -4515,7 +4582,8 @@ mod tests {
             .collect();
         let mut graph = graph(vec![node("A"), node("B")], vec![input]);
         let target = graph.edges[0].target;
-        gather_end_labels_for_node(&mut graph, target.node);
+        let gathered = gather_end_labels_for_node(&mut graph, target.node);
+        remove_gathered_end_labels(&mut graph, gathered.labels);
         let port = &graph.layerless_nodes[target.node].ports[target.port];
         assert_eq!(
             port.labels
