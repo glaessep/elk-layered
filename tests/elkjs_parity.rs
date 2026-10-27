@@ -349,6 +349,17 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    importer gives to the made-up port of the edge into G, so the two ports must not share a flow.
 // 47. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), look the
 //    flow of a port up as a made-up port (`false` for `port.named`): 2 cases, ports-group-include-flow-of-split-edges and random-group-ports/r037.
+// 48. In `gather_end_labels` (src/intermediate.rs), skip the ports of the north or south port
+//    dummy (`if false && ..origin_port == Some(origin)`), so the labels of the edges moved to the
+//    dummy belong to no port: 123 cases, such as ports-end-labels-north-port-head-and-tail,
+//    ports-end-labels-fixed-side-port-head and random-cross-ports/r001.
+// 49. In `preprocess_end_labels`, skip every node that is not a normal node, so a port dummy
+//    keeps the margins it had before its end labels: 98 cases, such as
+//    ports-end-labels-east-port-edge-from-node-down, ports-end-labels-north-port-tail-and-center
+//    and ports-end-labels-fixed-side-port-head.
+// 50. In `assign_four_sides_label_side_and_alignment` (src/selfloops.rs), read the side of the
+//    rightmost port instead of the leftmost one twice: 2 cases,
+//    ports-self-loops-on-four-sides-with-labels and random-cross-ports/r143.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

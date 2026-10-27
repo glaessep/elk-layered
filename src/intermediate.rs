@@ -4636,6 +4636,37 @@ mod tests {
         assert!(graph.layerless_nodes[target].margin.left > old_left_margin);
     }
 
+    // Mutation: in `smart_for_regular_node`, queue a port only when it has an end label. The
+    // two ports of A then no longer pair up, and the tail label gets the default side.
+    #[test]
+    fn smart_label_sides_count_a_port_whose_edges_carry_no_end_label() {
+        let mut tail = ElkInputLabel::center("tail", 24.0, 10.0);
+        tail.placement = EdgeLabelPlacement::Tail;
+        let mut labelled = edge("A-B", "A", "B");
+        labelled.labels = vec![tail];
+        let mut graph = graph(
+            vec![node("A"), node("B"), node("C")],
+            vec![labelled, edge("A-C", "A", "C")],
+        );
+        graph.options.edge_label_side_selection = EdgeLabelSideSelection::SmartDown;
+
+        layer_network_simplex(&mut graph).unwrap();
+        crate::p3order::process_port_sides(&mut graph);
+        select_label_sides(&mut graph);
+
+        // A has one port per edge, and both sit on the same side. ELK pairs them up: the first
+        // gets the label side that is not the default, here `Above`, whatever labels it has.
+        let source = graph.edges[0].source;
+        let second = graph.edges[1].source;
+        assert_eq!(source.node, second.node);
+        assert_eq!(
+            graph.layerless_nodes[source.node].ports[source.port].side,
+            graph.layerless_nodes[second.node].ports[second.port].side
+        );
+        assert!(source.port < second.port);
+        assert_eq!(graph.edges[0].labels[0].label_side, Some(LabelSide::Above));
+    }
+
     #[test]
     fn label_dummy_remover_centers_vertical_inline_labels_in_label_space() {
         let mut center = ElkInputLabel::center("choice", 30.0, 12.0);
