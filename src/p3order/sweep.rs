@@ -1462,6 +1462,9 @@ struct BarycenterHeuristic {
     random: JavaRandom,
     port_distributor: BarycenterPortDistributor,
     force_node_model_order: bool,
+    /// `ForsterConstraintResolver.layoutUnits`: the nodes of each layout unit, in the order the
+    /// layers had when the resolver was made. The order of the layers changes later.
+    layout_units: HashMap<usize, Vec<usize>>,
     bigger_than: HashMap<usize, HashSet<usize>>,
     smaller_than: HashMap<usize, HashSet<usize>>,
 }
@@ -1480,11 +1483,22 @@ impl BarycenterHeuristic {
             .flat_map(|layer| layer.nodes.iter().copied())
             .map(|node| (node, BarycenterState::default()))
             .collect();
+        let mut layout_units: HashMap<usize, Vec<usize>> = HashMap::new();
+        for node in graph
+            .layers
+            .iter()
+            .flat_map(|layer| layer.nodes.iter().copied())
+        {
+            if let Some(unit) = graph.layerless_nodes[node].in_layer_layout_unit {
+                layout_units.entry(unit).or_default().push(node);
+            }
+        }
         Self {
             states,
             random,
             port_distributor,
             force_node_model_order: graph.options.force_node_model_order,
+            layout_units,
             bigger_than: HashMap::new(),
             smaller_than: HashMap::new(),
         }
@@ -1553,7 +1567,7 @@ impl BarycenterHeuristic {
                     let right = self.states.get(right).and_then(|state| state.barycenter);
                     compare_barycenters(left, right)
                 });
-                resolve_forster_constraints(graph, layer, &mut self.states);
+                resolve_forster_constraints(graph, layer, &mut self.states, &self.layout_units);
             }
         }
     }
@@ -1833,6 +1847,7 @@ fn resolve_forster_constraints(
     graph: &LGraph,
     layer: &mut [usize],
     states: &mut HashMap<usize, BarycenterState>,
+    layout_units: &HashMap<usize, Vec<usize>>,
 ) {
     if layer.len() < 2 {
         return;
@@ -1844,7 +1859,7 @@ fn resolve_forster_constraints(
         .map(ConstraintGroup::new)
         .collect::<Vec<_>>();
     if graph.in_layer_successor_constraints_between_non_dummies {
-        process_forster_constraints(graph, states, &mut groups, true);
+        process_forster_constraints(graph, states, layout_units, &mut groups, true);
         apply_forster_group_order(layer, states, &groups);
         groups = layer
             .iter()
@@ -1852,7 +1867,7 @@ fn resolve_forster_constraints(
             .map(ConstraintGroup::new)
             .collect::<Vec<_>>();
     }
-    process_forster_constraints(graph, states, &mut groups, false);
+    process_forster_constraints(graph, states, layout_units, &mut groups, false);
 
     apply_forster_group_order(layer, states, &groups);
 }
@@ -1879,10 +1894,11 @@ fn apply_forster_group_order(
 fn process_forster_constraints(
     graph: &LGraph,
     states: &mut HashMap<usize, BarycenterState>,
+    layout_units: &HashMap<usize, Vec<usize>>,
     groups: &mut Vec<ConstraintGroup>,
     only_between_normal_nodes: bool,
 ) {
-    build_forster_constraints_graph(graph, groups, only_between_normal_nodes);
+    build_forster_constraints_graph(graph, layout_units, groups, only_between_normal_nodes);
     while let Some((predecessor, successor)) = find_violated_forster_constraint(states, groups) {
         handle_violated_forster_constraint(states, groups, predecessor, successor);
     }
@@ -1890,6 +1906,7 @@ fn process_forster_constraints(
 
 fn build_forster_constraints_graph(
     graph: &LGraph,
+    layout_units: &HashMap<usize, Vec<usize>>,
     groups: &mut [ConstraintGroup],
     only_between_normal_nodes: bool,
 ) {
@@ -1927,10 +1944,10 @@ fn build_forster_constraints_graph(
 
         if !only_between_normal_nodes && graph.layerless_nodes[node].kind == LNodeKind::Normal {
             if let Some(previous) = last_non_dummy_node {
-                let previous_unit_nodes = layout_unit_nodes(graph, previous, groups);
-                let current_unit_nodes = layout_unit_nodes(graph, node, groups);
-                for previous_unit in &previous_unit_nodes {
-                    for current_unit in &current_unit_nodes {
+                let previous_unit_nodes = layout_unit_nodes(layout_units, previous);
+                let current_unit_nodes = layout_unit_nodes(layout_units, node);
+                for previous_unit in previous_unit_nodes {
+                    for current_unit in current_unit_nodes {
                         if let (Some(left), Some(right)) = (
                             index_by_node.get(previous_unit).copied(),
                             index_by_node.get(current_unit).copied(),
@@ -1949,12 +1966,9 @@ fn build_forster_constraints_graph(
     }
 }
 
-fn layout_unit_nodes(graph: &LGraph, unit: usize, groups: &[ConstraintGroup]) -> Vec<usize> {
-    groups
-        .iter()
-        .flat_map(|group| group.nodes.iter().copied())
-        .filter(|node| graph.layerless_nodes[*node].in_layer_layout_unit == Some(unit))
-        .collect::<Vec<_>>()
+/// `ForsterConstraintResolver.layoutUnits.get(unit)`.
+fn layout_unit_nodes(layout_units: &HashMap<usize, Vec<usize>>, unit: usize) -> &[usize] {
+    layout_units.get(&unit).map_or(&[], Vec::as_slice)
 }
 
 fn add_forster_constraint(groups: &mut [ConstraintGroup], from: usize, to: usize) {
@@ -2645,20 +2659,77 @@ impl InLayerCrossingCounter {
 struct NorthSouthEdgeNeighbouringNodeCrossingsCounter {
     upper_lower_crossings: usize,
     lower_upper_crossings: usize,
+    /// The place of each northern and southern port among the ports of its side and node.
+    port_positions: HashMap<PortRef, usize>,
 }
 
 impl NorthSouthEdgeNeighbouringNodeCrossingsCounter {
-    fn new() -> Self {
-        Self::default()
+    /// Ports the constructor: it numbers the northern and southern ports of the layer's nodes.
+    fn new(graph: &LGraph, layer: &[usize]) -> Self {
+        let mut port_positions = HashMap::new();
+        for &node in layer {
+            for side in [PortSide::South, PortSide::North] {
+                for (port_id, port) in ports_in_north_south_east_west_order(graph, node, side)
+                    .into_iter()
+                    .enumerate()
+                {
+                    port_positions.insert(port, port_id);
+                }
+            }
+        }
+        Self {
+            port_positions,
+            ..Self::default()
+        }
     }
 
     fn count_crossings(&mut self, graph: &LGraph, upper_node: usize, lower_node: usize) {
         self.upper_lower_crossings = 0;
         self.lower_upper_crossings = 0;
+
+        self.process_if_two_north_south_nodes(graph, upper_node, lower_node);
         self.process_if_north_south_long_edge_dummy_crossing(graph, upper_node, lower_node);
         self.process_if_normal_node_with_ns_ports_and_long_edge_dummy(
             graph, upper_node, lower_node,
         );
+    }
+
+    fn process_if_two_north_south_nodes(
+        &mut self,
+        graph: &LGraph,
+        upper_node: usize,
+        lower_node: usize,
+    ) {
+        if is_north_south_node(graph, upper_node)
+            && is_north_south_node(graph, lower_node)
+            && !have_different_origins(graph, upper_node, lower_node)
+        {
+            if north_south_dummy_is_north_of_normal_node(graph, upper_node) {
+                self.count_crossings_of_two_north_south_dummies(graph, upper_node, lower_node);
+            } else {
+                self.count_crossings_of_two_north_south_dummies(graph, lower_node, upper_node);
+            }
+        }
+    }
+
+    fn count_crossings_of_two_north_south_dummies(
+        &mut self,
+        graph: &LGraph,
+        further_from_normal_node: usize,
+        closer_to_normal_node: usize,
+    ) {
+        let first_degree = |node: usize, side: PortSide| {
+            first_port_on_side_of(graph, node, side).map_or(0, |port| port_degree(graph, port))
+        };
+        if self.origin_port_position_of(graph, further_from_normal_node)
+            > self.origin_port_position_of(graph, closer_to_normal_node)
+        {
+            self.upper_lower_crossings = first_degree(closer_to_normal_node, PortSide::East);
+            self.lower_upper_crossings = first_degree(further_from_normal_node, PortSide::West);
+        } else {
+            self.upper_lower_crossings = first_degree(closer_to_normal_node, PortSide::West);
+            self.lower_upper_crossings = first_degree(further_from_normal_node, PortSide::East);
+        }
     }
 
     fn process_if_north_south_long_edge_dummy_crossing(
@@ -2705,6 +2776,13 @@ impl NorthSouthEdgeNeighbouringNodeCrossingsCounter {
                 number_of_north_south_edges(graph, lower_node, PortSide::South);
         }
     }
+
+    fn origin_port_position_of(&self, graph: &LGraph, node: usize) -> usize {
+        // The origin port is a northern or southern port of a node in the layer, so it has a place.
+        origin_port_of(graph, node)
+            .and_then(|origin| self.port_positions.get(&origin).copied())
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2732,7 +2810,9 @@ impl SwitchDecider {
             crossing_matrix_filler,
             left_in_layer_counter: InLayerCrossingCounter::new(graph, free_layer, PortSide::West),
             right_in_layer_counter: InLayerCrossingCounter::new(graph, free_layer, PortSide::East),
-            north_south_counter: NorthSouthEdgeNeighbouringNodeCrossingsCounter::new(),
+            north_south_counter: NorthSouthEdgeNeighbouringNodeCrossingsCounter::new(
+                graph, free_layer,
+            ),
         }
     }
 
@@ -2821,8 +2901,9 @@ impl SwitchDecider {
     ) -> bool {
         let upper_node = free_layer[upper_node_index];
         let lower_node = free_layer[lower_node_index];
-        are_normal_and_north_south_port_dummy(graph, upper_node, lower_node)
-            || have_north_south_layout_unit_guard(graph, upper_node, lower_node)
+        have_successor_constraints(graph, upper_node, lower_node)
+            || have_layout_unit_constraints(graph, upper_node, lower_node)
+            || are_normal_and_north_south_port_dummy(graph, upper_node, lower_node)
     }
 }
 
@@ -3547,25 +3628,56 @@ fn are_normal_and_north_south_port_dummy(
             && graph.layerless_nodes[upper_node].kind == LNodeKind::Normal)
 }
 
-fn have_north_south_layout_unit_guard(
-    graph: &LGraph,
-    upper_node: usize,
-    lower_node: usize,
-) -> bool {
-    if graph.layerless_nodes[upper_node].kind == LNodeKind::LongEdge
-        || graph.layerless_nodes[lower_node].kind == LNodeKind::LongEdge
-    {
-        return false;
-    }
-
-    has_edges_on_side(graph, upper_node, PortSide::North)
-        || has_edges_on_side(graph, lower_node, PortSide::South)
+/// `SwitchDecider.haveSuccessorConstraints`.
+fn have_successor_constraints(graph: &LGraph, upper_node: usize, lower_node: usize) -> bool {
+    graph.layerless_nodes[upper_node]
+        .in_layer_successor_constraints
+        .contains(&lower_node)
 }
 
+/// `SwitchDecider.haveLayoutUnitConstraints`.
+fn have_layout_unit_constraints(graph: &LGraph, upper_node: usize, lower_node: usize) -> bool {
+    let neither_node_is_long_edge_dummy =
+        !is_long_edge_dummy(graph, upper_node) && !is_long_edge_dummy(graph, lower_node);
+
+    // If the nodes are part of a layout unit with more nodes than themselves, the layout units
+    // must be equal for a switch to be allowed.
+    let upper_layout_unit = graph.layerless_nodes[upper_node].in_layer_layout_unit;
+    let lower_layout_unit = graph.layerless_nodes[lower_node].in_layer_layout_unit;
+    let are_in_different_layout_units = upper_layout_unit != lower_layout_unit;
+
+    let part_of_multi_node_layout_unit =
+        |node: usize, unit: Option<usize>| unit.is_some_and(|unit| unit != node);
+    let mut nodes_have_layout_units = part_of_multi_node_layout_unit(upper_node, upper_layout_unit)
+        || part_of_multi_node_layout_unit(lower_node, lower_layout_unit);
+
+    let upper_node_has_northern_edges = has_edges_on_side(graph, upper_node, PortSide::North);
+    let lower_node_has_southern_edges = has_edges_on_side(graph, lower_node, PortSide::South);
+
+    // ELK's hotfix for #162: if north or south edges are present, there must be a layout unit.
+    nodes_have_layout_units |= has_edges_on_side(graph, upper_node, PortSide::South)
+        || has_edges_on_side(graph, lower_node, PortSide::North);
+
+    let has_layout_unit_constraint = (nodes_have_layout_units && are_in_different_layout_units)
+        || (upper_node_has_northern_edges || lower_node_has_southern_edges);
+
+    neither_node_is_long_edge_dummy && has_layout_unit_constraint
+}
+
+/// `SwitchDecider.hasEdgesOnSide`: whether a port of the side has an edge or a dummy that holds
+/// its edges.
 fn has_edges_on_side(graph: &LGraph, node: usize, side: PortSide) -> bool {
-    ports_in_north_south_east_west_order(graph, node, side)
-        .into_iter()
-        .any(|port| connected_edges(graph, port).next().is_some())
+    graph.layerless_nodes[node]
+        .ports
+        .iter()
+        .enumerate()
+        .filter(|(_, port)| port.side == side)
+        .any(|(index, port)| {
+            port.port_dummy.is_some()
+                || connected_edges(graph, PortRef { node, port: index })
+                    .next()
+                    .is_some()
+        })
 }
 
 fn is_north_south_node(graph: &LGraph, node: usize) -> bool {
@@ -3576,17 +3688,44 @@ fn is_long_edge_dummy(graph: &LGraph, node: usize) -> bool {
     graph.layerless_nodes[node].kind == LNodeKind::LongEdge
 }
 
-fn north_south_dummy_is_north_of_normal_node(graph: &LGraph, node: usize) -> bool {
+/// `NorthSouthEdgeNeighbouringNodeCrossingsCounter.originPortOf`: the port of the regular node a
+/// dummy was made for.
+fn origin_port_of(graph: &LGraph, node: usize) -> Option<PortRef> {
     graph.layerless_nodes[node]
         .ports
         .first()
-        .is_some_and(|port| port.side == PortSide::North)
+        .and_then(|port| port.origin_port)
 }
 
+/// `NorthSouthEdgeNeighbouringNodeCrossingsCounter.isNorthOfNormalNode`.
+fn north_south_dummy_is_north_of_normal_node(graph: &LGraph, node: usize) -> bool {
+    origin_port_of(graph, node).is_some_and(|origin| {
+        graph.layerless_nodes[origin.node].ports[origin.port].side == PortSide::North
+    })
+}
+
+/// `NorthSouthEdgeNeighbouringNodeCrossingsCounter.haveDifferentOrigins`: two dummies have the
+/// origin of their ports in different nodes.
+fn have_different_origins(graph: &LGraph, upper_node: usize, lower_node: usize) -> bool {
+    origin_port_of(graph, upper_node).map(|origin| origin.node)
+        != origin_port_of(graph, lower_node).map(|origin| origin.node)
+}
+
+fn first_port_on_side_of(graph: &LGraph, node: usize, side: PortSide) -> Option<PortRef> {
+    graph.layerless_nodes[node]
+        .ports
+        .iter()
+        .position(|port| port.side == side)
+        .map(|port| PortRef { node, port })
+}
+
+/// `NorthSouthEdgeNeighbouringNodeCrossingsCounter.numberOfNorthSouthEdges`: the ports of the
+/// side that have a dummy.
 fn number_of_north_south_edges(graph: &LGraph, node: usize, side: PortSide) -> usize {
-    ports_in_north_south_east_west_order(graph, node, side)
-        .into_iter()
-        .filter(|port| connected_edges(graph, *port).next().is_some())
+    graph.layerless_nodes[node]
+        .ports
+        .iter()
+        .filter(|port| port.side == side && port.port_dummy.is_some())
         .count()
 }
 
@@ -5188,5 +5327,348 @@ mod tests {
 
         assert_eq!(before, 1.0);
         assert_eq!(after, 0.0);
+    }
+}
+
+/// Tests of the parts of the greedy switch that deal with north and south port dummies.
+#[cfg(test)]
+mod north_south_tests {
+    use super::*;
+    use crate::graph::{LPoint, LayeredEdge};
+    use crate::options::{ElkDirection, LayeredOptions};
+
+    fn graph() -> LGraph {
+        LGraph::new(
+            "g",
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Right),
+        )
+    }
+
+    fn port(node: usize, port: usize) -> PortRef {
+        PortRef { node, port }
+    }
+
+    fn add_edge(graph: &mut LGraph, source: PortRef, target: PortRef) {
+        let id = format!("e{}", graph.edges.len());
+        graph
+            .add_edge(LayeredEdge {
+                id,
+                source,
+                target,
+                source_node_id: String::new(),
+                target_node_id: String::new(),
+                labels: Vec::new(),
+                minlen: 1,
+                reversed: false,
+                bend_points: Vec::new(),
+                junction_points: Vec::new(),
+                model_order: None,
+                priority_direction: 0,
+                priority_shortness: 0,
+                priority_straightness: 0,
+                thickness: 0.0,
+                original_opposite_port: None,
+                compound_segment: None,
+            })
+            .expect("both ports exist");
+    }
+
+    /// A node on `layer` with the given ports, `FIXED_SIDE`.
+    fn add_node(graph: &mut LGraph, id: &str, layer: usize, sides: &[PortSide]) -> usize {
+        let index = graph.layerless_nodes.len();
+        let mut node = LNode::new(id, 40.0, 20.0, None);
+        node.port_constraints = PortConstraints::FixedSide;
+        graph.layerless_nodes.push(node);
+        graph.set_node_layer(index, layer);
+        for side in sides {
+            let port_type = if *side == PortSide::East {
+                PortType::Output
+            } else {
+                PortType::Input
+            };
+            graph.add_port(index, port_type, *side, LPoint::default());
+        }
+        index
+    }
+
+    /// A long edge dummy on the layer, with a neighbour on each side.
+    fn add_long_edge_dummy(graph: &mut LGraph, layer: usize) -> usize {
+        let index = graph.layerless_nodes.len();
+        let mut dummy = LNode::new("long", 0.0, 0.0, None);
+        dummy.kind = LNodeKind::LongEdge;
+        graph.layerless_nodes.push(dummy);
+        graph.set_node_layer(index, layer);
+        graph.add_port(index, PortType::Input, PortSide::West, LPoint::default());
+        graph.add_port(index, PortType::Output, PortSide::East, LPoint::default());
+        index
+    }
+
+    fn dummy_of(graph: &LGraph, node: usize, port: usize) -> usize {
+        graph.layerless_nodes[node].ports[port]
+            .port_dummy
+            .as_ref()
+            .unwrap()
+            .node
+    }
+
+    /// Two nodes with one north port each, a neighbour in front. Every node gets the given
+    /// number of edges for its port. Returns the graph, the nodes and their dummies.
+    fn two_nodes_with_north_ports(edges: [usize; 2]) -> (LGraph, [usize; 2], [usize; 2]) {
+        let mut graph = graph();
+        let neighbour = add_node(&mut graph, "n", 0, &[PortSide::East; 5]);
+        let a = add_node(&mut graph, "a", 1, &[PortSide::North, PortSide::South]);
+        let b = add_node(&mut graph, "b", 1, &[PortSide::North, PortSide::South]);
+        let mut next = 0;
+        for (node, count) in [a, b].into_iter().zip(edges) {
+            for _ in 0..count {
+                add_edge(&mut graph, port(neighbour, next), port(node, 0));
+                next += 1;
+            }
+        }
+        crate::north_south::preprocess_north_south_ports(&mut graph);
+        let dummies = [dummy_of(&graph, a, 0), dummy_of(&graph, b, 0)];
+        (graph, [a, b], dummies)
+    }
+
+    // Mutation: look for the constraint in the list of the lower node, or ignore the list.
+    #[test]
+    fn successor_constraints_prevent_a_switch_in_one_direction_only() {
+        let (graph, [a, _], [north, _]) = two_nodes_with_north_ports([1, 1]);
+        // The northern dummy must stay above its node.
+        assert!(have_successor_constraints(&graph, north, a));
+        assert!(!have_successor_constraints(&graph, a, north));
+    }
+
+    // Mutation: leave out the check of the layout units, which keeps a unit together.
+    #[test]
+    fn dummies_of_different_nodes_may_not_switch_places() {
+        let (graph, [a, b], [north_a, north_b]) = two_nodes_with_north_ports([1, 1]);
+        // The southern dummy of the first node stands next to the northern one of the second.
+        assert_eq!(graph.layers[1].nodes.len(), 4);
+        assert!(have_layout_unit_constraints(&graph, north_a, north_b));
+        assert!(have_layout_unit_constraints(&graph, a, north_b));
+        assert!(have_layout_unit_constraints(&graph, a, b));
+    }
+
+    // Mutation: compare the layout units as "both have one" instead of "both are the same".
+    #[test]
+    fn dummies_of_one_node_may_switch_places() {
+        let mut graph = graph();
+        let neighbour = add_node(&mut graph, "n", 0, &[PortSide::East; 2]);
+        let a = add_node(&mut graph, "a", 1, &[PortSide::North, PortSide::North]);
+        add_edge(&mut graph, port(neighbour, 0), port(a, 0));
+        add_edge(&mut graph, port(neighbour, 1), port(a, 1));
+        crate::north_south::preprocess_north_south_ports(&mut graph);
+        let (first, second) = (dummy_of(&graph, a, 0), dummy_of(&graph, a, 1));
+
+        // Neither has an edge on a northern or southern side, and both are in the unit of `a`.
+        assert!(!have_layout_unit_constraints(&graph, first, second));
+        assert!(!have_layout_unit_constraints(&graph, second, first));
+    }
+
+    // Mutation: apply the layout unit rule to long edge dummies.
+    #[test]
+    fn a_long_edge_dummy_may_switch_with_any_node() {
+        let (mut graph, [a, _], [north_a, _]) = two_nodes_with_north_ports([1, 1]);
+        let long = add_long_edge_dummy(&mut graph, 1);
+        for node in [a, north_a] {
+            assert!(!have_layout_unit_constraints(&graph, node, long));
+            assert!(!have_layout_unit_constraints(&graph, long, node));
+        }
+    }
+
+    // Mutation: ask only for the edges of the ports, not for the dummies that hold them.
+    #[test]
+    fn a_port_with_a_dummy_counts_as_a_port_with_edges() {
+        let (graph, [a, _], _) = two_nodes_with_north_ports([1, 1]);
+        // The edge of the northern port of `a` lives at the dummy now.
+        assert!(graph.layerless_nodes[a].ports[0].incoming_edges.is_empty());
+        assert!(has_edges_on_side(&graph, a, PortSide::North));
+        // The southern port has no edge and no dummy.
+        assert!(!has_edges_on_side(&graph, a, PortSide::South));
+    }
+
+    // Mutation: drop the successor or the layout unit rule from `constraints_prevent_switch`.
+    #[test]
+    fn the_switch_decider_applies_all_three_rules() {
+        let (mut graph, [a, b], [north_a, north_b]) = two_nodes_with_north_ports([1, 1]);
+        let long = add_long_edge_dummy(&mut graph, 1);
+        // Two plain nodes that only a successor constraint ties together, and a plain node next
+        // to a dummy that has no layout unit and no constraint.
+        let first = add_node(&mut graph, "first", 1, &[]);
+        let second = add_node(&mut graph, "second", 1, &[]);
+        graph.layerless_nodes[first]
+            .in_layer_successor_constraints
+            .push(second);
+        let plain = add_node(&mut graph, "plain", 1, &[]);
+        let bare_dummy = add_node(&mut graph, "bare", 1, &[]);
+        graph.layerless_nodes[bare_dummy].kind = LNodeKind::NorthSouthPort;
+        let order = graph
+            .layers
+            .iter()
+            .map(|layer| layer.nodes.clone())
+            .collect::<Vec<_>>();
+        let filler = CrossingMatrixFiller::new(
+            order[1].len(),
+            CrossMinType::TwoSidedGreedySwitch,
+            CrossingCountSide::West,
+        );
+        let decider = SwitchDecider::new(&graph, &order, 1, filler, false);
+        let layer = order[1].clone();
+        let index = |node: usize| {
+            layer
+                .iter()
+                .position(|candidate| *candidate == node)
+                .unwrap()
+        };
+
+        // A dummy and its node (rules 1 and 3), dummies of different nodes (rule 2).
+        assert!(decider.constraints_prevent_switch(&graph, &layer, index(north_a), index(a)));
+        assert!(decider.constraints_prevent_switch(&graph, &layer, index(a), index(north_a)));
+        assert!(decider.constraints_prevent_switch(&graph, &layer, index(north_a), index(north_b)));
+        assert!(decider.constraints_prevent_switch(&graph, &layer, index(a), index(b)));
+        // Only the successor constraint ties these two, and only in one direction.
+        assert!(decider.constraints_prevent_switch(&graph, &layer, index(first), index(second)));
+        assert!(!decider.constraints_prevent_switch(&graph, &layer, index(second), index(first)));
+        // Only the kinds of these two nodes forbid the switch.
+        assert!(decider.constraints_prevent_switch(
+            &graph,
+            &layer,
+            index(plain),
+            index(bare_dummy)
+        ));
+        assert!(decider.constraints_prevent_switch(
+            &graph,
+            &layer,
+            index(bare_dummy),
+            index(plain)
+        ));
+        // A long edge dummy is free.
+        assert!(!decider.constraints_prevent_switch(&graph, &layer, index(a), index(long)));
+        assert!(!decider.constraints_prevent_switch(&graph, &layer, index(long), index(north_b)));
+    }
+
+    fn counter_for(graph: &LGraph) -> NorthSouthEdgeNeighbouringNodeCrossingsCounter {
+        NorthSouthEdgeNeighbouringNodeCrossingsCounter::new(graph, &graph.layers[1].nodes)
+    }
+
+    /// A node with two northern ports, the first with one edge and the second with two. Returns
+    /// the graph, the node and the dummies of the first and second port.
+    fn two_north_ports() -> (LGraph, usize, usize, usize) {
+        let mut graph = graph();
+        let neighbour = add_node(&mut graph, "n", 0, &[PortSide::East; 3]);
+        let a = add_node(&mut graph, "a", 1, &[PortSide::North, PortSide::North]);
+        add_edge(&mut graph, port(neighbour, 0), port(a, 0));
+        add_edge(&mut graph, port(neighbour, 1), port(a, 1));
+        add_edge(&mut graph, port(neighbour, 2), port(a, 1));
+        crate::north_south::preprocess_north_south_ports(&mut graph);
+        let (first, second) = (dummy_of(&graph, a, 0), dummy_of(&graph, a, 1));
+        (graph, a, first, second)
+    }
+
+    // Mutation: leave out the count for two dummies of one node, or swap the roles of the dummy
+    // further from the node and the one closer to it.
+    #[test]
+    fn two_dummies_of_one_node_cross_as_often_as_the_edges_of_the_inner_port() {
+        let (graph, _, first, second) = two_north_ports();
+        let mut counter = counter_for(&graph);
+
+        // The dummy of the left port is further from the node's left corner in this order. The
+        // dummy of the right port has two edges.
+        counter.count_crossings(&graph, first, second);
+        assert_eq!(
+            (counter.upper_lower_crossings, counter.lower_upper_crossings),
+            (2, 0)
+        );
+        counter.count_crossings(&graph, second, first);
+        assert_eq!(
+            (counter.upper_lower_crossings, counter.lower_upper_crossings),
+            (0, 2)
+        );
+    }
+
+    // Mutation: count the crossings of dummies that belong to different nodes.
+    #[test]
+    fn dummies_of_different_nodes_do_not_cross_each_other() {
+        let (graph, _, [north_a, north_b]) = two_nodes_with_north_ports([1, 2]);
+        let mut counter = counter_for(&graph);
+        counter.count_crossings(&graph, north_a, north_b);
+        assert_eq!(
+            (counter.upper_lower_crossings, counter.lower_upper_crossings),
+            (0, 0)
+        );
+    }
+
+    // Mutation: swap the northern and southern case, or read the side of the dummy's own port
+    // instead of the side of the port it was made for.
+    #[test]
+    fn a_dummy_crosses_a_long_edge_on_the_side_of_its_port() {
+        let mut graph = graph();
+        let neighbour = add_node(&mut graph, "n", 0, &[PortSide::East; 2]);
+        let a = add_node(&mut graph, "a", 1, &[PortSide::North, PortSide::South]);
+        add_edge(&mut graph, port(neighbour, 0), port(a, 0));
+        add_edge(&mut graph, port(neighbour, 1), port(a, 1));
+        crate::north_south::preprocess_north_south_ports(&mut graph);
+        let (north, south) = (dummy_of(&graph, a, 0), dummy_of(&graph, a, 1));
+        let long = add_long_edge_dummy(&mut graph, 1);
+        let mut counter = counter_for(&graph);
+        let result = |counter: &NorthSouthEdgeNeighbouringNodeCrossingsCounter| {
+            (counter.upper_lower_crossings, counter.lower_upper_crossings)
+        };
+
+        counter.count_crossings(&graph, north, long);
+        assert_eq!(result(&counter), (1, 0));
+        counter.count_crossings(&graph, long, north);
+        assert_eq!(result(&counter), (0, 1));
+        counter.count_crossings(&graph, south, long);
+        assert_eq!(result(&counter), (0, 1));
+        counter.count_crossings(&graph, long, south);
+        assert_eq!(result(&counter), (1, 0));
+    }
+
+    // Mutation: count the ports that have edges instead of the ports that have a dummy.
+    #[test]
+    fn a_node_crosses_a_long_edge_once_for_each_port_with_a_dummy() {
+        let mut graph = graph();
+        let neighbour = add_node(&mut graph, "n", 0, &[PortSide::East; 3]);
+        let a = add_node(
+            &mut graph,
+            "a",
+            1,
+            &[PortSide::North, PortSide::South, PortSide::South],
+        );
+        add_edge(&mut graph, port(neighbour, 0), port(a, 0));
+        add_edge(&mut graph, port(neighbour, 1), port(a, 1));
+        add_edge(&mut graph, port(neighbour, 2), port(a, 2));
+        crate::north_south::preprocess_north_south_ports(&mut graph);
+        let long = add_long_edge_dummy(&mut graph, 1);
+        let mut counter = counter_for(&graph);
+
+        // The node above the long edge: the long edge passes the southern ports' dummies.
+        counter.count_crossings(&graph, a, long);
+        assert_eq!(
+            (counter.upper_lower_crossings, counter.lower_upper_crossings),
+            (2, 1)
+        );
+        counter.count_crossings(&graph, long, a);
+        assert_eq!(
+            (counter.upper_lower_crossings, counter.lower_upper_crossings),
+            (1, 2)
+        );
+    }
+
+    // Mutation: collect the layout units from the layers in reverse order.
+    #[test]
+    fn the_heuristic_keeps_the_layout_units_in_the_order_of_its_start() {
+        let (graph, [a, _], [north_a, _]) = two_nodes_with_north_ports([1, 1]);
+        let order = graph
+            .layers
+            .iter()
+            .map(|layer| layer.nodes.clone())
+            .collect::<Vec<_>>();
+        let distributor = BarycenterPortDistributor::new(PortDistributorKind::NodeRelative, &order);
+        let heuristic = BarycenterHeuristic::new(&graph, JavaRandom::new(1), distributor);
+        // The dummy is above the node in the layer, so it comes first.
+        assert_eq!(heuristic.layout_units[&a], vec![north_a, a]);
     }
 }
