@@ -14,8 +14,8 @@ use crate::compound::{
     source_ported_cross_hierarchy_segments,
 };
 use crate::graph::{
-    CompoundEdgeSegment, EdgeLabelPlacement, HierarchyEdge, LGraph, LLabel, LNode, LPoint, LPort,
-    LSize, LayeredEdge, PortRef, PortSide, PortType, apply_port_index_to_dummy,
+    CompoundEdgeSegment, EdgeLabelPlacement, HierarchyEdge, LGraph, LLabel, LNode, LNodeKind,
+    LPoint, LPort, LSize, LayeredEdge, PortRef, PortSide, PortType, apply_port_index_to_dummy,
     create_external_port_dummy, is_across_flow, port_side_from_direction,
 };
 use crate::options::{
@@ -86,6 +86,9 @@ pub struct ElkInputPort {
     pub index: Option<i32>,
     /// `elk.port.borderOffset`, when set.
     pub border_offset: Option<f64>,
+    /// `layered.allowNonFlowPortsToSwitchSides`: the crossing minimization may move a port across
+    /// the flow to the other side of its node.
+    pub allow_non_flow_ports_to_switch_sides: bool,
     /// The net flow of the port: the votes of every edge at the port, those outside its node
     /// too. A positive number makes the port an output port of its node.
     ///
@@ -209,7 +212,8 @@ pub enum ImportError {
         node_id: String,
         port_id: String,
     },
-    /// A port on the north or south side of its graph needs `NorthSouthPortPreprocessor`.
+    /// A node with children has a port across the layout flow, which needs the hierarchical part
+    /// of the north and south port steps.
     #[error("ELK port `{port_id}` of node `{node_id}` is on a north or south side")]
     NorthSouthPort { node_id: String, port_id: String },
     #[error("ELK node `{node_id}` references missing parent `{parent_id}`")]
@@ -376,11 +380,15 @@ fn import_external_ports(
     dummies
 }
 
-/// Refuses a graph that needs `NorthSouthPortPreprocessor`, which is not ported.
+/// Refuses a node with children that has a port across the layout flow, while its graph has
+/// ports that are not free.
 ///
-/// Ports the condition of `OrthogonalEdgeRouter.getLayoutProcessorConfiguration`, which adds the
-/// step when a graph has ports that are not free and a port across the layout flow. A graph with
-/// only free ports needs no step: `PortSideProcessor` puts every port on a side along the flow.
+/// `NorthSouthPortPreprocessor` handles the ports across the flow of a node without children. A
+/// node with children needs more: its ports have dummies inside the node as well, and the sweep
+/// over the hierarchy must place them. That part is not ported. The condition is the one of
+/// `OrthogonalEdgeRouter.getLayoutProcessorConfiguration`, which adds the step when a graph has
+/// ports that are not free and a port across the layout flow. A graph with only free ports needs
+/// no step: `PortSideProcessor` puts every port on a side along the flow.
 fn check_north_south_ports(root: &LGraph) -> ImportResult<()> {
     let mut pending = vec![root];
     while let Some(graph) = pending.pop() {
@@ -389,6 +397,7 @@ fn check_north_south_ports(root: &LGraph) -> ImportResult<()> {
             let offender = graph
                 .layerless_nodes
                 .iter()
+                .filter(|node| has_children(node))
                 .flat_map(|node| node.ports.iter().map(move |port| (node, port)))
                 .find(|(_, port)| {
                     port.input_index.is_some() && is_across_flow(graph.options.direction, port.side)
@@ -409,6 +418,19 @@ fn check_north_south_ports(root: &LGraph) -> ImportResult<()> {
         );
     }
     Ok(())
+}
+
+/// Whether the importer put children into the nested graph of a node. A node can also have a
+/// nested graph of dummies only, for an inside self loop: it has no children, as
+/// `node_materializes_children` says, and every node the importer makes for a child is a normal
+/// node.
+fn has_children(node: &LNode) -> bool {
+    node.nested_graph.as_deref().is_some_and(|nested| {
+        nested
+            .layerless_nodes
+            .iter()
+            .any(|child| child.kind == LNodeKind::Normal)
+    })
 }
 
 /// Rejects a scoped segment before any graph object is built. It checks that every endpoint is
@@ -1402,9 +1424,11 @@ fn transform_port(
         x: port.x,
         y: port.y,
     };
-    // `lport.copyProperties(elkport)` copies the two options. `containsKey` asks whether one is set.
+    // `lport.copyProperties(elkport)` copies the three options. `containsKey` asks whether one is
+    // set.
     lport.port_index = port.index.map(|index| index as isize);
     lport.border_offset = port.border_offset;
+    lport.allow_non_flow_ports_to_switch_sides = port.allow_non_flow_ports_to_switch_sides;
     // The input has no edge to or from a descendant of its node, because the node has no children.
     // Inside self loops are refused, so `INSIDE_CONNECTIONS` stays false.
     initialize_port(&mut lport, constraints, node_size, graph.options.direction);
@@ -3871,6 +3895,7 @@ mod tests {
             side,
             index: None,
             border_offset: None,
+            allow_non_flow_ports_to_switch_sides: false,
             net_flow: 0,
             child_edges: 0,
             connected_to_external_nodes: false,
@@ -4254,18 +4279,18 @@ mod tests {
     // Mutation: drop the direction from the test, so that a port across the flow is one that is
     // north or south in every direction.
     #[test]
-    fn a_port_across_the_flow_of_a_graph_with_fixed_ports_is_refused() {
-        // (direction, side, accepted)
+    fn a_port_across_the_flow_of_a_node_without_children_is_imported_and_marks_the_graph() {
+        // (direction, side, across the flow)
         let cases = [
-            (ElkDirection::Right, PortSide::North, false),
-            (ElkDirection::Left, PortSide::South, false),
-            (ElkDirection::Right, PortSide::East, true),
-            (ElkDirection::Down, PortSide::East, false),
-            (ElkDirection::Up, PortSide::West, false),
-            (ElkDirection::Down, PortSide::North, true),
-            (ElkDirection::Up, PortSide::South, true),
+            (ElkDirection::Right, PortSide::North, true),
+            (ElkDirection::Left, PortSide::South, true),
+            (ElkDirection::Right, PortSide::East, false),
+            (ElkDirection::Down, PortSide::East, true),
+            (ElkDirection::Up, PortSide::West, true),
+            (ElkDirection::Down, PortSide::North, false),
+            (ElkDirection::Up, PortSide::South, false),
         ];
-        for (direction, side, accepted) in cases {
+        for (direction, side, across_flow) in cases {
             let input = flat_graph(
                 direction,
                 vec![ported(
@@ -4275,16 +4300,94 @@ mod tests {
                 )],
                 vec![],
             );
-            let result = import_graph(&input);
-            if accepted {
-                assert!(result.is_ok(), "{direction:?} {side:?}");
-            } else {
+            let lgraph = import_graph(&input).unwrap();
+            assert_eq!(
+                lgraph.graph_properties.north_south_ports, across_flow,
+                "{direction:?} {side:?}"
+            );
+        }
+    }
+
+    // Mutation: refuse every node with fixed ports across the flow, not only a node with
+    // children, accept the port of a node with children, or ignore the direction.
+    #[test]
+    fn a_port_across_the_flow_of_a_node_with_children_is_refused() {
+        let hierarchical = |direction: ElkDirection, side: PortSide| {
+            let mut child = node("X");
+            child.parent = Some("G".to_string());
+            let mut input = flat_graph(
+                direction,
+                vec![
+                    ported(
+                        "G",
+                        Some(PortConstraints::FixedSide),
+                        vec![input_port("p", side)],
+                    ),
+                    child,
+                    // A node without children has a port across the flow in every case.
+                    ported(
+                        "L",
+                        Some(PortConstraints::FixedSide),
+                        vec![
+                            input_port("q", PortSide::North),
+                            input_port("r", PortSide::East),
+                        ],
+                    ),
+                ],
+                vec![],
+            );
+            input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
+            input
+        };
+
+        // (direction, side of the port of `G`, refused)
+        let cases = [
+            (ElkDirection::Right, PortSide::North, true),
+            (ElkDirection::Down, PortSide::East, true),
+            (ElkDirection::Right, PortSide::East, false),
+            (ElkDirection::Down, PortSide::North, false),
+        ];
+        for (direction, side, refused) in cases {
+            let result = import_graph(&hierarchical(direction, side));
+            if refused {
                 assert!(
-                    matches!(result, Err(ImportError::NorthSouthPort { ref port_id, .. }) if port_id == "p"),
+                    matches!(
+                        result,
+                        Err(ImportError::NorthSouthPort { ref node_id, ref port_id })
+                            if node_id == "G" && port_id == "p"
+                    ),
                     "{direction:?} {side:?}"
                 );
+            } else {
+                assert!(result.is_ok(), "{direction:?} {side:?}");
             }
         }
+    }
+
+    // Mutation: test `nested_graph.is_some()` instead of children in `check_north_south_ports`,
+    // so the dummy-only nested graph of an inside self loop makes the node count as one with
+    // children.
+    #[test]
+    fn a_node_with_only_an_inside_self_loop_has_no_children_for_its_ports() {
+        let mut input = graph(
+            vec![ported(
+                "A",
+                Some(PortConstraints::FixedSide),
+                vec![input_port("p", PortSide::North)],
+            )],
+            vec![ElkInputEdge {
+                source_port: None,
+                target_port: None,
+                inside_self_loops_yo: true,
+                ..edge("A-A", "A", "A")
+            }],
+        );
+        input.options.direction = ElkDirection::Right;
+        input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
+        input.options.inside_self_loops_activate = true;
+        let lgraph = import_graph(&input).unwrap();
+        // The node has a nested graph, so only the test for children lets the port pass.
+        assert!(layered_node(&lgraph, "A").nested_graph.is_some());
     }
 
     // Mutation: refuse a port across the flow although every node has free ports.
@@ -4298,7 +4401,8 @@ mod tests {
         let lgraph = import_graph(&input).unwrap();
         // The graph still has the property. `PortSideProcessor` moves the port later.
         assert!(lgraph.graph_properties.north_south_ports);
-        // A fixed node anywhere else in the graph makes it a problem.
+        // A fixed node anywhere else in the graph makes the graph need the north and south
+        // port steps, which a node without children does not stop.
         let mixed = flat_graph(
             ElkDirection::Right,
             vec![
@@ -4307,10 +4411,7 @@ mod tests {
             ],
             vec![],
         );
-        assert!(matches!(
-            import_graph(&mixed),
-            Err(ImportError::NorthSouthPort { .. })
-        ));
+        assert!(import_graph(&mixed).is_ok());
     }
 
     // Mutation: hand out the model order of ports even when the graph does not ask for it.

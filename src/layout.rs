@@ -846,10 +846,11 @@ impl<'a, 't> Work<'a, 't> {
                     element: node_element(&scope_info.node.id),
                     reason: error.to_string(),
                 },
-                // A port across the flow needs a step that is not ported yet.
+                // A port across the flow of a node with children needs a step that is not ported
+                // yet.
                 importer::ImportError::NorthSouthPort { port_id, .. } => Error::Unsupported {
                     element: port_element(&port_id),
-                    feature: "north and south ports".to_string(),
+                    feature: "north and south ports on a node with children".to_string(),
                 },
                 // A port of the scope without a dummy: ELK cannot find the end of the edge.
                 importer::ImportError::ScopePortWithoutDummy { edge_id } => Error::Unsupported {
@@ -989,6 +990,7 @@ impl<'a, 't> Work<'a, 't> {
                 side: settings.side,
                 index: settings.index,
                 border_offset: settings.border_offset,
+                allow_non_flow_ports_to_switch_sides: settings.allow_non_flow_ports_to_switch_sides,
                 net_flow: facts.net_flow,
                 child_edges: facts.child_edges,
                 connected_to_external_nodes: facts.connected_to_external_nodes,

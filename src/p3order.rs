@@ -137,7 +137,84 @@ impl SweepCopy {
             }
         }
 
+        correct_north_south_port_sides(graph);
+
         true
+    }
+}
+
+/// Ports the end of `SweepCopy.transferNodeAndPortOrdersToGraph` and `assertCorrectPortSides`.
+///
+/// The option `allowNonFlowPortsToSwitchSides` lets the crossing minimization place the dummy of
+/// a port on either side of its node. A dummy below its node means the port is a southern one,
+/// and a dummy above means a northern one, so the side of the port changes to match. The ports of
+/// each dummy and of each node that has a dummy are sorted again, side by side.
+fn correct_north_south_port_sides(graph: &mut LGraph) {
+    let mut to_sort: Vec<usize> = Vec::new();
+    // Which nodes are in `to_sort` already, and where a node sits in the layer being read.
+    let mut queued = vec![false; graph.layerless_nodes.len()];
+    let mut position_in_layer = vec![usize::MAX; graph.layerless_nodes.len()];
+    for layer_index in 0..graph.layers.len() {
+        let layer = graph.layers[layer_index].nodes.clone();
+        for (position, node) in layer.iter().copied().enumerate() {
+            position_in_layer[node] = position;
+        }
+        for (position, dummy) in layer.iter().copied().enumerate() {
+            if graph.layerless_nodes[dummy].kind != LNodeKind::NorthSouthPort {
+                continue;
+            }
+            // The node the dummy was made for is in its layout unit, in the same layer.
+            let Some(origin) = graph.layerless_nodes[dummy].in_layer_layout_unit else {
+                continue;
+            };
+            // `position` and `origin_position` are the final places in the layer. Java compares
+            // the same numbers: `transferNodeAndPortOrdersToGraph` sets `node.id = j` for every
+            // node of the layer first, and only then `assertCorrectPortSides` compares
+            // `dummy.id > origin.id`. The ids from before the sweep play no part.
+            let origin_position = position_in_layer[origin];
+            if origin_position == usize::MAX {
+                continue;
+            }
+            let origin_port = graph.layerless_nodes[dummy]
+                .ports
+                .first()
+                .and_then(|port| port.origin_port);
+            if let Some(origin_port) = origin_port.filter(|port| port.node == origin) {
+                let port = &mut graph.layerless_nodes[origin].ports[origin_port.port];
+                if port.side == PortSide::North && position > origin_position {
+                    port.set_side(PortSide::South);
+                } else if port.side == PortSide::South && origin_position > position {
+                    port.set_side(PortSide::North);
+                }
+            }
+            for node in [origin, dummy] {
+                if !queued[node] {
+                    queued[node] = true;
+                    to_sort.push(node);
+                }
+            }
+        }
+        for node in layer {
+            position_in_layer[node] = usize::MAX;
+        }
+    }
+
+    // The side of a port may have changed, so the list is sorted again, as `PortListSorter` sorts
+    // a node with a fixed port order. An order that is already sorted changes nothing, so the
+    // node's references to its ports are left alone.
+    for node in to_sort {
+        let constraints = graph.layerless_nodes[node].port_constraints;
+        let mut order = (0..graph.layerless_nodes[node].ports.len()).collect::<Vec<_>>();
+        order
+            .sort_by(|left, right| compare_combined_ports(graph, node, *left, *right, constraints));
+        if order.iter().enumerate().any(|(index, old)| index != *old) {
+            // A sort of the port indices is a permutation, so a refusal is a bug, never caller
+            // input. It stays loud in release builds, as `remap_port_index` does.
+            assert!(
+                graph.reorder_node_ports(node, order),
+                "the sorted port order of node {node} is not a permutation of its ports"
+            );
+        }
     }
 }
 
@@ -2141,6 +2218,239 @@ mod tests {
             port_order_indices_by_id(&graph, 0, &missing),
             None,
             "a saved numeric ID must never fall back to the external ID"
+        );
+    }
+
+    // --- Sides of ports whose dummies the minimization placed. ---
+
+    /// A node `a` in layer 1 with a north port and a south port that may switch sides, a
+    /// neighbour in layer 0 and the dummies the pre-processor makes. Returns the graph, the node
+    /// and the dummies of the north and of the south port.
+    fn node_with_movable_ports() -> (LGraph, usize, usize, usize) {
+        let mut graph = LGraph::new(
+            "g",
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Right),
+        );
+        let neighbour = graph.layerless_nodes.len();
+        graph
+            .layerless_nodes
+            .push(LNode::new("n", 10.0, 10.0, None));
+        graph.set_node_layer(neighbour, 0);
+        for _ in 0..2 {
+            graph.add_port(
+                neighbour,
+                PortType::Output,
+                PortSide::East,
+                LPoint::default(),
+            );
+        }
+        let a = graph.layerless_nodes.len();
+        let mut node = LNode::new("a", 40.0, 20.0, None);
+        node.port_constraints = PortConstraints::FixedSide;
+        graph.layerless_nodes.push(node);
+        graph.set_node_layer(a, 1);
+        for (index, side) in [PortSide::North, PortSide::South].into_iter().enumerate() {
+            graph.add_port(a, PortType::Input, side, LPoint::default());
+            graph.layerless_nodes[a].ports[index].allow_non_flow_ports_to_switch_sides = true;
+            graph.add_edge(layered_edge(
+                &format!("e{index}"),
+                PortRef {
+                    node: neighbour,
+                    port: index,
+                },
+                PortRef {
+                    node: a,
+                    port: index,
+                },
+            ));
+        }
+        crate::north_south::preprocess_north_south_ports(&mut graph);
+        let dummy = |port: usize| {
+            graph.layerless_nodes[a].ports[port]
+                .port_dummy
+                .as_ref()
+                .unwrap()
+                .node
+        };
+        let (north, south) = (dummy(0), dummy(1));
+        (graph, a, north, south)
+    }
+
+    fn side_of(graph: &LGraph, node: usize, port_id: usize) -> PortSide {
+        graph.layerless_nodes[node].ports[port_id].side
+    }
+
+    // Mutation: leave the sides of the ports alone.
+    #[test]
+    fn a_dummy_on_the_other_side_of_its_node_switches_the_side_of_its_port() {
+        let (mut graph, a, north, south) = node_with_movable_ports();
+        // The dummies trade places around the node: the south dummy first, the north one last.
+        graph.layers[1].nodes = vec![south, a, north];
+
+        correct_north_south_port_sides(&mut graph);
+
+        let sides = graph.layerless_nodes[a]
+            .ports
+            .iter()
+            .map(|port| (port.id.clone(), port.side))
+            .collect::<Vec<_>>();
+        // The port that was north is south now, and the other way round. The list is sorted by
+        // side again: north before south.
+        assert_eq!(side_of(&graph, a, 0), PortSide::North);
+        assert_eq!(side_of(&graph, a, 1), PortSide::South);
+        assert_eq!(sides[0].0, "a:1");
+        assert_eq!(sides[1].0, "a:0");
+    }
+
+    // Mutation: leave the correction out of the transfer of the best sweep to the graph.
+    #[test]
+    fn the_transfer_of_a_sweep_corrects_the_sides_of_ports_that_switched() {
+        let (mut graph, a, north, south) = node_with_movable_ports();
+        initialize_crossing_minimization_port_ids(&mut graph);
+        let mut order = graph
+            .layers
+            .iter()
+            .map(|layer| layer.nodes.clone())
+            .collect::<Vec<_>>();
+        order[1] = vec![south, a, north];
+        let sweep = SweepCopy::new(&graph, &order);
+
+        assert!(sweep.transfer_node_and_port_orders_to_graph(&mut graph, true));
+
+        assert_eq!(graph.layers[1].nodes, vec![south, a, north]);
+        // The northern port is below its dummy and became the southern one: it is last now.
+        assert_eq!(graph.layerless_nodes[a].ports[0].id, "a:1");
+        assert_eq!(side_of(&graph, a, 0), PortSide::North);
+        assert_eq!(side_of(&graph, a, 1), PortSide::South);
+        assert_eq!(
+            graph.layerless_nodes[a].port_constraints,
+            PortConstraints::FixedOrder
+        );
+    }
+
+    // Mutation: switch the sides although the dummies are where the sides say.
+    #[test]
+    fn dummies_on_the_expected_side_leave_the_sides_of_the_ports_alone() {
+        let (mut graph, a, north, south) = node_with_movable_ports();
+        assert_eq!(graph.layers[1].nodes, vec![north, a, south]);
+
+        correct_north_south_port_sides(&mut graph);
+
+        assert_eq!(side_of(&graph, a, 0), PortSide::North);
+        assert_eq!(side_of(&graph, a, 1), PortSide::South);
+        assert_eq!(graph.layerless_nodes[a].ports[0].id, "a:0");
+    }
+
+    // Mutation: switch the side of the south port only (or of the north port only).
+    #[test]
+    fn a_north_and_a_south_port_switch_independently() {
+        let (mut graph, a, north, south) = node_with_movable_ports();
+        // Both dummies above the node: the south port becomes a north port.
+        graph.layers[1].nodes = vec![north, south, a];
+
+        correct_north_south_port_sides(&mut graph);
+
+        assert_eq!(side_of(&graph, a, 0), PortSide::North);
+        assert_eq!(side_of(&graph, a, 1), PortSide::North);
+
+        let (mut graph, a, north, south) = node_with_movable_ports();
+        // Both below: the north port becomes a south port.
+        graph.layers[1].nodes = vec![a, north, south];
+
+        correct_north_south_port_sides(&mut graph);
+
+        assert_eq!(side_of(&graph, a, 0), PortSide::South);
+        assert_eq!(side_of(&graph, a, 1), PortSide::South);
+    }
+
+    // Mutation: leave the ports of the dummies in the order they were made.
+    #[test]
+    fn the_ports_of_a_dummy_are_sorted_by_side_again() {
+        let mut graph = LGraph::new(
+            "g",
+            LayeredOptions::flowchart_test_defaults(ElkDirection::Right),
+        );
+        let neighbour = graph.layerless_nodes.len();
+        graph
+            .layerless_nodes
+            .push(LNode::new("n", 10.0, 10.0, None));
+        graph.set_node_layer(neighbour, 0);
+        graph.add_port(
+            neighbour,
+            PortType::Output,
+            PortSide::East,
+            LPoint::default(),
+        );
+        graph.add_port(
+            neighbour,
+            PortType::Input,
+            PortSide::West,
+            LPoint::default(),
+        );
+        let a = graph.layerless_nodes.len();
+        let mut node = LNode::new("a", 40.0, 20.0, None);
+        node.port_constraints = PortConstraints::FixedSide;
+        graph.layerless_nodes.push(node);
+        graph.set_node_layer(a, 1);
+        graph.add_port(a, PortType::Input, PortSide::North, LPoint::default());
+        graph.add_edge(layered_edge(
+            "in",
+            PortRef {
+                node: neighbour,
+                port: 0,
+            },
+            PortRef { node: a, port: 0 },
+        ));
+        graph.add_edge(layered_edge(
+            "out",
+            PortRef { node: a, port: 0 },
+            PortRef {
+                node: neighbour,
+                port: 1,
+            },
+        ));
+        crate::north_south::preprocess_north_south_ports(&mut graph);
+        let dummy = graph.layerless_nodes[a].ports[0]
+            .port_dummy
+            .as_ref()
+            .unwrap()
+            .node;
+        // The dummy has a west port first and an east port second.
+        let before = graph.layerless_nodes[dummy]
+            .ports
+            .iter()
+            .map(|port| port.side)
+            .collect::<Vec<_>>();
+        assert_eq!(before, [PortSide::West, PortSide::East]);
+
+        correct_north_south_port_sides(&mut graph);
+
+        // East comes before west, as in `PortListSorter`. The edges stayed at their ports.
+        let after = graph.layerless_nodes[dummy]
+            .ports
+            .iter()
+            .map(|port| {
+                (
+                    port.side,
+                    port.incoming_edges.len(),
+                    port.outgoing_edges.len(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(after, [(PortSide::East, 0, 1), (PortSide::West, 1, 0)]);
+        assert_eq!(
+            graph.edges[0].target,
+            PortRef {
+                node: dummy,
+                port: 1
+            }
+        );
+        assert_eq!(
+            graph.edges[1].source,
+            PortRef {
+                node: dummy,
+                port: 0
+            }
         );
     }
 }

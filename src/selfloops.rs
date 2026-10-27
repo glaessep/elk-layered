@@ -1021,14 +1021,16 @@ fn north_south_port_connection_sides(graph: &LGraph, port: &crate::graph::LPort)
         return Vec::new();
     };
 
+    // Only the ports of the dummy that were made for this port count:
+    // `dummyLPort.getProperty(ORIGIN) == lPort` in Java.
+    let origin = crate::graph::PortRef {
+        node: port.node,
+        port: port_index(graph, port),
+    };
     let mut sides = dummy_node
         .ports
         .iter()
-        .filter(|_| {
-            dummy_node.origin_port.as_ref().is_some_and(|origin| {
-                origin.port.node == port.node && origin.port.port == port_index(graph, port)
-            })
-        })
+        .filter(|dummy_port| dummy_port.origin_port == Some(origin))
         .filter(|dummy_port| {
             !dummy_port.incoming_edges.is_empty() || !dummy_port.outgoing_edges.is_empty()
         })
@@ -1266,20 +1268,22 @@ fn assign_two_sides_opposing_and_three_sides_label_side_and_alignment(
     }
 }
 
+/// Ports `LabelPlacer.assignFourSidesSideAndAlignment` at commit `62d5909`.
+///
+/// ELK reads the side of the leftmost port twice and never looks at the rightmost port: its
+/// `rightmostPortSide` is `slLoop.getLeftmostPort().getLPort().getSide()`. elkjs 0.9.3 does the
+/// same, so this does too.
 fn assign_four_sides_label_side_and_alignment(
     graph: &LGraph,
     node: usize,
     hyper_loop: &mut SelfHyperLoop,
 ) {
-    let (Some(leftmost_port), Some(rightmost_port)) =
-        (hyper_loop.leftmost_port, hyper_loop.rightmost_port)
-    else {
+    let Some(leftmost_port) = hyper_loop.leftmost_port else {
         return;
     };
     let leftmost_side = graph.layerless_nodes[node].ports[leftmost_port].side;
-    let rightmost_side = graph.layerless_nodes[node].ports[rightmost_port].side;
 
-    if leftmost_side == PortSide::North || rightmost_side == PortSide::North {
+    if leftmost_side == PortSide::North {
         assign_label_side_and_alignment_to_loop(
             hyper_loop,
             PortSide::South,

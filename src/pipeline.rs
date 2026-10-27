@@ -28,6 +28,7 @@ use crate::intermediate::{
     restore_reversed_edges, reverse_edges_for_edge_and_layer_constraints, select_label_sides,
     sort_end_labels, split_long_edges, switch_label_dummies,
 };
+use crate::north_south::{postprocess_north_south_ports, preprocess_north_south_ports};
 use crate::p1cycles::{
     break_cycles_depth_first, break_cycles_greedy, break_cycles_greedy_model_order,
     break_cycles_interactive, break_cycles_model_order,
@@ -510,6 +511,8 @@ fn is_source_ported_processor(kind: ProcessorKind) -> bool {
             | ProcessorKind::InvertedPortProcessor
             | ProcessorKind::PortListSorter
             | ProcessorKind::SortByInputModelProcessor
+            | ProcessorKind::NorthSouthPortPreprocessor
+            | ProcessorKind::NorthSouthPortPostprocessor
             | ProcessorKind::HierarchicalPortConstraintProcessor
             | ProcessorKind::LayerSweepCrossingMinimizerBarycenter
             | ProcessorKind::LayerSweepCrossingMinimizerOneSidedGreedySwitch
@@ -951,7 +954,7 @@ fn execute_hierarchy_aware_processor(
 /// cannot place yet.
 ///
 /// A dummy on a north or south side of a horizontal layout, or on an east or west side of a
-/// vertical one, needs the steps for ports across the flow. Issue #5 adds them. Without them the
+/// vertical one, needs the steps for ports across the flow. Issue #24 adds them. Without them the
 /// routing of the edges at such a dummy does not match elkjs. A dummy without a side comes from a
 /// port without one on a node whose port sides are fixed, and a node of size zero has nothing to
 /// take the side from: ELK fails on it.
@@ -969,7 +972,7 @@ fn check_external_port_sides(root: &LGraph) -> PipelineResult<()> {
             }
             if is_across_flow(graph.options.direction, node.external_port_side) {
                 return Err(PipelineError::UnsupportedCompoundGraph {
-                    reason: "ports of a node with children on a side across the layout direction, which wait for north and south ports (issue #5)",
+                    reason: "ports of a node with children on a side across the layout direction, which wait for issue #24",
                 });
             }
         }
@@ -1172,6 +1175,8 @@ fn execute_processor(graph: &mut LGraph, kind: ProcessorKind) -> PipelineResult<
         ProcessorKind::InvertedPortProcessor => process_inverted_ports(graph),
         ProcessorKind::PortListSorter => sort_port_lists(graph),
         ProcessorKind::SortByInputModelProcessor => sort_by_input_model(graph),
+        ProcessorKind::NorthSouthPortPreprocessor => preprocess_north_south_ports(graph),
+        ProcessorKind::NorthSouthPortPostprocessor => postprocess_north_south_ports(graph),
         ProcessorKind::LayerSweepCrossingMinimizerBarycenter => {
             minimize_crossings_layer_sweep_with_type(graph, CrossMinType::Barycenter);
         }

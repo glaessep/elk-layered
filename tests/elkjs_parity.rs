@@ -16,36 +16,110 @@ use serde_json::Value;
 /// Cases whose feature elk-layered does not have yet, each with the issue that adds it. A case
 /// leaves this list in the pull request that makes it pass.
 const NOT_YET: &[(&str, &str)] = &[
-    ("comp-ns", "north and south ports, #5"),
-    ("random-group-ports/r007", "north and south ports, #5"),
-    ("random-group-ports/r010", "north and south ports, #5"),
-    ("random-group-ports/r013", "north and south ports, #5"),
-    ("random-group-ports/r019", "north and south ports, #5"),
-    ("random-group-ports/r025", "north and south ports, #5"),
-    ("random-group-ports/r029", "north and south ports, #5"),
-    ("random-group-ports/r033", "north and south ports, #5"),
-    ("random-group-ports/r035", "north and south ports, #5"),
-    ("random-group-ports/r043", "north and south ports, #5"),
-    ("random-group-ports/r044", "north and south ports, #5"),
-    ("random-group-ports/r045", "north and south ports, #5"),
-    ("random-group-ports/r048", "north and south ports, #5"),
-    ("random-group-ports/r050", "north and south ports, #5"),
-    ("random-group-ports/r059", "north and south ports, #5"),
-    ("random-group-ports/r064", "north and south ports, #5"),
-    ("random-group-ports/r074", "north and south ports, #5"),
-    ("random-group-ports/r077", "north and south ports, #5"),
-    ("random-group-ports/r078", "north and south ports, #5"),
-    ("random-group-ports/r082", "north and south ports, #5"),
-    ("random-group-ports/r106", "north and south ports, #5"),
-    ("random-group-ports/r111", "north and south ports, #5"),
-    ("random-group-ports/r112", "north and south ports, #5"),
-    ("random-group-ports/r125", "north and south ports, #5"),
-    ("random-group-ports/r127", "north and south ports, #5"),
-    ("random-group-ports/r131", "north and south ports, #5"),
-    ("random-group-ports/r134", "north and south ports, #5"),
-    ("random-group-ports/r135", "north and south ports, #5"),
-    ("random-group-ports/r140", "north and south ports, #5"),
-    ("random-group-ports/r147", "north and south ports, #5"),
+    (
+        "random-group-ports/r010",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r013",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r019",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r025",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r029",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r033",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r035",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r043",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r044",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r045",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r048",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r064",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r074",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r077",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r078",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r082",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r106",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r111",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r112",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r125",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r127",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r131",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r134",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r135",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r140",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r147",
+        "ports across the flow on a group, #24",
+    ),
 ];
 
 fn cases_dir() -> PathBuf {
@@ -55,7 +129,8 @@ fn cases_dir() -> PathBuf {
 /// Every input: the hand-written cases in `tests/elkjs/`, then the random ones that
 /// `oracle/random.mjs` writes: `tests/elkjs/random/`, `tests/elkjs/random-group-ends/`, whose
 /// edges may also end at a group, `tests/elkjs/random-ports/`, whose nodes have ports, and
-/// `tests/elkjs/random-group-ports/`, whose groups have ports too.
+/// `tests/elkjs/random-group-ports/`, whose groups have ports too, and
+/// `tests/elkjs/random-cross-ports/`, whose ports sit on all four sides.
 fn cases() -> Vec<PathBuf> {
     let mut inputs = Vec::new();
     for dir in [
@@ -64,6 +139,7 @@ fn cases() -> Vec<PathBuf> {
         cases_dir().join("random-group-ends"),
         cases_dir().join("random-ports"),
         cases_dir().join("random-group-ports"),
+        cases_dir().join("random-cross-ports"),
     ] {
         let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|_| panic!("{} exists", dir.display()))
@@ -351,6 +427,28 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    importer gives to the made-up port of the edge into G, so the two ports must not share a flow.
 // 47. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), look the
 //    flow of a port up as a made-up port (`false` for `port.named`): 2 cases, ports-group-include-flow-of-split-edges and random-group-ports/r037.
+// 48. In `gather_end_labels` (src/intermediate.rs), skip the ports of the north or south port
+//    dummy (`if false && ..origin_port == Some(origin)`), so the labels of the edges moved to the
+//    dummy belong to no port: 124 cases, such as ports-end-labels-north-port-head-and-tail,
+//    ports-end-labels-fixed-side-port-head and random-cross-ports/r001.
+// 49. In `preprocess_end_labels`, skip every node that is not a normal node, so a port dummy
+//    keeps the margins it had before its end labels: 98 cases, such as
+//    ports-end-labels-east-port-edge-from-node-down, ports-end-labels-north-port-tail-and-center
+//    and ports-end-labels-fixed-side-port-head.
+// 50. In `assign_four_sides_label_side_and_alignment` (src/selfloops.rs), read the side of the
+//    rightmost port instead of the leftmost one twice: 2 cases,
+//    ports-self-loops-on-four-sides-with-labels and random-cross-ports/r143.
+// 51. In `north_south_port_connection_sides` (src/selfloops.rs), take the ports of the dummy whose
+//    node has an origin port instead of the dummy ports whose origin is this port: 2 cases,
+//    ports-self-loop-ports-restored-beside-a-north-port and random-cross-ports/r023.
+// 52. In `correct_north_south_port_sides` (src/p3order.rs), leave the port on its side after the
+//    dummy has moved (drop both `set_side` calls): 4 cases, ports-switch-sides-north-to-south,
+//    ports-switch-sides-south-to-north, ports-switch-sides-two-north-ports and
+//    ports-switch-sides-both-ways.
+// 53. In the same function, switch a northern port when its dummy sits above the node
+//    (`position < origin_position`): 89 cases, such as the same four.
+// 54. In `origin_allows_side_switch` (src/north_south.rs), always answer no, so the dummy keeps
+//    its order constraint to the node: the same four cases.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

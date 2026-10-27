@@ -1,0 +1,110 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered"
+  },
+  "children": [
+    {
+      "id": "n0",
+      "width": 40,
+      "height": 30,
+      "$H": 277,
+      "x": 12,
+      "y": 12
+    },
+    {
+      "id": "n1",
+      "width": 40,
+      "height": 30,
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE"
+      },
+      "ports": [
+        {
+          "id": "n1p0",
+          "width": 6,
+          "height": 6,
+          "layoutOptions": {
+            "elk.port.side": "NORTH",
+            "elk.layered.allowNonFlowPortsToSwitchSides": "true"
+          },
+          "x": 17,
+          "y": 30
+        }
+      ],
+      "$H": 279,
+      "x": 12,
+      "y": 68
+    },
+    {
+      "id": "n2",
+      "width": 40,
+      "height": 30,
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE"
+      },
+      "ports": [
+        {
+          "id": "n2p0",
+          "width": 6,
+          "height": 6,
+          "layoutOptions": {
+            "elk.port.side": "NORTH",
+            "elk.layered.allowNonFlowPortsToSwitchSides": "true"
+          },
+          "x": 17,
+          "y": -6
+        }
+      ],
+      "$H": 283,
+      "x": 72,
+      "y": 18
+    },
+    {
+      "id": "n3",
+      "width": 40,
+      "height": 30,
+      "$H": 286,
+      "x": 72,
+      "y": 99
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "sources": [
+        "n1p0"
+      ],
+      "targets": [
+        "n3"
+      ],
+      "sections": [
+        {
+          "id": "e1_s0",
+          "startPoint": {
+            "x": 32,
+            "y": 104
+          },
+          "endPoint": {
+            "x": 72,
+            "y": 114
+          },
+          "bendPoints": [
+            {
+              "x": 32,
+              "y": 114
+            }
+          ],
+          "incomingShape": "n1p0",
+          "outgoingShape": "n3"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 124,
+  "height": 141
+}

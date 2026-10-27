@@ -264,6 +264,9 @@ fn remap_references(
         for port in &mut node.ports {
             port.node = map_index(nodes, port.node, "port owner")?;
             map_optional(&mut port.long_edge_target_node, nodes, "long edge target")?;
+            if let Some(origin) = &mut port.origin_port {
+                map_port(origin, nodes)?;
+            }
             map_list(&mut port.incoming_edges, edges, "incoming edge")?;
             map_list(&mut port.outgoing_edges, edges, "outgoing edge")?;
             map_labels(&mut port.labels, edges)?;
@@ -517,4 +520,82 @@ pub(crate) fn combine(target: &mut LGraph, mut components: Vec<Component>) -> Pi
     // Keep the target's minimum constraint. Source copyProperties merges its property map;
     // the missing minimum on a component does not remove the target's original property.
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{GraphNodeRef, LNode, LPoint, LayeredEdge, PortSide, PortType};
+    use crate::options::LayeredOptions;
+
+    // Mutation: leave the `origin_port` of a dummy's port out of `remap_references`. The second
+    // component keeps the node index it had in the whole graph, and that index is past its end.
+    #[test]
+    fn the_port_a_north_dummy_was_made_for_moves_with_its_component() {
+        let mut graph = LGraph::new("g", LayeredOptions::default());
+        // Node 0 is a component of its own. Nodes 1 and 2 are the second component: node 1 has a
+        // north port, and node 2 is the dummy made for it.
+        graph
+            .layerless_nodes
+            .push(LNode::new("alone", 10.0, 10.0, None));
+        graph
+            .layerless_nodes
+            .push(LNode::new("a", 10.0, 10.0, None));
+        let mut dummy = LNode::new("dummy", 0.0, 0.0, None);
+        dummy.kind = LNodeKind::NorthSouthPort;
+        graph.layerless_nodes.push(dummy);
+        let north = graph
+            .add_port(1, PortType::Input, PortSide::North, LPoint::default())
+            .unwrap();
+        let west = graph
+            .add_port(1, PortType::Input, PortSide::West, LPoint::default())
+            .unwrap();
+        let out = graph
+            .add_port(2, PortType::Output, PortSide::East, LPoint::default())
+            .unwrap();
+        graph.layerless_nodes[2].ports[out.port].origin_port = Some(north);
+        graph.layerless_nodes[1].ports[north.port].port_dummy = Some(GraphNodeRef {
+            graph_id: "g".to_string(),
+            node: 2,
+        });
+        graph
+            .add_edge(LayeredEdge {
+                id: "e".to_string(),
+                source: out,
+                target: west,
+                source_node_id: String::new(),
+                target_node_id: String::new(),
+                labels: Vec::new(),
+                minlen: 1,
+                reversed: false,
+                bend_points: Vec::new(),
+                junction_points: Vec::new(),
+                model_order: None,
+                priority_direction: 0,
+                priority_shortness: 0,
+                priority_straightness: 0,
+                thickness: 1.0,
+                original_opposite_port: None,
+                compound_segment: None,
+            })
+            .unwrap();
+
+        let components = split(&graph).unwrap().unwrap();
+
+        assert_eq!(components.len(), 2);
+        let second = &components[1].graph;
+        assert_eq!(second.layerless_nodes.len(), 2);
+        // The dummy is node 1 here, and the node it was made for is node 0.
+        assert_eq!(
+            second.layerless_nodes[1].ports[0].origin_port,
+            Some(PortRef { node: 0, port: 0 })
+        );
+        assert_eq!(
+            second.layerless_nodes[0].ports[0]
+                .port_dummy
+                .as_ref()
+                .map(|dummy| dummy.node),
+            Some(1)
+        );
+    }
 }

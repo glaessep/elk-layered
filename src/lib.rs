@@ -45,6 +45,7 @@ mod importer;
 mod intermediate;
 mod layout;
 mod layout_options;
+mod north_south;
 mod options;
 mod p1cycles;
 mod p2layers;

@@ -2397,6 +2397,7 @@ mod tests {
             net_flow: 0,
             child_edges: 0,
             connected_to_external_nodes: false,
+            allow_non_flow_ports_to_switch_sides: false,
         };
         let mut group = node("G");
         group.ports = vec![port("G:1"), port("G:2")];
