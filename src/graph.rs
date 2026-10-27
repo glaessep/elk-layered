@@ -234,6 +234,9 @@ pub struct LNode {
     pub ports_surrounding: Option<super::options::SpacingMargin>,
     pub external_port_side: PortSide,
     pub external_port_size: LSize,
+    /// For the dummy of a port of the graph's own node: the position of that port among the
+    /// node's input ports. ELK keeps the port in `InternalProperties.ORIGIN`.
+    pub scope_port: Option<usize>,
     pub port_ratio_or_position: f64,
     pub replaced_external_port_dummy: Option<usize>,
     pub in_layer_successor_constraints: Vec<usize>,
@@ -282,6 +285,7 @@ impl LNode {
             ports_surrounding: None,
             external_port_side: PortSide::Undefined,
             external_port_size: LSize::default(),
+            scope_port: None,
             port_ratio_or_position: 0.0,
             replaced_external_port_dummy: None,
             in_layer_successor_constraints: Vec::new(),
@@ -341,6 +345,12 @@ pub struct LPort {
     /// The position of the input port this port was made from, among its node's ports. `None` for
     /// a port ELK makes up. ELK keeps the input port in `InternalProperties.ORIGIN`.
     pub input_index: Option<usize>,
+    /// Whether the caller named this port, so an edge finds it by its id alone. A port that
+    /// ELK makes up is found by its id and type. An external port dummy's port counts as named.
+    pub named: bool,
+    /// `CompoundGraphPreprocessor.calculateNetFlow` for a port the caller named: the votes of
+    /// every edge at the port, those outside its node too. `None` for a port ELK makes up.
+    pub hierarchy_net_flow: Option<isize>,
     pub port_index: Option<isize>,
     pub border_offset: Option<f64>,
     pub ratio_or_position: f64,
@@ -369,6 +379,8 @@ impl LPort {
             model_order: None,
             long_edge_target_node: None,
             input_index: None,
+            named: false,
+            hierarchy_net_flow: None,
             port_index: None,
             border_offset: None,
             ratio_or_position: 0.0,
@@ -1429,6 +1441,27 @@ pub fn create_external_port_dummy(
     }
     dummy.ports.push(port);
     dummy
+}
+
+/// The part of `LGraphUtil.createExternalPortDummy` that reads `PORT_INDEX`: with exactly
+/// `FIXED_ORDER` and an index on the port, the index replaces the position as the order
+/// information. Indices count the other way on the south and west sides.
+pub fn apply_port_index_to_dummy(
+    dummy: &mut LNode,
+    port_constraints: PortConstraints,
+    port_index: Option<isize>,
+) {
+    let Some(index) = port_index else {
+        return;
+    };
+    if port_constraints != PortConstraints::FixedOrder {
+        return;
+    }
+    dummy.port_ratio_or_position = match dummy.external_port_side {
+        PortSide::North | PortSide::East => index as f64,
+        PortSide::South | PortSide::West => -(index as f64),
+        PortSide::Undefined => 0.0,
+    };
 }
 
 fn port_side_from_direction(direction: ElkDirection) -> PortSide {

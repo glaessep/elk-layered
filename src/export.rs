@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::compound::compare_compound_segments;
 use crate::error::Error;
-use crate::graph::{LGraph, LLabel, LNodeKind, LPoint, LSize, PortRef};
+use crate::graph::{LGraph, LLabel, LNode, LNodeKind, LPoint, LSize, PortRef, PortSide};
 
 /// `OrthogonalRoutingGenerator.TOLERANCE`.
 const TOLERANCE: f64 = 1e-3;
@@ -56,11 +56,27 @@ pub(crate) struct EdgeLayout {
     pub(crate) labels: Vec<(usize, LPoint, LSize)>,
 }
 
+/// Where a run put a port of the node it lays out, and what it decided about the port.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScopePortLayout {
+    /// The position of the port among the node's ports.
+    pub(crate) index: usize,
+    /// The port's new position, relative to the node.
+    pub(crate) position: LPoint,
+    pub(crate) side: PortSide,
+    /// The border offset the dummy of the port used.
+    pub(crate) border_offset: f64,
+}
+
 /// Everything one layered run computed.
 #[derive(Debug, Clone)]
 pub(crate) struct LayoutResult {
     pub(crate) nodes: Vec<NodeLayout>,
     pub(crate) edges: Vec<EdgeLayout>,
+    /// The ports of the node the run lays out, when the graph has external ports.
+    pub(crate) scope_ports: Vec<ScopePortLayout>,
+    /// Whether the graph has external ports: `GraphProperties.EXTERNAL_PORTS`.
+    pub(crate) external_ports: bool,
     /// `lgraph.getActualSize()` of the top graph: its size plus padding.
     pub(crate) actual_size: LSize,
 }
@@ -369,9 +385,33 @@ struct EdgeToApply<'a> {
 
 /// Ports `ElkGraphLayoutTransferrer.applyLayout`, for the whole hierarchy.
 pub(crate) fn apply_layout(
-    root: &LGraph,
+    root: &mut LGraph,
     input: &TransferInput<'_>,
 ) -> Result<LayoutResult, Error> {
+    // The external ports of the top graph are placed first. This moves their dummies, which
+    // the edges that end at them read.
+    let mut scope_ports = Vec::new();
+    for index in 0..root.layerless_nodes.len() {
+        let Some(port) = root.layerless_nodes[index].scope_port else {
+            continue;
+        };
+        // The port keeps its size, and every step of the run is over: no turn of the graph is left.
+        let size = root.layerless_nodes[index].external_port_size;
+        let position = crate::pipeline::external_port_position(root, index, size);
+        let dummy = &root.layerless_nodes[index];
+        scope_ports.push(ScopePortLayout {
+            index: port,
+            position,
+            side: dummy.external_port_side,
+            border_offset: dummy
+                .ports
+                .first()
+                .and_then(|port| port.border_offset)
+                .unwrap_or(0.0),
+        });
+    }
+    let external_ports = root.graph_properties.external_ports;
+    let root: &LGraph = root;
     let hierarchy = Hierarchy::new(root);
     let joined = join_cross_hierarchy_edges(&hierarchy);
 
@@ -427,6 +467,8 @@ pub(crate) fn apply_layout(
     let mut result = LayoutResult {
         nodes: Vec::new(),
         edges: Vec::new(),
+        scope_ports,
+        external_ports,
         actual_size: actual_size(root),
     };
     for (graph_index, edges) in by_graph.into_iter().enumerate() {
@@ -459,8 +501,14 @@ fn is_original_edge(graph: &LGraph, index: usize, input: &TransferInput<'_>) -> 
     };
     attached(edge.source, true)
         && attached(edge.target, false)
-        && graph.layerless_nodes[edge.source.node].kind == LNodeKind::Normal
-        && graph.layerless_nodes[edge.target.node].kind == LNodeKind::Normal
+        && is_input_end(&graph.layerless_nodes[edge.source.node])
+        && is_input_end(&graph.layerless_nodes[edge.target.node])
+}
+
+/// Whether a node stands for something the input has: a node, or a port of the graph's own node.
+fn is_input_end(node: &LNode) -> bool {
+    node.kind == LNodeKind::Normal
+        || (node.kind == LNodeKind::ExternalPort && node.scope_port.is_some())
 }
 
 /// `LGraph.getActualSize`.
@@ -731,7 +779,7 @@ mod tests {
             sized_nodes: &sized_nodes,
             edge_containers: &containers,
         };
-        let result = apply_layout(&graph, &input).expect("transfers");
+        let result = apply_layout(&mut graph, &input).expect("transfers");
         let edge = result
             .edges
             .iter()

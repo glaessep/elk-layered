@@ -725,16 +725,58 @@ fn a_port_along_the_flow_is_laid_out_in_every_direction() {
     }
 }
 
-// Mutation: drop the root check in `Tree::new`.
+// Mutation: drop the check for the root in `run_layered`. ELK fails on this graph, and elk-layered
+// would give it a layout.
 #[test]
-fn a_port_on_the_root_is_unsupported() {
-    let mut graph = root(vec![node("a", 40.0, 30.0)], vec![]);
+fn an_edge_between_a_root_port_and_a_child_is_unsupported() {
+    for edges in [vec![edge("e", "p", "a")], vec![edge("e", "a", "p")]] {
+        let mut graph = root(vec![node("a", 40.0, 30.0)], edges);
+        graph.ports = vec![port("p", 6.0, 4.0, "WEST")];
+        graph
+            .layout_options
+            .insert("elk.portConstraints".into(), "FIXED_SIDE".into());
+        assert!(matches!(
+            error_of(&graph),
+            Error::Unsupported { element, feature }
+                if element == "port \"p\""
+                    && feature == "an edge between a port of the root graph and a node inside it"
+        ));
+    }
+}
+
+// Mutation: count a grandchild as a child in `Tree::count_port_facts`. The edge at `p` then makes
+// the port an external port of the root.
+#[test]
+fn a_root_port_with_an_edge_to_a_grandchild_only_is_laid_out() {
+    let mut graph = root(
+        vec![group("g", vec![node("a", 40.0, 30.0)])],
+        vec![edge("e", "p", "a")],
+    );
     graph.ports = vec![port("p", 6.0, 4.0, "WEST")];
-    assert!(matches!(
-        error_of(&graph),
-        Error::Unsupported { element, feature }
-            if element == "node \"root\"" && feature == "ports on the root graph"
-    ));
+    graph
+        .layout_options
+        .insert("elk.portConstraints".into(), "FIXED_SIDE".into());
+    // The edge is not one of the root's children, so ELK leaves it out of this run.
+    assert!(layout(&graph).is_ok());
+}
+
+// Mutation: let the root count as a graph with external ports whenever it has a port, in
+// `Tree::count_port_facts`.
+#[test]
+fn a_root_port_without_edges_is_laid_out_and_placed_by_its_side() {
+    let mut graph = root(vec![node("a", 40.0, 30.0)], vec![]);
+    graph.ports = vec![port("w", 10.0, 10.0, "WEST"), port("e", 10.0, 10.0, "EAST")];
+    graph
+        .layout_options
+        .insert("elk.portConstraints".into(), "FIXED_SIDE".into());
+    let laid = layout(&graph).unwrap();
+    // The root is 64 wide: 12 padding, 40 for the node, 12 padding. ELK moves the east port with
+    // the right border, and leaves the west port where it is.
+    assert_eq!(laid.width, 64.0);
+    let (west_x, _) = port_at(&laid, "root", "w");
+    let (east_x, _) = port_at(&laid, "root", "e");
+    assert_eq!(west_x, 0.0);
+    assert_eq!(east_x, 64.0);
 }
 
 // Mutation: refuse a label without text, which ELK drops, or accept one with text.
@@ -763,9 +805,10 @@ fn a_port_label_with_text_is_unsupported_but_one_without_is_dropped() {
     ));
 }
 
-// Mutation: let the check for hierarchy levels look at the nodes' grandparents, or drop it.
+// Mutation: in `hierarchy_edge_end` of src/importer.rs, ignore the named port and make a port of
+// the node's own, as for an edge that names no port.
 #[test]
-fn an_edge_at_a_port_across_a_level_of_an_included_graph_is_unsupported() {
+fn an_edge_at_a_port_across_a_level_of_an_included_graph_ends_at_the_port() {
     let inner = group(
         "g",
         vec![with_ports(
@@ -775,20 +818,27 @@ fn an_edge_at_a_port_across_a_level_of_an_included_graph_is_unsupported() {
         )],
     );
     let graph = include_children(root(
-        vec![inner, node("y", 40.0, 30.0)],
-        vec![edge("e", "p", "y")],
+        vec![
+            inner,
+            with_ports(
+                node("y", 40.0, 30.0),
+                "FIXED_SIDE",
+                vec![port("q", 6.0, 4.0, "WEST")],
+            ),
+        ],
+        vec![edge("e", "p", "q")],
     ));
-    assert!(matches!(
-        error_of(&graph),
-        Error::Unsupported { element, .. } if element == "edge \"e\""
-    ));
-    // The same edge at a node instead of a port is laid out.
-    let inner = group("g", vec![node("x", 40.0, 30.0)]);
-    let graph = include_children(root(
-        vec![inner, node("y", 40.0, 30.0)],
-        vec![edge("e", "x", "y")],
-    ));
-    assert!(layout(&graph).is_ok());
+    let laid = layout(&graph).unwrap();
+    let e = find_edge(&laid, "e");
+    assert_eq!(e.sections[0].incoming_shape.as_deref(), Some("p"));
+    assert_eq!(e.sections[0].outgoing_shape.as_deref(), Some("q"));
+    // The route starts at the anchor of `p`: the middle of its right border. `p` is 6 by 4.
+    let (px, py) = port_at(&laid, "x", "p");
+    let (x, y) = at(&laid, "x");
+    let (gx, gy) = at(&laid, "g");
+    let start = e.sections[0].start_point;
+    assert_eq!((start.x, start.y), (gx + x + px + 6.0, gy + y + py + 2.0));
+    assert_eq!((start.x, start.y), (70.0, 39.0));
 }
 
 // Mutation: leave the port ids out of the id check in `Tree::new`, or check them against the
@@ -1097,18 +1147,133 @@ fn error_of(graph: &ElkNode) -> Error {
     layout(graph).expect_err("the graph should be refused")
 }
 
-// Mutation: drop the check for a port on a node with children in `Tree::new`.
+// Mutation: in `apply_parent_node_layout`, leave the ports where they are when the group grows.
 #[test]
-fn a_port_on_a_node_with_children_is_unsupported() {
-    let mut a = group("a", vec![node("c", 10.0, 10.0)]);
-    a.ports = vec![ElkPort {
-        id: "p".into(),
-        ..Default::default()
-    }];
+fn a_port_on_a_group_moves_with_the_border_the_group_grows_to() {
+    // The group has no edge to its children, so it has no external ports, and ELK moves the
+    // ports with the new size. 24 is the padding twice, and 50 the width of the child.
+    let mut a = group("a", vec![node("c", 50.0, 20.0)]);
+    a.layout_options
+        .insert("elk.portConstraints".into(), "FIXED_SIDE".into());
+    a.ports = vec![port("e", 10.0, 10.0, "EAST"), port("w", 10.0, 10.0, "WEST")];
+    let laid = layout(&root(vec![a], vec![])).unwrap();
+    let (width, _) = size(&laid, "a");
+    assert_eq!(width, 74.0);
+    let (east_x, _) = port_at(&laid, "a", "e");
+    let (west_x, _) = port_at(&laid, "a", "w");
+    assert_eq!(east_x, 74.0);
+    assert_eq!(west_x, -10.0);
+}
+
+// Mutation: drop the fixed-ratio check in `run_layered`. ELK fails on the first graph, and
+// elk-layered would give it a layout.
+#[test]
+fn an_edge_across_the_border_of_a_group_with_fixed_ratio_ports_is_unsupported() {
+    let build = |edges: Vec<ElkEdge>| {
+        let mut a = group("a", vec![node("c", 40.0, 30.0)]);
+        a.layout_options
+            .insert("elk.portConstraints".into(), "FIXED_RATIO".into());
+        include_children(root(vec![a, node("y", 40.0, 30.0)], edges))
+    };
     assert!(matches!(
-        error_of(&root(vec![a], vec![])),
-        Error::Unsupported { element, feature } if element == "node \"a\"" && feature == "ports on a node with children"
+        error_of(&build(vec![edge("e", "c", "y")])),
+        Error::Unsupported { element, .. } if element == "edge \"e\""
     ));
+    // Nothing crosses the border of the group, so there is no external port to place.
+    assert!(layout(&build(vec![edge("e", "y", "y")])).is_ok());
+}
+
+// Mutation: drop the size check in `import_external_ports`. ELK divides by the size and the
+// layout fills up with NaN; elk-layered would give some other number.
+#[test]
+fn a_fixed_ratio_port_of_a_group_is_unsupported_only_without_a_size() {
+    let build = |width: f64, height: f64| {
+        let mut a = group("a", vec![node("c", 40.0, 30.0)]);
+        a.width = width;
+        a.height = height;
+        a.layout_options
+            .insert("elk.portConstraints".into(), "FIXED_RATIO".into());
+        a.ports = vec![port("p", 6.0, 4.0, "WEST")];
+        a.edges = vec![edge("e", "p", "c")];
+        root(vec![a], vec![])
+    };
+    // A port on the west side divides by the height. A side along the width is not checked.
+    assert!(matches!(
+        error_of(&build(100.0, 0.0)),
+        Error::Unsupported { element, .. } if element == "port \"p\""
+    ));
+    assert!(layout(&build(0.0, 100.0)).is_ok());
+    assert!(layout(&build(100.0, 100.0)).is_ok());
+}
+
+// Mutation: drop `check_external_port_sides` in src/pipeline.rs. The group would get a layout
+// that is not elkjs's.
+#[test]
+fn a_dummy_for_a_group_port_on_a_side_across_the_flow_is_unsupported() {
+    let across = |graph: &ElkNode| {
+        matches!(
+            error_of(graph),
+            Error::Unsupported { feature, .. }
+                if feature == "ports of a node with children on a side across the layout direction"
+        )
+    };
+    // The group lays out its own children, and a port of it becomes an external port of that
+    // layout. The port sides along the flow are fine, and the ones across it are not.
+    for (direction, side) in [
+        ("RIGHT", "NORTH"),
+        ("LEFT", "SOUTH"),
+        ("DOWN", "EAST"),
+        ("UP", "WEST"),
+    ] {
+        let mut a = group("a", vec![node("c", 40.0, 30.0)]);
+        a.layout_options
+            .insert("elk.portConstraints".into(), "FIXED_SIDE".into());
+        a.layout_options
+            .insert("elk.direction".into(), direction.into());
+        a.ports = vec![port("p", 6.0, 4.0, side)];
+        a.edges = vec![edge("e", "p", "c")];
+        assert!(across(&root(vec![a], vec![])), "{direction} {side}");
+    }
+    // With INCLUDE_CHILDREN, a group that fixes the sides of its ports gets the dummy of an edge
+    // that leaves it on the east side, whatever the direction is.
+    let mut a = group("a", vec![node("c", 40.0, 30.0)]);
+    a.layout_options
+        .insert("elk.portConstraints".into(), "FIXED_SIDE".into());
+    let mut graph = include_children(root(
+        vec![a, node("y", 40.0, 30.0)],
+        vec![edge("e", "c", "y")],
+    ));
+    assert!(layout(&graph).is_ok());
+    graph
+        .layout_options
+        .insert("elk.direction".into(), "DOWN".into());
+    assert!(across(&graph));
+}
+
+// Mutation: drop the `Undefined` arm of `check_external_port_sides`. ELK fails on the graph, and
+// elk-layered would give it a layout.
+#[test]
+fn a_group_port_without_a_side_on_a_group_without_size_is_unsupported_when_an_edge_ends_there() {
+    let build = |size: f64| {
+        let mut a = group("a", vec![node("c", 40.0, 30.0)]);
+        a.width = size;
+        a.height = size;
+        a.layout_options
+            .insert("elk.portConstraints".into(), "FIXED_SIDE".into());
+        // The port sits outside of the left border, so a node with a size can tell its side.
+        let mut p = port("p", 6.0, 4.0, "");
+        p.x = -6.0;
+        a.ports = vec![p];
+        a.edges = vec![edge("e", "p", "c")];
+        include_children(root(vec![group("outer", vec![a])], vec![]))
+    };
+    // Without a size, the side of the port cannot come from where the port sits.
+    assert!(matches!(
+        error_of(&build(0.0)),
+        Error::Unsupported { feature, .. }
+            if feature == "a port of a node with children that has no side, on a node with fixed port sides"
+    ));
+    assert!(layout(&build(100.0)).is_ok());
 }
 
 // Mutation: drop the hyperedge check in `Tree::new`.

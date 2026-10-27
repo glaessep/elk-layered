@@ -64,7 +64,7 @@ pub struct ElkNode {
         serde(default, skip_serializing_if = "Vec::is_empty")
     )]
     pub children: Vec<ElkNode>,
-    /// The node's ports. A node with children, and the root, cannot have any yet.
+    /// The node's ports.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Vec::is_empty")
@@ -99,8 +99,8 @@ pub struct ElkNode {
 /// A port on a node.
 ///
 /// Layout writes the port's `x` and `y`, relative to its node. A port on a north or south
-/// side, a port with a label, and a port on a node with children or on the root are refused
-/// for now.
+/// side across the layout flow, a port with a label, and an edge between a port of the root
+/// and a node inside it are refused for now.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]

@@ -3761,13 +3761,9 @@ fn apply_parent_hierarchical_port_order_on_sweep_side(
     } else {
         PortSide::West
     };
-    let eligible_count = parent_graph.layerless_nodes[parent_node_index]
-        .ports
-        .iter()
-        .filter(|port| port.side == sweep_side && port.inside_connections)
-        .count();
-    debug_assert_eq!(eligible_count, ordered_ports.len());
-
+    // The ports on the sweep side and the dummies in the layer need not match: a dummy on a
+    // north or south side stands in the layer too, and a port beyond the dummies keeps its place.
+    // `LayerSweepCrossingMinimizer.sortPortsByDummyPositionsInLastLayer` sets the ports one by one.
     let mut new_order =
         Vec::with_capacity(parent_graph.layerless_nodes[parent_node_index].ports.len());
     let mut ordered_iter = ordered_ports.iter().copied();
@@ -3787,9 +3783,7 @@ fn apply_parent_hierarchical_port_order_on_sweep_side(
         new_order.push(index);
     }
 
-    debug_assert!(ordered_iter.next().is_none());
     let _changed = parent_graph.reorder_node_ports(parent_node_index, new_order);
-    debug_assert!(_changed);
 }
 
 fn first_index(forward: bool, length: usize) -> usize {

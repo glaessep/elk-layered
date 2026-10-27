@@ -15,10 +15,7 @@ use serde_json::Value;
 
 /// Cases whose feature elk-layered does not have yet, each with the issue that adds it. A case
 /// leaves this list in the pull request that makes it pass.
-const NOT_YET: &[(&str, &str)] = &[
-    ("comp-we", "ports in the input, #4"),
-    ("comp-ns", "north and south ports, #5"),
-];
+const NOT_YET: &[(&str, &str)] = &[("comp-ns", "north and south ports, #5")];
 
 fn cases_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/elkjs")
@@ -71,11 +68,15 @@ fn without_hash_ids(value: &mut Value) {
 
 /// The first place two JSON values differ, or `None` when they are equal. Numbers compare as
 /// `f64`, bit for bit, so `12` and `12.0` are equal and `12` and `12.000000000000002` are not.
+/// Only the sign of a zero does not count.
 fn first_difference(path: &str, want: &Value, got: &Value) -> Option<String> {
     match (want, got) {
         (Value::Number(a), Value::Number(b)) => {
             let (a, b) = (a.as_f64().unwrap(), b.as_f64().unwrap());
-            (a.to_bits() != b.to_bits()).then(|| format!("{path}: elkjs {a:?}, elk-layered {b:?}"))
+            // JavaScript writes a negative zero as `0`, so the recorded files cannot hold one.
+            // Zero with either sign is the same number.
+            let same = a.to_bits() == b.to_bits() || (a == 0.0 && b == 0.0);
+            (!same).then(|| format!("{path}: elkjs {a:?}, elk-layered {b:?}"))
         }
         (Value::Object(a), Value::Object(b)) => {
             for key in a.keys().chain(b.keys()) {
@@ -224,6 +225,59 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 11. In the `to_graph` refusal of src/layout.rs, change the `feature` text, for example to "an
 //    edge into a part of the graph laid out on its own". The same 26 cases then fail on the
 //    feature, not on the error kind.
+// 12. In `Tree::count_port_facts` (src/layout.rs), count only the edges to children and leave
+//    the edges to the outside out (`else { 0 }` for both directions): 7 cases, such as
+//    ports-group-include-netflow, ports-group-separate-zero-flow and random-group-ports/r018.
+// 13. In `ensure_segment_endpoint_port` (src/compound.rs), never reuse the dummy of a named port
+//    of the parent (`if false && let Some(&dummy) = parent_dummies.get(..)`): 33 cases, such as
+//    ports-group-include, ports-group-include-free and random-group-ports/r000.
+// 14. In `lookup_types` (src/compound.rs), find a named port by the output type only: 80 cases,
+//    such as comp-we, ports-across-levels and random-group-ports/r000.
+// 15. In `define_port_sides` (src/layout.rs), compare the net flow with `>= 0` instead of
+//    `> 0`: 1 case, ports-group-separate-zero-flow.
+// 16. In `apply_port_index_to_dummy` (src/graph.rs), ignore the port index: 1 case,
+//    ports-group-separate-port-index-order.
+// 17. In `import_external_ports` (src/importer.rs), give a port without a border offset the
+//    offset 0 instead of `calc_port_offset`: 3 cases, ports-group-separate-fixed-pos,
+//    ports-group-ratio-sized and ports-group-separate-zero-flow.
+// 18. In `apply_parent_node_layout` (src/layout.rs), never move the ports of a node whose graph
+//    has no external ports: 1 case, ports-root-idle.
+// 19. In `transfer_external_port_dummy_layout_to_parent_node` (src/pipeline.rs), take the size of
+//    the port from the dummy instead of from the port of the turned parent graph: 3 cases,
+//    ports-group-include-down-flat-ports, random-group-ports/r026 and r109.
+// 20. In `run_layered` (src/layout.rs), leave out `define_port_sides` for a node with children
+//    that has size constraints: 1 case, ports-group-include-defined-side.
+// 21. In `create_parent_boundary_port` (src/compound.rs), put the dummy of a node with fixed
+//    port sides on the side of the direction instead of west or east: 10 cases, such as
+//    hierarchy-edge-at-fixed-side-node-left, random-group-ports/r011 and r041.
+// 22. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), read the
+//    port constraints of the node after the dummies are linked instead of before: the case
+//    ports-group-include-idle-port differs.
+// 23. In `hierarchy_edge_end` (src/importer.rs), ignore the named port and make a port of the
+//    node's own: 84 cases, such as comp-we, ports-across-levels and random-group-ports/r000.
+// 24. In `InputIndex::child_position` (src/importer.rs), leave out the number of dummies of the
+//    external ports: 16 cases, such as ports-group-separate, ports-group-ratio-sized and
+//    ports-group-separate-fixed-pos.
+// 25. In `write_result` (src/layout.rs), leave out the write of the positions of the ports of
+//    the node whose layout it is: 15 cases, such as ports-group-separate and
+//    ports-group-separate-sized.
+// 26. In `is_input_end` (src/export.rs), accept only normal nodes: 16 cases, such as
+//    ports-group-separate and ports-group-separate-fixed-pos.
+// 27. In `input_node` (src/layout.rs), leave out `FIXED_POS` for a node whose ports a run has
+//    placed: 8 cases, such as ports-group-separate-two-ports and ports-group-separate-zero-flow.
+// 28. In `create_parent_boundary_port` (src/compound.rs), set `non_free_ports` on the nested
+//    graph again: 1 case, ports-leaf-in-group-with-crossing-edge.
+// 29. In `write_result` (src/layout.rs), do not keep the side the dummy chose on the port: 1
+//    case, ports-group-separate-zero-flow.
+// 30. In `Tree::count_port_facts` (src/layout.rs), never count an edge to a child: 16 cases,
+//    such as ports-group-separate, ports-group-ratio-sized and ports-group-separate-sized.
+// 31. In `ensure_hierarchy_endpoint_port` (src/importer.rs), leave the side of the port of a
+//    hierarchy edge undefined: 36 cases, such as hierarchy-edge-at-fixed-side-node,
+//    hierarchy-edge-at-fixed-side-node-left and random-group-ports/r002.
+// 32. In `Tree::count_port_facts` (src/layout.rs), count a grandchild as a child: 3 cases,
+//    ports-edge-to-grandchild, random-group-ports/r060 and r067.
+// The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
+// their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
 fn every_case_lays_out_exactly_as_elkjs_does() {
     let mut failures = Vec::new();
@@ -260,6 +314,18 @@ fn no_case_waits_for_a_feature_that_already_works() {
             "{case} now matches elkjs: take it off NOT_YET ({issue})"
         );
     }
+}
+
+/// A negative zero equals a zero: elkjs's JSON has no negative zero, and a one-bit change in a
+/// number that is not zero still counts.
+// Mutation: compare the numbers by their bits only. The zeros then differ.
+#[test]
+fn a_negative_zero_equals_a_zero() {
+    let want: Value = serde_json::json!({"x": 0});
+    let got: Value = serde_json::json!({"x": -0.0});
+    assert!(first_difference("", &want, &got).is_none());
+    let got: Value = serde_json::json!({"x": 5e-324});
+    assert!(first_difference("", &want, &got).is_some());
 }
 
 /// The differ itself must see a one-bit change, or the suite proves nothing.

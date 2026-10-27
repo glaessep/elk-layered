@@ -15,7 +15,8 @@ use crate::compound::{
 };
 use crate::graph::{
     CompoundEdgeSegment, EdgeLabelPlacement, HierarchyEdge, LGraph, LLabel, LNode, LPoint, LPort,
-    LSize, LayeredEdge, PortRef, PortSide, PortType, create_external_port_dummy,
+    LSize, LayeredEdge, PortRef, PortSide, PortType, apply_port_index_to_dummy,
+    create_external_port_dummy,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
@@ -85,6 +86,18 @@ pub struct ElkInputPort {
     pub index: Option<i32>,
     /// `elk.port.borderOffset`, when set.
     pub border_offset: Option<f64>,
+    /// The net flow of the port: the votes of every edge at the port, those outside its node
+    /// too. A positive number makes the port an output port of its node.
+    ///
+    /// Ports `ElkGraphImporter.calculateNetFlow` and `CompoundGraphPreprocessor.calculateNetFlow`,
+    /// which count the same votes.
+    pub net_flow: i32,
+    /// How many edges at the port connect to a child of the port's node, at most two.
+    /// `ElkGraphImporter.checkExternalPorts` counts them.
+    pub child_edges: usize,
+    /// Whether an edge at the port connects to a node outside the port's node.
+    /// Ports `ElkGraphImporter.isConnectedToExternalNodes`.
+    pub connected_to_external_nodes: bool,
 }
 
 /// What ELK reads from a node's parent when it sizes the node.
@@ -187,9 +200,9 @@ pub enum ImportError {
     DuplicatePort { id: String },
     #[error("ELK edge `{edge_id}` references missing node `{node_id}`")]
     MissingEndpoint { edge_id: String, node_id: String },
-    /// A named port on a hierarchy-crossing edge needs a hierarchy edge that keeps the port.
-    #[error("ELK edge `{edge_id}` names a port and crosses a hierarchy level")]
-    PortAcrossHierarchy { edge_id: String },
+    /// An edge ends at a port of the node the run lays out, but no child connects to a port of it.
+    #[error("ELK edge `{edge_id}` ends at a port of its graph, which has no external ports")]
+    ScopePortWithoutDummy { edge_id: String },
     #[error("ELK edge `{edge_id}` names port `{port_id}`, which is no port of node `{node_id}`")]
     MissingPort {
         edge_id: String,
@@ -237,7 +250,28 @@ pub fn import_graph_with_segments(
     input: &ElkInputGraph,
     segments: &[ElkInputEdgeSegment],
 ) -> ImportResult<LGraph> {
-    import_scope(input, segments, ElkPadding::uniform(0.0))
+    import_scope(input, segments, ElkPadding::uniform(0.0), ScopePorts::NONE)
+}
+
+/// The ports of the node a run lays out, which ELK sees as the external ports of the graph.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScopePorts<'a> {
+    /// In input order. Each port has its side defined: `ElkGraphImporter.ensureDefinedPortSide`.
+    pub(crate) ports: &'a [ElkInputPort],
+    /// The size of the node, which the dummies of ports with fixed ratios read.
+    pub(crate) node_size: LSize,
+}
+
+impl ScopePorts<'_> {
+    /// A graph whose node has no ports.
+    #[cfg(test)]
+    pub(crate) const NONE: ScopePorts<'static> = ScopePorts {
+        ports: &[],
+        node_size: LSize {
+            width: 0.0,
+            height: 0.0,
+        },
+    };
 }
 
 /// Imports a graph whose root has inside node labels. `root_label_padding` is the padding
@@ -246,8 +280,9 @@ pub(crate) fn import_scope(
     input: &ElkInputGraph,
     segments: &[ElkInputEdgeSegment],
     root_label_padding: ElkPadding,
+    scope: ScopePorts<'_>,
 ) -> ImportResult<LGraph> {
-    let index = InputIndex::new(input)?;
+    let mut index = InputIndex::new(input, scope.ports)?;
     validate_scoped_edge_segments(&index, segments)?;
     let prepared_segments =
         materialize_scoped_edge_segments(&index, segments, input.options.merge_edges);
@@ -258,6 +293,9 @@ pub(crate) fn import_scope(
     apply_graph_padding_from_options(&mut root);
     add_padding(&mut root, root_label_padding);
     root.options = root.options.with_spacing_base_value_applied();
+    // `importGraph` makes the dummies of the external ports before it imports any child, so
+    // they come first in the graph.
+    index.scope_dummies = import_external_ports(&mut root, &scope, input.id.as_str());
     let mut port_index = ImportPortIndex::new();
 
     if root.options.hierarchy_handling == HierarchyHandling::IncludeChildren {
@@ -271,6 +309,79 @@ pub(crate) fn import_scope(
 
     root.sync_graph_properties_to_options();
     Ok(root)
+}
+
+/// Makes the external port dummy of each port of the graph's node, if the graph has external
+/// ports. Gives the dummy of each port by the port's id.
+///
+/// Ports `ElkGraphImporter.checkExternalPorts` and `transformExternalPort`. Port labels are
+/// refused before this runs, and inside self loops are refused, so a port is external only
+/// when an edge connects it to a child.
+fn import_external_ports(
+    root: &mut LGraph,
+    scope: &ScopePorts<'_>,
+    scope_id: &str,
+) -> HashMap<String, usize> {
+    let mut dummies = HashMap::new();
+    if scope.ports.iter().any(|port| port.child_edges > 0) {
+        root.graph_properties.external_ports = true;
+    }
+    if scope.ports.iter().any(|port| port.child_edges > 1) {
+        root.graph_properties.hyperedges = true;
+    }
+    if !root.graph_properties.external_ports {
+        return dummies;
+    }
+    let constraints = root.options.port_constraints;
+    for (position, port) in scope.ports.iter().enumerate() {
+        // If the port has no offset, infer one. A port at (0, 0) gets none, to spare the
+        // common case.
+        let border_offset = port.border_offset.unwrap_or_else(|| {
+            if port.x == 0.0 && port.y == 0.0 {
+                0.0
+            } else {
+                let mut lport = LPort::new(port.id.clone(), 0, PortType::Output);
+                lport.position = LPoint {
+                    x: port.x,
+                    y: port.y,
+                };
+                lport.size = LSize {
+                    width: port.width,
+                    height: port.height,
+                };
+                calc_port_offset(&lport, scope.node_size, port.side)
+            }
+        });
+        let mut dummy = create_external_port_dummy(
+            format!("{scope_id}:external:{}", port.id),
+            port.id.clone(),
+            PortType::Output,
+            constraints,
+            port.side,
+            port.net_flow as isize,
+            LPoint {
+                x: port.x + port.width / 2.0,
+                y: port.y + port.height / 2.0,
+            },
+            LSize {
+                width: port.width,
+                height: port.height,
+            },
+            scope.node_size,
+            border_offset,
+            root.options.direction,
+        );
+        apply_port_index_to_dummy(&mut dummy, constraints, port.index.map(|i| i as isize));
+        let node = root.layerless_nodes.len();
+        let dummy_port = &mut dummy.ports[0];
+        dummy_port.node = node;
+        dummy_port.named = true;
+        dummy_port.connected_to_external_nodes = port.connected_to_external_nodes;
+        dummy.scope_port = Some(position);
+        root.layerless_nodes.push(dummy);
+        dummies.insert(port.id.clone(), node);
+    }
+    dummies
 }
 
 /// Refuses a graph that needs `NorthSouthPortPreprocessor`, which is not ported.
@@ -1062,6 +1173,10 @@ fn input_edge_containing_parent<'a>(
     if let Some(container) = edge.container.as_deref() {
         return index.nodes.contains_key(container).then_some(container);
     }
+    // An edge at a port of the node the run lays out belongs to that node's graph, the root.
+    if edge.source == index.scope_id || edge.target == index.scope_id {
+        return None;
+    }
     let source_parent = index.node_parent(edge.source.as_str());
     let target_parent = index.node_parent(edge.target.as_str());
     if source_parent == target_parent {
@@ -1243,6 +1358,8 @@ fn transform_port(
     // and a named port is never looked up that way.
     let mut lport = LPort::new(port.id.clone(), node, PortType::Output);
     lport.input_index = Some(position);
+    lport.named = true;
+    lport.hierarchy_net_flow = Some(port.net_flow as isize);
     lport.model_order = model_order;
     lport.side = port.side;
     lport.size = LSize {
@@ -1455,6 +1572,9 @@ fn edge_end_port(
         edge_id: edge.id.clone(),
         node_id: node_id.to_string(),
     };
+    if node_id == index.scope_id && !index.nodes.contains_key(node_id) {
+        return scope_port_end(edge, node_id, port_id, index);
+    }
     let position = index.child_position(node_id);
     if let Some(port_id) = port_id {
         let port = index
@@ -1484,6 +1604,29 @@ fn edge_end_port(
     .ok_or_else(missing_node)
 }
 
+/// The port of the dummy that stands for a port of the node the run lays out.
+///
+/// Ports the lookup of `ElkGraphImporter.transformEdge`, where an external port maps to a node.
+/// Without a dummy the node is unknown: `UnsupportedGraphException`.
+fn scope_port_end(
+    edge: &ElkInputEdge,
+    node_id: &str,
+    port_id: Option<&str>,
+    index: &InputIndex<'_>,
+) -> ImportResult<PortRef> {
+    let port_id = port_id.ok_or_else(|| ImportError::MissingEndpoint {
+        edge_id: edge.id.clone(),
+        node_id: node_id.to_string(),
+    })?;
+    index
+        .scope_dummies
+        .get(port_id)
+        .map(|&node| PortRef { node, port: 0 })
+        .ok_or_else(|| ImportError::ScopePortWithoutDummy {
+            edge_id: edge.id.clone(),
+        })
+}
+
 /// Preserve a hierarchy-crossing edge for ELK's compound preprocessor.
 ///
 /// Source:
@@ -1496,63 +1639,36 @@ fn transform_cross_hierarchy_edge(
     model_order: Option<usize>,
     port_index: &mut ImportPortIndex,
 ) -> ImportResult<()> {
-    if edge.source_port.is_some() || edge.target_port.is_some() {
-        return Err(ImportError::PortAcrossHierarchy {
-            edge_id: edge.id.clone(),
-        });
-    }
     let merge_edges = arena.root().options.merge_edges;
-    let source_port_key = hierarchy_port_key(
-        edge.source.as_str(),
-        edge_order,
-        "source",
-        merge_edges,
-        PortType::Output,
-    );
-    let target_port_key = hierarchy_port_key(
-        edge.target.as_str(),
-        edge_order,
-        "target",
-        merge_edges,
-        PortType::Input,
-    );
     let source_parent = index.node_parent(edge.source.as_str());
     let target_parent = index.node_parent(edge.target.as_str());
 
-    {
-        let source_slot = arena.graph_slot_for_parent(index, source_parent);
-        let source_graph = arena.graph_mut(source_slot);
-        ensure_hierarchy_endpoint_port(
-            source_graph,
-            source_parent,
-            index.child_position(edge.source.as_str()),
-            edge.source.as_str(),
-            source_port_key.as_str(),
-            PortType::Output,
-            port_index,
-        )
-        .ok_or_else(|| ImportError::MissingEndpoint {
-            edge_id: edge.id.clone(),
-            node_id: edge.source.clone(),
-        })?;
-    }
-    {
-        let target_slot = arena.graph_slot_for_parent(index, target_parent);
-        let target_graph = arena.graph_mut(target_slot);
-        ensure_hierarchy_endpoint_port(
-            target_graph,
-            target_parent,
-            index.child_position(edge.target.as_str()),
-            edge.target.as_str(),
-            target_port_key.as_str(),
-            PortType::Input,
-            port_index,
-        )
-        .ok_or_else(|| ImportError::MissingEndpoint {
-            edge_id: edge.id.clone(),
-            node_id: edge.target.clone(),
-        })?;
-    }
+    let source = hierarchy_edge_end(
+        edge,
+        edge.source.as_str(),
+        edge.source_port.as_deref(),
+        PortType::Output,
+        "source",
+        edge_order,
+        merge_edges,
+        index,
+        arena,
+        source_parent,
+        port_index,
+    )?;
+    let target = hierarchy_edge_end(
+        edge,
+        edge.target.as_str(),
+        edge.target_port.as_deref(),
+        PortType::Input,
+        "target",
+        edge_order,
+        merge_edges,
+        index,
+        arena,
+        target_parent,
+        port_index,
+    )?;
 
     // The owned paths are part of ELK's compound-edge input, not graph locators. Build each once
     // and move it into the retained hierarchy edge so deep-chain cost tracks emitted path data.
@@ -1564,10 +1680,10 @@ fn transform_cross_hierarchy_edge(
         .unwrap_or_default();
     arena.root_mut().hierarchy_edges.push(HierarchyEdge {
         id: edge.id.clone(),
-        source_node_id: edge.source.clone(),
-        target_node_id: edge.target.clone(),
-        source_port_key,
-        target_port_key,
+        source_node_id: source.node_id,
+        target_node_id: target.node_id,
+        source_port_key: source.port_key,
+        target_port_key: target.port_key,
         source_path,
         target_path,
         labels: edge.labels.iter().map(label_to_lgraph).collect(),
@@ -1579,6 +1695,83 @@ fn transform_cross_hierarchy_edge(
     });
 
     Ok(())
+}
+
+/// How a hierarchy edge names one end: the node and the key of the port the end sits at.
+struct HierarchyEdgeEnd {
+    node_id: String,
+    port_key: String,
+}
+
+/// Finds or makes the port at one end of a hierarchy edge.
+///
+/// A port the caller named is the end as it is, in its own graph. A node without a named port gets
+/// a port of its own, as `ElkGraphImporter.transformEdge` makes with `LGraphUtil.createPort`. A
+/// port of the node the run lays out is the port of its external port dummy.
+#[allow(clippy::too_many_arguments)]
+fn hierarchy_edge_end(
+    edge: &ElkInputEdge,
+    node_id: &str,
+    port_id: Option<&str>,
+    port_type: PortType,
+    role: &str,
+    edge_order: usize,
+    merge_edges: bool,
+    index: &InputIndex<'_>,
+    arena: &mut HierarchicalImportArena,
+    graph_parent: Option<&str>,
+    port_index: &mut ImportPortIndex,
+) -> ImportResult<HierarchyEdgeEnd> {
+    let missing_endpoint = || ImportError::MissingEndpoint {
+        edge_id: edge.id.clone(),
+        node_id: node_id.to_string(),
+    };
+    if node_id == index.scope_id && !index.nodes.contains_key(node_id) {
+        // The dummy is a node of the root graph with the id of its port.
+        let end = scope_port_end(edge, node_id, port_id, index)?;
+        let dummy = &arena.root().layerless_nodes[end.node];
+        return Ok(HierarchyEdgeEnd {
+            node_id: dummy.id.clone(),
+            port_key: dummy.ports[end.port].id.clone(),
+        });
+    }
+    let slot = arena.graph_slot_for_parent(index, graph_parent);
+    if let Some(port_id) = port_id {
+        let port = index
+            .port_ref(node_id, port_id)
+            .ok_or_else(|| ImportError::MissingPort {
+                edge_id: edge.id.clone(),
+                node_id: node_id.to_string(),
+                port_id: port_id.to_string(),
+            })?;
+        let graph = arena.graph(slot);
+        let node = graph
+            .layerless_nodes
+            .get(port.node)
+            .ok_or_else(missing_endpoint)?;
+        if node.id != node_id || port.port >= node.ports.len() {
+            return Err(missing_endpoint());
+        }
+        return Ok(HierarchyEdgeEnd {
+            node_id: node_id.to_string(),
+            port_key: port_id.to_string(),
+        });
+    }
+    let port_key = hierarchy_port_key(node_id, edge_order, role, merge_edges, port_type);
+    ensure_hierarchy_endpoint_port(
+        arena.graph_mut(slot),
+        graph_parent,
+        index.child_position(node_id),
+        node_id,
+        port_key.as_str(),
+        port_type,
+        port_index,
+    )
+    .ok_or_else(missing_endpoint)?;
+    Ok(HierarchyEdgeEnd {
+        node_id: node_id.to_string(),
+        port_key,
+    })
 }
 
 fn ensure_hierarchy_endpoint_port(
@@ -1604,9 +1797,17 @@ fn ensure_hierarchy_endpoint_port(
     }
 
     let port = graph.layerless_nodes[node].ports.len();
-    graph.layerless_nodes[node]
-        .ports
-        .push(LPort::new(port_key.to_string(), node, port_type));
+    let mut hierarchy_port = LPort::new(port_key.to_string(), node, port_type);
+    // `LGraphUtil.createPort` gives the port the side of its type along the direction. A node
+    // with fixed port sides keeps it. ELK makes the end of an edge into a descendant an input
+    // port, but only a node with children has such an end, and its ports take the side of their
+    // dummies in the end.
+    let default_side = port_side_from_direction(graph.options.direction);
+    hierarchy_port.set_side(match port_type {
+        PortType::Output => default_side,
+        PortType::Input => default_side.opposed(),
+    });
+    graph.layerless_nodes[node].ports.push(hierarchy_port);
     // Dedicated hierarchy ports are never looked up again: only collector and inside-self-loop
     // identities participate in ELK's reuse rules. Indexing this edge-unique key would retain one
     // copied String and HashMap entry per endpoint without changing any later port selection.
@@ -1721,7 +1922,7 @@ fn node_needs_nested_graph(
 
 /// Source: `LGraphUtil.getDirection`, which `ElkGraphImporter.createLGraph` uses for a graph
 /// without a direction.
-fn resolve_direction(direction: ElkDirection, aspect_ratio: f64) -> ElkDirection {
+pub(crate) fn resolve_direction(direction: ElkDirection, aspect_ratio: f64) -> ElkDirection {
     match direction {
         ElkDirection::Undefined if aspect_ratio >= 1.0 => ElkDirection::Right,
         ElkDirection::Undefined => ElkDirection::Down,
@@ -1801,10 +2002,14 @@ struct InputIndex<'a> {
     hierarchy_queries: HierarchyQueryIndex,
     container_depths: Vec<Option<usize>>,
     first_unmaterialized_graph_parents: Vec<Option<&'a str>>,
+    /// The id of the node the run lays out, whose ports are the graph's external ports.
+    scope_id: &'a str,
+    /// The node index of the dummy of each port of the scope, by the port's id.
+    scope_dummies: HashMap<String, usize>,
 }
 
 impl<'a> InputIndex<'a> {
-    fn new(input: &'a ElkInputGraph) -> ImportResult<Self> {
+    fn new(input: &'a ElkInputGraph, scope_ports: &'a [ElkInputPort]) -> ImportResult<Self> {
         let mut nodes = HashMap::new();
         let mut node_order = HashMap::new();
         for (index, node) in input.nodes.iter().enumerate() {
@@ -1829,6 +2034,17 @@ impl<'a> InputIndex<'a> {
                         id: port.id.clone(),
                     });
                 }
+            }
+        }
+
+        for (position, port) in scope_ports.iter().enumerate() {
+            if ports
+                .insert(port.id.as_str(), (input.id.as_str(), position))
+                .is_some()
+            {
+                return Err(ImportError::DuplicatePort {
+                    id: port.id.clone(),
+                });
             }
         }
 
@@ -1861,14 +2077,22 @@ impl<'a> InputIndex<'a> {
             }
         }
 
+        // An edge may end at a port of the node the run lays out, which is no node of the graph.
+        let is_scope_port = |node: &str, port: &Option<String>| {
+            node == input.id && port.is_some() && !nodes.contains_key(node)
+        };
         for edge in &input.edges {
-            if !nodes.contains_key(edge.source.as_str()) {
+            if !nodes.contains_key(edge.source.as_str())
+                && !is_scope_port(edge.source.as_str(), &edge.source_port)
+            {
                 return Err(ImportError::MissingEndpoint {
                     edge_id: edge.id.clone(),
                     node_id: edge.source.clone(),
                 });
             }
-            if !nodes.contains_key(edge.target.as_str()) {
+            if !nodes.contains_key(edge.target.as_str())
+                && !is_scope_port(edge.target.as_str(), &edge.target_port)
+            {
                 return Err(ImportError::MissingEndpoint {
                     edge_id: edge.id.clone(),
                     node_id: edge.target.clone(),
@@ -1944,6 +2168,8 @@ impl<'a> InputIndex<'a> {
             hierarchy_queries,
             container_depths: vec![None; input.nodes.len()],
             first_unmaterialized_graph_parents: vec![None; input.nodes.len()],
+            scope_id: input.id.as_str(),
+            scope_dummies: HashMap::new(),
         };
         result.index_materialized_reachability();
         for edge in &input.edges {
@@ -1982,11 +2208,18 @@ impl<'a> InputIndex<'a> {
             .is_some_and(|children| !children.is_empty())
     }
 
+    /// The index of a node in its graph. The dummies of the external ports come first in the
+    /// graph of the run, ahead of its children.
     fn child_position(&self, node: &str) -> usize {
-        *self
+        let position = *self
             .child_positions
             .get(node)
-            .expect("validated input nodes have a stable sibling position")
+            .expect("validated input nodes have a stable sibling position");
+        if self.node_parent(node).is_none() {
+            position + self.scope_dummies.len()
+        } else {
+            position
+        }
     }
 
     /// Where a named port sits in its node, once `transform_node` has made the node's ports.
@@ -2358,7 +2591,7 @@ mod tests {
             ],
             Vec::new(),
         );
-        let index = InputIndex::new(&input).unwrap();
+        let index = InputIndex::new(&input, &[]).unwrap();
         let root_a = index.node_index("root-a").unwrap();
         let left_leaf = index.node_index("left-leaf").unwrap();
         let right_leaf = index.node_index("right-leaf").unwrap();
@@ -3564,6 +3797,9 @@ mod tests {
             side,
             index: None,
             border_offset: None,
+            net_flow: 0,
+            child_edges: 0,
+            connected_to_external_nodes: false,
         }
     }
 
