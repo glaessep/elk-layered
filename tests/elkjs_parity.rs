@@ -452,7 +452,9 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 54. In `origin_allows_side_switch` (src/north_south.rs), always answer no, so the dummy keeps
 //    its order constraint to the node: the same four cases.
 // 55. In `apply_label_side` (src/intermediate.rs), call a label dummy inline when any of its
-//    labels is inline, not all: 22 cases, such as random-inline-labels/r012, r028 and r036.
+//    labels is inline, not all: 24 cases, such as labels-inline-mixed-one-edge,
+//    labels-inline-mixed-one-edge-down and random-inline-labels/r012. The two hand cases put an
+//    inline and a plain centre label on one edge, in both orders.
 // 56. In the same function, leave out the `.ceil()` of the inline port position: 35 cases, such as
 //    labels-inline-direction-down, labels-inline-direction-up and random-inline-labels/r005.
 // 57. In `place_label_dummy_labels`, take the space for the labels as if they were not inline
@@ -472,6 +474,10 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    `elk.edge.thickness` is not ported, so every edge has thickness 1, where `(1 / 2).ceil()`
 //    is 1 and no thickness is negative. Unit tests in src/intermediate.rs give edges the
 //    thickness 5 and -3 and fail on each of these.
+// 63. In `place_label_dummy_labels`, call the labels inline when any of them is, not all: 7 cases,
+//    such as labels-inline-mixed-one-edge-down and random-inline-labels/r069.
+// 64. In `place_labels_for_vertical_layout`, do the same: 10 cases, such as
+//    labels-inline-mixed-one-edge-down and random-inline-labels/r012.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
