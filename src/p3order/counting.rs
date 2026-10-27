@@ -317,7 +317,8 @@ impl CrossingsCounter {
     }
 
     /// `HyperedgeCrossingsCounter.countCrossings`. The number is exact for plain edges and an
-    /// estimate for hyperedges, as in ELK.
+    /// estimate for hyperedges, as in ELK. Like ELK's `int`, it can be negative: a hyperedge with
+    /// no port in one of the two layers has its upper corner below its lower corner.
     ///
     /// ELK breaks a tie between two hyperedges or corners by `hashCode()`. That tie cannot happen
     /// here: each hyperedge owns its own ports, so the positions it is sorted by never repeat.
@@ -326,7 +327,7 @@ impl CrossingsCounter {
         graph: &LGraph,
         left_layer: &[usize],
         right_layer: &[usize],
-    ) -> usize {
+    ) -> isize {
         let layer_of = |node: usize| graph.layerless_nodes[node].layer_index;
         let (Some(&left_first), Some(&right_first)) = (left_layer.first(), right_layer.first())
         else {
@@ -500,13 +501,13 @@ impl CrossingsCounter {
         let mut tree = vec![0usize; tree_size];
 
         // Count the straight-line crossings of the topmost edges.
-        let mut crossings = 0usize;
+        let mut crossings = 0isize;
         for position in &south_sequence {
             let mut index = position + first_index;
             tree[index] += 1;
             while index > 0 {
                 if !index.is_multiple_of(2) {
-                    crossings += tree[index + 1];
+                    crossings += tree[index + 1] as isize;
                 }
                 index = (index - 1) / 2;
                 tree[index] += 1;
@@ -575,7 +576,10 @@ struct Hyperedge {
 /// The corner sweep of `HyperedgeCrossingsCounter.countCrossings`: every hyperedge covers the
 /// span `(upper, lower)` on one side. Each time a span closes, it crosses all spans still open.
 /// Corners sort by position, then by opposite position, then upper before lower.
-fn count_overlapping_areas(spans: &[(usize, usize)]) -> usize {
+///
+/// The sum can be negative, as ELK's `int` can: a span whose upper corner lies below its lower
+/// corner closes before it opens.
+fn count_overlapping_areas(spans: &[(usize, usize)]) -> isize {
     // (position, opposite position, is_lower)
     let mut corners = Vec::with_capacity(spans.len() * 2);
     for (upper, lower) in spans {
@@ -593,7 +597,7 @@ fn count_overlapping_areas(spans: &[(usize, usize)]) -> usize {
             open += 1;
         }
     }
-    crossings.max(0) as usize
+    crossings
 }
 
 pub fn ports_in_north_south_east_west_order(
@@ -1071,6 +1075,22 @@ mod tests {
                 .count_crossings_between_layers(&graph, &order[1], &order[2])
                 .is_nan()
         );
+    }
+
+    // Mutation: clamp the sum of `count_overlapping_areas` at 0, as the port did. The span that
+    // closes before it opens then adds nothing, and the sum of two sides is 0 and not -1.
+    #[test]
+    fn overlapping_areas_can_sum_to_less_than_zero() {
+        // Upper below lower: the lower corner sorts first, and it closes a span that is not open.
+        assert_eq!(count_overlapping_areas(&[(5, 3)]), -1);
+        // Two sides add as signed numbers: one crossing from the sorted spans, minus one.
+        assert_eq!(count_overlapping_areas(&[(0, 4), (1, 3)]), 1);
+        assert_eq!(
+            count_overlapping_areas(&[(0, 4), (1, 3)]) + count_overlapping_areas(&[(5, 3)]),
+            0
+        );
+        // An ordinary span closes after it opens.
+        assert_eq!(count_overlapping_areas(&[(1, 3)]), 0);
     }
 
     #[test]
