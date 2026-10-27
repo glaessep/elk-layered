@@ -2686,21 +2686,30 @@ impl InLayerCrossingCounter {
 struct NorthSouthEdgeNeighbouringNodeCrossingsCounter {
     upper_lower_crossings: usize,
     lower_upper_crossings: usize,
-    /// The place of each northern and southern port among the ports of its side and node.
-    port_positions: HashMap<PortRef, usize>,
+    /// The place of each northern and southern port among the ports of its side and node, by
+    /// `crossing_minimization_id` as in `CrossingsCounter`. A port nobody numbered is at 0.
+    port_positions: Vec<usize>,
 }
 
 impl NorthSouthEdgeNeighbouringNodeCrossingsCounter {
     /// Ports the constructor: it numbers the northern and southern ports of the layer's nodes.
     fn new(graph: &LGraph, layer: &[usize]) -> Self {
-        let mut port_positions = HashMap::new();
+        let mut port_positions = Vec::new();
         for &node in layer {
             for side in [PortSide::South, PortSide::North] {
-                for (port_id, port) in ports_in_north_south_east_west_order(graph, node, side)
+                for (position, port) in ports_in_north_south_east_west_order(graph, node, side)
                     .into_iter()
                     .enumerate()
                 {
-                    port_positions.insert(port, port_id);
+                    let Some(id) =
+                        graph.layerless_nodes[port.node].ports[port.port].crossing_minimization_id
+                    else {
+                        continue;
+                    };
+                    if port_positions.len() <= id {
+                        port_positions.resize(id + 1, 0);
+                    }
+                    port_positions[id] = position;
                 }
             }
         }
@@ -2807,7 +2816,10 @@ impl NorthSouthEdgeNeighbouringNodeCrossingsCounter {
     fn origin_port_position_of(&self, graph: &LGraph, node: usize) -> usize {
         // The origin port is a northern or southern port of a node in the layer, so it has a place.
         origin_port_of(graph, node)
-            .and_then(|origin| self.port_positions.get(&origin).copied())
+            .and_then(|origin| {
+                graph.layerless_nodes[origin.node].ports[origin.port].crossing_minimization_id
+            })
+            .and_then(|id| self.port_positions.get(id).copied())
             .unwrap_or(0)
     }
 }
@@ -5821,6 +5833,14 @@ mod north_south_tests {
         add_edge(&mut graph, port(neighbour, 1), port(a, 1));
         add_edge(&mut graph, port(neighbour, 2), port(a, 1));
         crate::north_south::preprocess_north_south_ports(&mut graph);
+        // The sweep numbers every port before it counts, and the counter reads the numbers.
+        let ports = graph
+            .layerless_nodes
+            .iter_mut()
+            .flat_map(|node| &mut node.ports);
+        for (id, port) in ports.enumerate() {
+            port.crossing_minimization_id = Some(id);
+        }
         let (first, second) = (dummy_of(&graph, a, 0), dummy_of(&graph, a, 1));
         (graph, a, first, second)
     }
