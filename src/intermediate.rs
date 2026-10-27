@@ -911,18 +911,21 @@ fn ensure_no_outgoing_except_label_dummies(graph: &LGraph, node: usize) -> Inter
     Ok(())
 }
 
+// Java: LabelDummyInserter.process. It visits the layerless nodes in order, and each node's
+// outgoing edges in port order. The dummies are created in that order, so it fixes their node
+// order inside a layer before crossing minimisation. Walking the edge list by index gives another
+// order whenever a node has an edge on a declared port and one on the node itself.
 pub fn insert_label_dummies(graph: &mut LGraph) {
-    let edge_indices = graph
-        .edges
-        .iter()
-        .enumerate()
-        .filter(|(_, edge)| edge.source.node != edge.target.node)
-        .filter(|(_, edge)| {
-            edge.labels
-                .iter()
-                .any(|label| label.placement == EdgeLabelPlacement::Center)
+    let edge_indices = (0..graph.layerless_nodes.len())
+        .flat_map(|node| graph.node_outgoing_edges(node))
+        .filter(|&index| {
+            let edge = &graph.edges[index];
+            edge.source.node != edge.target.node
+                && edge
+                    .labels
+                    .iter()
+                    .any(|label| label.placement == EdgeLabelPlacement::Center)
         })
-        .map(|(index, _)| index)
         .collect::<Vec<_>>();
 
     for edge_index in edge_indices {
