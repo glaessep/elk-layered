@@ -52,21 +52,34 @@ fn place_ports(graph: &mut LGraph, node: usize) {
         PortConstraints::FixedPos => {
             place_fixed_pos_ports(graph, node, PortSide::North);
             place_fixed_pos_ports(graph, node, PortSide::South);
+            offset_southern_ports_by_node_size(graph, node);
             place_fixed_pos_ports(graph, node, PortSide::East);
             place_fixed_pos_ports(graph, node, PortSide::West);
         }
         PortConstraints::FixedRatio => {
             place_fixed_ratio_ports(graph, node, PortSide::North);
             place_fixed_ratio_ports(graph, node, PortSide::South);
+            offset_southern_ports_by_node_size(graph, node);
             place_fixed_ratio_ports(graph, node, PortSide::East);
             place_fixed_ratio_ports(graph, node, PortSide::West);
         }
         _ => {
             place_free_ports(graph, node, PortSide::North);
             place_free_ports(graph, node, PortSide::South);
+            offset_southern_ports_by_node_size(graph, node);
             place_free_ports(graph, node, PortSide::East);
             place_free_ports(graph, node, PortSide::West);
         }
+    }
+}
+
+/// Ports `NodeLabelAndSizeUtilities.offsetSouthernPortsByNodeSize`. ELK places the southern ports
+/// as if the node had no height, because the height is not known until the horizontal ports are
+/// placed. This moves them down to the southern border.
+fn offset_southern_ports_by_node_size(graph: &mut LGraph, node: usize) {
+    let height = graph.layerless_nodes[node].size.height;
+    for port in ports_on_side(graph, node, PortSide::South) {
+        graph.layerless_nodes[node].ports[port].position.y += height;
     }
 }
 
@@ -471,6 +484,50 @@ mod tests {
         );
     }
 
+    // Mutation: leave the southern ports at the height they are placed at, which is the top of
+    // the node, or offset the northern ones too.
+    #[test]
+    fn southern_ports_sit_on_the_southern_border_for_every_port_constraint() {
+        for constraints in [
+            PortConstraints::FixedSide,
+            PortConstraints::FixedRatio,
+            PortConstraints::FixedPos,
+        ] {
+            let mut graph = LGraph::new("root", LayeredOptions::default());
+            graph
+                .layerless_nodes
+                .push(LNode::new("A", 80.0, 40.0, None));
+            let node = 0;
+            graph.set_node_layer(node, 0);
+            graph.layerless_nodes[node].port_constraints = constraints;
+            let mut refs = Vec::new();
+            for side in [PortSide::North, PortSide::South] {
+                let port = graph
+                    .add_port(
+                        node,
+                        PortType::Output,
+                        side,
+                        crate::graph::LPoint::default(),
+                    )
+                    .unwrap();
+                let data = &mut graph.layerless_nodes[node].ports[port.port];
+                data.size = LSize {
+                    width: 6.0,
+                    height: 4.0,
+                };
+                data.border_offset = Some(1.5);
+                refs.push(port.port);
+            }
+
+            calculate_label_and_node_sizes(&mut graph, [node]);
+
+            let ports = &graph.layerless_nodes[node].ports;
+            // The northern port sits outside above the node, the southern port below it.
+            assert_eq!(ports[refs[0]].position.y, -4.0 - 1.5, "{constraints:?}");
+            assert_eq!(ports[refs[1]].position.y, 40.0 + 1.5, "{constraints:?}");
+        }
+    }
+
     #[test]
     fn label_and_node_size_calculation_places_free_ports_on_node_border() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
@@ -497,6 +554,8 @@ mod tests {
         assert!(port.position.y < graph.layerless_nodes[node].size.height);
     }
 
+    // Mutation: place the southern ports at the top of the node, as they were before the node had
+    // a height.
     #[test]
     fn label_and_node_size_calculation_crams_distributed_ports_when_overhang_disabled() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
@@ -528,7 +587,7 @@ mod tests {
                 "port {index} x: expected {expected_x}, got {}",
                 port.position.x
             );
-            assert_eq!(port.position.y, 0.0);
+            assert_eq!(port.position.y, 54.0);
         }
     }
 
