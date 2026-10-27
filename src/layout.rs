@@ -394,7 +394,7 @@ impl<'a> Tree<'a> {
         for index in 0..self.edges.len() {
             let (source, target) = (self.edges[index].source, self.edges[index].target);
             if let Some(port) = self.edges[index].source_port {
-                let to_child = self.nodes[target].parent == Some(source) && target != source;
+                let to_child = self.nodes[target].parent == Some(source);
                 let outside = !self.is_descendant(target, source);
                 let facts = &mut self.nodes[source].port_facts[port];
                 facts.net_flow += if to_child { -1 } else { 1 };
@@ -404,7 +404,7 @@ impl<'a> Tree<'a> {
                 facts.connected_to_external_nodes |= outside;
             }
             if let Some(port) = self.edges[index].target_port {
-                let from_child = self.nodes[source].parent == Some(target) && source != target;
+                let from_child = self.nodes[source].parent == Some(target);
                 let outside = !self.is_descendant(source, target);
                 let facts = &mut self.nodes[target].port_facts[port];
                 facts.net_flow += if from_child { 1 } else { -1 };
