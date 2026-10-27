@@ -9,6 +9,7 @@
 
 use std::collections::VecDeque;
 
+use crate::common::cells::grow_label_cell;
 use crate::graph::{
     LGraph, LMargin, LNodeKind, LPoint, LSize, PortRef, PortSide, SelfHyperLoop,
     SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder, SelfLoopLabelAlignment, SelfLoopLabelRef,
@@ -226,7 +227,8 @@ fn initialize_self_hyper_loop_labels(graph: &LGraph, hyper_loop: &mut SelfHyperL
                 edge: sl_edge.edge,
                 label: label_index,
             });
-            update_self_hyper_loop_label_size(
+            // `SelfHyperLoopLabels.updateSize`, which repeats the arithmetic of `LabelCell.addLabel`.
+            grow_label_cell(
                 &mut size,
                 label.size,
                 label_refs.len(),
@@ -246,28 +248,6 @@ fn initialize_self_hyper_loop_labels(graph: &LGraph, hyper_loop: &mut SelfHyperL
             alignment: None,
             alignment_reference_port: None,
         });
-    }
-}
-
-fn update_self_hyper_loop_label_size(
-    size: &mut LSize,
-    label_size: LSize,
-    label_count: usize,
-    label_spacing: f64,
-    horizontal_layout: bool,
-) {
-    if horizontal_layout {
-        size.width = size.width.max(label_size.width);
-        size.height += label_size.height;
-        if label_count > 1 {
-            size.height += label_spacing;
-        }
-    } else {
-        size.width += label_size.width;
-        size.height = size.height.max(label_size.height);
-        if label_count > 1 {
-            size.width += label_spacing;
-        }
     }
 }
 
@@ -329,16 +309,25 @@ fn hide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
     remap_holder_ports(holder, &old_to_new);
 
     let visible_count = port_count - hidden_indices.len();
-    holder.hidden_ports = graph.layerless_nodes[holder.node]
-        .ports
-        .split_off(visible_count);
+    let node = &mut graph.layerless_nodes[holder.node];
+    holder.hidden_ports = node.ports.split_off(visible_count);
+    node.hidden_port_count = holder.hidden_ports.len();
 }
 
 /// Puts the ports that `hide_ports` took off the node back at the end of its port list.
+///
+/// Java has no such step. `PortRestorer.restorePorts` (called by `SelfLoopPortRestorer`) clears
+/// the node's port list and puts every port back with `lPort.setNode(lNode)`. It visits the
+/// hidden ports in the order of its target areas (north start, north middle, and so on), never
+/// by their old index. Here the hidden ports come back first, in ascending index order, because
+/// the indices `hide_ports` gave them are what the holder's ports and edges, and so the target
+/// areas, refer to. `restore_hidden_ports` then reorders the whole list by those indices, in
+/// Java's order. Its `restored_port_order` leaves the hidden ports out of the old ports it walks
+/// in bursts. So the order they come back in does not reach the result. Only their indices do.
 fn unhide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
-    graph.layerless_nodes[holder.node]
-        .ports
-        .append(&mut holder.hidden_ports);
+    let node = &mut graph.layerless_nodes[holder.node];
+    node.ports.append(&mut holder.hidden_ports);
+    node.hidden_port_count = 0;
 }
 
 fn assign_hidden_port_sides(graph: &mut LGraph, holder: &SelfLoopHolder) {

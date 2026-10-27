@@ -31,10 +31,17 @@ if (one) {
   try {
     laid = await new ELK().layout(graph);
   } catch (error) {
-    // elkjs refuses the graph. The expected file says so, and the parity test then expects
-    // layout() to refuse it too. Only the exception's first line is kept: the rest prints
-    // GWT's object dumps, which change with every build.
-    laid = { elkjsError: String(error?.message ?? error).split("\n")[0] };
+    // elkjs refuses the graph with ELK's `UnsupportedGraphException`. The expected file says so,
+    // and the parity test then expects layout() to refuse it too. Only the exception's first line
+    // is kept: the rest prints GWT's object dumps, which change with every build.
+    const message = String(error?.message ?? error).split("\n")[0];
+    if (!message.includes("UnsupportedGraphException")) {
+      // Any other exception (TypeError, stack overflow, ClassCastException...) is not a refusal.
+      // Nothing is written, so someone looks at the case.
+      console.error(`${one}: elkjs failed with something other than a refusal: ${message}`);
+      process.exit(1);
+    }
+    laid = { elkjsError: message };
   }
   writeFileSync(out, JSON.stringify(laid, null, 2) + "\n");
   console.log(`recorded ${out}`);

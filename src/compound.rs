@@ -725,6 +725,12 @@ fn order_segments_by_publication(
 // the border-offset property before segment introduction creates exported parent ports.
 type ParentPortBorderOffsets = HashMap<PortType, HashMap<String, f64>>;
 
+/// What the ports of a graph's parent node give to the segments introduced in that graph.
+struct ParentPorts<'a> {
+    border_offsets: &'a ParentPortBorderOffsets,
+    net_flows: &'a ParentPortFlows,
+}
+
 pub(crate) fn introduce_source_ported_scoped_edge_segments(
     graph: &mut LGraph,
     segments: Vec<ScopedHierarchySegment>,
@@ -733,6 +739,7 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
         return;
     }
     let publications = order_segments_by_publication(graph, segments);
+    let parent_port_flows = parent_port_net_flows(&publications.segments);
     let mut local_port_publications = publications.local_ports;
     let mut segments_by_parent: HashMap<Option<String>, Vec<ScopedHierarchySegment>> =
         HashMap::new();
@@ -795,7 +802,10 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
                     scoped.labels,
                     &mut external_ports,
                     &mut local_ports,
-                    &parent_offsets,
+                    &ParentPorts {
+                        border_offsets: &parent_offsets,
+                        net_flows: &parent_port_flows,
+                    },
                 );
                 let model_order = scoped.edge.model_order;
                 record_cross_hierarchy_edge_segment(
@@ -1049,7 +1059,7 @@ fn introduce_hierarchical_edge_segment(
     labels: Vec<LLabel>,
     external_ports: &mut HashMap<ExternalPortKey, ExternalPort>,
     local_ports: &mut GraphPortIndex,
-    parent_offsets: &ParentPortBorderOffsets,
+    parent_ports: &ParentPorts,
 ) -> usize {
     let parent_boundary = match (&pending.source, &pending.target) {
         (
@@ -1091,37 +1101,19 @@ fn introduce_hierarchical_edge_segment(
         }
     }
 
-    // `createExternalPortDummy` takes the net flow of the parent's own port from
-    // `calculateNetFlow(outsidePort)`. That count votes the other way when the edge's far end is
-    // not a direct child of the parent node (an edge to a grandchild, say). The count covers
-    // every edge on that port. Here a port carries this one edge only: the importer gives each
-    // edge its own port, and `mergeEdges`, which would share them, is refused as not ported.
-    let far_end_is_direct_child = match (&pending.source, &pending.target) {
-        (
-            PendingSegmentEndpoint::LocalNode { node_id, .. },
-            PendingSegmentEndpoint::ParentBoundary { .. },
-        ) => node_id == &edge.source_node_id,
-        (
-            PendingSegmentEndpoint::ParentBoundary { .. },
-            PendingSegmentEndpoint::LocalNode { node_id, .. },
-        ) => node_id == &edge.target_node_id,
-        _ => true,
-    };
     let source = ensure_segment_endpoint_port(
         graph,
         local_ports,
         &pending.source,
         PortType::Output,
-        parent_offsets,
-        far_end_is_direct_child,
+        parent_ports,
     );
     let target = ensure_segment_endpoint_port(
         graph,
         local_ports,
         &pending.target,
         PortType::Input,
-        parent_offsets,
-        far_end_is_direct_child,
+        parent_ports,
     );
 
     if source.node == target.node {
@@ -1204,34 +1196,127 @@ fn apply_label_graph_properties(graph: &mut LGraph, labels: &[LLabel]) {
     }
 }
 
+/// The net flow of each parent port that hierarchy edges end at, keyed by the parent node's id
+/// and the port key.
+type ParentPortFlows = HashMap<(String, String), isize>;
+
+/// Port of `CompoundGraphPreprocessor.calculateNetFlow(outsidePort)`, for every parent port that
+/// the edges in `segments` end at.
+///
+/// Java walks the port's edges and counts a vote for "output port of the parent" or for "input
+/// port of the parent" per edge. It returns `outputPortVote - inputPortVote`.
+///
+/// - An edge that leaves the port votes "input" if its far end sits directly in the parent's
+///   graph, as the port then feeds the nested graph. Any other far end votes "output": a node
+///   deeper down, or a node outside the parent.
+/// - An edge that enters the port votes the other way round.
+/// - Java adds two self-loop cases. An inside self loop votes like an edge from the inside, an
+///   outside self loop like an edge from the outside. Neither is a hierarchy edge here. The
+///   importer turns inside self loops into dummies on their own port keys.
+///
+/// An edge reaches the port through exactly one segment that ends at the parent node, so each
+/// edge votes once. Edges on the port that never enter the parent's graph have no segment here
+/// and do not vote. No port carries one today: every edge gets its own.
+fn parent_port_net_flows(segments: &[ScopedHierarchySegment]) -> ParentPortFlows {
+    let mut flows = ParentPortFlows::new();
+    for scoped in segments {
+        let ends = [
+            (
+                &scoped.pending.source,
+                &scoped.pending.target,
+                &scoped.edge.target_node_id,
+            ),
+            (
+                &scoped.pending.target,
+                &scoped.pending.source,
+                &scoped.edge.source_node_id,
+            ),
+        ];
+        for (boundary, far_end, far_original_end) in ends {
+            let PendingSegmentEndpoint::ParentBoundary {
+                node_id,
+                port_key,
+                port_type,
+                connects_parent_node: true,
+                ..
+            } = boundary
+            else {
+                continue;
+            };
+            // The segment next to the parent ends at the original end only if that end is a
+            // direct child of the parent.
+            let far_end_is_child_of_parent = match far_end {
+                PendingSegmentEndpoint::LocalNode { node_id, .. } => node_id == far_original_end,
+                // Every segment has one `ParentBoundary` end and one `LocalNode` end, and `boundary`
+                // is the first. A second boundary end would need a vote this function does not
+                // define, so it is a bug in the code that builds segments, not input.
+                PendingSegmentEndpoint::ParentBoundary { .. } => unreachable!(
+                    "a compound segment has exactly one parent boundary end and one local end"
+                ),
+            };
+            // The dummy's port type is `Input` for an edge that leaves the parent's port.
+            let leaves_port = *port_type == PortType::Input;
+            let votes_output = leaves_port != far_end_is_child_of_parent;
+            *flows
+                .entry((node_id.clone(), port_key.clone()))
+                .or_insert(0) += if votes_output { 1 } else { -1 };
+        }
+    }
+    flows
+}
+
 fn ensure_segment_endpoint_port(
     graph: &mut LGraph,
     local_ports: &mut GraphPortIndex,
     endpoint: &PendingSegmentEndpoint,
     port_type: PortType,
-    parent_offsets: &ParentPortBorderOffsets,
-    far_end_is_direct_child: bool,
+    parent_ports: &ParentPorts,
 ) -> PortRef {
     match endpoint {
         PendingSegmentEndpoint::LocalNode { node_id, port_key } => local_ports
             .ensure_local_node_port(graph, node_id.as_str(), port_key.as_str(), port_type)
             .expect("compound segment local endpoint should exist in the current graph"),
-        PendingSegmentEndpoint::ParentBoundary { node_id, .. } => create_parent_boundary_port(
-            graph,
-            local_ports,
-            node_id.as_str(),
-            endpoint_port_type(endpoint, port_type),
-            endpoint_parent_port_type(endpoint, port_type),
-            endpoint_port_key(endpoint).unwrap_or_default(),
-            endpoint_connects_parent_node(endpoint).then(|| {
-                let border_offset = parent_offsets
-                    .get(&endpoint_parent_port_type(endpoint, port_type))
-                    .and_then(|ports| ports.get(endpoint_port_key(endpoint).unwrap_or_default()))
+        PendingSegmentEndpoint::ParentBoundary { node_id, .. } => {
+            let dummy_port_type = endpoint_port_type(endpoint, port_type);
+            let parent_port_type = endpoint_parent_port_type(endpoint, port_type);
+            let port_key = endpoint_port_key(endpoint).unwrap_or_default();
+            let connects_parent_node = endpoint_connects_parent_node(endpoint);
+            // `createExternalPortDummy`, parent-node branch: `calculateNetFlow(outsidePort)`.
+            // Its other branch makes a fresh port, which takes -1 for an input and 1 for an
+            // output.
+            let net_flow = if connects_parent_node {
+                parent_ports
+                    .net_flows
+                    .get(&(node_id.clone(), port_key.to_string()))
                     .copied()
-                    .unwrap_or(0.0);
-                (border_offset, far_end_is_direct_child)
-            }),
-        ),
+                    .expect("every port a parent end connects to has its votes counted")
+            } else {
+                match dummy_port_type {
+                    PortType::Input => -1,
+                    PortType::Output => 1,
+                }
+            };
+            let original_border_offset = connects_parent_node.then(|| {
+                parent_ports
+                    .border_offsets
+                    .get(&parent_port_type)
+                    .and_then(|ports| ports.get(port_key))
+                    .copied()
+                    .unwrap_or(0.0)
+            });
+            create_parent_boundary_port(
+                graph,
+                local_ports,
+                ParentBoundaryPort {
+                    parent_node_id: node_id,
+                    dummy_port_type,
+                    parent_port_type,
+                    parent_port_key: port_key,
+                    net_flow,
+                    original_border_offset,
+                },
+            )
+        }
     }
 }
 
@@ -1710,20 +1795,33 @@ fn create_parent_external_port(
     port
 }
 
+/// What `create_parent_boundary_port` needs to know about the parent's port.
+struct ParentBoundaryPort<'a> {
+    parent_node_id: &'a str,
+    dummy_port_type: PortType,
+    parent_port_type: PortType,
+    parent_port_key: &'a str,
+    /// `calculateNetFlow(outsidePort)` for an edge that ends at the parent node itself, else the
+    /// fixed flow of a fresh port.
+    net_flow: isize,
+    /// `Some(original border offset)` when the edge ends at the parent node itself.
+    original_border_offset: Option<f64>,
+}
+
 fn create_parent_boundary_port(
     graph: &mut LGraph,
     local_ports: &GraphPortIndex,
-    parent_node_id: &str,
-    dummy_port_type: PortType,
-    parent_port_type: PortType,
-    parent_port_key: &str,
-    // `Some((original border offset, far end is a direct child))` when the edge ends at the parent
-    // node itself.
-    parent_end: Option<(f64, bool)>,
+    boundary: ParentBoundaryPort,
 ) -> PortRef {
-    let connects_parent_node = parent_end.is_some();
-    let original_parent_border_offset = parent_end.map(|(offset, _)| offset);
-    let far_end_is_direct_child = parent_end.is_none_or(|(_, direct)| direct);
+    let ParentBoundaryPort {
+        parent_node_id,
+        dummy_port_type,
+        parent_port_type,
+        parent_port_key,
+        net_flow,
+        original_border_offset: original_parent_border_offset,
+    } = boundary;
+    let connects_parent_node = original_parent_border_offset.is_some();
     graph.graph_properties.external_ports = true;
     graph.graph_properties.non_free_ports = true;
     graph.options.port_constraints = if graph.options.port_constraints.is_side_fixed() {
@@ -1764,13 +1862,7 @@ fn create_parent_boundary_port(
         dummy_port_type,
         graph.options.port_constraints,
         port_side,
-        // CompoundGraphPreprocessor#createExternalPortDummy, parent-node branch: the net flow is
-        // `calculateNetFlow(outsidePort)`. Only an edge to a direct child counts as the port's
-        // flow into the nested graph. Any deeper end counts the other way.
-        match (dummy_port_type, !far_end_is_direct_child) {
-            (PortType::Input, false) | (PortType::Output, true) => -1,
-            (PortType::Output, false) | (PortType::Input, true) => 1,
-        },
+        net_flow,
         Default::default(),
         LSize::default(),
         LSize::default(),
@@ -2058,6 +2150,53 @@ mod tests {
                 ..
             } if node_id == "sibling" && port_key == "B:target"
         ));
+    }
+
+    // Mutation: vote by the dummy's port type alone (`votes_output = !leaves_port`), as a port
+    // with one edge would allow. The shared port then reads -1 instead of 1.
+    #[test]
+    fn edges_that_share_a_parent_port_vote_together() {
+        let edge = |id: &str,
+                    source: &str,
+                    source_key: &str,
+                    source_path: &[&str],
+                    target: &str,
+                    target_key: &str,
+                    target_path: &[&str]| HierarchyEdge {
+            id: id.into(),
+            source_node_id: source.into(),
+            target_node_id: target.into(),
+            source_port_key: source_key.into(),
+            target_port_key: target_key.into(),
+            source_path: source_path.iter().map(|id| id.to_string()).collect(),
+            target_path: target_path.iter().map(|id| id.to_string()).collect(),
+            labels: Vec::new(),
+            minlen: 1,
+            model_order: None,
+            priority_direction: 0,
+            priority_shortness: 0,
+            priority_straightness: 0,
+        };
+        let edges = [
+            // Leaves the port for a direct child: votes "input".
+            edge("e1", "P", "P:shared", &[], "c", "c:in", &["P"]),
+            // Leaves the port for a grandchild: votes "output".
+            edge("e2", "P", "P:shared", &[], "g", "g:in", &["P", "q"]),
+            // Enters the port from a direct child: votes "output".
+            edge("e3", "c", "c:out", &["P"], "P", "P:shared", &[]),
+            // Another port that only feeds a direct child.
+            edge("e4", "P", "P:other", &[], "c", "c:in2", &["P"]),
+        ];
+        let segments = edges
+            .iter()
+            .flat_map(materialize_hierarchy_edge_segments)
+            .collect::<Vec<_>>();
+
+        let flows = parent_port_net_flows(&segments);
+
+        assert_eq!(flows.len(), 2);
+        assert_eq!(flows[&("P".to_string(), "P:shared".to_string())], 1);
+        assert_eq!(flows[&("P".to_string(), "P:other".to_string())], -1);
     }
 
     #[test]

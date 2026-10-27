@@ -21,6 +21,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::common::cells::grow_label_cell;
 use crate::graph::{
     EdgeLabelPlacement, HorizontalLabelAlignment, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize,
     LabelCellLayout, LabelSide, LayeredEdge, PortRef, PortSide, PortType, VerticalLabelAlignment,
@@ -1806,33 +1807,17 @@ fn place_end_label_cells_for_node(
         place_end_label_cell_for_port(graph, node, port_index, edge_label_spacing);
     }
 
-    if vertical_layout {
-        remove_end_label_overlaps(
-            graph,
-            node,
-            PortSide::East,
-            2.0 * label_label_spacing,
-            edge_label_spacing,
-        );
-        remove_end_label_overlaps(
-            graph,
-            node,
-            PortSide::West,
-            2.0 * label_label_spacing,
-            edge_label_spacing,
-        );
+    // `EndLabelPreprocessor.process`: east and west in a vertical layout, else north and south.
+    let sides = if vertical_layout {
+        [PortSide::East, PortSide::West]
     } else {
+        [PortSide::North, PortSide::South]
+    };
+    for side in sides {
         remove_end_label_overlaps(
             graph,
             node,
-            PortSide::North,
-            2.0 * label_label_spacing,
-            edge_label_spacing,
-        );
-        remove_end_label_overlaps(
-            graph,
-            node,
-            PortSide::South,
+            side,
             2.0 * label_label_spacing,
             edge_label_spacing,
         );
@@ -1863,24 +1848,17 @@ fn create_end_label_cell(
 /// additions, so the sum rounds the way Java's does. In horizontal layout mode a cell stacks its
 /// labels one below the other; in vertical mode it puts them side by side.
 fn label_cell_size(labels: &[LLabel], label_label_spacing: f64, horizontal_layout: bool) -> LSize {
-    let mut width: f64 = 0.0;
-    let mut height: f64 = 0.0;
-    for (count, label) in labels.iter().enumerate() {
-        if horizontal_layout {
-            width = width.max(label.size.width);
-            height += label.size.height;
-            if count > 0 {
-                height += label_label_spacing;
-            }
-        } else {
-            width += label.size.width;
-            height = height.max(label.size.height);
-            if count > 0 {
-                width += label_label_spacing;
-            }
-        }
+    let mut size = LSize::default();
+    for (index, label) in labels.iter().enumerate() {
+        grow_label_cell(
+            &mut size,
+            label.size,
+            index + 1,
+            label_label_spacing,
+            horizontal_layout,
+        );
     }
-    LSize { width, height }
+    size
 }
 
 fn place_end_label_cell_for_port(
@@ -2007,7 +1985,9 @@ fn remove_end_label_overlaps(
     let sideways = matches!(port_side, PortSide::East | PortSide::West);
 
     // Import the rectangles (`importRectangle`): for east and west the strip axis is x, so the
-    // rectangle is turned by 90 degrees.
+    // rectangle is turned by 90 degrees. The values stay as `importRectangle` gives them,
+    // including a `y` of 0 for east and west. The greedy pass sorts each cell's overlaps by `y`,
+    // so these values reach the result.
     let mut rects = Vec::new();
     for (port_index, port) in graph.layerless_nodes[node].ports.iter().enumerate() {
         if port.side != port_side {
@@ -2041,6 +2021,10 @@ fn remove_end_label_overlaps(
     }
 
     // removeOverlaps: a stable sort by left border (Java's List.sort, also stable in GWT).
+    // `RectangleStripOverlapRemover.rectangleNodes` is an `ArrayList` that
+    // `rectangleNodes.sort(compareLeftRectangleBorders)` sorts in place. The greedy remover
+    // walks that same sorted list (`overlapRemover.getRectangleNodes()`). So `rects`, sorted
+    // here, is also the order in which the cells are placed below.
     rects.sort_by(|a, b| a.x.total_cmp(&b.x));
 
     // computeOverlaps: scanline over the left borders. Java keeps the cells that touch the
@@ -2072,6 +2056,7 @@ fn remove_end_label_overlaps(
     // already placed cell it overlaps.
     for current in 0..rects.len() {
         let mut y_pos = 0.0;
+        // Java sorts this list in place. Nothing reads it again, so a sorted copy is enough.
         let mut overlapping = std::mem::take(&mut rects[current].overlapping);
         overlapping.sort_by(|&a, &b| rects[a].y.total_cmp(&rects[b].y));
         for &other in &overlapping {
@@ -2082,7 +2067,6 @@ fn remove_end_label_overlaps(
                 y_pos = rects[other].y + rects[other].height + gap;
             }
         }
-        rects[current].overlapping = overlapping;
         rects[current].y = y_pos;
         rects[current].placed = true;
     }

@@ -18,6 +18,34 @@ use crate::options::{
     ElkPadding, NodeLabelLocation, NodeLabelPlacement, NodeSizing, SizeConstraints, SizeOptions,
 };
 
+/// Source: `LabelCell.addLabel`, the part that grows the cell's minimum content size.
+/// `SelfHyperLoopLabels.updateSize` repeats the same arithmetic. One function serves every
+/// caller, so all of them add the floats in the order Java does.
+///
+/// `label_count` counts the label being added, so it is 1 for the first. In horizontal layout
+/// mode the cell stacks its labels one below the other; otherwise it puts them side by side.
+pub(crate) fn grow_label_cell(
+    content: &mut LSize,
+    label: LSize,
+    label_count: usize,
+    gap: f64,
+    horizontal_layout_mode: bool,
+) {
+    if horizontal_layout_mode {
+        content.width = f64::max(content.width, label.width);
+        content.height += label.height;
+        if label_count > 1 {
+            content.height += gap;
+        }
+    } else {
+        content.width += label.width;
+        content.height = f64::max(content.height, label.height);
+        if label_count > 1 {
+            content.width += gap;
+        }
+    }
+}
+
 /// One node label as the cell system sees it.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CellLabel {
@@ -719,19 +747,13 @@ impl Cells<'_> {
         } = &mut self.cells[id].kind
         {
             labels.push(label);
-            if *horizontal_layout_mode {
-                minimum_content.width = f64::max(minimum_content.width, label_size.width);
-                minimum_content.height += label_size.height;
-                if labels.len() > 1 {
-                    minimum_content.height += *gap;
-                }
-            } else {
-                minimum_content.width += label_size.width;
-                minimum_content.height = f64::max(minimum_content.height, label_size.height);
-                if labels.len() > 1 {
-                    minimum_content.width += *gap;
-                }
-            }
+            grow_label_cell(
+                minimum_content,
+                label_size,
+                labels.len(),
+                *gap,
+                *horizontal_layout_mode,
+            );
         }
     }
 
