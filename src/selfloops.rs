@@ -1266,20 +1266,22 @@ fn assign_two_sides_opposing_and_three_sides_label_side_and_alignment(
     }
 }
 
+/// Ports `LabelPlacer.assignFourSidesSideAndAlignment` at commit `62d5909`.
+///
+/// ELK reads the side of the leftmost port twice and never looks at the rightmost port: its
+/// `rightmostPortSide` is `slLoop.getLeftmostPort().getLPort().getSide()`. elkjs 0.9.3 does the
+/// same, so this does too.
 fn assign_four_sides_label_side_and_alignment(
     graph: &LGraph,
     node: usize,
     hyper_loop: &mut SelfHyperLoop,
 ) {
-    let (Some(leftmost_port), Some(rightmost_port)) =
-        (hyper_loop.leftmost_port, hyper_loop.rightmost_port)
-    else {
+    let Some(leftmost_port) = hyper_loop.leftmost_port else {
         return;
     };
     let leftmost_side = graph.layerless_nodes[node].ports[leftmost_port].side;
-    let rightmost_side = graph.layerless_nodes[node].ports[rightmost_port].side;
 
-    if leftmost_side == PortSide::North || rightmost_side == PortSide::North {
+    if leftmost_side == PortSide::North {
         assign_label_side_and_alignment_to_loop(
             hyper_loop,
             PortSide::South,
