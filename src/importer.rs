@@ -14,9 +14,9 @@ use crate::compound::{
     source_ported_cross_hierarchy_segments,
 };
 use crate::graph::{
-    CompoundEdgeSegment, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge, LGraph, LLabel,
-    LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, PortId, PortRef, PortSide, PortType,
-    apply_port_index_to_dummy, create_external_port_dummy, is_across_flow,
+    CompoundEdgeSegment, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge, HierarchyStep,
+    LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, PortId, PortRef, PortSide,
+    PortType, apply_port_index_to_dummy, create_external_port_dummy, is_across_flow,
     port_side_from_direction,
 };
 use crate::options::{
@@ -289,8 +289,6 @@ pub(crate) fn import_scope(
 ) -> ImportResult<GraphArena> {
     let mut index = InputIndex::new(input, scope.ports)?;
     validate_scoped_edge_segments(&index, segments)?;
-    let prepared_segments =
-        materialize_scoped_edge_segments(&index, segments, input.options.merge_edges);
     let mut root = LGraph::new(input.id.clone(), input.options.clone());
     root.options.direction = resolve_direction(root.options.direction, root.options.aspect_ratio);
     root.options.hierarchy_handling =
@@ -303,14 +301,25 @@ pub(crate) fn import_scope(
     index.scope_dummies = import_external_ports(&mut root, &scope, input.id.as_str());
     let mut port_index = ImportPortIndex::new();
 
-    let mut graphs = if root.options.hierarchy_handling == HierarchyHandling::IncludeChildren {
-        import_hierarchical_graph(&index, root, &mut port_index)?
-    } else {
-        import_flat_graph(input, &index, &mut root, None, &mut port_index)?;
-        GraphArena::new(root)
-    };
+    let (mut graphs, nested_graphs) =
+        if root.options.hierarchy_handling == HierarchyHandling::IncludeChildren {
+            import_hierarchical_graph(&index, root, &mut port_index)?
+        } else {
+            import_flat_graph(input, &index, &mut root, None, &mut port_index)?;
+            (GraphArena::new(root), vec![None; index.node_ids.len()])
+        };
 
     check_north_south_ports(&graphs)?;
+    // The graph inside a node. A node without one reads as the root, as `graph_slot_for_parent`
+    // does.
+    let graph_of = |node: &str| {
+        index
+            .node_index(node)
+            .and_then(|node| nested_graphs[node])
+            .unwrap_or(GraphId::ROOT)
+    };
+    let prepared_segments =
+        materialize_scoped_edge_segments(&index, segments, input.options.merge_edges, &graph_of);
     introduce_source_ported_scoped_edge_segments(
         &mut graphs,
         GraphId::ROOT,
@@ -460,7 +469,16 @@ fn materialize_scoped_edge_segments(
     index: &InputIndex<'_>,
     segments: &[ElkInputEdgeSegment],
     merge_edges: bool,
+    graph_of: &dyn Fn(&str) -> GraphId,
 ) -> PreparedScopedSegments {
+    let steps = |path: Vec<&str>| {
+        path.into_iter()
+            .map(|node| HierarchyStep {
+                node_id: node.to_string(),
+                graph: graph_of(node),
+            })
+            .collect::<Vec<_>>()
+    };
     let mut pending_segments = Vec::new();
 
     for scoped in segments {
@@ -482,15 +500,19 @@ fn materialize_scoped_edge_segments(
         let source_placeholder = scoped_segment_endpoint_id(&scoped.source);
         let target_placeholder = scoped_segment_endpoint_id(&scoped.target);
         let source_path = match &scoped.source {
-            ElkInputEdgeSegmentEndpoint::Node { id } => index
-                .materialized_graph_path(id)
-                .expect("scoped endpoint reachability was validated before materialization"),
+            ElkInputEdgeSegmentEndpoint::Node { id } => steps(
+                index
+                    .materialized_graph_path(id)
+                    .expect("scoped endpoint reachability was validated before materialization"),
+            ),
             ElkInputEdgeSegmentEndpoint::ParentBoundary { .. } => Vec::new(),
         };
         let target_path = match &scoped.target {
-            ElkInputEdgeSegmentEndpoint::Node { id } => index
-                .materialized_graph_path(id)
-                .expect("scoped endpoint reachability was validated before materialization"),
+            ElkInputEdgeSegmentEndpoint::Node { id } => steps(
+                index
+                    .materialized_graph_path(id)
+                    .expect("scoped endpoint reachability was validated before materialization"),
+            ),
             ElkInputEdgeSegmentEndpoint::ParentBoundary { .. } => Vec::new(),
         };
         let mut local = source_ported_cross_hierarchy_segments(
@@ -878,8 +900,9 @@ impl HierarchicalImportArena {
         slot
     }
 
-    fn into_graphs(self) -> GraphArena {
-        self.graphs
+    /// The graphs, and the graph inside each input node by the node's position in the input.
+    fn into_graphs(self) -> (GraphArena, Vec<Option<GraphId>>) {
+        (self.graphs, self.nested_graph_slots)
     }
 }
 
@@ -887,7 +910,7 @@ fn import_hierarchical_graph(
     index: &InputIndex<'_>,
     root: LGraph,
     port_index: &mut ImportPortIndex,
-) -> ImportResult<GraphArena> {
+) -> ImportResult<(GraphArena, Vec<Option<GraphId>>)> {
     let mut arena = HierarchicalImportArena::new(root, index.node_ids.len());
     let mut queue = VecDeque::new();
     queue.extend(
@@ -1732,12 +1755,24 @@ fn transform_cross_hierarchy_edge(
 
     // The owned paths are part of ELK's compound-edge input, not graph locators. Build each once
     // and move it into the retained hierarchy edge so deep-chain cost tracks emitted path data.
-    let source_path = index
-        .hierarchy_edge_output_path(edge.source.as_str())
-        .unwrap_or_default();
-    let target_path = index
-        .hierarchy_edge_output_path(edge.target.as_str())
-        .unwrap_or_default();
+    let steps = |path: Vec<String>| {
+        path.into_iter()
+            .map(|node| HierarchyStep {
+                graph: arena.graph_slot_for_parent(index, Some(node.as_str())),
+                node_id: node,
+            })
+            .collect::<Vec<_>>()
+    };
+    let source_path = steps(
+        index
+            .hierarchy_edge_output_path(edge.source.as_str())
+            .unwrap_or_default(),
+    );
+    let target_path = steps(
+        index
+            .hierarchy_edge_output_path(edge.target.as_str())
+            .unwrap_or_default(),
+    );
     arena.root_mut().hierarchy_edges.push(HierarchyEdge {
         id: edge.id.clone(),
         source_node_id: source.node_id,
@@ -3124,8 +3159,14 @@ mod tests {
         assert_eq!(lgraph.hierarchy_edges[0].id, "cluster-A");
         assert_eq!(lgraph.hierarchy_edges[0].source_node_id, "cluster");
         assert_eq!(lgraph.hierarchy_edges[0].target_node_id, "A");
-        assert_eq!(lgraph.hierarchy_edges[0].source_path, Vec::<String>::new());
-        assert_eq!(lgraph.hierarchy_edges[0].target_path, vec!["cluster"]);
+        assert_eq!(lgraph.hierarchy_edges[0].source_path, Vec::new());
+        assert_eq!(
+            lgraph.hierarchy_edges[0].target_path,
+            vec![HierarchyStep {
+                node_id: "cluster".to_string(),
+                graph: nested.id,
+            }]
+        );
     }
 
     #[test]

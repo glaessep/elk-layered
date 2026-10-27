@@ -8,15 +8,16 @@ use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphArena, GraphId, GraphNodeRef,
-    GraphPortRef, HierarchyEdge, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize, LayeredEdge,
-    PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
-    port_side_from_direction,
+    GraphPortRef, HierarchyEdge, HierarchyStep, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize,
+    LayeredEdge, PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy,
+    create_external_port_dummy, port_side_from_direction,
 };
 use crate::options::{ElkDirection, PortConstraints};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingCompoundSegment {
-    pub(crate) graph_parent: Option<String>,
+    /// The graph the segment lands in, or `None` for the graph of the scope being introduced.
+    pub(crate) graph_parent: Option<GraphId>,
     pub(crate) source: PendingSegmentEndpoint,
     pub(crate) target: PendingSegmentEndpoint,
     pub(crate) segment: CompoundEdgeSegment,
@@ -50,18 +51,14 @@ pub(crate) struct ScopedHierarchySegment {
 /// full ELK algorithm introduces segments through `ExternalPort` records while walking the graph
 /// recursively; this helper keeps segment ordering and label-placement semantics in the compound
 /// boundary while that recursive port is filled in.
-pub(crate) fn source_ported_cross_hierarchy_segments<SourcePath, TargetPath>(
+pub(crate) fn source_ported_cross_hierarchy_segments(
     source: &str,
     target: &str,
     source_port_key: &str,
     target_port_key: &str,
-    source_path: &[SourcePath],
-    target_path: &[TargetPath],
-) -> Vec<PendingCompoundSegment>
-where
-    SourcePath: AsRef<str>,
-    TargetPath: AsRef<str>,
-{
+    source_path: &[HierarchyStep],
+    target_path: &[HierarchyStep],
+) -> Vec<PendingCompoundSegment> {
     let shape = cross_hierarchy_shape(source, target, source_path, target_path);
     let common_depth = shape.common_depth;
 
@@ -75,17 +72,17 @@ where
         let segment_source = if depth == source_path.len() {
             source.to_string()
         } else {
-            source_path[depth].as_ref().to_string()
+            source_path[depth].node_id.to_string()
         };
-        let connects_parent_node = target == source_path[depth - 1].as_ref();
+        let connects_parent_node = target == source_path[depth - 1].node_id;
         segments.push(PendingCompoundSegment {
-            graph_parent: Some(source_path[depth - 1].as_ref().to_string()),
+            graph_parent: Some(source_path[depth - 1].graph),
             source: PendingSegmentEndpoint::LocalNode {
                 node_id: segment_source,
                 port_key: source_port_key.to_string(),
             },
             target: PendingSegmentEndpoint::ParentBoundary {
-                node_id: source_path[depth - 1].as_ref().to_string(),
+                node_id: source_path[depth - 1].node_id.to_string(),
                 port_key: if connects_parent_node {
                     target_port_key.to_string()
                 } else {
@@ -105,12 +102,12 @@ where
 
     if !shape.source_is_target_ancestor && !shape.target_is_source_ancestor {
         let segment_source = if source_path.len() > common_depth {
-            source_path[common_depth].as_ref().to_string()
+            source_path[common_depth].node_id.to_string()
         } else {
             source.to_string()
         };
         let segment_target = if target_path.len() > common_depth {
-            target_path[common_depth].as_ref().to_string()
+            target_path[common_depth].node_id.to_string()
         } else {
             target.to_string()
         };
@@ -126,7 +123,7 @@ where
         segments.push(PendingCompoundSegment {
             graph_parent: common_depth
                 .checked_sub(1)
-                .map(|parent_depth| source_path[parent_depth].as_ref().to_string()),
+                .map(|parent_depth| source_path[parent_depth].graph),
             source: PendingSegmentEndpoint::LocalNode {
                 node_id: segment_source,
                 port_key: source_port_key.to_string(),
@@ -143,13 +140,13 @@ where
         let segment_target = if depth == target_path.len() {
             target.to_string()
         } else {
-            target_path[depth].as_ref().to_string()
+            target_path[depth].node_id.to_string()
         };
-        let connects_parent_node = source == target_path[depth - 1].as_ref();
+        let connects_parent_node = source == target_path[depth - 1].node_id;
         segments.push(PendingCompoundSegment {
-            graph_parent: Some(target_path[depth - 1].as_ref().to_string()),
+            graph_parent: Some(target_path[depth - 1].graph),
             source: PendingSegmentEndpoint::ParentBoundary {
-                node_id: target_path[depth - 1].as_ref().to_string(),
+                node_id: target_path[depth - 1].node_id.to_string(),
                 port_key: if connects_parent_node {
                     source_port_key.to_string()
                 } else {
@@ -181,23 +178,19 @@ struct CrossHierarchyShape {
     target_is_source_ancestor: bool,
 }
 
-fn cross_hierarchy_shape<SourcePath, TargetPath>(
+fn cross_hierarchy_shape(
     source: &str,
     target: &str,
-    source_path: &[SourcePath],
-    target_path: &[TargetPath],
-) -> CrossHierarchyShape
-where
-    SourcePath: AsRef<str>,
-    TargetPath: AsRef<str>,
-{
+    source_path: &[HierarchyStep],
+    target_path: &[HierarchyStep],
+) -> CrossHierarchyShape {
     let common_depth = common_graph_depth(source_path, target_path);
     CrossHierarchyShape {
         common_depth,
         source_is_target_ancestor: target_path.len() > common_depth
-            && source == target_path[common_depth].as_ref(),
+            && source == target_path[common_depth].node_id,
         target_is_source_ancestor: source_path.len() > common_depth
-            && target == source_path[common_depth].as_ref(),
+            && target == source_path[common_depth].node_id,
     }
 }
 
@@ -581,7 +574,7 @@ struct LocalPortPublication {
 
 struct HierarchyPublications {
     segments: Vec<ScopedHierarchySegment>,
-    local_ports: HashMap<Option<String>, Vec<LocalPortPublication>>,
+    local_ports: HashMap<Option<GraphId>, Vec<LocalPortPublication>>,
 }
 
 /// Walks `scope` and the graphs below it, children before the graph they lie in.
@@ -657,7 +650,7 @@ fn order_segments_by_publication(
                 && !port_order.contains_key(&(node_id.as_str(), port_type, port_key.as_str()))
             {
                 port_buckets[order].push((
-                    scoped.pending.graph_parent.clone(),
+                    scoped.pending.graph_parent,
                     LocalPortPublication {
                         node_id: node_id.clone(),
                         port_key: port_key.clone(),
@@ -767,7 +760,7 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
     let publications = order_segments_by_publication(graphs, scope, segments);
     let parent_port_flows = parent_port_net_flows(&publications.segments);
     let mut local_port_publications = publications.local_ports;
-    let mut segments_by_parent: HashMap<Option<String>, Vec<ScopedHierarchySegment>> =
+    let mut segments_by_parent: HashMap<Option<GraphId>, Vec<ScopedHierarchySegment>> =
         HashMap::new();
     let mut original_parent_offsets: HashMap<String, ParentNodeInfo> = HashMap::new();
     for scoped in publications.segments {
@@ -777,7 +770,7 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
             }
         }
         segments_by_parent
-            .entry(scoped.pending.graph_parent.clone())
+            .entry(scoped.pending.graph_parent)
             .or_default()
             .push(scoped);
     }
@@ -819,7 +812,7 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
             first_graph = false;
             None
         } else {
-            graph.parent_node_id.clone()
+            Some(graph.id)
         };
         if let Some(segments) = segments_by_parent.remove(&parent) {
             let mut state = SegmentState::default();
@@ -1976,14 +1969,10 @@ pub fn compare_compound_segments(
     }
 }
 
-fn common_graph_depth<Left, Right>(left: &[Left], right: &[Right]) -> usize
-where
-    Left: AsRef<str>,
-    Right: AsRef<str>,
-{
+fn common_graph_depth(left: &[HierarchyStep], right: &[HierarchyStep]) -> usize {
     left.iter()
         .zip(right.iter())
-        .take_while(|(left, right)| left.as_ref() == right.as_ref())
+        .take_while(|(left, right)| left.graph == right.graph)
         .count()
 }
 
@@ -1993,6 +1982,36 @@ mod tests {
     use crate::graph::LPoint;
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::options::{HierarchyHandling, LayeredOptions, NodeLabelPlacement};
+
+    /// Steps of made-up graphs, one for each name, for tests that only look at the shape of the
+    /// segments. Two paths that share a name share the graph.
+    fn steps(names: &[&str]) -> Vec<HierarchyStep> {
+        names
+            .iter()
+            .map(|name| HierarchyStep {
+                node_id: name.to_string(),
+                graph: GraphId::new(
+                    1 + name.bytes().fold(7usize, |hash, byte| {
+                        (hash * 131 + usize::from(byte)) % 1_000_003
+                    }),
+                ),
+            })
+            .collect()
+    }
+
+    /// Steps of the node called `name` in `graphs`, with the graph inside it.
+    fn real_step(graphs: &GraphArena, name: &str) -> HierarchyStep {
+        let graph = graphs
+            .iter()
+            .flat_map(|graph| &graph.layerless_nodes)
+            .find(|node| node.id == name)
+            .and_then(|node| node.nested_graph)
+            .expect("the node has a graph inside");
+        HierarchyStep {
+            node_id: name.to_string(),
+            graph,
+        }
+    }
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
@@ -2096,8 +2115,8 @@ mod tests {
             "B",
             "A:source",
             "B:target",
-            &["outer", "inner"],
-            &["sibling"],
+            &steps(&["outer", "inner"]),
+            &steps(&["sibling"]),
         );
 
         let mut sorted = segments
@@ -2124,8 +2143,8 @@ mod tests {
             "B",
             "A:source",
             "B:target",
-            &["outer", "inner"],
-            &["sibling"],
+            &steps(&["outer", "inner"]),
+            &steps(&["sibling"]),
         );
 
         assert!(matches!(
@@ -2171,8 +2190,8 @@ mod tests {
             target_port_key: target_key.into(),
             source_port_named: false,
             target_port_named: false,
-            source_path: source_path.iter().map(|id| id.to_string()).collect(),
-            target_path: target_path.iter().map(|id| id.to_string()).collect(),
+            source_path: steps(source_path),
+            target_path: steps(target_path),
             labels: Vec::new(),
             minlen: 1,
             model_order: None,
@@ -2253,8 +2272,13 @@ mod tests {
                 target_port_key: "B:target".into(),
                 source_port_named: false,
                 target_port_named: false,
-                source_path: (0..depth).map(|index| format!("group-{index}")).collect(),
-                target_path: vec!["other".into()],
+                source_path: (0..depth)
+                    .map(|index| HierarchyStep {
+                        node_id: format!("group-{index}"),
+                        graph: GraphId::new(index + 1),
+                    })
+                    .collect(),
+                target_path: steps(&["other"]),
                 labels: (0..4096)
                     .map(|index| {
                         let mut label = LLabel::new(index.to_string(), 12.0, 10.0);
@@ -2300,8 +2324,8 @@ mod tests {
             "B",
             "A:source",
             "B:target",
-            &["outer", "inner"],
-            &["sibling"],
+            &steps(&["outer", "inner"]),
+            &steps(&["sibling"]),
         );
 
         let label_index = compound_label_segment_index(&segments, EdgeLabelPlacement::Center);
@@ -2319,8 +2343,8 @@ mod tests {
             "B",
             "A:source",
             "B:target",
-            &["outer", "inner"],
-            &["sibling"],
+            &steps(&["outer", "inner"]),
+            &steps(&["sibling"]),
         );
         let reference = |placement| {
             let mut sorted = segments
@@ -2663,7 +2687,7 @@ mod tests {
                     source_port_named: false,
                     target_port_named: false,
                     source_path: Vec::new(),
-                    target_path: vec!["Inner".to_string()],
+                    target_path: vec![real_step(&graph, "Inner")],
                     labels: Vec::new(),
                     minlen: 1,
                     model_order: None,
@@ -3031,6 +3055,7 @@ mod tests {
         let group_graph = lgraph.layerless_nodes[0]
             .nested_graph
             .expect("group graph is materialized");
+        let inner_step = real_step(&lgraph, "inner");
         lgraph[group_graph].hierarchy_edges.push(HierarchyEdge {
             id: "leaf-sibling".to_string(),
             source_node_id: "leaf".to_string(),
@@ -3039,7 +3064,7 @@ mod tests {
             target_port_key: "sibling:target".to_string(),
             source_port_named: false,
             target_port_named: false,
-            source_path: vec!["inner".to_string()],
+            source_path: vec![inner_step],
             target_path: Vec::new(),
             labels: Vec::new(),
             minlen: 1,
@@ -3137,5 +3162,67 @@ mod tests {
             .expect("small-stack worker should start")
             .join()
             .expect("compound preprocessing must not overflow the worker stack");
+    }
+
+    // Mutation: pick the graph of a segment by the id of its parent node, as the segment used to
+    // name it, and take the first graph with that name.
+    #[test]
+    fn a_segment_lands_in_the_graph_its_id_names_even_when_two_graphs_share_a_parent_name() {
+        let options = LayeredOptions::default();
+        let mut graphs = GraphArena::new(crate::graph::LGraph::new("root", options.clone()));
+        let mut lands = Vec::new();
+        for (position, holder) in ["p0", "p1"].into_iter().enumerate() {
+            graphs
+                .root_mut()
+                .layerless_nodes
+                .push(crate::graph::LNode::new(holder, 10.0, 10.0, None));
+            let mut nested = crate::graph::LGraph::new("dup", options.clone());
+            nested.parent_node_id = Some("dup".to_string());
+            for child in ["a", "b"] {
+                nested
+                    .layerless_nodes
+                    .push(crate::graph::LNode::new(child, 1.0, 1.0, None));
+            }
+            lands.push(graphs.nest(GraphId::ROOT, position, nested));
+        }
+        let edge = HierarchyEdge {
+            id: "e".to_string(),
+            source_node_id: "a".to_string(),
+            target_node_id: "b".to_string(),
+            source_port_key: "a:out".to_string(),
+            target_port_key: "b:in".to_string(),
+            source_port_named: false,
+            target_port_named: false,
+            source_path: Vec::new(),
+            target_path: Vec::new(),
+            labels: Vec::new(),
+            minlen: 1,
+            model_order: None,
+            priority_direction: 0,
+            priority_shortness: 0,
+            priority_straightness: 0,
+        };
+        let segment = ScopedHierarchySegment {
+            edge,
+            pending: PendingCompoundSegment {
+                graph_parent: Some(lands[1]),
+                source: PendingSegmentEndpoint::LocalNode {
+                    node_id: "a".to_string(),
+                    port_key: "a:out".to_string(),
+                },
+                target: PendingSegmentEndpoint::LocalNode {
+                    node_id: "b".to_string(),
+                    port_key: "b:in".to_string(),
+                },
+                segment: CompoundEdgeSegment::Output { depth: 1 },
+            },
+            labels: Vec::new(),
+        };
+
+        introduce_source_ported_scoped_edge_segments(&mut graphs, GraphId::ROOT, vec![segment]);
+
+        assert_eq!(graphs[lands[0]].edges.len(), 0);
+        assert_eq!(graphs[lands[1]].edges.len(), 1);
+        assert_eq!(graphs[lands[1]].cross_hierarchy_edges[0].graph_id, lands[1]);
     }
 }

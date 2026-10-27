@@ -391,14 +391,24 @@ pub struct HierarchyEdge {
     pub source_port_named: bool,
     /// The same for the target port.
     pub target_port_named: bool,
-    pub source_path: Vec<String>,
-    pub target_path: Vec<String>,
+    /// The nodes above the source, from the hierarchy edge's own graph down.
+    pub source_path: Vec<HierarchyStep>,
+    /// The nodes above the target, from the hierarchy edge's own graph down.
+    pub target_path: Vec<HierarchyStep>,
     pub labels: Vec<LLabel>,
     pub minlen: usize,
     pub model_order: Option<usize>,
     pub priority_direction: i32,
     pub priority_shortness: i32,
     pub priority_straightness: i32,
+}
+
+/// One node above the end of a hierarchy edge, and the graph inside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HierarchyStep {
+    /// The caller's id of the node.
+    pub node_id: String,
+    pub graph: GraphId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
