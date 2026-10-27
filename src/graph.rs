@@ -1156,17 +1156,14 @@ impl LGraph {
 
         // The ports of north and south port dummies point at the ports that were reordered. A
         // port with such a dummy names it in `port_dummy`, so only those dummies are visited.
-        // A dummy made for an input and an output port is named once, so it is remapped once.
         let graph_id = self.id.clone();
-        let mut dummies = self.layerless_nodes[node_index]
+        let dummies = self.layerless_nodes[node_index]
             .ports
             .iter()
             .filter_map(|port| port.port_dummy.as_ref())
             .filter(|dummy| dummy.graph_id == graph_id)
             .map(|dummy| dummy.node)
             .collect::<Vec<_>>();
-        dummies.sort_unstable();
-        dummies.dedup();
         for dummy in dummies {
             let Some(dummy) = self.layerless_nodes.get_mut(dummy) else {
                 continue;
@@ -1706,5 +1703,64 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["p2", "p0", "p1"]
         );
+    }
+
+    // Mutation: leave the `origin_port` remap out of `reorder_node_ports_with_map`. The dummies
+    // of the node then point at the places its ports had before.
+    #[test]
+    fn reordering_ports_moves_the_origin_of_the_dummies_that_name_them() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        let mut node = LNode::new("A", 10.0, 10.0, Some(0));
+        for id in ["p0", "p1", "p2"] {
+            node.ports.push(LPort::new(id, 0, PortType::Output));
+        }
+        let mut other = LNode::new("B", 10.0, 10.0, Some(1));
+        for id in ["q0", "q1"] {
+            other.ports.push(LPort::new(id, 3, PortType::Output));
+        }
+        // Nodes 1 and 2 are the dummies of A's ports 0 and 1. Node 1 has a port for edges in and
+        // one for edges out, both made for port 0. Node 4 is the dummy of B's port 1.
+        let dummy = |id: &str, origins: &[PortRef]| {
+            let mut dummy = LNode::new(id, 0.0, 0.0, None);
+            dummy.kind = LNodeKind::NorthSouthPort;
+            for origin in origins {
+                let mut port = LPort::new("d", 0, PortType::Input);
+                port.origin_port = Some(*origin);
+                dummy.ports.push(port);
+            }
+            dummy
+        };
+        let a = |port: usize| PortRef { node: 0, port };
+        graph.layerless_nodes.push(node);
+        graph.layerless_nodes.push(dummy("n0", &[a(0), a(0)]));
+        graph.layerless_nodes.push(dummy("n1", &[a(1)]));
+        graph.layerless_nodes.push(other);
+        graph
+            .layerless_nodes
+            .push(dummy("m1", &[PortRef { node: 3, port: 1 }]));
+        for (port, dummy) in [(0, 1), (1, 2)] {
+            graph.layerless_nodes[0].ports[port].port_dummy = Some(GraphNodeRef {
+                graph_id: "root".to_string(),
+                node: dummy,
+            });
+        }
+        graph.layerless_nodes[3].ports[1].port_dummy = Some(GraphNodeRef {
+            graph_id: "root".to_string(),
+            node: 4,
+        });
+
+        // Port 0 goes to place 1, port 1 to place 2, and port 2 to place 0.
+        assert!(graph.reorder_node_ports(0, [2, 0, 1]));
+
+        let origins = |node: usize| {
+            graph.layerless_nodes[node]
+                .ports
+                .iter()
+                .map(|port| port.origin_port.unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(origins(1), vec![a(1), a(1)]);
+        assert_eq!(origins(2), vec![a(2)]);
+        assert_eq!(origins(4), vec![PortRef { node: 3, port: 1 }]);
     }
 }
