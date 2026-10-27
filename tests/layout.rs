@@ -1207,14 +1207,16 @@ fn a_fixed_ratio_port_of_a_group_is_unsupported_only_without_a_size() {
 }
 
 // Mutation: drop `check_external_port_sides` in src/pipeline.rs. The group would get a layout
-// that is not elkjs's.
+// that is not elkjs's. Or cut "(issue #5)" from its reason: the text must say what the refusal
+// waits for.
 #[test]
 fn a_dummy_for_a_group_port_on_a_side_across_the_flow_is_unsupported() {
     let across = |graph: &ElkNode| {
         matches!(
             error_of(graph),
             Error::Unsupported { feature, .. }
-                if feature == "ports of a node with children on a side across the layout direction"
+                if feature == "ports of a node with children on a side across the layout direction, \
+                    which wait for north and south ports (issue #5)"
         )
     };
     // The group lays out its own children, and a port of it becomes an external port of that

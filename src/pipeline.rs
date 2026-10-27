@@ -951,10 +951,10 @@ fn execute_hierarchy_aware_processor(
 /// cannot place yet.
 ///
 /// A dummy on a north or south side of a horizontal layout, or on an east or west side of a
-/// vertical one, needs the steps for ports across the flow. The routing of the edges at such a
-/// dummy does not match elkjs yet. A dummy without a side comes from a port without one on a node
-/// whose port sides are fixed, and a node of size zero has nothing to take the side from: ELK
-/// fails on it.
+/// vertical one, needs the steps for ports across the flow. Issue #5 adds them. Without them the
+/// routing of the edges at such a dummy does not match elkjs. A dummy without a side comes from a
+/// port without one on a node whose port sides are fixed, and a node of size zero has nothing to
+/// take the side from: ELK fails on it.
 fn check_external_port_sides(root: &LGraph) -> PipelineResult<()> {
     let mut pending = vec![root];
     while let Some(graph) = pending.pop() {
@@ -975,7 +975,7 @@ fn check_external_port_sides(root: &LGraph) -> PipelineResult<()> {
             }
             if across_flow(node.external_port_side) {
                 return Err(PipelineError::UnsupportedCompoundGraph {
-                    reason: "ports of a node with children on a side across the layout direction",
+                    reason: "ports of a node with children on a side across the layout direction, which wait for north and south ports (issue #5)",
                 });
             }
         }
