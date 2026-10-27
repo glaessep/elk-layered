@@ -15,6 +15,12 @@
 // layout flow: west or east for the directions none, RIGHT and LEFT, north or south for DOWN and
 // UP. An edge may start or end at a port.
 //
+//   node random.mjs ../tests/elkjs/random-group-ports --group-ports && node record.mjs ../tests/elkjs/random-group-ports --drop-crashes
+//
+// With `--group-ports`, groups have ports too, under SEPARATE_CHILDREN and INCLUDE_CHILDREN. The
+// side of a port follows the direction of the run that lays its node out. A group under
+// SEPARATE_CHILDREN sets no direction, so its children and its nested run use RIGHT.
+//
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
 // a feature, and then write and record the whole corpus again.
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -141,10 +147,17 @@ function graph() {
   const ends = leaves.map((n) => n.id);
   if (groupEnds) ends.push(...groups.map((g) => g.id));
   if (withPorts) {
-    // Along the flow, so that no port needs the north and south port steps of layered.
-    const flowSides = direction === "DOWN" || direction === "UP" ? ["NORTH", "SOUTH"] : ["WEST", "EAST"];
+    // Along the flow, so that no port needs the north and south port steps of layered. The flow
+    // is the direction of the run that lays the node out. That is the root's direction for the
+    // root's children and for everything under INCLUDE_CHILDREN. A group under
+    // SEPARATE_CHILDREN sets no direction, so the run of its children uses the default, RIGHT.
+    const sidesOf = (node) => {
+      const own = parent.get(node.id) === root || hierarchy === "include" ? direction : null;
+      return own === "DOWN" || own === "UP" ? ["NORTH", "SOUTH"] : ["WEST", "EAST"];
+    };
     let p = 0;
     for (const node of groupPorts ? [...leaves, ...groups] : leaves) {
+      const flowSides = sidesOf(node);
       if (!rand.chance(0.6)) continue;
       const constraint = rand.pick([null, "FIXED_SIDE", "FIXED_SIDE", "FIXED_ORDER"]);
       if (constraint) (node.layoutOptions ??= {})["elk.portConstraints"] = constraint;
