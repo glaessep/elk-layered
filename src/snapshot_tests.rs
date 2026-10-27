@@ -24,6 +24,7 @@ use crate::pipeline::{execute_ported_compound_processors, execute_ported_process
 
 fn node(id: &str, width: f64, height: f64, parent: Option<&str>) -> ElkInputNode {
     ElkInputNode {
+        ports: Vec::new(),
         parent_settings: Default::default(),
         id: id.into(),
         width,
@@ -47,6 +48,8 @@ fn node(id: &str, width: f64, height: f64, parent: Option<&str>) -> ElkInputNode
 
 fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
     ElkInputEdge {
+        source_port: None,
+        target_port: None,
         id: id.into(),
         source: source.into(),
         target: target.into(),

@@ -172,20 +172,31 @@ fn an_edge_end_is_a_string_or_a_list_of_strings() {
     assert!(serde_json::from_value::<ElkNode>(both).is_err());
 }
 
-// Mutation: make `layout` skip the ports check, so the port key's node lays out port-free.
+// Mutation: drop the `source_port` and `target_port` fields of `EdgeWire`, so the old port keys
+// read as nothing and the edge is laid out at the node.
 #[test]
-fn a_port_in_the_old_edge_form_is_refused() {
+fn a_port_in_the_old_edge_form_is_an_error() {
+    for key in ["sourcePort", "targetPort"] {
+        let result = serde_json::from_value::<ElkNode>(json!({
+            "id": "root",
+            "children": [
+                {"id": "a", "width": 60, "height": 30, "ports": [{"id": "p"}]},
+                {"id": "b", "width": 60, "height": 30, "ports": [{"id": "q"}]}
+            ],
+            "edges": [{"id": "e", "source": "a", "target": "b", key: "p"}]
+        }));
+        let error = result.expect_err("the old port key is refused").to_string();
+        assert!(error.contains(key) && error.contains("\"e\""), "{error}");
+    }
+}
+
+// Mutation: refuse a `null` old port key too. elkjs reads a missing key and a null alike.
+#[test]
+fn a_null_old_port_key_is_no_port() {
     let graph: ElkNode = serde_json::from_value(json!({
         "id": "root",
-        "children": [
-            {"id": "a", "width": 60, "height": 30, "ports": [{"id": "p"}]},
-            {"id": "b", "width": 60, "height": 30}
-        ],
-        "edges": [{"id": "e", "source": "a", "sourcePort": "p", "target": "b"}]
+        "edges": [{"id": "e", "source": "a", "target": "b", "sourcePort": null}]
     }))
     .unwrap();
-    assert!(matches!(
-        layout(&graph),
-        Err(elk_layered::Error::Unsupported { .. })
-    ));
+    assert_eq!(graph.edges[0].sources, ["a"]);
 }

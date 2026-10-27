@@ -1714,6 +1714,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            ports: Vec::new(),
             parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
@@ -1737,6 +1738,8 @@ mod tests {
 
     fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
         ElkInputEdge {
+            source_port: None,
+            target_port: None,
             id: id.to_string(),
             source: source.to_string(),
             target: target.to_string(),
@@ -2383,6 +2386,8 @@ mod tests {
             nodes: vec![node("A"), node("B")],
             edges: vec![
                 ElkInputEdge {
+                    source_port: None,
+                    target_port: None,
                     labels: vec![ElkInputLabel::center("center", 28.0, 12.0)],
                     ..edge("A-A", "A", "A")
                 },
@@ -2495,6 +2500,7 @@ mod tests {
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![
                 ElkInputNode {
+                    ports: Vec::new(),
                     parent_settings: Default::default(),
                     id: "cluster".to_string(),
                     width: 0.0,
@@ -2515,6 +2521,7 @@ mod tests {
                     self_loop_ordering: Default::default(),
                 },
                 ElkInputNode {
+                    ports: Vec::new(),
                     parent_settings: Default::default(),
                     id: "A".to_string(),
                     width: 80.0,
@@ -2537,6 +2544,8 @@ mod tests {
             ],
             edges: vec![
                 ElkInputEdge {
+                    source_port: None,
+                    target_port: None,
                     id: "cluster-A".to_string(),
                     source: "cluster".to_string(),
                     target: "A".to_string(),
@@ -2550,6 +2559,8 @@ mod tests {
                     container: None,
                 },
                 ElkInputEdge {
+                    source_port: None,
+                    target_port: None,
                     id: "A-A".to_string(),
                     source: "A".to_string(),
                     target: "A".to_string(),
@@ -2587,6 +2598,7 @@ mod tests {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![ElkInputNode {
+                ports: Vec::new(),
                 parent_settings: Default::default(),
                 id: "A".to_string(),
                 width: 80.0,
@@ -2607,6 +2619,8 @@ mod tests {
                 self_loop_ordering: Default::default(),
             }],
             edges: vec![ElkInputEdge {
+                source_port: None,
+                target_port: None,
                 id: "A-A".to_string(),
                 source: "A".to_string(),
                 target: "A".to_string(),

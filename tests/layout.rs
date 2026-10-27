@@ -487,23 +487,441 @@ fn an_edge_with_a_section_keeps_its_id() {
     assert!(e.junction_points.is_empty());
 }
 
+// --- Ports on nodes without children. ---
+
+fn port(id: &str, width: f64, height: f64, side: &str) -> ElkPort {
+    let mut port = ElkPort {
+        id: id.into(),
+        width,
+        height,
+        ..Default::default()
+    };
+    if !side.is_empty() {
+        port.layout_options
+            .insert("elk.port.side".into(), side.into());
+    }
+    port
+}
+
+fn with_ports(mut node: ElkNode, constraints: &str, ports: Vec<ElkPort>) -> ElkNode {
+    if !constraints.is_empty() {
+        node.layout_options
+            .insert("elk.portConstraints".into(), constraints.into());
+    }
+    node.ports = ports;
+    node
+}
+
+fn port_at(graph: &ElkNode, node: &str, port: &str) -> (f64, f64) {
+    let port = find(graph, node)
+        .ports
+        .iter()
+        .find(|candidate| candidate.id == port)
+        .unwrap_or_else(|| panic!("no port {port}"));
+    (port.x, port.y)
+}
+
+// Mutation: drop the port writes in `write_result`. Every port then stays at the given (0, 0).
+#[test]
+fn ports_come_back_with_their_positions_relative_to_their_node() {
+    // elkjs 0.9.3 returns these numbers. `p2` is given below `p`, and FIXED_ORDER sorts by it.
+    let mut p = port("p", 6.0, 4.0, "EAST");
+    p.y = 30.0;
+    let mut p2 = port("p2", 6.0, 4.0, "EAST");
+    p2.y = 5.0;
+    let graph = root(
+        vec![
+            with_ports(
+                node("a", 40.0, 50.0),
+                "FIXED_ORDER",
+                vec![p, p2, port("p3", 6.0, 4.0, "WEST")],
+            ),
+            with_ports(
+                node("b", 40.0, 30.0),
+                "FIXED_ORDER",
+                vec![port("q", 6.0, 4.0, "WEST"), port("q2", 6.0, 4.0, "WEST")],
+            ),
+        ],
+        vec![
+            edge("e", "p", "q"),
+            edge("e2", "p2", "q2"),
+            edge("e3", "b", "p3"),
+        ],
+    );
+    let laid = layout(&graph).unwrap();
+    assert_eq!(at(&laid, "a"), (28.0, 12.0));
+    assert_eq!(port_at(&laid, "a", "p"), (40.0, 32.0));
+    assert_eq!(port_at(&laid, "a", "p2"), (40.0, 14.0));
+    assert_eq!(port_at(&laid, "a", "p3"), (-6.0, 23.0));
+    assert_eq!(at(&laid, "b"), (100.0, 18.666_666_666_666_664));
+    assert_eq!(port_at(&laid, "b", "q"), (-6.0, 18.666_666_666_666_668));
+    assert_eq!(port_at(&laid, "b", "q2"), (-6.0, 7.333_333_333_333_334));
+    // The edge starts at the anchor of `p2`, the east side of its box, and ends at `q2`.
+    let e2 = route(find_edge(&laid, "e2"));
+    assert_eq!((e2[0], e2[e2.len() - 1]), ((74.0, 28.0), (94.0, 28.0)));
+    // Sizes stay as given.
+    assert_eq!(size(&laid, "a"), (40.0, 50.0));
+    assert_eq!(laid.children[0].ports[0].width, 6.0);
+}
+
+// Mutation: read the border offset of a port only when the node is not fixed.
+#[test]
+fn a_border_offset_moves_a_port_off_the_border() {
+    let mut p = port("p", 6.0, 4.0, "EAST");
+    p.x = 40.0;
+    p.y = 5.0;
+    p.layout_options
+        .insert("elk.port.borderOffset".into(), "-3".into());
+    let mut p3 = port("p3", 6.0, 4.0, "WEST");
+    p3.layout_options
+        .insert("elk.port.borderOffset".into(), "2".into());
+    let graph = root(
+        vec![
+            with_ports(node("a", 40.0, 30.0), "FIXED_SIDE", vec![p, p3]),
+            with_ports(
+                node("b", 40.0, 30.0),
+                "FIXED_SIDE",
+                vec![port("q", 6.0, 4.0, "WEST")],
+            ),
+        ],
+        vec![edge("e", "p", "q"), edge("e3", "b", "p3")],
+    );
+    let laid = layout(&graph).unwrap();
+    assert_eq!(at(&laid, "a"), (96.0, 12.0));
+    assert_eq!(port_at(&laid, "a", "p"), (37.0, 13.0));
+    assert_eq!(port_at(&laid, "a", "p3"), (-8.0, 13.0));
+}
+
+// Mutation: ignore the position of a port that has no side, so it gets the default side.
+#[test]
+fn a_fixed_side_port_without_a_side_takes_it_from_where_it_sits() {
+    let at_xy = |id: &str, x: f64, y: f64| {
+        let mut p = port(id, 6.0, 4.0, "");
+        p.x = x;
+        p.y = y;
+        p
+    };
+    let graph = root(
+        vec![
+            with_ports(
+                node("a", 40.0, 50.0),
+                "FIXED_SIDE",
+                vec![at_xy("p", 40.0, 10.0), at_xy("p2", -6.0, 35.0)],
+            ),
+            with_ports(
+                node("b", 40.0, 30.0),
+                "FIXED_SIDE",
+                vec![at_xy("q", -6.0, 5.0)],
+            ),
+        ],
+        vec![edge("e", "p", "q"), edge("e2", "b", "p2")],
+    );
+    let laid = layout(&graph).unwrap();
+    assert_eq!(at(&laid, "a"), (94.0, 12.0));
+    assert_eq!(port_at(&laid, "a", "p"), (40.0, 23.0));
+    assert_eq!(port_at(&laid, "a", "p2"), (-6.0, 23.0));
+    assert_eq!(at(&laid, "b"), (28.0, 22.0));
+}
+
+// Mutation: refuse a port across the flow in a graph whose ports are free.
+#[test]
+fn a_port_on_a_north_side_is_laid_out_while_the_ports_are_free() {
+    let graph = root(
+        vec![
+            with_ports(
+                node("a", 40.0, 30.0),
+                "",
+                vec![port("p", 6.0, 4.0, "NORTH"), port("p2", 6.0, 4.0, "SOUTH")],
+            ),
+            with_ports(node("b", 40.0, 30.0), "", vec![port("q", 6.0, 4.0, "WEST")]),
+        ],
+        vec![edge("e", "p", "q"), edge("e2", "b", "p2")],
+    );
+    let laid = layout(&graph).unwrap();
+    // elkjs 0.9.3 moves the free ports to the sides along the flow.
+    assert_eq!(at(&laid, "a"), (84.0, 12.0));
+    assert_eq!(port_at(&laid, "a", "p"), (-6.0, 18.666_666_666_666_668));
+    assert_eq!(port_at(&laid, "a", "p2"), (-6.0, 7.333_333_333_333_334));
+    assert_eq!(at(&laid, "b"), (12.0, 12.666_666_666_666_668));
+    assert_eq!(port_at(&laid, "b", "q"), (40.0, 17.333_333_333_333_332));
+}
+
+// Mutation: drop the `NorthSouthPort` mapping in `run_layered`, which then reports an internal error.
+#[test]
+fn a_port_across_the_flow_is_unsupported() {
+    // Right: north and south are across. Down: east and west are across.
+    for (direction, side) in [
+        ("RIGHT", "NORTH"),
+        ("LEFT", "SOUTH"),
+        ("DOWN", "EAST"),
+        ("UP", "WEST"),
+    ] {
+        let mut graph = root(
+            vec![with_ports(
+                node("a", 40.0, 30.0),
+                "FIXED_SIDE",
+                vec![port("p", 6.0, 4.0, side)],
+            )],
+            vec![],
+        );
+        graph
+            .layout_options
+            .insert("elk.direction".into(), direction.into());
+        assert!(
+            matches!(
+                error_of(&graph),
+                Error::Unsupported { element, feature }
+                    if element == "port \"p\"" && feature == "north and south ports"
+            ),
+            "{direction} {side}"
+        );
+    }
+}
+
+// Mutation: in `check_north_south_ports`, call the north and south sides across the flow in a
+// vertical layout too. The refusal then names `n`.
+#[test]
+fn the_refusal_names_the_port_across_the_flow() {
+    let mut graph = root(
+        vec![with_ports(
+            node("a", 40.0, 30.0),
+            "FIXED_SIDE",
+            vec![port("n", 6.0, 4.0, "NORTH"), port("e", 6.0, 4.0, "EAST")],
+        )],
+        vec![],
+    );
+    graph
+        .layout_options
+        .insert("elk.direction".into(), "DOWN".into());
+    assert!(matches!(
+        error_of(&graph),
+        Error::Unsupported { element, .. } if element == "port \"e\""
+    ));
+}
+
+// Mutation: treat the sides along the flow as across it for the vertical directions.
+#[test]
+fn a_port_along_the_flow_is_laid_out_in_every_direction() {
+    for (direction, side) in [
+        ("RIGHT", "EAST"),
+        ("LEFT", "WEST"),
+        ("DOWN", "NORTH"),
+        ("UP", "SOUTH"),
+    ] {
+        let mut graph = root(
+            vec![with_ports(
+                node("a", 40.0, 30.0),
+                "FIXED_SIDE",
+                vec![port("p", 6.0, 4.0, side)],
+            )],
+            vec![],
+        );
+        graph
+            .layout_options
+            .insert("elk.direction".into(), direction.into());
+        assert!(layout(&graph).is_ok(), "{direction} {side}");
+    }
+}
+
+// Mutation: drop the root check in `Tree::new`.
+#[test]
+fn a_port_on_the_root_is_unsupported() {
+    let mut graph = root(vec![node("a", 40.0, 30.0)], vec![]);
+    graph.ports = vec![port("p", 6.0, 4.0, "WEST")];
+    assert!(matches!(
+        error_of(&graph),
+        Error::Unsupported { element, feature }
+            if element == "node \"root\"" && feature == "ports on the root graph"
+    ));
+}
+
+// Mutation: refuse a label without text, which ELK drops, or accept one with text.
+#[test]
+fn a_port_label_with_text_is_unsupported_but_one_without_is_dropped() {
+    let mut p = port("p", 6.0, 4.0, "EAST");
+    p.labels = vec![label("", 10.0, 10.0)];
+    let graph = root(
+        vec![with_ports(
+            node("a", 40.0, 30.0),
+            "FIXED_SIDE",
+            vec![p.clone()],
+        )],
+        vec![],
+    );
+    assert!(layout(&graph).is_ok());
+    p.labels = vec![label("P", 10.0, 10.0)];
+    let graph = root(
+        vec![with_ports(node("a", 40.0, 30.0), "FIXED_SIDE", vec![p])],
+        vec![],
+    );
+    assert!(matches!(
+        error_of(&graph),
+        Error::Unsupported { element, feature }
+            if element == "port \"p\"" && feature == "port labels"
+    ));
+}
+
+// Mutation: let the check for hierarchy levels look at the nodes' grandparents, or drop it.
+#[test]
+fn an_edge_at_a_port_across_a_level_of_an_included_graph_is_unsupported() {
+    let inner = group(
+        "g",
+        vec![with_ports(
+            node("x", 40.0, 30.0),
+            "FIXED_SIDE",
+            vec![port("p", 6.0, 4.0, "EAST")],
+        )],
+    );
+    let graph = include_children(root(
+        vec![inner, node("y", 40.0, 30.0)],
+        vec![edge("e", "p", "y")],
+    ));
+    assert!(matches!(
+        error_of(&graph),
+        Error::Unsupported { element, .. } if element == "edge \"e\""
+    ));
+    // The same edge at a node instead of a port is laid out.
+    let inner = group("g", vec![node("x", 40.0, 30.0)]);
+    let graph = include_children(root(
+        vec![inner, node("y", 40.0, 30.0)],
+        vec![edge("e", "x", "y")],
+    ));
+    assert!(layout(&graph).is_ok());
+}
+
+// Mutation: leave the port ids out of the id check in `Tree::new`.
+#[test]
+fn a_port_id_may_not_repeat_a_node_or_port_id() {
+    let two = |first: &str, second: &str, node_id: &str| {
+        root(
+            vec![
+                with_ports(node("a", 40.0, 30.0), "", vec![port(first, 6.0, 4.0, "")]),
+                with_ports(
+                    node(node_id, 40.0, 30.0),
+                    "",
+                    vec![port(second, 6.0, 4.0, "")],
+                ),
+            ],
+            vec![],
+        )
+    };
+    // Two ports with one id, a port with the id of an earlier node, and of a later node.
+    for graph in [two("p", "p", "b"), two("a", "q", "b"), two("b", "q", "b")] {
+        assert!(matches!(error_of(&graph), Error::DuplicateId { .. }));
+    }
+    assert!(layout(&two("p", "q", "b")).is_ok());
+    // A port may share an id with an edge: edges have their own ids, as in elkjs.
+    let mut graph = two("p", "q", "b");
+    graph.edges = vec![edge("p", "a", "b")];
+    assert!(layout(&graph).is_ok());
+}
+
+// Mutation: look up an edge end among the nodes only.
+#[test]
+fn an_edge_end_may_name_a_port_and_an_unknown_id_is_still_unknown() {
+    let graph = root(
+        vec![
+            with_ports(
+                node("a", 40.0, 30.0),
+                "FIXED_SIDE",
+                vec![port("p", 6.0, 4.0, "EAST")],
+            ),
+            node("b", 40.0, 30.0),
+        ],
+        vec![edge("e", "p", "b")],
+    );
+    let laid = layout(&graph).unwrap();
+    // elkjs 0.9.3: the route starts at the anchor of `p`, the east middle of its 6 by 4 box.
+    assert_eq!(port_at(&laid, "a", "p"), (40.0, 13.0));
+    assert_eq!(route(find_edge(&laid, "e")), [(58.0, 27.0), (78.0, 27.0)]);
+    assert_eq!(
+        find_edge(&laid, "e").sections[0].incoming_shape.as_deref(),
+        Some("p")
+    );
+    let mut graph = graph;
+    graph.edges[0].targets = vec!["nowhere".into()];
+    assert!(matches!(
+        error_of(&graph),
+        Error::UnknownId { edge, id } if edge == "e" && id == "nowhere"
+    ));
+}
+
+// Mutation: skip the options of a port in `Tree::new`.
+#[test]
+fn the_options_of_a_port_are_checked() {
+    let with_option = |key: &str, value: &str| {
+        let mut p = port("p", 6.0, 4.0, "");
+        p.layout_options.insert(key.into(), value.into());
+        root(vec![with_ports(node("a", 40.0, 30.0), "", vec![p])], vec![])
+    };
+    assert!(matches!(
+        error_of(&with_option("elk.port.side", "UPWARDS")),
+        Error::InvalidOptionValue { element, .. } if element == "port \"p\""
+    ));
+    assert!(matches!(
+        error_of(&with_option("elk.port.anchor", "(1, 2)")),
+        Error::UnsupportedOption { element, key, .. }
+            if element == "port \"p\"" && key == "elk.port.anchor"
+    ));
+    assert!(matches!(
+        error_of(&with_option("elk.nothing", "1")),
+        Error::UnknownOption { .. }
+    ));
+    // A node option does not apply to a port.
+    assert!(matches!(
+        error_of(&with_option("elk.portConstraints", "FREE")),
+        Error::UnsupportedOption { .. }
+    ));
+    assert!(layout(&with_option("elk.port.index", "2")).is_ok());
+    assert!(layout(&with_option("elk.port.borderOffset", "1.5")).is_ok());
+}
+
+// Mutation: skip the number checks for ports.
+#[test]
+fn the_numbers_of_a_port_are_checked() {
+    for (field, graph) in [
+        ("x", f64::NAN),
+        ("y", f64::INFINITY),
+        ("width", -1.0),
+        ("height", f64::NAN),
+    ]
+    .map(|(field, value)| {
+        let mut p = port("p", 6.0, 4.0, "");
+        match field {
+            "x" => p.x = value,
+            "y" => p.y = value,
+            "width" => p.width = value,
+            _ => p.height = value,
+        }
+        (
+            field,
+            root(vec![with_ports(node("a", 40.0, 30.0), "", vec![p])], vec![]),
+        )
+    }) {
+        assert!(matches!(
+            error_of(&graph),
+            Error::InvalidSize { element, field: f, .. } if element == "port \"p\"" && f == field
+        ));
+    }
+}
+
 // --- Errors: one test per variant and cause. ---
 
 fn error_of(graph: &ElkNode) -> Error {
     layout(graph).expect_err("the graph should be refused")
 }
 
-// Mutation: drop the ports check in `Tree::new`.
+// Mutation: drop the check for a port on a node with children in `Tree::new`.
 #[test]
-fn ports_are_unsupported() {
-    let mut a = node("a", 60.0, 30.0);
+fn a_port_on_a_node_with_children_is_unsupported() {
+    let mut a = group("a", vec![node("c", 10.0, 10.0)]);
     a.ports = vec![ElkPort {
         id: "p".into(),
         ..Default::default()
     }];
     assert!(matches!(
         error_of(&root(vec![a], vec![])),
-        Error::Unsupported { feature, .. } if feature == "ports"
+        Error::Unsupported { element, feature } if element == "node \"a\"" && feature == "ports on a node with children"
     ));
 }
 
@@ -747,7 +1165,7 @@ fn errors_read_as_plain_sentences() {
     };
     assert_eq!(
         error.to_string(),
-        "edge \"e\" names \"x\", which is no node of the graph"
+        "edge \"e\" names \"x\", which is no node or port of the graph"
     );
 }
 

@@ -16,17 +16,17 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::api::{ElkEdge, ElkEdgeSection, ElkLabel, ElkNode, ElkPoint};
+use crate::api::{ElkEdge, ElkEdgeSection, ElkLabel, ElkNode, ElkPoint, ElkPort};
 use crate::common::networksimplex::NetworkSimplexError;
 use crate::components::ComponentError;
 use crate::error::Error;
 use crate::export::{self, LayoutResult, TransferInput};
 use crate::graph::{LPoint, LSize};
 use crate::importer::{
-    self, ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, ParentSettings,
+    self, ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, ElkInputPort, ParentSettings,
 };
 use crate::layout_options::{
-    self, EdgeSettings, LabelSettings, NodeSettings, OptionError, OptionProblem,
+    self, EdgeSettings, LabelSettings, NodeSettings, OptionError, OptionProblem, PortSettings,
 };
 use crate::options::{ElkDirection, HierarchyHandling, LayeredOptions, SizeConstraints};
 use crate::p2layers::LayeringError;
@@ -42,8 +42,9 @@ use crate::pipeline::{self, PipelineError};
 /// # Errors
 ///
 /// Returns an [`Error`] for a graph elk-layered cannot lay out exactly as elkjs does: one
-/// that uses ports, an option elk-layered does not support or cannot read, an id used twice
-/// or not found, or a size that is no finite, non-negative number.
+/// that uses a port elk-layered cannot place yet (a port on a node with children, on the root,
+/// or on a north or south side), an option elk-layered does not support or cannot read, an id
+/// used twice or not found, or a size that is no finite, non-negative number.
 ///
 /// Ports `RecursiveGraphLayoutEngine.layout` with the JSON round trip of elkjs's `JsonImporter`.
 pub fn layout(graph: &ElkNode) -> Result<ElkNode, Error> {
@@ -62,6 +63,8 @@ struct NodeInfo<'a> {
     path: Vec<usize>,
     settings: NodeSettings,
     labels: Vec<LabelSettings>,
+    /// The options of each port of `node`, in order.
+    ports: Vec<PortSettings>,
 }
 
 /// One edge of the input.
@@ -72,6 +75,10 @@ struct EdgeInfo<'a> {
     index: usize,
     source: usize,
     target: usize,
+    /// The index in the source node's `ports`, when the edge starts at a port.
+    source_port: Option<usize>,
+    /// The index in the target node's `ports`, when the edge ends at a port.
+    target_port: Option<usize>,
     /// The node ELK moves the edge to: `ElkGraphUtil.findBestEdgeContainment`.
     container: usize,
     settings: EdgeSettings,
@@ -93,6 +100,11 @@ struct Tree<'a> {
 /// No ELK counterpart: names a node in an error.
 fn node_element(id: &str) -> String {
     format!("node \"{id}\"")
+}
+
+/// No ELK counterpart: names a port in an error.
+fn port_element(id: &str) -> String {
+    format!("port \"{id}\"")
 }
 
 /// No ELK counterpart: names an edge in an error.
@@ -155,6 +167,26 @@ fn label_settings(labels: &[ElkLabel], owner: &str) -> Result<Vec<LabelSettings>
         .collect()
 }
 
+/// No ELK counterpart: checks and reads one port, and refuses what elk-layered cannot place yet.
+fn port_settings(port: &ElkPort) -> Result<PortSettings, Error> {
+    let element = port_element(&port.id);
+    check_number(&element, "x", port.x, false)?;
+    check_number(&element, "y", port.y, false)?;
+    check_number(&element, "width", port.width, true)?;
+    check_number(&element, "height", port.height, true)?;
+    let settings = layout_options::port_settings(&port.layout_options)
+        .map_err(|error| option_error(element.clone(), error))?;
+    label_settings(&port.labels, &element)?;
+    // `ElkGraphImporter.transformPort` drops a label without text.
+    if port.labels.iter().any(|label| !label.text.is_empty()) {
+        return Err(Error::Unsupported {
+            element,
+            feature: "port labels".to_string(),
+        });
+    }
+    Ok(settings)
+}
+
 /// The most levels a node may sit below the root. ELK has no such limit; Rust's stack needs one.
 /// 256 leaves a wide margin on every target, and is twice what serde_json reads by default.
 const MAX_NESTING_DEPTH: usize = 256;
@@ -164,6 +196,7 @@ impl<'a> Tree<'a> {
     fn new(root: &'a ElkNode) -> Result<Self, Error> {
         let mut nodes: Vec<NodeInfo<'a>> = Vec::new();
         let mut by_id: HashMap<&'a str, usize> = HashMap::new();
+        let mut port_by_id: HashMap<&'a str, (usize, usize)> = HashMap::new();
         // Preorder, so a node's index is smaller than its children's.
         let mut stack: Vec<(&'a ElkNode, Option<usize>, Vec<usize>)> =
             vec![(root, None, Vec::new())];
@@ -178,15 +211,23 @@ impl<'a> Tree<'a> {
                     feature: format!("a graph nested deeper than {MAX_NESTING_DEPTH} levels"),
                 });
             }
-            if by_id.insert(node.id.as_str(), nodes.len()).is_some() {
+            if by_id.insert(node.id.as_str(), nodes.len()).is_some()
+                || port_by_id.contains_key(node.id.as_str())
+            {
                 return Err(Error::DuplicateId {
                     id: node.id.clone(),
                 });
             }
-            if !node.ports.is_empty() {
+            if !node.ports.is_empty() && parent.is_none() {
                 return Err(Error::Unsupported {
                     element,
-                    feature: "ports".to_string(),
+                    feature: "ports on the root graph".to_string(),
+                });
+            }
+            if !node.ports.is_empty() && !node.children.is_empty() {
+                return Err(Error::Unsupported {
+                    element,
+                    feature: "ports on a node with children".to_string(),
                 });
             }
             check_number(&element, "x", node.x, false)?;
@@ -196,7 +237,21 @@ impl<'a> Tree<'a> {
             let settings = layout_options::node_settings(&node.layout_options)
                 .map_err(|error| option_error(element.clone(), error))?;
             let labels = label_settings(&node.labels, &element)?;
-            let index = nodes.len();
+            let node_index = nodes.len();
+            let mut ports = Vec::with_capacity(node.ports.len());
+            for (port_position, port) in node.ports.iter().enumerate() {
+                if by_id.contains_key(port.id.as_str())
+                    || port_by_id
+                        .insert(port.id.as_str(), (node_index, port_position))
+                        .is_some()
+                {
+                    return Err(Error::DuplicateId {
+                        id: port.id.clone(),
+                    });
+                }
+                ports.push(port_settings(port)?);
+            }
+            let index = node_index;
             if let Some(parent) = parent {
                 nodes[parent].children.push(index);
             }
@@ -207,6 +262,7 @@ impl<'a> Tree<'a> {
                 path: path.clone(),
                 settings,
                 labels,
+                ports,
             });
             for (child_index, child) in node.children.iter().enumerate().rev() {
                 let mut child_path = path.clone();
@@ -230,10 +286,17 @@ impl<'a> Tree<'a> {
                         edge: edge.id.clone(),
                     });
                 }
+                // An id names a node, or a port of a node: `ElkGraphUtil.connectableShapeToNode`
+                // gives the port's node.
                 let find = |id: &String| {
                     by_id
                         .get(id.as_str())
-                        .copied()
+                        .map(|&node| (node, None))
+                        .or_else(|| {
+                            port_by_id
+                                .get(id.as_str())
+                                .map(|&(node, port)| (node, Some(port)))
+                        })
                         .ok_or_else(|| Error::UnknownId {
                             edge: edge.id.clone(),
                             id: id.clone(),
@@ -263,8 +326,10 @@ impl<'a> Tree<'a> {
                     edge,
                     given_in,
                     index,
-                    source: sources[0],
-                    target: targets[0],
+                    source: sources[0].0,
+                    target: targets[0].0,
+                    source_port: sources[0].1,
+                    target_port: targets[0].1,
                     container: 0,
                     settings,
                     labels,
@@ -573,6 +638,15 @@ impl<'a, 't> Work<'a, 't> {
                     element,
                     feature: "an edge into a part of the graph laid out on its own".to_string(),
                 });
+            } else if (edge.source_port.is_some() || edge.target_port.is_some())
+                && tree.nodes[edge.source].parent != tree.nodes[edge.target].parent
+            {
+                // The hierarchy edge of the compound preprocessor would have to keep the port.
+                return Err(Error::Unsupported {
+                    element,
+                    feature: "an edge from or to a port that crosses a level of the hierarchy"
+                        .to_string(),
+                });
             }
             edges.push(edge_index);
         }
@@ -610,6 +684,11 @@ impl<'a, 't> Work<'a, 't> {
                     importer::ImportError::NodeSize(_) => Error::Unsolvable {
                         element: node_element(&scope_info.node.id),
                         reason: error.to_string(),
+                    },
+                    // A port across the flow needs a step that is not ported yet.
+                    importer::ImportError::NorthSouthPort { port_id, .. } => Error::Unsupported {
+                        element: port_element(&port_id),
+                        feature: "north and south ports".to_string(),
                     },
                     // Ids and parents are checked before the import, so the rest is a bug.
                     other => Error::Internal {
@@ -703,6 +782,21 @@ impl<'a, 't> Work<'a, 't> {
             node_label_placement: info.settings.node_label_placement,
             node_flexibility: info.settings.node_flexibility,
             ports_surrounding: None,
+            ports: current
+                .ports
+                .iter()
+                .zip(&info.ports)
+                .map(|(port, settings)| ElkInputPort {
+                    id: port.id.clone(),
+                    x: port.x,
+                    y: port.y,
+                    width: port.width,
+                    height: port.height,
+                    side: settings.side,
+                    index: settings.index,
+                    border_offset: settings.border_offset,
+                })
+                .collect(),
             nested_options: (!info.children.is_empty())
                 .then(|| Box::new(info.settings.options.clone())),
             labels: current
@@ -717,6 +811,11 @@ impl<'a, 't> Work<'a, 't> {
             self_loop_ordering: info.settings.self_loop_ordering,
             parent_settings,
         }
+    }
+
+    /// No ELK counterpart: the id of a node's port.
+    fn port_id(&self, node: usize, port: usize) -> String {
+        self.tree.nodes[node].node.ports[port].id.clone()
     }
 
     /// No ELK counterpart: maps the elkjs JSON tree onto the importer's input.
@@ -743,6 +842,8 @@ impl<'a, 't> Work<'a, 't> {
             priority_shortness: info.settings.priority_shortness,
             priority_straightness: info.settings.priority_straightness,
             container: Some(self.tree.nodes[info.container].node.id.clone()),
+            source_port: info.source_port.map(|port| self.port_id(info.source, port)),
+            target_port: info.target_port.map(|port| self.port_id(info.target, port)),
         }
     }
 
@@ -760,6 +861,13 @@ impl<'a, 't> Work<'a, 't> {
             if let Some(size) = node.size {
                 out.width = size.width;
                 out.height = size.height;
+            }
+            // `ElkGraphLayoutTransferrer.applyNodeLayout`: `elkport.setLocation(lport.getPosition())`.
+            for &(port, position) in &node.ports {
+                if let Some(port) = out.ports.get_mut(port) {
+                    port.x = position.x;
+                    port.y = position.y;
+                }
             }
             for &(label, position, size) in &node.labels {
                 if let Some(label) = out.labels.get_mut(label) {
@@ -793,7 +901,7 @@ impl<'a, 't> Work<'a, 't> {
 
     /// Ports `ElkGraphLayoutTransferrer.applyParentNodeLayout` for the top graph of a run, with
     /// `ElkUtil.resizeNode(node, width, height, true, true)` and `effectiveMinSizeConstraintFor`.
-    /// Without ports, there is no port to move.
+    /// The node has children, so it has no ports to move: `Tree::new` refuses them.
     fn apply_parent_node_layout(&mut self, scope: usize, actual: LSize) {
         let mut new_size = self.sizing[scope].effective_minimum().unwrap_or_default();
         new_size.width = f64::max(new_size.width, actual.width);

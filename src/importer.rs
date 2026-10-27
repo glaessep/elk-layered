@@ -14,8 +14,8 @@ use crate::compound::{
     source_ported_cross_hierarchy_segments,
 };
 use crate::graph::{
-    CompoundEdgeSegment, EdgeLabelPlacement, HierarchyEdge, LGraph, LLabel, LNode, LPort, LSize,
-    LayeredEdge, PortRef, PortSide, PortType, create_external_port_dummy,
+    CompoundEdgeSegment, EdgeLabelPlacement, HierarchyEdge, LGraph, LLabel, LNode, LPoint, LPort,
+    LSize, LayeredEdge, PortRef, PortSide, PortType, create_external_port_dummy,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
@@ -47,6 +47,8 @@ pub struct ElkInputNode {
     pub node_label_placement: NodeLabelPlacement,
     pub node_flexibility: crate::options::NodeFlexibility,
     pub ports_surrounding: Option<crate::options::SpacingMargin>,
+    /// The node's ports, in input order.
+    pub ports: Vec<ElkInputPort>,
     /// Resolved options for the graph inside this node. Absent values use ELK defaults.
     pub nested_options: Option<Box<LayeredOptions>>,
     /// The node's labels, in input order. ELK drops a label with empty text from the layered
@@ -61,6 +63,28 @@ pub struct ElkInputNode {
     /// What the node's parent sets itself. The caller works this out once, so every path that
     /// sizes a node reads the same values.
     pub parent_settings: ParentSettings,
+}
+
+/// A port of a node, as `ElkGraphImporter.transformPort` reads it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ElkInputPort {
+    /// Unique among the ports and nodes of the graph.
+    pub id: String,
+    /// Left side, relative to the node. `LGraphUtil.initializePort` reads it to find the side of
+    /// a port that has none, and `FIXED_POS` and `FIXED_RATIO` keep it.
+    pub x: f64,
+    /// Top side, relative to the node.
+    pub y: f64,
+    /// Width.
+    pub width: f64,
+    /// Height.
+    pub height: f64,
+    /// `elk.port.side`, or `Undefined`.
+    pub side: PortSide,
+    /// `elk.port.index`, when set.
+    pub index: Option<i32>,
+    /// `elk.port.borderOffset`, when set.
+    pub border_offset: Option<f64>,
 }
 
 /// What ELK reads from a node's parent when it sizes the node.
@@ -93,6 +117,11 @@ pub struct ElkInputEdge {
     /// graph's own id for the root. `None` leaves the choice to the importer, which takes the
     /// shared parent or the endpoint that holds the other one, and the root otherwise.
     pub container: Option<String>,
+    /// The id of the source node's port that the edge starts at. `None` leaves the choice to
+    /// the importer, which makes a port, as `LGraphUtil.createPort` does.
+    pub source_port: Option<String>,
+    /// The id of the target node's port that the edge ends at, like `source_port`.
+    pub target_port: Option<String>,
 }
 
 /// One endpoint of a hierarchy edge segment materialized by an outer recursive-layout owner.
@@ -154,8 +183,22 @@ pub enum ImportError {
     DuplicateNode { id: String },
     #[error("ELK graph has duplicate edge id: {id}")]
     DuplicateEdge { id: String },
+    #[error("ELK graph has duplicate node or port id: {id}")]
+    DuplicatePort { id: String },
     #[error("ELK edge `{edge_id}` references missing node `{node_id}`")]
     MissingEndpoint { edge_id: String, node_id: String },
+    /// A named port on a hierarchy-crossing edge needs a hierarchy edge that keeps the port.
+    #[error("ELK edge `{edge_id}` names a port and crosses a hierarchy level")]
+    PortAcrossHierarchy { edge_id: String },
+    #[error("ELK edge `{edge_id}` names port `{port_id}`, which is no port of node `{node_id}`")]
+    MissingPort {
+        edge_id: String,
+        node_id: String,
+        port_id: String,
+    },
+    /// A port on the north or south side of its graph needs `NorthSouthPortPreprocessor`.
+    #[error("ELK port `{port_id}` of node `{node_id}` is on a north or south side")]
+    NorthSouthPort { node_id: String, port_id: String },
     #[error("ELK node `{node_id}` references missing parent `{parent_id}`")]
     MissingParent { node_id: String, parent_id: String },
     #[error("ELK parent assignment would create a cycle at node `{node_id}`")]
@@ -223,10 +266,50 @@ pub(crate) fn import_scope(
         import_flat_graph(input, &index, &mut root, None, &mut port_index)?;
     }
 
+    check_north_south_ports(&root)?;
     introduce_source_ported_scoped_edge_segments(&mut root, prepared_segments.segments);
 
     root.sync_graph_properties_to_options();
     Ok(root)
+}
+
+/// Refuses a graph that needs `NorthSouthPortPreprocessor`, which is not ported.
+///
+/// Ports the condition of `OrthogonalEdgeRouter.getLayoutProcessorConfiguration`, which adds the
+/// step when a graph has ports that are not free and a port across the layout flow. A graph with
+/// only free ports needs no step: `PortSideProcessor` puts every port on a side along the flow.
+fn check_north_south_ports(root: &LGraph) -> ImportResult<()> {
+    let mut pending = vec![root];
+    while let Some(graph) = pending.pop() {
+        let properties = &graph.graph_properties;
+        if properties.north_south_ports && properties.non_free_ports {
+            let across_flow = |side: PortSide| match graph.options.direction {
+                ElkDirection::Left | ElkDirection::Right => {
+                    matches!(side, PortSide::North | PortSide::South)
+                }
+                _ => matches!(side, PortSide::East | PortSide::West),
+            };
+            let offender = graph
+                .layerless_nodes
+                .iter()
+                .flat_map(|node| node.ports.iter().map(move |port| (node, port)))
+                .find(|(_, port)| port.input_index.is_some() && across_flow(port.side));
+            if let Some((node, port)) = offender {
+                return Err(ImportError::NorthSouthPort {
+                    node_id: node.id.clone(),
+                    port_id: port.id.clone(),
+                });
+            }
+        }
+        pending.extend(
+            graph
+                .layerless_nodes
+                .iter()
+                .rev()
+                .filter_map(|node| node.nested_graph.as_deref()),
+        );
+    }
+    Ok(())
 }
 
 /// Rejects a scoped segment before any graph object is built. It checks that every endpoint is
@@ -1092,9 +1175,22 @@ pub(crate) fn include_minimum_graph_size(
     configured.height = f64::max(minimum.height, configured.height);
 }
 
+/// Ports `ElkGraphImporter.transformNode`, for a node without children.
 fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<usize>) -> usize {
     let mut lnode = LNode::new(node.id.clone(), node.width, node.height, model_order);
-    lnode.port_constraints = node.port_constraints.unwrap_or(PortConstraints::Free);
+    // Java reads the constraints before it replaces UNDEFINED, and hands that value on to the
+    // ports. UNDEFINED is not side fixed, like FREE.
+    let declared_constraints = node.port_constraints.unwrap_or(PortConstraints::Undefined);
+    lnode.port_constraints = match declared_constraints {
+        PortConstraints::Undefined => PortConstraints::Free,
+        other => other,
+    };
+    if !matches!(
+        declared_constraints,
+        PortConstraints::Undefined | PortConstraints::Free
+    ) {
+        graph.graph_properties.non_free_ports = true;
+    }
     lnode.port_alignment = node.port_alignment;
     if let Some(layer_constraint) = node.layer_constraint {
         lnode.layer_constraint = layer_constraint;
@@ -1110,8 +1206,158 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     lnode.self_loop_ordering = node.self_loop_ordering;
     lnode.node_flexibility = node.node_flexibility;
     lnode.ports_surrounding = node.ports_surrounding;
+    let node_size = lnode.size;
     graph.layerless_nodes.push(lnode);
-    graph.layerless_nodes.len() - 1
+    let node_index = graph.layerless_nodes.len() - 1;
+
+    // A port gets a model order when its node does: `needsModelOrder` asks about the node's
+    // parent, which also decides the node's own order.
+    for (position, port) in node.ports.iter().enumerate() {
+        let port_model_order = model_order.map(|_| position);
+        let lport = transform_port(
+            port,
+            position,
+            node_index,
+            node_size,
+            declared_constraints,
+            graph,
+            port_model_order,
+        );
+        graph.layerless_nodes[node_index].ports.push(lport);
+    }
+    node_index
+}
+
+/// Ports `ElkGraphImporter.transformPort`.
+fn transform_port(
+    port: &ElkInputPort,
+    position: usize,
+    node: usize,
+    node_size: LSize,
+    constraints: PortConstraints,
+    graph: &mut LGraph,
+    model_order: Option<usize>,
+) -> LPort {
+    // Java's `LPort` has no type. This one only lets the importer find a port it made up again,
+    // and a named port is never looked up that way.
+    let mut lport = LPort::new(port.id.clone(), node, PortType::Output);
+    lport.input_index = Some(position);
+    lport.model_order = model_order;
+    lport.side = port.side;
+    lport.size = LSize {
+        width: port.width,
+        height: port.height,
+    };
+    lport.position = LPoint {
+        x: port.x,
+        y: port.y,
+    };
+    // `lport.copyProperties(elkport)` copies the two options. `containsKey` asks whether one is set.
+    lport.port_index = port.index.map(|index| index as isize);
+    lport.border_offset = port.border_offset;
+    // The input has no edge to or from a descendant of its node, because the node has no children.
+    // Inside self loops are refused, so `INSIDE_CONNECTIONS` stays false.
+    initialize_port(&mut lport, constraints, node_size, graph.options.direction);
+
+    let across_flow = match graph.options.direction {
+        ElkDirection::Left | ElkDirection::Right => {
+            matches!(lport.side, PortSide::North | PortSide::South)
+        }
+        ElkDirection::Up | ElkDirection::Down => {
+            matches!(lport.side, PortSide::East | PortSide::West)
+        }
+        ElkDirection::Undefined => false,
+    };
+    if across_flow {
+        graph.graph_properties.north_south_ports = true;
+    }
+    lport
+}
+
+/// Ports `LGraphUtil.initializePort`, without an explicit anchor: no option supplies one.
+///
+/// `ElkGraphImporter.transformPort` sets the side before it sets the port's size, so the anchor
+/// that `LPort.setSide` computes there is the corner. `initializePort` then replaces it in every
+/// case, so only the final anchor is computed here.
+fn initialize_port(
+    port: &mut LPort,
+    constraints: PortConstraints,
+    node_size: LSize,
+    direction: ElkDirection,
+) {
+    let mut side = port.side;
+    if side == PortSide::Undefined && constraints.is_side_fixed() {
+        // The common case of a port at (0, 0) keeps border offset 0.
+        side = crate::compound::calc_port_side(port, node_size, direction);
+        port.side = side;
+        if port.border_offset.is_none()
+            && side != PortSide::Undefined
+            && (port.position.x != 0.0 || port.position.y != 0.0)
+        {
+            port.border_offset = Some(calc_port_offset(port, node_size, side));
+        }
+    }
+
+    if constraints.is_ratio_fixed() {
+        let mut ratio = 0.0;
+        match side {
+            PortSide::North | PortSide::South => {
+                if node_size.width > 0.0 {
+                    ratio = port.position.x / node_size.width;
+                }
+            }
+            PortSide::East | PortSide::West => {
+                if node_size.height > 0.0 {
+                    ratio = port.position.y / node_size.height;
+                }
+            }
+            PortSide::Undefined => {}
+        }
+        port.ratio_or_position = ratio;
+    }
+
+    let (width, height) = (port.size.width, port.size.height);
+    port.anchor = if constraints.is_side_fixed() {
+        match side {
+            PortSide::North => LPoint {
+                x: width / 2.0,
+                y: 0.0,
+            },
+            PortSide::East => LPoint {
+                x: width,
+                y: height / 2.0,
+            },
+            PortSide::South => LPoint {
+                x: width / 2.0,
+                y: height,
+            },
+            PortSide::West => LPoint {
+                x: 0.0,
+                y: height / 2.0,
+            },
+            // The side is decided later, so the anchor is the centre.
+            PortSide::Undefined => LPoint {
+                x: width / 2.0,
+                y: height / 2.0,
+            },
+        }
+    } else {
+        LPoint {
+            x: width / 2.0,
+            y: height / 2.0,
+        }
+    };
+}
+
+/// Ports `LGraphUtil.calcPortOffset`.
+fn calc_port_offset(port: &LPort, node_size: LSize, side: PortSide) -> f64 {
+    match side {
+        PortSide::North => -(port.position.y + port.size.height),
+        PortSide::East => port.position.x - node_size.width,
+        PortSide::South => port.position.y - node_size.height,
+        PortSide::West => -(port.position.x + port.size.width),
+        PortSide::Undefined => 0.0,
+    }
 }
 
 fn transform_edge(
@@ -1122,30 +1368,26 @@ fn transform_edge(
     model_order: Option<usize>,
     port_index: &mut ImportPortIndex,
 ) -> ImportResult<usize> {
-    let source = ensure_port_at_node(
-        graph,
-        graph_parent,
-        index.child_position(edge.source.as_str()),
-        edge.source.as_str(),
+    let source = edge_end_port(
+        edge,
+        &edge.source,
+        edge.source_port.as_deref(),
         PortType::Output,
-        port_index,
-    )
-    .ok_or_else(|| ImportError::MissingEndpoint {
-        edge_id: edge.id.clone(),
-        node_id: edge.source.clone(),
-    })?;
-    let target = ensure_port_at_node(
+        index,
         graph,
         graph_parent,
-        index.child_position(edge.target.as_str()),
-        edge.target.as_str(),
-        PortType::Input,
         port_index,
-    )
-    .ok_or_else(|| ImportError::MissingEndpoint {
-        edge_id: edge.id.clone(),
-        node_id: edge.target.clone(),
-    })?;
+    )?;
+    let target = edge_end_port(
+        edge,
+        &edge.target,
+        edge.target_port.as_deref(),
+        PortType::Input,
+        index,
+        graph,
+        graph_parent,
+        port_index,
+    )?;
 
     if source.node == target.node {
         graph.graph_properties.self_loops = true;
@@ -1192,6 +1434,54 @@ fn transform_edge(
     Ok(edge_index)
 }
 
+/// The port an edge starts or ends at: the named port, or one `LGraphUtil.createPort` makes.
+///
+/// Ports `ElkGraphImporter.transformEdge`, where it looks up `nodeAndPortMap` and creates the
+/// ports that are missing.
+#[allow(clippy::too_many_arguments)]
+fn edge_end_port(
+    edge: &ElkInputEdge,
+    node_id: &str,
+    port_id: Option<&str>,
+    port_type: PortType,
+    index: &InputIndex<'_>,
+    graph: &mut LGraph,
+    graph_parent: Option<&str>,
+    port_index: &mut ImportPortIndex,
+) -> ImportResult<PortRef> {
+    let missing_node = || ImportError::MissingEndpoint {
+        edge_id: edge.id.clone(),
+        node_id: node_id.to_string(),
+    };
+    let position = index.child_position(node_id);
+    if let Some(port_id) = port_id {
+        let port = index
+            .port_ref(node_id, port_id)
+            .ok_or_else(|| ImportError::MissingPort {
+                edge_id: edge.id.clone(),
+                node_id: node_id.to_string(),
+                port_id: port_id.to_string(),
+            })?;
+        let node = graph
+            .layerless_nodes
+            .get(port.node)
+            .ok_or_else(missing_node)?;
+        if node.id != node_id || port.port >= node.ports.len() {
+            return Err(missing_node());
+        }
+        return Ok(port);
+    }
+    ensure_port_at_node(
+        graph,
+        graph_parent,
+        position,
+        node_id,
+        port_type,
+        port_index,
+    )
+    .ok_or_else(missing_node)
+}
+
 /// Preserve a hierarchy-crossing edge for ELK's compound preprocessor.
 ///
 /// Source:
@@ -1204,6 +1494,11 @@ fn transform_cross_hierarchy_edge(
     model_order: Option<usize>,
     port_index: &mut ImportPortIndex,
 ) -> ImportResult<()> {
+    if edge.source_port.is_some() || edge.target_port.is_some() {
+        return Err(ImportError::PortAcrossHierarchy {
+            edge_id: edge.id.clone(),
+        });
+    }
     let merge_edges = arena.root().options.merge_edges;
     let source_port_key = hierarchy_port_key(
         edge.source.as_str(),
@@ -1375,8 +1670,10 @@ fn ensure_port_at_node(
     Some(PortRef { node, port })
 }
 
+/// `ElkGraphImporter.transformEdge` marks hyperedges when a port has more than one incoming
+/// or more than one outgoing edge. One of each is not a hyperedge.
 fn has_parallel_port_edges(port: &LPort) -> bool {
-    port.incoming_edges.len() + port.outgoing_edges.len() > 1
+    port.incoming_edges.len() > 1 || port.outgoing_edges.len() > 1
 }
 
 fn port_side_from_direction(direction: ElkDirection) -> PortSide {
@@ -1493,6 +1790,8 @@ struct InputIndex<'a> {
     root_children: Vec<&'a ElkInputNode>,
     children_by_parent: HashMap<&'a str, Vec<&'a ElkInputNode>>,
     child_positions: HashMap<&'a str, usize>,
+    /// For each port id, the id of its node and its position among that node's ports.
+    ports: HashMap<&'a str, (&'a str, usize)>,
     edges_by_parent: HashMap<Option<&'a str>, Vec<&'a ElkInputEdge>>,
     inside_self_loop_nodes: HashSet<&'a str>,
     root_options: LayeredOptions,
@@ -1513,6 +1812,22 @@ impl<'a> InputIndex<'a> {
                 });
             }
             node_order.insert(node.id.as_str(), index);
+        }
+
+        // Ports and nodes share one id space: a port can stand where an edge names a node.
+        let mut ports: HashMap<&str, (&str, usize)> = HashMap::new();
+        for node in &input.nodes {
+            for (position, port) in node.ports.iter().enumerate() {
+                if nodes.contains_key(port.id.as_str())
+                    || ports
+                        .insert(port.id.as_str(), (node.id.as_str(), position))
+                        .is_some()
+                {
+                    return Err(ImportError::DuplicatePort {
+                        id: port.id.clone(),
+                    });
+                }
+            }
         }
 
         let mut root_children = Vec::new();
@@ -1556,6 +1871,20 @@ impl<'a> InputIndex<'a> {
                     edge_id: edge.id.clone(),
                     node_id: edge.target.clone(),
                 });
+            }
+            for (node, port) in [
+                (&edge.source, &edge.source_port),
+                (&edge.target, &edge.target_port),
+            ] {
+                if let Some(port) = port
+                    && ports.get(port.as_str()).map(|(owner, _)| *owner) != Some(node.as_str())
+                {
+                    return Err(ImportError::MissingPort {
+                        edge_id: edge.id.clone(),
+                        node_id: node.clone(),
+                        port_id: port.clone(),
+                    });
+                }
             }
         }
 
@@ -1605,6 +1934,7 @@ impl<'a> InputIndex<'a> {
             root_children,
             children_by_parent,
             child_positions,
+            ports,
             edges_by_parent: HashMap::new(),
             inside_self_loop_nodes,
             root_options,
@@ -1655,6 +1985,15 @@ impl<'a> InputIndex<'a> {
             .child_positions
             .get(node)
             .expect("validated input nodes have a stable sibling position")
+    }
+
+    /// Where a named port sits in its node, once `transform_node` has made the node's ports.
+    fn port_ref(&self, node: &str, port: &str) -> Option<PortRef> {
+        let &(owner, position) = self.ports.get(port)?;
+        (owner == node).then(|| PortRef {
+            node: self.child_position(node),
+            port: position,
+        })
     }
 
     fn options_for_parent(&self, parent: Option<&str>) -> &LayeredOptions {
@@ -1832,6 +2171,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            ports: Vec::new(),
             parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
@@ -1855,6 +2195,8 @@ mod tests {
 
     fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
         ElkInputEdge {
+            source_port: None,
+            target_port: None,
             id: id.to_string(),
             source: source.to_string(),
             target: target.to_string(),
@@ -2037,6 +2379,8 @@ mod tests {
         let mut child = node("child");
         child.parent = Some("group".to_string());
         let loop_edge = ElkInputEdge {
+            source_port: None,
+            target_port: None,
             inside_self_loops_yo: true,
             ..edge("group-loop", "group", "group")
         };
@@ -2139,6 +2483,8 @@ mod tests {
         let edge_count = 32usize;
         let edges = (0..edge_count)
             .map(|index| ElkInputEdge {
+                source_port: None,
+                target_port: None,
                 inside_self_loops_yo: true,
                 ..edge(format!("loop-{index}").as_str(), "A", "A")
             })
@@ -2222,6 +2568,8 @@ mod tests {
         let mut graph = graph(
             vec![node("A")],
             vec![ElkInputEdge {
+                source_port: None,
+                target_port: None,
                 inside_self_loops_yo: true,
                 ..edge("A-A", "A", "A")
             }],
@@ -2243,10 +2591,14 @@ mod tests {
             vec![node("A")],
             vec![
                 ElkInputEdge {
+                    source_port: None,
+                    target_port: None,
                     inside_self_loops_yo: true,
                     ..edge("A-A-1", "A", "A")
                 },
                 ElkInputEdge {
+                    source_port: None,
+                    target_port: None,
                     inside_self_loops_yo: true,
                     ..edge("A-A-2", "A", "A")
                 },
@@ -2285,6 +2637,8 @@ mod tests {
         let mut graph = graph(
             vec![node("A")],
             vec![ElkInputEdge {
+                source_port: None,
+                target_port: None,
                 inside_self_loops_yo: true,
                 ..edge("A-A", "A", "A")
             }],
@@ -3194,5 +3548,457 @@ mod tests {
             })) if graph_id == "root"
         ));
         assert_eq!(imported.options.random_seed, 0);
+    }
+
+    // --- Ports on nodes without children. ---
+
+    fn input_port(id: &str, side: PortSide) -> ElkInputPort {
+        ElkInputPort {
+            id: id.to_string(),
+            x: 0.0,
+            y: 0.0,
+            width: 6.0,
+            height: 4.0,
+            side,
+            index: None,
+            border_offset: None,
+        }
+    }
+
+    /// A node of 80 by 40 with the given ports and port constraints.
+    fn ported(
+        id: &str,
+        constraints: Option<PortConstraints>,
+        ports: Vec<ElkInputPort>,
+    ) -> ElkInputNode {
+        let mut node = node(id);
+        node.port_constraints = constraints;
+        node.ports = ports;
+        node
+    }
+
+    fn flat_graph(
+        direction: ElkDirection,
+        nodes: Vec<ElkInputNode>,
+        edges: Vec<ElkInputEdge>,
+    ) -> ElkInputGraph {
+        let mut input = graph(nodes, edges);
+        input.options.direction = direction;
+        input.options.hierarchy_handling = HierarchyHandling::SeparateChildren;
+        input
+    }
+
+    fn layered_node<'a>(graph: &'a LGraph, id: &str) -> &'a LNode {
+        graph
+            .layerless_nodes
+            .iter()
+            .find(|node| node.id == id)
+            .unwrap()
+    }
+
+    // Mutation: skip the `non_free_ports` property in `transform_node`, or compute the anchor
+    // as the centre for a fixed-side port.
+    #[test]
+    fn a_fixed_side_port_keeps_its_size_position_side_and_side_anchor() {
+        let mut east = input_port("p", PortSide::East);
+        east.x = 80.0;
+        east.y = 10.0;
+        let west = input_port("q", PortSide::West);
+        let input = flat_graph(
+            ElkDirection::Right,
+            vec![ported(
+                "A",
+                Some(PortConstraints::FixedSide),
+                vec![east, west],
+            )],
+            vec![],
+        );
+        let lgraph = import_graph(&input).unwrap();
+        let node = layered_node(&lgraph, "A");
+        assert_eq!(node.port_constraints, PortConstraints::FixedSide);
+        assert!(lgraph.graph_properties.non_free_ports);
+        assert!(!lgraph.graph_properties.north_south_ports);
+        let ids: Vec<_> = node.ports.iter().map(|port| port.id.as_str()).collect();
+        assert_eq!(ids, ["p", "q"]);
+        let (p, q) = (&node.ports[0], &node.ports[1]);
+        assert_eq!(p.side, PortSide::East);
+        assert_eq!((p.size.width, p.size.height), (6.0, 4.0));
+        assert_eq!((p.position.x, p.position.y), (80.0, 10.0));
+        assert_eq!((p.anchor.x, p.anchor.y), (6.0, 2.0));
+        assert_eq!((q.anchor.x, q.anchor.y), (0.0, 2.0));
+        assert_eq!((p.input_index, q.input_index), (Some(0), Some(1)));
+    }
+
+    // Mutation: give a port that is not side fixed the anchor of its side.
+    #[test]
+    fn a_free_port_keeps_its_side_but_has_the_centre_as_anchor() {
+        let input = flat_graph(
+            ElkDirection::Right,
+            vec![ported("A", None, vec![input_port("p", PortSide::East)])],
+            vec![],
+        );
+        let lgraph = import_graph(&input).unwrap();
+        let port = &layered_node(&lgraph, "A").ports[0];
+        assert_eq!(port.side, PortSide::East);
+        assert_eq!((port.anchor.x, port.anchor.y), (3.0, 2.0));
+        assert!(!lgraph.graph_properties.non_free_ports);
+    }
+
+    // Mutation: keep `UNDEFINED` on the layered node, or let it set `non_free_ports`.
+    #[test]
+    fn undefined_port_constraints_become_free() {
+        let input = flat_graph(
+            ElkDirection::Right,
+            vec![ported(
+                "A",
+                Some(PortConstraints::Undefined),
+                vec![input_port("p", PortSide::West)],
+            )],
+            vec![],
+        );
+        let lgraph = import_graph(&input).unwrap();
+        assert_eq!(
+            layered_node(&lgraph, "A").port_constraints,
+            PortConstraints::Free
+        );
+        assert!(!lgraph.graph_properties.non_free_ports);
+    }
+
+    // Mutation: set `non_free_ports` only for a node that has ports.
+    #[test]
+    fn a_node_without_ports_still_marks_the_graph_as_not_free() {
+        let input = flat_graph(
+            ElkDirection::Right,
+            vec![ported("A", Some(PortConstraints::FixedOrder), vec![])],
+            vec![],
+        );
+        assert!(
+            import_graph(&input)
+                .unwrap()
+                .graph_properties
+                .non_free_ports
+        );
+    }
+
+    // Mutation: drop the call to `calc_port_side`, or the border offset next to it.
+    #[test]
+    fn a_fixed_side_port_without_a_side_takes_it_from_its_position() {
+        // Node of 80 by 40, port of 6 by 4. (x, y, expected side, expected border offset)
+        let cases = [
+            (-8.0, 10.0, PortSide::West, Some(2.0)),
+            (84.0, 10.0, PortSide::East, Some(4.0)),
+            // At the corner the offset stays unset, so the port sits on the border.
+            (0.0, 0.0, PortSide::West, None),
+        ];
+        for (x, y, side, offset) in cases {
+            let mut port = input_port("p", PortSide::Undefined);
+            port.x = x;
+            port.y = y;
+            let input = flat_graph(
+                ElkDirection::Right,
+                vec![ported("A", Some(PortConstraints::FixedSide), vec![port])],
+                vec![],
+            );
+            let lgraph = import_graph(&input).unwrap();
+            let port = &layered_node(&lgraph, "A").ports[0];
+            assert_eq!((port.side, port.border_offset), (side, offset), "x = {x}");
+        }
+    }
+
+    // Mutation: overwrite a border offset the input sets with the computed one.
+    #[test]
+    fn a_border_offset_from_the_input_wins() {
+        let mut port = input_port("p", PortSide::Undefined);
+        port.x = -8.0;
+        port.y = 10.0;
+        port.border_offset = Some(7.0);
+        let input = flat_graph(
+            ElkDirection::Right,
+            vec![ported("A", Some(PortConstraints::FixedSide), vec![port])],
+            vec![],
+        );
+        let lgraph = import_graph(&input).unwrap();
+        assert_eq!(layered_node(&lgraph, "A").ports[0].border_offset, Some(7.0));
+    }
+
+    // Mutation: remember the ratio for FIXED_POS too, or divide by the width on the east side.
+    #[test]
+    fn only_fixed_ratio_remembers_the_ratio_of_a_port() {
+        for (constraints, ratio) in [
+            (PortConstraints::FixedRatio, 0.25),
+            (PortConstraints::FixedPos, 0.0),
+            (PortConstraints::FixedOrder, 0.0),
+        ] {
+            let mut port = input_port("p", PortSide::East);
+            port.x = 80.0;
+            port.y = 10.0;
+            let input = flat_graph(
+                ElkDirection::Right,
+                vec![ported("A", Some(constraints), vec![port])],
+                vec![],
+            );
+            let lgraph = import_graph(&input).unwrap();
+            assert_eq!(layered_node(&lgraph, "A").ports[0].ratio_or_position, ratio);
+        }
+    }
+
+    // Mutation: ignore the `elk.port.index` of the input port.
+    #[test]
+    fn the_port_index_reaches_the_layered_port() {
+        let mut indexed = input_port("p", PortSide::East);
+        indexed.index = Some(3);
+        let input = flat_graph(
+            ElkDirection::Right,
+            vec![ported(
+                "A",
+                Some(PortConstraints::FixedOrder),
+                vec![indexed, input_port("q", PortSide::East)],
+            )],
+            vec![],
+        );
+        let lgraph = import_graph(&input).unwrap();
+        let ports = &layered_node(&lgraph, "A").ports;
+        assert_eq!((ports[0].port_index, ports[1].port_index), (Some(3), None));
+    }
+
+    // Mutation: attach the edge to a new port instead of the named one.
+    #[test]
+    fn an_edge_attaches_to_its_named_ports() {
+        let mut named = edge("e", "A", "B");
+        named.source_port = Some("p".to_string());
+        named.target_port = Some("q".to_string());
+        let input = flat_graph(
+            ElkDirection::Right,
+            vec![
+                ported(
+                    "A",
+                    Some(PortConstraints::FixedSide),
+                    vec![
+                        input_port("x", PortSide::East),
+                        input_port("p", PortSide::East),
+                    ],
+                ),
+                ported(
+                    "B",
+                    Some(PortConstraints::FixedSide),
+                    vec![input_port("q", PortSide::West)],
+                ),
+            ],
+            vec![named],
+        );
+        let lgraph = import_graph(&input).unwrap();
+        // No port was added, and the second port of A holds the edge.
+        assert_eq!(layered_node(&lgraph, "A").ports.len(), 2);
+        assert_eq!(layered_node(&lgraph, "B").ports.len(), 1);
+        assert!(
+            layered_node(&lgraph, "A").ports[0]
+                .outgoing_edges
+                .is_empty()
+        );
+        assert_eq!(layered_node(&lgraph, "A").ports[1].outgoing_edges, vec![0]);
+        assert_eq!(layered_node(&lgraph, "B").ports[0].incoming_edges, vec![0]);
+    }
+
+    // Mutation: count the incoming and outgoing edges of a port together, as one number.
+    #[test]
+    fn a_port_with_two_edges_in_one_direction_makes_a_hyperedge_but_one_each_does_not() {
+        let from_port = |id: &str, target: &str| {
+            let mut e = edge(id, "A", target);
+            e.source_port = Some("p".to_string());
+            e
+        };
+        let into_port = |id: &str, source: &str| {
+            let mut e = edge(id, source, "A");
+            e.target_port = Some("p".to_string());
+            e
+        };
+        let build = |edges: Vec<ElkInputEdge>| {
+            let input = flat_graph(
+                ElkDirection::Right,
+                vec![
+                    ported(
+                        "A",
+                        Some(PortConstraints::FixedSide),
+                        vec![input_port("p", PortSide::East)],
+                    ),
+                    node("B"),
+                ],
+                edges,
+            );
+            import_graph(&input).unwrap().graph_properties.hyperedges
+        };
+        assert!(!build(vec![from_port("e1", "B")]));
+        assert!(!build(vec![from_port("e1", "B"), into_port("e2", "B")]));
+        assert!(build(vec![from_port("e1", "B"), from_port("e2", "B")]));
+        assert!(build(vec![into_port("e1", "B"), into_port("e2", "B")]));
+    }
+
+    // Mutation: do not look at the ports when checking ids.
+    #[test]
+    fn a_port_id_may_not_repeat_a_node_or_port_id() {
+        let two_with = |first: &str, second: &str| {
+            flat_graph(
+                ElkDirection::Right,
+                vec![
+                    ported("A", None, vec![input_port(first, PortSide::East)]),
+                    ported("B", None, vec![input_port(second, PortSide::West)]),
+                ],
+                vec![],
+            )
+        };
+        assert!(matches!(
+            import_graph(&two_with("p", "p")),
+            Err(ImportError::DuplicatePort { id }) if id == "p"
+        ));
+        assert!(matches!(
+            import_graph(&two_with("B", "q")),
+            Err(ImportError::DuplicatePort { id }) if id == "B"
+        ));
+        assert!(import_graph(&two_with("p", "q")).is_ok());
+    }
+
+    // Mutation: accept a port of another node.
+    #[test]
+    fn an_edge_may_only_name_a_port_of_its_own_node() {
+        let build = |source_port: &str| {
+            let mut e = edge("e", "A", "B");
+            e.source_port = Some(source_port.to_string());
+            flat_graph(
+                ElkDirection::Right,
+                vec![
+                    ported("A", None, vec![input_port("p", PortSide::East)]),
+                    ported("B", None, vec![input_port("q", PortSide::West)]),
+                ],
+                vec![e],
+            )
+        };
+        assert!(import_graph(&build("p")).is_ok());
+        assert!(matches!(
+            import_graph(&build("q")),
+            Err(ImportError::MissingPort { port_id, node_id, .. }) if port_id == "q" && node_id == "A"
+        ));
+        assert!(matches!(
+            import_graph(&build("nowhere")),
+            Err(ImportError::MissingPort { .. })
+        ));
+
+        // An edge the flat import leaves out is checked too: both its ends sit inside `G`.
+        let mut inside = edge("e", "X", "X");
+        inside.source_port = Some("q".to_string());
+        let mut x = ported("X", None, vec![input_port("p", PortSide::East)]);
+        x.parent = Some("G".to_string());
+        let input = flat_graph(
+            ElkDirection::Right,
+            vec![
+                node("G"),
+                x,
+                ported("B", None, vec![input_port("q", PortSide::West)]),
+            ],
+            vec![inside],
+        );
+        assert!(matches!(
+            import_graph(&input),
+            Err(ImportError::MissingPort { port_id, .. }) if port_id == "q"
+        ));
+    }
+
+    // Mutation: drop the direction from the test, so that a port across the flow is one that is
+    // north or south in every direction.
+    #[test]
+    fn a_port_across_the_flow_of_a_graph_with_fixed_ports_is_refused() {
+        // (direction, side, accepted)
+        let cases = [
+            (ElkDirection::Right, PortSide::North, false),
+            (ElkDirection::Left, PortSide::South, false),
+            (ElkDirection::Right, PortSide::East, true),
+            (ElkDirection::Down, PortSide::East, false),
+            (ElkDirection::Up, PortSide::West, false),
+            (ElkDirection::Down, PortSide::North, true),
+            (ElkDirection::Up, PortSide::South, true),
+        ];
+        for (direction, side, accepted) in cases {
+            let input = flat_graph(
+                direction,
+                vec![ported(
+                    "A",
+                    Some(PortConstraints::FixedSide),
+                    vec![input_port("p", side)],
+                )],
+                vec![],
+            );
+            let result = import_graph(&input);
+            if accepted {
+                assert!(result.is_ok(), "{direction:?} {side:?}");
+            } else {
+                assert!(
+                    matches!(result, Err(ImportError::NorthSouthPort { ref port_id, .. }) if port_id == "p"),
+                    "{direction:?} {side:?}"
+                );
+            }
+        }
+    }
+
+    // Mutation: refuse a port across the flow although every node has free ports.
+    #[test]
+    fn a_port_across_the_flow_is_fine_while_all_ports_are_free() {
+        let input = flat_graph(
+            ElkDirection::Right,
+            vec![ported("A", None, vec![input_port("p", PortSide::North)])],
+            vec![],
+        );
+        let lgraph = import_graph(&input).unwrap();
+        // The graph still has the property. `PortSideProcessor` moves the port later.
+        assert!(lgraph.graph_properties.north_south_ports);
+        // A fixed node anywhere else in the graph makes it a problem.
+        let mixed = flat_graph(
+            ElkDirection::Right,
+            vec![
+                ported("A", None, vec![input_port("p", PortSide::North)]),
+                ported("B", Some(PortConstraints::FixedOrder), vec![]),
+            ],
+            vec![],
+        );
+        assert!(matches!(
+            import_graph(&mixed),
+            Err(ImportError::NorthSouthPort { .. })
+        ));
+    }
+
+    // Mutation: hand out the model order of ports even when the graph does not ask for it.
+    #[test]
+    fn ports_get_a_model_order_when_the_graph_asks_for_one() {
+        let ports = || {
+            vec![
+                input_port("p", PortSide::East),
+                input_port("q", PortSide::East),
+            ]
+        };
+        let mut asking = flat_graph(
+            ElkDirection::Right,
+            vec![ported("A", None, ports())],
+            vec![],
+        );
+        asking.options.consider_model_order_strategy = OrderingStrategy::NodesAndEdges;
+        let lgraph = import_graph(&asking).unwrap();
+        let orders: Vec<_> = layered_node(&lgraph, "A")
+            .ports
+            .iter()
+            .map(|p| p.model_order)
+            .collect();
+        assert_eq!(orders, [Some(0), Some(1)]);
+
+        let mut silent = flat_graph(
+            ElkDirection::Right,
+            vec![ported("A", None, ports())],
+            vec![],
+        );
+        silent.options.consider_model_order_strategy = OrderingStrategy::None;
+        let lgraph = import_graph(&silent).unwrap();
+        let orders: Vec<_> = layered_node(&lgraph, "A")
+            .ports
+            .iter()
+            .map(|p| p.model_order)
+            .collect();
+        assert_eq!(orders, [None, None]);
     }
 }

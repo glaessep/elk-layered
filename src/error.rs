@@ -7,7 +7,7 @@
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The graph uses something elk-layered does not support yet, such as ports.
+    /// The graph uses something elk-layered does not support yet, such as a port with a label.
     #[error("{element}: {feature} is not supported")]
     Unsupported {
         /// Where the graph uses it.
@@ -15,14 +15,14 @@ pub enum Error {
         /// What it is.
         feature: String,
     },
-    /// Two nodes, or two edges, share an id.
+    /// Two nodes or ports, or two edges, share an id.
     #[error("the id \"{id}\" is used more than once")]
     DuplicateId {
         /// The id.
         id: String,
     },
-    /// An edge names a node the graph does not have.
-    #[error("edge \"{edge}\" names \"{id}\", which is no node of the graph")]
+    /// An edge names a node or port the graph does not have.
+    #[error("edge \"{edge}\" names \"{id}\", which is no node or port of the graph")]
     UnknownId {
         /// The edge's id.
         edge: String,

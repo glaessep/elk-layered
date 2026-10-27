@@ -333,6 +333,9 @@ pub struct LPort {
     pub labels: Vec<LLabel>,
     pub model_order: Option<usize>,
     pub long_edge_target_node: Option<usize>,
+    /// The position of the input port this port was made from, among its node's ports. `None` for
+    /// a port ELK makes up. ELK keeps the input port in `InternalProperties.ORIGIN`.
+    pub input_index: Option<usize>,
     pub port_index: Option<isize>,
     pub border_offset: Option<f64>,
     pub ratio_or_position: f64,
@@ -360,6 +363,7 @@ impl LPort {
             labels: Vec::new(),
             model_order: None,
             long_edge_target_node: None,
+            input_index: None,
             port_index: None,
             border_offset: None,
             ratio_or_position: 0.0,

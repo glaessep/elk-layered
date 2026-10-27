@@ -1801,7 +1801,7 @@ fn port_side_from_direction(direction: ElkDirection) -> PortSide {
     }
 }
 
-fn calc_port_side(port: &LPort, node_size: LSize, direction: ElkDirection) -> PortSide {
+pub(crate) fn calc_port_side(port: &LPort, node_size: LSize, direction: ElkDirection) -> PortSide {
     let node_width = node_size.width;
     let node_height = node_size.height;
     if node_width <= 0.0 && node_height <= 0.0 {
@@ -1902,6 +1902,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            ports: Vec::new(),
             parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
@@ -1925,6 +1926,8 @@ mod tests {
 
     fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
         ElkInputEdge {
+            source_port: None,
+            target_port: None,
             id: id.to_string(),
             source: source.to_string(),
             target: target.to_string(),

@@ -38,6 +38,8 @@ pub(crate) struct NodeLayout {
     pub(crate) id: String,
     pub(crate) position: LPoint,
     pub(crate) size: Option<LSize>,
+    /// New positions by input port index, relative to the node.
+    pub(crate) ports: Vec<(usize, LPoint)>,
     /// New positions and sizes by label index.
     pub(crate) labels: Vec<(usize, LPoint, LSize)>,
 }
@@ -511,6 +513,13 @@ fn node_layout(
                 .map(|index| (index, label.position, label.size))
         })
         .collect();
+    // `elkport.setLocation(lport.getPosition().x, lport.getPosition().y)` for each port that
+    // came from the input.
+    let ports = node
+        .ports
+        .iter()
+        .filter_map(|port| port.input_index.map(|index| (index, port.position)))
+        .collect();
     NodeLayout {
         id: node.id.clone(),
         position: LPoint {
@@ -518,6 +527,7 @@ fn node_layout(
             y: node.position.y + offset.y,
         },
         size,
+        ports,
         labels,
     }
 }

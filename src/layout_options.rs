@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::graph::{EdgeLabelPlacement, LSize};
+use crate::graph::{EdgeLabelPlacement, LSize, PortSide};
 use crate::options::{
     ContentAlignment, CrossingMinimizationStrategy, CycleBreakingStrategy, DirectionCongruency,
     EdgeLabelSideSelection, EdgeRouting, EdgeStraighteningStrategy, ElkDirection, ElkPadding,
@@ -528,6 +528,7 @@ pub(crate) enum ElementKind {
     /// A node, the root included. ELK's `PARENTS` and `NODES` targets apply.
     Node,
     Edge,
+    Port,
     Label,
 }
 
@@ -537,6 +538,7 @@ impl ElementKind {
         match self {
             Self::Node => PARENTS | NODES,
             Self::Edge => EDGES,
+            Self::Port => PORTS,
             Self::Label => LABELS,
         }
     }
@@ -602,6 +604,17 @@ pub(crate) struct EdgeSettings {
     pub(crate) priority_direction: i32,
     pub(crate) priority_shortness: i32,
     pub(crate) priority_straightness: i32,
+}
+
+/// What a port's `layoutOptions` set.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PortSettings {
+    /// `elk.port.side`; `Undefined` when the port does not set it.
+    pub(crate) side: PortSide,
+    /// `elk.port.index`, when set.
+    pub(crate) index: Option<i32>,
+    /// `elk.port.borderOffset`, when set. `LGraphUtil.initializePort` tests whether it is set.
+    pub(crate) border_offset: Option<f64>,
 }
 
 /// What a label's `layoutOptions` set.
@@ -686,6 +699,46 @@ pub(crate) fn edge_settings(
     Ok(settings)
 }
 
+/// Reads a port's options.
+///
+/// Ports `JsonImporter.setOption` for a port.
+pub(crate) fn port_settings(
+    options: &BTreeMap<String, String>,
+) -> Result<PortSettings, OptionError> {
+    let mut settings = PortSettings {
+        side: PortSide::Undefined,
+        index: None,
+        border_offset: None,
+    };
+    for (id, key, value) in resolve_all(options, ElementKind::Port)? {
+        let result = match id {
+            "org.eclipse.elk.port.side" => parse_enum(
+                value,
+                &[
+                    ("UNDEFINED", PortSide::Undefined),
+                    ("NORTH", PortSide::North),
+                    ("EAST", PortSide::East),
+                    ("SOUTH", PortSide::South),
+                    ("WEST", PortSide::West),
+                ],
+            )
+            .map(|v| settings.side = v),
+            "org.eclipse.elk.port.index" => parse_int(value).map(|v| settings.index = Some(v)),
+            "org.eclipse.elk.port.borderOffset" => {
+                parse_double(value).map(|v| settings.border_offset = Some(v))
+            }
+            "org.eclipse.elk.port.anchor" => Err(OptionProblem::Unsupported(PORT_ANCHOR)),
+            _ => Err(OptionProblem::Unsupported(NOT_PORTED)),
+        };
+        result.map_err(|problem| OptionError {
+            key: key.to_string(),
+            value: value.to_string(),
+            problem,
+        })?;
+    }
+    Ok(settings)
+}
+
 /// Reads a label's options.
 ///
 /// Ports `JsonImporter.setOption` for a label.
@@ -721,7 +774,10 @@ pub(crate) fn label_settings(
 
 const NOT_PORTED: &str = "elk-layered does not support this option";
 const WRONG_TARGET: &str = "the option does not apply to this kind of element";
-const PORTS_LATER: &str = "ports are not supported yet";
+const PORT_SIZING: &str = "sizing a node to its ports is not supported yet";
+const PORT_LABEL_PLACEMENT: &str = "port labels are not supported yet";
+const PORT_ALIGNMENT_BY_SIDE: &str = "port alignment by side is not supported yet";
+const PORT_ANCHOR: &str = "an explicit port anchor is not supported yet";
 const INTERACTIVE: &str = "interactive strategies need input positions, which are not read";
 const INSIDE_SELF_LOOPS: &str = "inside self-loops are not supported";
 const JUNCTION_POINTS: &str = "merged edges need junction points, which are not ported";
@@ -820,7 +876,7 @@ fn apply_node_option(s: &mut NodeSettings, id: &str, value: &str) -> Result<(), 
             if constraints.contains(SizeConstraints::PORTS)
                 || constraints.contains(SizeConstraints::PORT_LABELS)
             {
-                return Err(OptionProblem::Unsupported(PORTS_LATER));
+                return Err(OptionProblem::Unsupported(PORT_SIZING));
             }
             s.node_size.constraints = constraints;
         }
@@ -1230,16 +1286,14 @@ fn apply_node_option(s: &mut NodeSettings, id: &str, value: &str) -> Result<(), 
                 ],
             )?;
         }
-        "org.eclipse.elk.port.anchor"
-        | "org.eclipse.elk.port.index"
-        | "org.eclipse.elk.port.side"
-        | "org.eclipse.elk.port.borderOffset"
-        | "org.eclipse.elk.portLabels.placement"
-        | "org.eclipse.elk.portAlignment.north"
+        "org.eclipse.elk.portLabels.placement" => {
+            return Err(OptionProblem::Unsupported(PORT_LABEL_PLACEMENT));
+        }
+        "org.eclipse.elk.portAlignment.north"
         | "org.eclipse.elk.portAlignment.south"
         | "org.eclipse.elk.portAlignment.west"
         | "org.eclipse.elk.portAlignment.east" => {
-            return Err(OptionProblem::Unsupported(PORTS_LATER));
+            return Err(OptionProblem::Unsupported(PORT_ALIGNMENT_BY_SIDE));
         }
         _ => return Err(OptionProblem::Unsupported(NOT_PORTED)),
     }

@@ -53,7 +53,7 @@ pub struct ElkNode {
         serde(default, skip_serializing_if = "Vec::is_empty")
     )]
     pub children: Vec<ElkNode>,
-    /// The node's ports. elk-layered does not support ports yet.
+    /// The node's ports. A node with children, and the root, cannot have any yet.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Vec::is_empty")
@@ -85,7 +85,11 @@ pub struct ElkNode {
     pub layout_options: BTreeMap<String, String>,
 }
 
-/// A port on a node. elk-layered does not support ports yet; a graph with one is refused.
+/// A port on a node.
+///
+/// Layout writes the port's `x` and `y`, relative to its node. A port on a north or south
+/// side, a port with a label, and a port on a node with children or on the root are refused
+/// for now.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
@@ -127,10 +131,11 @@ pub struct ElkPort {
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[cfg_attr(feature = "serde", serde(try_from = "EdgeWire"))]
 pub struct ElkEdge {
     /// Unique among all edges of the graph.
     pub id: String,
-    /// The ids of the edge's source nodes. elk-layered supports exactly one.
+    /// The ids of the edge's source nodes or ports. elk-layered supports exactly one.
     ///
     /// The JSON may also give the old form: a single `source` string
     /// (`transformPrimitiveEdge` in the importer).
@@ -139,7 +144,7 @@ pub struct ElkEdge {
         serde(default, alias = "source", deserialize_with = "ends::deserialize")
     )]
     pub sources: Vec<String>,
-    /// The ids of the edge's target nodes. elk-layered supports exactly one.
+    /// The ids of the edge's target nodes or ports. elk-layered supports exactly one.
     ///
     /// The JSON may also give the old form: a single `target` string.
     #[cfg_attr(
@@ -267,6 +272,68 @@ pub struct ElkPoint {
     /// Vertical coordinate.
     #[cfg_attr(feature = "serde", serde(default))]
     pub y: f64,
+}
+
+/// What `ElkEdge` reads from JSON. It has the fields of `ElkEdge` and the two old port keys,
+/// which only serve to refuse them.
+#[cfg(feature = "serde")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EdgeWire {
+    id: String,
+    #[serde(default, alias = "source", deserialize_with = "ends::deserialize")]
+    sources: Vec<String>,
+    #[serde(default, alias = "target", deserialize_with = "ends::deserialize")]
+    targets: Vec<String>,
+    #[serde(default)]
+    labels: Vec<ElkLabel>,
+    #[serde(
+        default,
+        alias = "properties",
+        deserialize_with = "options::deserialize"
+    )]
+    layout_options: BTreeMap<String, String>,
+    #[serde(default)]
+    sections: Vec<ElkEdgeSection>,
+    #[serde(default)]
+    container: Option<String>,
+    #[serde(default)]
+    junction_points: Vec<ElkPoint>,
+    #[serde(default)]
+    source_port: Option<serde::de::IgnoredAny>,
+    #[serde(default)]
+    target_port: Option<serde::de::IgnoredAny>,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<EdgeWire> for ElkEdge {
+    type Error = String;
+
+    /// Refuses the old port keys, which elk-layered does not read. Reading a graph that has
+    /// them without a port would lay the edge out at the node instead.
+    fn try_from(wire: EdgeWire) -> Result<Self, Self::Error> {
+        for (key, present) in [
+            ("sourcePort", wire.source_port.is_some()),
+            ("targetPort", wire.target_port.is_some()),
+        ] {
+            if present {
+                return Err(format!(
+                    "edge \"{}\": the old key \"{key}\" is not read; name the port in \"sources\" or \"targets\"",
+                    wire.id
+                ));
+            }
+        }
+        Ok(Self {
+            id: wire.id,
+            sources: wire.sources,
+            targets: wire.targets,
+            labels: wire.labels,
+            layout_options: wire.layout_options,
+            sections: wire.sections,
+            container: wire.container,
+            junction_points: wire.junction_points,
+        })
+    }
 }
 
 #[cfg(feature = "serde")]
