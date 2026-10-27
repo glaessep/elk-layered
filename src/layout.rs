@@ -296,31 +296,38 @@ impl<'a> Tree<'a> {
                     });
                 }
                 // Ports `JsonImporter.shapeById`: an id names a node first, and a port if no node
-                // has it. `ElkGraphUtil.connectableShapeToNode` gives the port's node.
-                let find = |id: &String| {
-                    by_id
-                        .get(id.as_str())
-                        .map(|&node| (node, None))
-                        .or_else(|| {
-                            port_by_id
-                                .get(id.as_str())
-                                .map(|&(node, port)| (node, Some(port)))
-                        })
-                        .ok_or_else(|| Error::UnknownId {
-                            edge: edge.id.clone(),
-                            id: id.clone(),
-                        })
+                // has it. `ElkGraphUtil.connectableShapeToNode` gives the port's node. An old-form
+                // `sourcePort` or `targetPort` is a port key: `transformPrimitiveEdge` looks it up
+                // in `portIdMap` alone, so a node with the same id must not take the edge.
+                let find = |id: &String, port_key: bool| {
+                    let port = || {
+                        port_by_id
+                            .get(id.as_str())
+                            .map(|&(node, port)| (node, Some(port)))
+                    };
+                    let found = if port_key {
+                        port()
+                    } else {
+                        by_id
+                            .get(id.as_str())
+                            .map(|&node| (node, None))
+                            .or_else(port)
+                    };
+                    found.ok_or_else(|| Error::UnknownId {
+                        edge: edge.id.clone(),
+                        id: id.clone(),
+                    })
                 };
                 // Check every end before refusing a hyperedge, so an unknown id wins.
                 let sources = edge
                     .sources
                     .iter()
-                    .map(find)
+                    .map(|id| find(id, edge.source_is_port))
                     .collect::<Result<Vec<_>, _>>()?;
                 let targets = edge
                     .targets
                     .iter()
-                    .map(find)
+                    .map(|id| find(id, edge.target_is_port))
                     .collect::<Result<Vec<_>, _>>()?;
                 if sources.len() > 1 || targets.len() > 1 {
                     return Err(Error::Unsupported {

@@ -260,6 +260,71 @@ fn an_old_port_key_that_names_no_port_is_an_unknown_id() {
     ));
 }
 
+/// A graph with nodes `a`, `b` and `other`, and a port `p` on `a` and `q` on `b`. `other` is the
+/// id the test gives to a third node: `p` makes it share the id of the port, a fresh id does not.
+fn graph_with_a_node_named(other: &str, edge: Value) -> ElkNode {
+    serde_json::from_value(json!({
+        "id": "root",
+        "children": [
+            {"id": "a", "width": 60, "height": 30, "layoutOptions": {"elk.portConstraints": "FIXED_SIDE"},
+             "ports": [{"id": "p", "width": 6, "height": 4, "layoutOptions": {"elk.port.side": "EAST"}}]},
+            {"id": "b", "width": 60, "height": 30, "layoutOptions": {"elk.portConstraints": "FIXED_SIDE"},
+             "ports": [{"id": "q", "width": 6, "height": 4, "layoutOptions": {"elk.port.side": "WEST"}}]},
+            {"id": other, "width": 20, "height": 20}
+        ],
+        "edges": [edge]
+    }))
+    .unwrap()
+}
+
+// Mutation: look an old-form port key up among the nodes first, as the new form does. The edge
+// then starts at the node `p` and not at the port `p`.
+#[test]
+fn an_old_port_key_names_a_port_even_when_a_node_has_the_same_id() {
+    for (edge, new_form) in [
+        (
+            json!({"id": "e", "source": "a", "target": "b", "sourcePort": "p"}),
+            json!({"id": "e", "sources": ["p"], "targets": ["b"]}),
+        ),
+        (
+            json!({"id": "e", "source": "a", "target": "b", "targetPort": "q"}),
+            json!({"id": "e", "sources": ["a"], "targets": ["q"]}),
+        ),
+    ] {
+        // The same graph, where the third node does not share the id of the port. In the new form
+        // an id names the node first, so only here does it name the port too.
+        let apart = layout(&graph_with_a_node_named("other", new_form)).unwrap();
+        let shared_id = if edge.get("sourcePort").is_some() {
+            "p"
+        } else {
+            "q"
+        };
+        let shared = layout(&graph_with_a_node_named(shared_id, edge)).unwrap();
+        assert_eq!(shared.edges[0].sections, apart.edges[0].sections);
+    }
+}
+
+// Mutation: let an old-form port key fall back to a node with that id. elkjs finds no port and
+// takes the edge to the node named by `source`; here the edge names an id that is no port, and
+// layout says so.
+#[test]
+fn an_old_port_key_that_only_a_node_has_is_an_unknown_id() {
+    let graph: ElkNode = serde_json::from_value(json!({
+        "id": "root",
+        "children": [
+            {"id": "a", "width": 60, "height": 30},
+            {"id": "b", "width": 60, "height": 30},
+            {"id": "n", "width": 60, "height": 30}
+        ],
+        "edges": [{"id": "e", "source": "a", "target": "b", "sourcePort": "n"}]
+    }))
+    .unwrap();
+    assert!(matches!(
+        layout(&graph),
+        Err(elk_layered::Error::UnknownId { id, .. }) if id == "n"
+    ));
+}
+
 // Mutation: read a `null` port key as an id.
 #[test]
 fn a_null_old_port_key_is_no_port() {
