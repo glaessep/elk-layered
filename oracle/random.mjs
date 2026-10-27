@@ -8,6 +8,12 @@
 // With `--group-ends`, an edge may also start or end at a group, not only at a leaf. elkjs
 // refuses some of those graphs; record.mjs then records the refusal.
 //
+//   node random.mjs ../tests/elkjs/random-ports --ports && node record.mjs ../tests/elkjs/random-ports
+//
+// With `--ports`, the graphs have no groups, and many leaves have ports on the west and east
+// sides, under the port constraints FREE, FIXED_SIDE or FIXED_ORDER. An edge may start or end at
+// a port.
+//
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
 // a feature, and then write and record the whole corpus again.
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -15,12 +21,14 @@ import { join } from "node:path";
 
 const dir = process.argv[2];
 if (!dir) {
-  console.error("usage: node random.mjs <directory> [--group-ends]");
+  console.error("usage: node random.mjs <directory> [--group-ends | --ports]");
   process.exit(2);
 }
-const groupEnds = process.argv[3] === "--group-ends";
-const COUNT = groupEnds ? 120 : 200;
-const SEED = groupEnds ? 0x6eed : 0x5eed;
+const mode = process.argv[3] ?? "";
+const groupEnds = mode === "--group-ends";
+const withPorts = mode === "--ports";
+const COUNT = { "--group-ends": 120, "--ports": 150 }[mode] ?? 200;
+const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed }[mode] ?? 0x5eed;
 
 // mulberry32: a small generator with a fixed seed. Its numbers only pick the graphs, so any
 // generator with a fixed seed would do.
@@ -59,7 +67,7 @@ function graph() {
   const options = { "elk.algorithm": "layered" };
   const direction = rand.pick([null, "RIGHT", "LEFT", "DOWN", "UP"]);
   if (direction) options["elk.direction"] = direction;
-  const hierarchy = rand.pick(["flat", "flat", "include", "include", "separate"]);
+  const hierarchy = withPorts ? "flat" : rand.pick(["flat", "flat", "include", "include", "separate"]);
   if (hierarchy === "include") options["elk.hierarchyHandling"] = "INCLUDE_CHILDREN";
   if (rand.chance(0.5)) options["elk.layered.considerModelOrder.strategy"] = "NODES_AND_EDGES";
   const seed = rand.pick([null, null, "1", String(rand.int(2, 1000000))]);
@@ -126,6 +134,22 @@ function graph() {
 
   const ends = leaves.map((n) => n.id);
   if (groupEnds) ends.push(...groups.map((g) => g.id));
+  if (withPorts) {
+    let p = 0;
+    for (const node of leaves) {
+      if (!rand.chance(0.6)) continue;
+      const constraint = rand.pick([null, "FIXED_SIDE", "FIXED_SIDE", "FIXED_ORDER"]);
+      if (constraint) (node.layoutOptions ??= {})["elk.portConstraints"] = constraint;
+      node.ports = [];
+      for (let i = 0, n = rand.int(1, 4); i < n; i++) {
+        const port = { id: `p${p++}`, width: rand.int(4, 10), height: rand.int(4, 10) };
+        if (constraint) port.layoutOptions = { "elk.port.side": rand.pick(["WEST", "EAST"]) };
+        node.ports.push(port);
+        parent.set(port.id, parent.get(node.id));
+        ends.push(port.id);
+      }
+    }
+  }
   let e = 0;
   const addEdge = (source, target) => {
     const edge = { id: `e${e++}`, sources: [source], targets: [target] };
