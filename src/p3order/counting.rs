@@ -215,6 +215,8 @@ impl CrossingsCounter {
         self.count_north_south_crossings_on_ports(graph, &ports, &mut index_tree)
     }
 
+    /// `CrossingsCounter.countNorthSouthCrossingsOnPorts`: the crossings among the in-layer
+    /// edges that join the north and south ports of a layer to their dummies.
     fn count_north_south_crossings_on_ports(
         &self,
         graph: &LGraph,

@@ -2761,6 +2761,7 @@ impl NorthSouthEdgeNeighbouringNodeCrossingsCounter {
         );
     }
 
+    /// `NorthSouthEdgeNeighbouringNodeCrossingsCounter.processIfTwoNorthSouthNodes`.
     fn process_if_two_north_south_nodes(
         &mut self,
         graph: &LGraph,
@@ -2779,6 +2780,7 @@ impl NorthSouthEdgeNeighbouringNodeCrossingsCounter {
         }
     }
 
+    /// `NorthSouthEdgeNeighbouringNodeCrossingsCounter.countCrossingsOfTwoNorthSouthDummies`.
     fn count_crossings_of_two_north_south_dummies(
         &mut self,
         graph: &LGraph,
@@ -3067,6 +3069,7 @@ impl GreedyPortDistributor {
         }
     }
 
+    /// `GreedyPortDistributor.distributePortsInLayer`.
     fn distribute_ports_in_layer(
         &mut self,
         graph: &mut LGraph,
