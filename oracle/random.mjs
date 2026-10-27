@@ -21,10 +21,17 @@
 // side of a port follows the direction of the run that lays its node out. A group under
 // SEPARATE_CHILDREN sets no direction, so its children and its nested run use RIGHT.
 //
+//   node random.mjs ../tests/elkjs/random-cross-ports --cross-ports && node record.mjs ../tests/elkjs/random-cross-ports --drop-crashes
+//
+// With `--cross-ports`, the generator is that of `--ports`, with its own seed and count, but a
+// port may sit on any of the four sides, so many sit across the layout flow. elkjs crashes on
+// some of these graphs; `--drop-crashes` lists them in `dropped.txt`.
+//
 //   node random.mjs ../tests/elkjs/random-inline-labels --inline-labels && node record.mjs ../tests/elkjs/random-inline-labels
 //
-// With `--inline-labels`, the graphs are those of the default mode, but each centre label sets
-// `elk.edgeLabels.inline` with a chance of 0.6, so inline and plain labels mix in one graph.
+// With `--inline-labels`, the generator is that of the default mode, with its own seed and count,
+// and each centre label sets `elk.edgeLabels.inline` with a chance of 0.6, so inline and plain
+// labels mix in one graph.
 //
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
 // a feature, and then write and record the whole corpus again.
