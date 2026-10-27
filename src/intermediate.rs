@@ -4599,7 +4599,7 @@ mod tests {
     }
 
     // Mutation: in `place_label_dummy_labels`, leave the edge thickness out of the shift of a
-    // label below the edge, or take the space of a vertical label as if it were inline.
+    // label below the edge.
     #[test]
     fn labels_below_an_edge_start_one_thickness_and_one_spacing_below_the_dummy() {
         let mut plain = ElkInputLabel::center("choice", 30.0, 12.5);
