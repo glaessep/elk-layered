@@ -12,14 +12,20 @@ use super::options::{
 };
 use crate::random::JavaRandom;
 
+mod arena;
 mod ports;
+pub use arena::GraphId;
 #[cfg(test)]
 pub(crate) use ports::port_ids;
 pub use ports::{NodePorts, PortId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LGraph {
-    pub id: String,
+    /// Names this graph in its hierarchy.
+    pub id: GraphId,
+    /// The caller's id of the node this graph belongs to. It only labels errors and results;
+    /// nothing looks a graph up by it.
+    pub name: String,
     pub options: LayeredOptions,
     pub size: LSize,
     pub padding: LPadding,
@@ -56,9 +62,10 @@ impl LGraph {
         size
     }
 
-    pub fn new(id: impl Into<String>, options: LayeredOptions) -> Self {
+    pub fn new(name: impl Into<String>, options: LayeredOptions) -> Self {
         Self {
-            id: id.into(),
+            id: GraphId::ROOT,
+            name: name.into(),
             options,
             size: LSize::default(),
             padding: LPadding::default(),
@@ -84,7 +91,8 @@ impl LGraph {
     /// Copies configured properties without copying the graph's dense arenas.
     /// Components use the already-resolved random stream through their serial executor.
     pub(crate) fn component_shell(&self) -> Self {
-        let mut graph = Self::new(self.id.clone(), self.options.clone());
+        let mut graph = Self::new(self.name.clone(), self.options.clone());
+        graph.id = self.id;
         graph.options.node_size.constraints = crate::options::SizeConstraints::FIXED;
         graph.padding = self.padding;
         graph.graph_properties = self.graph_properties.clone();
@@ -486,15 +494,15 @@ pub struct PortRef {
     pub port: PortId,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphNodeRef {
-    pub graph_id: String,
+    pub graph_id: GraphId,
     pub node: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphPortRef {
-    pub graph_id: String,
+    pub graph_id: GraphId,
     pub port: PortRef,
 }
 
@@ -508,7 +516,7 @@ pub enum CompoundEdgeSegment {
 pub struct CrossHierarchyEdge {
     pub original_edge_id: String,
     pub original_model_order: Option<usize>,
-    pub graph_id: String,
+    pub graph_id: GraphId,
     pub edge: usize,
     pub segment: CompoundEdgeSegment,
 }
@@ -1505,7 +1513,7 @@ mod tests {
         let mut dummy = LNode::new("external:cluster", 0.0, 0.0, None);
         dummy.kind = LNodeKind::ExternalPort;
         let origin = GraphPortRef {
-            graph_id: "root".to_string(),
+            graph_id: GraphId::ROOT,
             port: PortRef {
                 node: 0,
                 port: PortId::new(1),
@@ -1654,7 +1662,7 @@ mod tests {
         graph.layerless_nodes[1].long_edge_source = Some(a[0]);
         graph.layerless_nodes[1].long_edge_target = Some(a[2]);
         graph.layerless_nodes[1].origin_port = Some(GraphPortRef {
-            graph_id: "root".to_string(),
+            graph_id: GraphId::ROOT,
             port: a[1],
         });
         let edges_before = graph.edges.clone();

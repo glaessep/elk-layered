@@ -526,7 +526,7 @@ pub(crate) fn combine(target: &mut LGraph, mut components: Vec<Component>) -> Pi
 mod tests {
     use super::*;
     use crate::graph::PortId;
-    use crate::graph::{GraphNodeRef, LNode, LPoint, LayeredEdge, PortSide, PortType};
+    use crate::graph::{GraphId, GraphNodeRef, LNode, LPoint, LayeredEdge, PortSide, PortType};
     use crate::options::LayeredOptions;
 
     // Mutation: leave the `origin_port` of a dummy's port out of `remap_references`. The second
@@ -556,7 +556,7 @@ mod tests {
             .unwrap();
         graph.layerless_nodes[2].ports[out.port].origin_port = Some(north);
         graph.layerless_nodes[1].ports[north.port].port_dummy = Some(GraphNodeRef {
-            graph_id: "g".to_string(),
+            graph_id: GraphId::ROOT,
             node: 2,
         });
         graph

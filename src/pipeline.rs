@@ -295,7 +295,7 @@ fn graph_algorithm(graph: &LGraph) -> GraphAlgorithm {
         next_processor: 0,
         processors: assemble_processors_for_graph(graph),
         execution: GraphExecution {
-            graph_id: graph.id.clone(),
+            graph_id: graph.name.clone(),
             parent_node_id: graph.parent_node_id.clone(),
             processors: Vec::new(),
         },
@@ -1988,7 +1988,7 @@ mod tests {
             root.layerless_nodes[0]
                 .nested_graph
                 .as_deref()
-                .map(|graph| graph.id.as_str()),
+                .map(|graph| graph.name.as_str()),
             Some("child")
         );
         assert!(arena.graph_slots.iter().all(Option::is_none));
@@ -2023,12 +2023,12 @@ mod tests {
             .nested_graph
             .as_deref()
             .expect("the graph detached before the panic must be restored");
-        assert_eq!(child.id, "graph-1");
+        assert_eq!(child.name, "graph-1");
         assert_eq!(
             child.layerless_nodes[0]
                 .nested_graph
                 .as_deref()
-                .map(|graph| graph.id.as_str()),
+                .map(|graph| graph.name.as_str()),
             Some("graph-2")
         );
         assert!(arena.graph_slots.iter().all(Option::is_none));

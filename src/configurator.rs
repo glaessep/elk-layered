@@ -24,7 +24,7 @@ pub fn configure_graph_properties(graph: &mut LGraph) -> Result<(), RandomSeedEr
         // fire for them. It stays as the configurator's own guard against a seed of 0.
         if graph.options.random_seed == 0 {
             return Err(RandomSeedError::ZeroSeed {
-                graph_id: graph.id.clone(),
+                graph_id: graph.name.clone(),
             });
         }
         graph.options = configured_options(graph);
@@ -42,7 +42,7 @@ pub(crate) fn check_random_seeds(graph: &LGraph) -> Result<(), RandomSeedError> 
     while let Some(current) = pending.pop() {
         if current.options.random_seed == 0 {
             return Err(RandomSeedError::ZeroSeed {
-                graph_id: current.id.clone(),
+                graph_id: current.name.clone(),
             });
         }
         pending.extend(

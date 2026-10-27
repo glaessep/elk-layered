@@ -14,8 +14,8 @@ use crate::compound::{
     source_ported_cross_hierarchy_segments,
 };
 use crate::graph::{
-    CompoundEdgeSegment, EdgeLabelPlacement, HierarchyEdge, LGraph, LLabel, LNode, LNodeKind,
-    LPoint, LPort, LSize, LayeredEdge, PortId, PortRef, PortSide, PortType,
+    CompoundEdgeSegment, EdgeLabelPlacement, GraphId, HierarchyEdge, LGraph, LLabel, LNode,
+    LNodeKind, LPoint, LPort, LSize, LayeredEdge, PortId, PortRef, PortSide, PortType,
     apply_port_index_to_dummy, create_external_port_dummy, is_across_flow,
     port_side_from_direction,
 };
@@ -890,9 +890,10 @@ impl HierarchicalImportArena {
         input_node: usize,
         parent_slot: usize,
         parent_node: usize,
-        graph: LGraph,
+        mut graph: LGraph,
     ) -> usize {
         let slot = self.slots.len();
+        graph.id = GraphId::new(slot);
         self.slots.push(ImportGraphSlot {
             graph: Some(graph),
             attachment: Some(ImportGraphAttachment {
@@ -3248,9 +3249,8 @@ mod tests {
             .as_ref()
             .expect("compound port should point to nested external dummy");
         assert!(parent_port.inside_connections);
-        assert_eq!(port_dummy.graph_id, "cluster");
-
         let nested = cluster.nested_graph.as_ref().unwrap();
+        assert_eq!(port_dummy.graph_id, nested.id);
         let external = &nested.layerless_nodes[port_dummy.node];
         assert_eq!(external.external_port_side, PortSide::South);
         assert_eq!(
@@ -3265,7 +3265,7 @@ mod tests {
             .origin_port
             .as_ref()
             .expect("external dummy should point back to parent port");
-        assert_eq!(origin.graph_id, "root");
+        assert_eq!(origin.graph_id, GraphId::ROOT);
         assert_eq!(origin.port.node, cluster_index);
         assert_eq!(origin.port.port, PortId::new(0));
     }
@@ -3347,15 +3347,14 @@ mod tests {
         assert_eq!(parent_port.port_type, PortType::Output);
         let port_dummy = parent_port.port_dummy.as_ref().unwrap();
         assert!(parent_port.inside_connections);
-        assert_eq!(port_dummy.graph_id, "cluster");
-
         let nested = cluster.nested_graph.as_ref().unwrap();
+        assert_eq!(port_dummy.graph_id, nested.id);
         let external = &nested.layerless_nodes[port_dummy.node];
         let origin = external
             .origin_port
             .as_ref()
             .expect("external dummy should point back to parent port");
-        assert_eq!(origin.graph_id, "root");
+        assert_eq!(origin.graph_id, GraphId::ROOT);
         assert_eq!(origin.port.node, cluster_index);
         assert_eq!(origin.port.port, PortId::new(0));
     }

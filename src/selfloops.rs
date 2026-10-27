@@ -11,9 +11,9 @@ use std::collections::VecDeque;
 
 use crate::common::cells::grow_label_cell;
 use crate::graph::{
-    LGraph, LMargin, LNodeKind, LPoint, LSize, NodePorts, PortId, PortRef, PortSide, SelfHyperLoop,
-    SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder, SelfLoopLabelAlignment, SelfLoopLabelRef,
-    SelfLoopPort, SelfLoopType,
+    GraphId, LGraph, LMargin, LNodeKind, LPoint, LSize, NodePorts, PortId, PortRef, PortSide,
+    SelfHyperLoop, SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder, SelfLoopLabelAlignment,
+    SelfLoopLabelRef, SelfLoopPort, SelfLoopType,
 };
 use crate::options::{SelfLoopDistributionStrategy, SelfLoopOrderingStrategy};
 use crate::p5edges::orthogonal::{HyperEdgeGraph, HyperEdgeSegment, break_non_critical_cycles};
@@ -1010,7 +1010,7 @@ fn north_south_port_connection_sides(
     let Some(dummy_ref) = port.port_dummy.as_ref() else {
         return Vec::new();
     };
-    let Some(dummy_graph) = graph_by_id(graph, dummy_ref.graph_id.as_str()) else {
+    let Some(dummy_graph) = graph_by_id(graph, dummy_ref.graph_id) else {
         return Vec::new();
     };
     let Some(dummy_node) = dummy_graph.layerless_nodes.get(dummy_ref.node) else {
@@ -1037,7 +1037,7 @@ fn north_south_port_connection_sides(
     sides
 }
 
-fn graph_by_id<'a>(graph: &'a LGraph, id: &str) -> Option<&'a LGraph> {
+fn graph_by_id<'a>(graph: &'a LGraph, id: GraphId) -> Option<&'a LGraph> {
     if graph.id == id {
         return Some(graph);
     }

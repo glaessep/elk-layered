@@ -23,8 +23,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::common::cells::grow_label_cell;
 use crate::graph::{
-    EdgeLabelPlacement, HorizontalLabelAlignment, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize,
-    LabelCellLayout, LabelSide, LayeredEdge, PortId, PortRef, PortSide, PortType,
+    EdgeLabelPlacement, GraphId, HorizontalLabelAlignment, LGraph, LLabel, LNode, LNodeKind,
+    LPoint, LSize, LabelCellLayout, LabelSide, LayeredEdge, PortId, PortRef, PortSide, PortType,
     VerticalLabelAlignment, reverse_edge,
 };
 use crate::options::{
@@ -3888,7 +3888,7 @@ fn replacement_dummy_for_original(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum NorthSouthReplacementKey {
-    Origin { graph_id: String, port: PortRef },
+    Origin { graph_id: GraphId, port: PortRef },
     Dummy(usize),
 }
 
@@ -3898,7 +3898,7 @@ fn north_south_replacement_key(graph: &LGraph, original_dummy: usize) -> NorthSo
         .get(original_dummy)
         .and_then(|node| node.origin_port.as_ref())
         .map(|origin| NorthSouthReplacementKey::Origin {
-            graph_id: origin.graph_id.clone(),
+            graph_id: origin.graph_id,
             port: origin.port,
         })
         .unwrap_or(NorthSouthReplacementKey::Dummy(original_dummy))
@@ -5539,11 +5539,11 @@ mod tests {
             port: PortId::new(7),
         };
         graph.layerless_nodes[first].origin_port = Some(crate::graph::GraphPortRef {
-            graph_id: "parent".to_string(),
+            graph_id: GraphId::new(1),
             port: origin_port,
         });
         graph.layerless_nodes[second].origin_port = Some(crate::graph::GraphPortRef {
-            graph_id: "parent".to_string(),
+            graph_id: GraphId::new(1),
             port: origin_port,
         });
 
@@ -5587,7 +5587,7 @@ mod tests {
         };
         for dummy in [north_source, north_target] {
             graph.layerless_nodes[dummy].origin_port = Some(crate::graph::GraphPortRef {
-                graph_id: "parent".to_string(),
+                graph_id: GraphId::new(1),
                 port: origin_port,
             });
         }
@@ -5641,7 +5641,7 @@ mod tests {
         let north = push_external_dummy(&mut graph, "north", PortSide::North, 0.42);
         let target = push_normal_node(&mut graph, "target");
         let origin = crate::graph::GraphPortRef {
-            graph_id: "parent".to_string(),
+            graph_id: GraphId::new(1),
             port: PortRef {
                 node: 9,
                 port: PortId::new(3),

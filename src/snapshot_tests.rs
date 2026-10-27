@@ -342,7 +342,7 @@ fn dump(graph: &LGraph, origin: LPoint, depth: usize, out: &mut String) {
     let _ = writeln!(
         out,
         "{pad}graph {} size {:?}x{:?} padding {:?} {:?} {:?} {:?}",
-        graph.id,
+        graph.name,
         graph.size.width,
         graph.size.height,
         graph.padding.top,

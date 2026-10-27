@@ -17,7 +17,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::graph::{LGraph, LNode, LNodeKind, PortId, PortRef, PortSide, PortType};
+use crate::graph::{GraphId, LGraph, LNode, LNodeKind, PortId, PortRef, PortSide, PortType};
 use crate::options::{OrderingStrategy, PortConstraints};
 use crate::p3order::counting::{
     BinaryIndexedTree, CrossingsCounter, first_port_on_side, north_south_ports_with_incident_edges,
@@ -4180,12 +4180,9 @@ fn parent_port_order_by_dummy_layer(
     };
 
     for dummy_node in iter {
-        if let Some(port) = parent_port_for_dummy_node(
-            parent_graph,
-            parent_node_index,
-            child_graph.id.as_str(),
-            dummy_node,
-        ) {
+        if let Some(port) =
+            parent_port_for_dummy_node(parent_graph, parent_node_index, child_graph.id, dummy_node)
+        {
             order.push(port);
             continue;
         }
@@ -4202,7 +4199,7 @@ fn parent_port_order_by_dummy_layer(
 fn parent_port_for_dummy_node(
     parent_graph: &LGraph,
     parent_node_index: usize,
-    child_graph_id: &str,
+    child_graph_id: GraphId,
     dummy_node: usize,
 ) -> Option<PortId> {
     parent_graph
@@ -5115,7 +5112,7 @@ mod tests {
         ] {
             graph.layerless_nodes[0].ports[port.port].port_dummy =
                 Some(crate::graph::GraphNodeRef {
-                    graph_id: "root".to_string(),
+                    graph_id: GraphId::ROOT,
                     node: dummy,
                 });
         }
@@ -6434,6 +6431,8 @@ mod greedy_port_distributor_tests {
             PortConstraints::FixedSide,
             &[PortSide::West],
         );
+        inner.id = GraphId::new(1);
+        let inner_id = inner.id;
         // `d1` is below `d0`. `d1` goes to the lower node and `d0` to the upper one.
         add_edge(&mut inner, port(second, 0), port(c1, 0));
         add_edge(&mut inner, port(first, 0), port(c0, 0));
@@ -6449,7 +6448,7 @@ mod greedy_port_distributor_tests {
         for (port_index, dummy) in [first, second].into_iter().enumerate() {
             outer.layerless_nodes[parent].ports[PortId::new(port_index)].port_dummy =
                 Some(GraphNodeRef {
-                    graph_id: "inner".to_string(),
+                    graph_id: inner_id,
                     node: dummy,
                 });
         }

@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::compound::compare_compound_segments;
 use crate::error::Error;
-use crate::graph::{LGraph, LLabel, LNode, LNodeKind, LPoint, LSize, PortRef, PortSide};
+use crate::graph::{GraphId, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize, PortRef, PortSide};
 
 /// `OrthogonalRoutingGenerator.TOLERANCE`.
 const TOLERANCE: f64 = 1e-3;
@@ -102,7 +102,9 @@ struct Hierarchy<'a> {
     graphs: Vec<GraphEntry<'a>>,
     /// For each graph and each of its nodes, the graph inside the node. Indexed like `graphs`.
     nested_graphs: Vec<Vec<Option<usize>>>,
-    by_id: HashMap<&'a str, usize>,
+    by_id: HashMap<GraphId, usize>,
+    /// The graph of each container the caller names, by the caller's id of the node it is in.
+    by_name: HashMap<&'a str, usize>,
 }
 
 impl<'a> Hierarchy<'a> {
@@ -132,12 +134,18 @@ impl<'a> Hierarchy<'a> {
         let by_id = graphs
             .iter()
             .enumerate()
-            .map(|(index, entry)| (entry.graph.id.as_str(), index))
+            .map(|(index, entry)| (entry.graph.id, index))
+            .collect();
+        let by_name = graphs
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| (entry.graph.name.as_str(), index))
             .collect();
         Self {
             graphs,
             nested_graphs,
             by_id,
+            by_name,
         }
     }
 
@@ -222,7 +230,7 @@ impl<'a> Hierarchy<'a> {
         let node = &self.graph(graph).layerless_nodes[port.node];
         if node.kind == LNodeKind::ExternalPort
             && let Some(origin) = &node.origin_port
-            && let Some(&origin_graph) = self.by_id.get(origin.graph_id.as_str())
+            && let Some(&origin_graph) = self.by_id.get(&origin.graph_id)
         {
             return PortAt {
                 graph: origin_graph,
@@ -255,7 +263,7 @@ fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, Joi
         for record in &entry.graph.cross_hierarchy_edges {
             let graph = hierarchy
                 .by_id
-                .get(record.graph_id.as_str())
+                .get(&record.graph_id)
                 .copied()
                 .unwrap_or(graph_index);
             pieces
@@ -680,7 +688,7 @@ fn hierarchical_offset(
             message: format!("edge \"{edge_id}\" has no container"),
         });
     };
-    let Some(&target_graph) = hierarchy.by_id.get(container.as_str()) else {
+    let Some(&target_graph) = hierarchy.by_name.get(container.as_str()) else {
         return Err(Error::Internal {
             message: format!("the container \"{container}\" of edge \"{edge_id}\" has no graph"),
         });

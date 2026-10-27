@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::{LGraph, LNodeKind, PortId, PortRef, PortSide};
+use crate::graph::{GraphId, LGraph, LNodeKind, PortId, PortRef, PortSide};
 use crate::options::{OrderingStrategy, PortConstraints, PortSortingStrategy};
 
 pub mod counting;
@@ -294,7 +294,7 @@ fn process_node_port_sides(graph: &mut LGraph, node: usize) {
 pub fn set_port_side(graph: &mut LGraph, port: PortRef) {
     let port_data = &graph.layerless_nodes[port.node].ports[port.port];
     let side = if let Some(dummy) = port_data.port_dummy.as_ref() {
-        external_port_dummy_side(graph, port.node, dummy.graph_id.as_str(), dummy.node)
+        external_port_dummy_side(graph, port.node, dummy.graph_id, dummy.node)
     } else if port_data.net_flow() < 0 {
         PortSide::East
     } else {
@@ -308,7 +308,7 @@ pub fn set_port_side(graph: &mut LGraph, port: PortRef) {
 fn external_port_dummy_side(
     graph: &LGraph,
     port_node: usize,
-    dummy_graph_id: &str,
+    dummy_graph_id: GraphId,
     dummy_node: usize,
 ) -> PortSide {
     if dummy_graph_id == graph.id {
@@ -1538,7 +1538,7 @@ mod tests {
             )
             .unwrap();
         graph.layerless_nodes[parent].ports[port.port].port_dummy = Some(GraphNodeRef {
-            graph_id: "root".to_string(),
+            graph_id: GraphId::ROOT,
             node: dummy,
         });
 

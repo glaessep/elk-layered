@@ -7,9 +7,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
-    CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphNodeRef, GraphPortRef,
-    HierarchyEdge, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize, LayeredEdge, PortId, PortRef,
-    PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
+    CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphId, GraphNodeRef,
+    GraphPortRef, HierarchyEdge, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize, LayeredEdge,
+    PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
     port_side_from_direction,
 };
 use crate::options::{ElkDirection, PortConstraints};
@@ -264,11 +264,10 @@ pub(crate) fn link_external_port_dummy(
     parent_graph: &mut LGraph,
     parent_port: PortRef,
     dummy_side: PortSide,
-    dummy_graph_id: impl Into<String>,
+    dummy_graph_id: GraphId,
     dummy_node: usize,
     dummy_border_offset: Option<f64>,
 ) {
-    let dummy_graph_id = dummy_graph_id.into();
     let Some(parent_node) = parent_graph.layerless_nodes.get_mut(parent_port.node) else {
         return;
     };
@@ -294,14 +293,14 @@ pub(crate) fn link_external_port_dummy(
 pub(crate) fn set_external_dummy_origin(
     dummy_graph: &mut LGraph,
     dummy_node: usize,
-    origin_graph_id: impl Into<String>,
+    origin_graph_id: GraphId,
     origin_port: PortRef,
 ) {
     let Some(dummy) = dummy_graph.layerless_nodes.get_mut(dummy_node) else {
         return;
     };
     dummy.origin_port = Some(GraphPortRef {
-        graph_id: origin_graph_id.into(),
+        graph_id: origin_graph_id,
         port: origin_port,
     });
 }
@@ -316,7 +315,7 @@ pub(crate) fn record_cross_hierarchy_edge_segment(
     graph.cross_hierarchy_edges.push(CrossHierarchyEdge {
         original_edge_id: original_edge_id.into(),
         original_model_order,
-        graph_id: graph.id.clone(),
+        graph_id: graph.id,
         edge,
         segment,
     });
@@ -1102,7 +1101,7 @@ struct ExternalDummyMetadata {
 }
 
 struct NestedExternalDummyIndex {
-    graph_id: String,
+    graph_id: GraphId,
     by_edge_id: HashMap<String, ExternalDummyMetadata>,
 }
 
@@ -1193,14 +1192,14 @@ impl NestedExternalDummyIndex {
             }
         }
         Self {
-            graph_id: graph.id.clone(),
+            graph_id: graph.id,
             by_edge_id,
         }
     }
 
-    fn external_dummy(&self, edge_id: &str) -> Option<(&str, ExternalDummyMetadata)> {
+    fn external_dummy(&self, edge_id: &str) -> Option<(GraphId, ExternalDummyMetadata)> {
         let metadata = *self.by_edge_id.get(edge_id)?;
-        Some((self.graph_id.as_str(), metadata))
+        Some((self.graph_id, metadata))
     }
 }
 
@@ -1651,7 +1650,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
     original_constraints: &[PortConstraints],
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
-    let graph_id = graph.id.clone();
+    let graph_id = graph.id;
 
     for (node_index, &parent_constraints) in original_constraints.iter().enumerate() {
         let Some(nested_graph) = graph.layerless_nodes[node_index].nested_graph.as_ref() else {
@@ -1663,7 +1662,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
 
         let parent_node_id = graph.layerless_nodes[node_index].id.clone();
         let parent_size = graph.layerless_nodes[node_index].size;
-        let nested_graph_id = nested_graph.id.clone();
+        let nested_graph_id = nested_graph.id;
         let nested_direction = nested_graph.options.direction;
         let port_ids = graph.layerless_nodes[node_index]
             .ports
@@ -1724,7 +1723,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
                 graph,
                 parent_port,
                 dummy_side,
-                nested_graph_id.clone(),
+                nested_graph_id,
                 dummy_node,
                 dummy_border_offset,
             );
@@ -1732,7 +1731,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
                 .nested_graph
                 .as_deref_mut()
             {
-                set_external_dummy_origin(nested_graph, dummy_node, graph_id.clone(), parent_port);
+                set_external_dummy_origin(nested_graph, dummy_node, graph_id, parent_port);
             }
         }
     }
@@ -1790,9 +1789,9 @@ fn link_direct_compound_external_dummy_metadata(
     endpoints: &[CompoundEndpoint],
     observer: &mut impl CompoundPreprocessObserver,
 ) {
-    let graph_id = graph.id.clone();
+    let graph_id = graph.id;
     let parent_node_id = graph.layerless_nodes[node_index].id.clone();
-    let nested_graph_id = nested_graph.id.clone();
+    let nested_graph_id = nested_graph.id;
     if !endpoints.is_empty() {
         let endpoint_index =
             NestedExternalDummyIndex::new(nested_graph, parent_node_id.as_str(), observer);
@@ -1811,16 +1810,11 @@ fn link_direct_compound_external_dummy_metadata(
                 graph,
                 endpoint.port,
                 dummy.external_port_side,
-                dummy_graph_id.to_string(),
+                dummy_graph_id,
                 dummy.dummy_node,
                 dummy.border_offset,
             );
-            set_external_dummy_origin(
-                nested_graph,
-                dummy.dummy_node,
-                graph_id.clone(),
-                endpoint.port,
-            );
+            set_external_dummy_origin(nested_graph, dummy.dummy_node, graph_id, endpoint.port);
         }
     }
 
@@ -1855,14 +1849,14 @@ fn link_direct_compound_external_dummy_metadata(
             graph,
             parent_port,
             external_dummy.external_port_side,
-            nested_graph_id.clone(),
+            nested_graph_id,
             external_dummy.dummy_node,
             external_dummy.border_offset,
         );
         set_external_dummy_origin(
             nested_graph,
             external_dummy.dummy_node,
-            graph_id.clone(),
+            graph_id,
             parent_port,
         );
     }
