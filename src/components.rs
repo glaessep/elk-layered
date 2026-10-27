@@ -233,7 +233,7 @@ fn map_labels(labels: &mut [LLabel], edges: &[usize]) -> Result<(), ComponentErr
 }
 
 /// Maps every arena reference, including processor-created dummies and detached edges.
-/// Port ordinals are node-local and are deliberately unchanged.
+/// Port ids are node-local and are deliberately unchanged.
 fn remap_references(
     graph: &mut LGraph,
     nodes: &[usize],

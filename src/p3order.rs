@@ -62,13 +62,9 @@ fn assign_crossing_minimization_port_ids(graph: &mut LGraph, order: &[Vec<usize>
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SweepCopy {
     pub node_order: Vec<Vec<usize>>,
-    pub port_orders: Vec<Vec<Vec<PortOrderKey>>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PortOrderKey {
-    crossing_minimization_id: Option<usize>,
-    fallback_id: String,
+    /// The ports of each node, in its port order, by layer and place in the layer. Java keeps
+    /// the `LPort` objects here. A `PortId` is the same identity.
+    pub port_orders: Vec<Vec<Vec<PortId>>>,
 }
 
 impl SweepCopy {
@@ -80,16 +76,7 @@ impl SweepCopy {
                 .map(|layer| {
                     layer
                         .iter()
-                        .map(|node| {
-                            graph.layerless_nodes[*node]
-                                .ports
-                                .iter()
-                                .map(|port| PortOrderKey {
-                                    crossing_minimization_id: port.crossing_minimization_id,
-                                    fallback_id: port.id.clone(),
-                                })
-                                .collect()
-                        })
+                        .map(|node| graph.layerless_nodes[*node].ports.ids().collect())
                         .collect()
                 })
                 .collect(),
@@ -122,10 +109,7 @@ impl SweepCopy {
                 else {
                     return false;
                 };
-                let Some(port_order) = port_order_indices_by_id(graph, node, port_order) else {
-                    return false;
-                };
-                if !graph.reorder_node_ports(node, port_order) {
+                if !graph.reorder_node_ports(node, port_order.iter().copied()) {
                     return false;
                 }
                 if set_port_constraints
@@ -218,57 +202,6 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
             );
         }
     }
-}
-
-fn port_order_indices_by_id(
-    graph: &LGraph,
-    node: usize,
-    port_ids: &[PortOrderKey],
-) -> Option<Vec<PortId>> {
-    let ports = &graph.layerless_nodes.get(node)?.ports;
-    if ports.len() != port_ids.len() {
-        return None;
-    }
-
-    let use_crossing_ids = port_ids
-        .iter()
-        .any(|key| key.crossing_minimization_id.is_some());
-    let use_fallback_ids = port_ids
-        .iter()
-        .any(|key| key.crossing_minimization_id.is_none());
-    let mut by_crossing_id = HashMap::<usize, Vec<PortId>>::new();
-    let mut by_fallback_id = HashMap::<&str, Vec<PortId>>::new();
-    // Pop the smallest current index first, preserving the original first-unused match.
-    // A port can appear in both namespaces; the shared bitmap makes mixed saved keys safe.
-    for (index, port) in ports.iter_with_ids().rev() {
-        if use_crossing_ids && let Some(id) = port.crossing_minimization_id {
-            by_crossing_id.entry(id).or_default().push(index);
-        }
-        if use_fallback_ids {
-            by_fallback_id
-                .entry(port.id.as_str())
-                .or_default()
-                .push(index);
-        }
-    }
-    let mut order = Vec::with_capacity(port_ids.len());
-    let mut used = vec![false; ports.slot_count()];
-    for port_key in port_ids {
-        let candidates = if let Some(id) = port_key.crossing_minimization_id {
-            by_crossing_id.get_mut(&id)?
-        } else {
-            by_fallback_id.get_mut(port_key.fallback_id.as_str())?
-        };
-        let index = loop {
-            let index = candidates.pop()?;
-            if !used[index.index()] {
-                break index;
-            }
-        };
-        used[index.index()] = true;
-        order.push(index);
-    }
-    Some(order)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2159,8 +2092,10 @@ mod tests {
         );
     }
 
+    // Mutation: leave the ports where the sweep put them, which skips `reorder_node_ports` in the
+    // transfer.
     #[test]
-    fn sweep_copy_restores_ports_by_crossing_minimization_id_when_external_ids_repeat() {
+    fn sweep_copy_restores_ports_when_external_ids_repeat() {
         let mut graph = graph(vec![node("A")], vec![]);
         let a = graph
             .layerless_nodes
@@ -2201,58 +2136,6 @@ mod tests {
                 .map(|port| port.crossing_minimization_id)
                 .collect::<Vec<_>>(),
             vec![Some(7), Some(8)]
-        );
-    }
-    #[test]
-    fn sweep_copy_port_lookup_preserves_duplicate_and_mixed_fallback_matches() {
-        let mut graph = graph(vec![node("A")], vec![]);
-        graph.layerless_nodes[0].ports.clear();
-        for (crossing_id, id) in [
-            (Some(7), "same"),
-            (Some(8), "same"),
-            (Some(7), "other"),
-            (None, "same"),
-        ] {
-            let port = graph
-                .add_port(0, PortType::Output, PortSide::East, LPoint::default())
-                .unwrap();
-            graph.layerless_nodes[0].ports[port.port].crossing_minimization_id = crossing_id;
-            graph.layerless_nodes[0].ports[port.port].id = id.to_string();
-        }
-        let key = |crossing_minimization_id, fallback_id: &str| PortOrderKey {
-            crossing_minimization_id,
-            fallback_id: fallback_id.to_string(),
-        };
-        let mixed = [
-            key(None, "same"),
-            key(Some(7), "ignored"),
-            key(None, "same"),
-            key(None, "same"),
-        ];
-        assert_eq!(
-            port_order_indices_by_id(&graph, 0, &mixed),
-            Some(vec![0, 2, 1, 3].into_iter().map(PortId::new).collect())
-        );
-        let repeated = [
-            key(Some(7), "ignored"),
-            key(Some(7), "ignored"),
-            key(None, "same"),
-            key(None, "same"),
-        ];
-        assert_eq!(
-            port_order_indices_by_id(&graph, 0, &repeated),
-            Some(vec![0, 2, 1, 3].into_iter().map(PortId::new).collect())
-        );
-        let missing = [
-            key(Some(99), "same"),
-            key(None, "same"),
-            key(None, "other"),
-            key(None, "same"),
-        ];
-        assert_eq!(
-            port_order_indices_by_id(&graph, 0, &missing),
-            None,
-            "a saved numeric ID must never fall back to the external ID"
         );
     }
 
