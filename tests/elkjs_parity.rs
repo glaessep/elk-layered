@@ -276,6 +276,14 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    hierarchy-edge-at-fixed-side-node-left and random-group-ports/r002.
 // 32. In `Tree::count_port_facts` (src/layout.rs), count a grandchild as a child: 3 cases,
 //    ports-edge-to-grandchild, random-group-ports/r060 and r067.
+// 33. In `split` (src/components.rs), let every component join no side
+//    (`sides | group::SIDES_NONE`): 15 cases, such as ports-group-components,
+//    ports-group-components-rows and random-group-ports/r006.
+// 34. In `combine` (src/components.rs), place the components of a graph with external ports with
+//    the SimpleRow placer: 16 cases, such as ports-group-components-free, ports-group-components
+//    and random-group-ports/r022.
+// 35. In `combine`, leave out the move of the component's own offset after the group placer: 8
+//    cases, such as ports-group-components, random-group-ports/r040 and r113.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

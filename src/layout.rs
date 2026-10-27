@@ -1330,9 +1330,7 @@ fn pipeline_error(scope: &str, error: PipelineError) -> Error {
             reason: error.to_string(),
         },
         // A step that is not ported.
-        error @ PipelineError::Component(
-            ComponentError::ExternalPortGroups | ComponentError::HierarchyEdges,
-        ) => Error::Unsupported {
+        error @ PipelineError::Component(ComponentError::HierarchyEdges) => Error::Unsupported {
             element: node_element(scope),
             feature: error.to_string(),
         },

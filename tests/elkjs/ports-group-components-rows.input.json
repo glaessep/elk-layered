@@ -1,0 +1,127 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT"
+  },
+  "children": [
+    {
+      "id": "src",
+      "width": 50,
+      "height": 30
+    },
+    {
+      "id": "dst",
+      "width": 50,
+      "height": 30
+    },
+    {
+      "id": "g",
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.aspectRatio": "3",
+        "elk.spacing.componentComponent": "7"
+      },
+      "ports": [
+        {
+          "id": "gin",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          }
+        },
+        {
+          "id": "gout",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          }
+        }
+      ],
+      "children": [
+        {
+          "id": "w1",
+          "width": 50,
+          "height": 24
+        },
+        {
+          "id": "e1",
+          "width": 44,
+          "height": 16
+        },
+        {
+          "id": "n0",
+          "width": 30,
+          "height": 20
+        },
+        {
+          "id": "n1",
+          "width": 37,
+          "height": 25
+        },
+        {
+          "id": "n2",
+          "width": 44,
+          "height": 30
+        },
+        {
+          "id": "n3",
+          "width": 51,
+          "height": 35
+        },
+        {
+          "id": "n4",
+          "width": 58,
+          "height": 40
+        },
+        {
+          "id": "n5",
+          "width": 65,
+          "height": 45
+        }
+      ],
+      "edges": [
+        {
+          "id": "gi1",
+          "sources": [
+            "gin"
+          ],
+          "targets": [
+            "w1"
+          ]
+        },
+        {
+          "id": "go1",
+          "sources": [
+            "e1"
+          ],
+          "targets": [
+            "gout"
+          ]
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "o1",
+      "sources": [
+        "src"
+      ],
+      "targets": [
+        "gin"
+      ]
+    },
+    {
+      "id": "o2",
+      "sources": [
+        "gout"
+      ],
+      "targets": [
+        "dst"
+      ]
+    }
+  ]
+}

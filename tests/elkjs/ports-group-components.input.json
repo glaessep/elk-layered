@@ -1,0 +1,165 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT"
+  },
+  "children": [
+    {
+      "id": "src",
+      "width": 50,
+      "height": 30
+    },
+    {
+      "id": "dst",
+      "width": 50,
+      "height": 30
+    },
+    {
+      "id": "g",
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE"
+      },
+      "ports": [
+        {
+          "id": "gin",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          }
+        },
+        {
+          "id": "gout",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          }
+        }
+      ],
+      "children": [
+        {
+          "id": "w1",
+          "width": 50,
+          "height": 24
+        },
+        {
+          "id": "w2",
+          "width": 30,
+          "height": 40
+        },
+        {
+          "id": "e1",
+          "width": 44,
+          "height": 16
+        },
+        {
+          "id": "b1",
+          "width": 36,
+          "height": 28
+        },
+        {
+          "id": "b2",
+          "width": 36,
+          "height": 12
+        },
+        {
+          "id": "n1",
+          "width": 60,
+          "height": 30
+        },
+        {
+          "id": "n2",
+          "width": 20,
+          "height": 50
+        }
+      ],
+      "edges": [
+        {
+          "id": "gi1",
+          "sources": [
+            "gin"
+          ],
+          "targets": [
+            "w1"
+          ]
+        },
+        {
+          "id": "gi2",
+          "sources": [
+            "gin"
+          ],
+          "targets": [
+            "w2"
+          ]
+        },
+        {
+          "id": "gx1",
+          "sources": [
+            "w1"
+          ],
+          "targets": [
+            "w2"
+          ]
+        },
+        {
+          "id": "go1",
+          "sources": [
+            "e1"
+          ],
+          "targets": [
+            "gout"
+          ]
+        },
+        {
+          "id": "gt1",
+          "sources": [
+            "gin"
+          ],
+          "targets": [
+            "b1"
+          ]
+        },
+        {
+          "id": "gt2",
+          "sources": [
+            "b1"
+          ],
+          "targets": [
+            "gout"
+          ]
+        },
+        {
+          "id": "gm1",
+          "sources": [
+            "n1"
+          ],
+          "targets": [
+            "n2"
+          ]
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "o1",
+      "sources": [
+        "src"
+      ],
+      "targets": [
+        "gin"
+      ]
+    },
+    {
+      "id": "o2",
+      "sources": [
+        "gout"
+      ],
+      "targets": [
+        "dst"
+      ]
+    }
+  ]
+}
