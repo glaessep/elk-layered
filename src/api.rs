@@ -18,18 +18,12 @@
 //!
 //! elkjs reads an edge in an old form too: a single `source` and `target` string, with an
 //! optional `sourcePort` and `targetPort`. elkjs picks the old form only when neither `sources`
-//! nor `targets` is present. Then the edge starts at `sourcePort` if it is given, else at
-//! `source`, and ends at `targetPort` or `target` the same way. Here, `source` and `target` read
-//! as one-element `sources` and `targets`, and a port key replaces them, so the edge names the
-//! port alone. The edge also sets [`ElkEdge::source_is_port`] or [`ElkEdge::target_is_port`].
-//! Layout then looks that id up among the ports only, as `transformPrimitiveEdge` does with
-//! `portIdMap`, so a node with the same id as the port does not take the edge. Two differences
-//! follow. elkjs checks that the port belongs to the named node, and this mapping drops that
-//! check: a port of another node attaches to that port's node. elkjs
-//! also ignores a port key that names no port and attaches the edge to the node; here the edge
-//! then names an id that is no node, and layout reports `UnknownId`. In the new form, elkjs
-//! ignores both port keys, as this crate does. A graph that gives both `source` and `sources`
-//! is a serde error, and `source` next to `targets` reads as one source.
+//! nor `targets` is present. Here, `source` and `target` read as one-element `sources` and
+//! `targets`, and the port keys go to [`ElkEdge::old_form`]. Layout then follows
+//! `transformPrimitiveEdge`: `source` and `target` must name nodes, a port key names a port of
+//! that node, and a port key that names no port leaves the edge at the node. In the new form,
+//! elkjs ignores both port keys, as this crate does. A graph that gives both `source` and
+//! `sources` is a serde error, and `source` next to `targets` reads as one source.
 //!
 //! Source: `org.eclipse.elk.graph.json/src/org/eclipse/elk/graph/json/JsonImporter.xtend`,
 //! which reads this JSON and writes the layout back into it.
@@ -203,16 +197,21 @@ pub struct ElkEdge {
         serde(default, skip_serializing_if = "Vec::is_empty")
     )]
     pub junction_points: Vec<ElkPoint>,
-    /// Whether `sources` names a port and no node. The JSON reader sets it for the old
-    /// `sourcePort` key, and layout then looks the id up among the ports only, as elkjs does with
-    /// `portIdMap`. A node with the same id does not take the edge. The new form leaves it
-    /// `false`, and an id then names a node first, as `shapeById` does. The JSON writer leaves
-    /// this field out.
+    /// The port keys of an edge in elkjs's old JSON form, or `None` for the new form. When it is
+    /// set, `sources` and `targets` name nodes only, as `transformPrimitiveEdge` reads them. The
+    /// JSON reader sets it, and the JSON writer leaves it out.
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub source_is_port: bool,
-    /// Whether `targets` names a port and no node: the same for the old `targetPort` key.
-    #[cfg_attr(feature = "serde", serde(skip))]
-    pub target_is_port: bool,
+    pub old_form: Option<OldFormPorts>,
+}
+
+/// The `sourcePort` and `targetPort` keys of an edge in elkjs's old JSON form.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OldFormPorts {
+    /// The port of the source node the edge starts at. `None`, or an id that is no port, leaves
+    /// the edge at the node.
+    pub source_port: Option<String>,
+    /// The port of the target node the edge ends at, read the same way.
+    pub target_port: Option<String>,
 }
 
 /// One piece of an edge's route.
@@ -339,27 +338,22 @@ impl TryFrom<EdgeWire> for ElkEdge {
     type Error = String;
 
     /// Ports the old form of `JsonImporter.transformPrimitiveEdge`, which elkjs picks when neither
-    /// `sources` nor `targets` is present: the edge starts at `sourcePort` if it is given, else
-    /// at `source`, and ends at `targetPort` or `target` the same way.
+    /// `sources` nor `targets` is present. The port keys stay apart from the node ids, so that
+    /// layout can check them as elkjs does.
     fn try_from(wire: EdgeWire) -> Result<Self, Self::Error> {
         let old_form = wire.sources.is_none() && wire.targets.is_none();
         let id = wire.id;
-        // The ends, and whether the old form gave a port key for them.
-        let end = |plural: Option<Vec<String>>,
-                   single: Option<Vec<String>>,
-                   port: Option<String>,
-                   name: &str| match (plural, single) {
+        let end = |plural: Option<Vec<String>>, single: Option<Vec<String>>, name: &str| match (
+            plural, single,
+        ) {
             (Some(_), Some(_)) => Err(format!(
                 "edge \"{id}\": both \"{name}s\" and \"{name}\" are given"
             )),
-            (Some(ids), None) => Ok((ids, false)),
-            (None, single) => Ok(match port {
-                Some(port) if old_form => (vec![port], true),
-                _ => (single.unwrap_or_default(), false),
-            }),
+            (Some(ids), None) => Ok(ids),
+            (None, single) => Ok(single.unwrap_or_default()),
         };
-        let (sources, source_is_port) = end(wire.sources, wire.source, wire.source_port, "source")?;
-        let (targets, target_is_port) = end(wire.targets, wire.target, wire.target_port, "target")?;
+        let sources = end(wire.sources, wire.source, "source")?;
+        let targets = end(wire.targets, wire.target, "target")?;
         Ok(Self {
             id: id.clone(),
             sources,
@@ -369,8 +363,10 @@ impl TryFrom<EdgeWire> for ElkEdge {
             sections: wire.sections,
             container: wire.container,
             junction_points: wire.junction_points,
-            source_is_port,
-            target_is_port,
+            old_form: old_form.then_some(OldFormPorts {
+                source_port: wire.source_port,
+                target_port: wire.target_port,
+            }),
         })
     }
 }

@@ -29,6 +29,17 @@ pub enum Error {
         /// The id it names.
         id: String,
     },
+    /// An edge in elkjs's old JSON form names a port that belongs to another node than its
+    /// `source` or `target`.
+    #[error("edge \"{edge}\": port \"{port}\" is no port of node \"{node}\"")]
+    PortOfOtherNode {
+        /// The edge's id.
+        edge: String,
+        /// The port it names.
+        port: String,
+        /// The node it names next to the port.
+        node: String,
+    },
     /// An edge has no source or no target.
     #[error("edge \"{edge}\" needs a source and a target")]
     MissingEdgeEnd {

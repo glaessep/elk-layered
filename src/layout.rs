@@ -297,39 +297,52 @@ impl<'a> Tree<'a> {
                     });
                 }
                 // Ports `JsonImporter.shapeById`: an id names a node first, and a port if no node
-                // has it. `ElkGraphUtil.connectableShapeToNode` gives the port's node. An old-form
-                // `sourcePort` or `targetPort` is a port key: `transformPrimitiveEdge` looks it up
-                // in `portIdMap` alone, so a node with the same id must not take the edge.
-                let find = |id: &String, port_key: bool| {
-                    let port = || {
-                        port_by_id
-                            .get(id.as_str())
-                            .map(|&(node, port)| (node, Some(port)))
-                    };
-                    let found = if port_key {
-                        port()
-                    } else {
-                        by_id
-                            .get(id.as_str())
-                            .map(|&node| (node, None))
-                            .or_else(port)
-                    };
-                    found.ok_or_else(|| Error::UnknownId {
+                // has it. `ElkGraphUtil.connectableShapeToNode` gives the port's node.
+                let find = |id: &String| {
+                    by_id
+                        .get(id.as_str())
+                        .map(|&node| (node, None))
+                        .or_else(|| {
+                            port_by_id
+                                .get(id.as_str())
+                                .map(|&(node, port)| (node, Some(port)))
+                        })
+                        .ok_or_else(|| Error::UnknownId {
+                            edge: edge.id.clone(),
+                            id: id.clone(),
+                        })
+                };
+                // Ports `JsonImporter.transformPrimitiveEdge`, the old form: the id names a node,
+                // looked up in `nodeIdMap` alone. A port key is looked up in `portIdMap` alone. A
+                // port of another node is an error, and a key that names no port leaves the edge
+                // at the node.
+                let find_old = |id: &String, port_key: Option<&String>| {
+                    let node = *by_id.get(id.as_str()).ok_or_else(|| Error::UnknownId {
                         edge: edge.id.clone(),
                         id: id.clone(),
-                    })
+                    })?;
+                    match port_key.and_then(|key| port_by_id.get(key.as_str()).map(|p| (key, p))) {
+                        None => Ok((node, None)),
+                        Some((_, &(owner, port))) if owner == node => Ok((node, Some(port))),
+                        Some((key, _)) => Err(Error::PortOfOtherNode {
+                            edge: edge.id.clone(),
+                            port: key.clone(),
+                            node: id.clone(),
+                        }),
+                    }
+                };
+                let end = |ids: &[String], port_key: Option<&String>| {
+                    ids.iter()
+                        .map(|id| match &edge.old_form {
+                            Some(_) => find_old(id, port_key),
+                            None => find(id),
+                        })
+                        .collect::<Result<Vec<_>, _>>()
                 };
                 // Check every end before refusing a hyperedge, so an unknown id wins.
-                let sources = edge
-                    .sources
-                    .iter()
-                    .map(|id| find(id, edge.source_is_port))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let targets = edge
-                    .targets
-                    .iter()
-                    .map(|id| find(id, edge.target_is_port))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let old = edge.old_form.as_ref();
+                let sources = end(&edge.sources, old.and_then(|o| o.source_port.as_ref()))?;
+                let targets = end(&edge.targets, old.and_then(|o| o.target_port.as_ref()))?;
                 if sources.len() > 1 || targets.len() > 1 {
                     return Err(Error::Unsupported {
                         element,
@@ -1223,6 +1236,14 @@ impl<'a, 't> Work<'a, 't> {
         let tree = self.tree;
         for (index, info) in tree.edges.iter().enumerate() {
             let container = tree.nodes[info.container].node.id.clone();
+            // The shapes the edge was attached to, as elkjs writes their ids. In the old form a
+            // port key names a port that `sources` and `targets` do not.
+            let shape = |node: usize, port: Option<usize>| {
+                let node = tree.nodes[node].node;
+                port.map_or(&node.id, |port| &node.ports[port].id).clone()
+            };
+            let incoming_shape = shape(info.source, info.source_port);
+            let outgoing_shape = shape(info.target, info.target_port);
             let route = self.routes.remove(&index);
             let labels = self.edge_labels.remove(&index).unwrap_or_default();
             let node = self.out_node(info.given_in);
@@ -1240,8 +1261,8 @@ impl<'a, 't> Work<'a, 't> {
                     start_point: point(route.start),
                     end_point: point(route.end),
                     bend_points: route.bend_points.into_iter().map(point).collect(),
-                    incoming_shape: edge.sources.first().cloned(),
-                    outgoing_shape: edge.targets.first().cloned(),
+                    incoming_shape: Some(incoming_shape),
+                    outgoing_shape: Some(outgoing_shape),
                 }];
                 // `JsonImporter.transferLayoutInt` writes junction points only when there are some.
                 // With none, the edge keeps the ones it came with: the layout sets the ELK
