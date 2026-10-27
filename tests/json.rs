@@ -1,6 +1,6 @@
 //! The graph types read and write elkjs's JSON shape.
 
-use elk_layered::{ElkNode, layout};
+use elk_layered::{ElkEdge, ElkNode, layout};
 use serde_json::{Value, json};
 
 // Mutation: drop `default` from `ElkNode::x`.
@@ -150,11 +150,50 @@ fn the_old_edge_form_reads_like_sources_and_targets() {
     assert_eq!(old.edges[0].sources, ["a"]);
     assert_eq!(old.edges[0].targets, ["b"]);
     let new = graph(json!({"id": "e", "sources": ["a"], "targets": ["b"]}));
-    assert_eq!(layout(&old).unwrap(), layout(&new).unwrap());
-    // The result is written in the new form.
-    let back = serde_json::to_value(layout(&old).unwrap()).unwrap();
-    assert_eq!(back["edges"][0]["sources"], json!(["a"]));
-    assert!(back["edges"][0].get("source").is_none());
+    assert_eq!(
+        layout(&old).unwrap().edges[0].sections,
+        layout(&new).unwrap().edges[0].sections
+    );
+}
+
+// Mutation: in `EdgeOut::from`, write an old-form edge with `sources` and `targets`.
+#[test]
+fn an_old_form_edge_is_written_back_in_the_old_form() {
+    let graph: ElkNode = serde_json::from_value(json!({
+        "id": "root",
+        "children": [{"id": "a", "width": 60, "height": 30}, {"id": "b", "width": 60, "height": 30}],
+        "edges": [{"id": "e", "source": "a", "target": "b"}]
+    }))
+    .unwrap();
+    let edge = &laid_out(&graph)["edges"][0];
+    assert_eq!(edge["source"], "a");
+    assert_eq!(edge["target"], "b");
+    assert!(edge.get("sources").is_none() && edge.get("sourcePort").is_none());
+    // The new form stays the new form.
+    let new = serde_json::to_value(ElkEdge {
+        id: "e".into(),
+        sources: vec!["a".into()],
+        targets: vec!["b".into()],
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(new["sources"], json!(["a"]));
+    assert!(new.get("source").is_none());
+}
+
+// Mutation: leave the port keys out of the written edge. Read again, `sources: ["p"]` then names
+// the node `p` first, and the second layout differs from the first.
+#[test]
+fn an_old_form_edge_lays_out_the_same_after_a_round_trip() {
+    let first = graph_with_a_node_named(
+        "p",
+        json!({"id": "e", "source": "a", "target": "b", "sourcePort": "p", "targetPort": "q"}),
+    );
+    let written = laid_out(&first);
+    assert_eq!(written["edges"][0]["sourcePort"], "p");
+    assert_eq!(written["edges"][0]["targetPort"], "q");
+    let again: ElkNode = serde_json::from_value(written.clone()).unwrap();
+    assert_eq!(laid_out(&again), written);
 }
 
 // Mutation: let the `ends` deserializer accept only a list.
@@ -172,57 +211,54 @@ fn an_edge_end_is_a_string_or_a_list_of_strings() {
     assert!(serde_json::from_value::<ElkNode>(both).is_err());
 }
 
+/// A graph with nodes `a` and `b`, a port `p` on `a`, a port `q` on `b`, and one edge.
+fn graph_with_ports(edge: Value) -> ElkNode {
+    serde_json::from_value(json!({
+        "id": "root",
+        "children": [
+            {"id": "a", "width": 60, "height": 30, "layoutOptions": {"elk.portConstraints": "FIXED_SIDE"},
+             "ports": [{"id": "p", "width": 6, "height": 4, "layoutOptions": {"elk.port.side": "EAST"}}]},
+            {"id": "b", "width": 60, "height": 30, "layoutOptions": {"elk.portConstraints": "FIXED_SIDE"},
+             "ports": [{"id": "q", "width": 6, "height": 4, "layoutOptions": {"elk.port.side": "WEST"}}]}
+        ],
+        "edges": [edge]
+    }))
+    .unwrap()
+}
+
+/// The layout as elkjs's JSON, which leaves out `ElkEdge::old_form`.
+fn laid_out(graph: &ElkNode) -> Value {
+    serde_json::to_value(layout(graph).unwrap()).unwrap()
+}
+
 // Mutation: drop the `source_port` and `target_port` fields of `EdgeWire`, so the old port keys
 // read as nothing and the edge is laid out at the node.
 #[test]
 fn the_old_edge_form_attaches_to_a_port_when_it_gives_one() {
-    let edge = |edge: Value| -> ElkNode {
-        serde_json::from_value(json!({
-            "id": "root",
-            "children": [
-                {"id": "a", "width": 60, "height": 30, "layoutOptions": {"elk.portConstraints": "FIXED_SIDE"},
-                 "ports": [{"id": "p", "width": 6, "height": 4, "layoutOptions": {"elk.port.side": "EAST"}}]},
-                {"id": "b", "width": 60, "height": 30, "layoutOptions": {"elk.portConstraints": "FIXED_SIDE"},
-                 "ports": [{"id": "q", "width": 6, "height": 4, "layoutOptions": {"elk.port.side": "WEST"}}]}
-            ],
-            "edges": [edge]
-        }))
-        .unwrap()
+    let ports = |edge: Value| {
+        let old_form = graph_with_ports(edge).edges[0].old_form.clone().unwrap();
+        (old_form.source_port, old_form.target_port)
     };
-    let ends = |graph: &ElkNode| {
-        (
-            graph.edges[0].sources.clone(),
-            graph.edges[0].targets.clone(),
-        )
-    };
-    // The port wins over the node, on either end, and a missing key keeps the node.
+    let some = |id: &str| Some(id.to_string());
     assert_eq!(
-        ends(&edge(
-            json!({"id": "e", "source": "a", "target": "b", "sourcePort": "p"})
-        )),
-        (vec!["p".to_string()], vec!["b".to_string()])
+        ports(json!({"id": "e", "source": "a", "target": "b", "sourcePort": "p"})),
+        (some("p"), None)
     );
     assert_eq!(
-        ends(&edge(
-            json!({"id": "e", "source": "a", "target": "b", "targetPort": "q"})
-        )),
-        (vec!["a".to_string()], vec!["q".to_string()])
+        ports(json!({"id": "e", "source": "a", "target": "b", "targetPort": "q"})),
+        (None, some("q"))
     );
+    // The result is the layout of the new form with port ids, the section's shapes included.
+    let old =
+        json!({"id": "e", "source": "a", "target": "b", "sourcePort": "p", "targetPort": "q"});
+    let new = json!({"id": "e", "sources": ["p"], "targets": ["q"]});
+    let old = laid_out(&graph_with_ports(old));
     assert_eq!(
-        ends(&edge(
-            json!({"id": "e", "source": "a", "target": "b", "sourcePort": "p", "targetPort": "q"})
-        )),
-        (vec!["p".to_string()], vec!["q".to_string()])
+        old["edges"][0]["sections"],
+        laid_out(&graph_with_ports(new))["edges"][0]["sections"]
     );
-    // The result is the same layout as the new form with port ids.
-    let new = edge(json!({"id": "e", "sources": ["p"], "targets": ["q"]}));
-    let old = edge(
-        json!({"id": "e", "source": "a", "target": "b", "sourcePort": "p", "targetPort": "q"}),
-    );
-    assert_eq!(
-        layout(&old).unwrap().edges[0].sections,
-        layout(&new).unwrap().edges[0].sections
-    );
+    assert_eq!(old["edges"][0]["sections"][0]["incomingShape"], "p");
+    assert_eq!(old["edges"][0]["source"], "a");
 }
 
 // Mutation: read the port keys also in the new form. elkjs ignores them there.
@@ -234,7 +270,7 @@ fn the_new_edge_form_ignores_the_old_port_keys() {
     }))
     .unwrap();
     assert_eq!(graph.edges[0].sources, ["a"]);
-    assert_eq!(graph.edges[0].targets, ["b"]);
+    assert_eq!(graph.edges[0].old_form, None);
     // `source` next to `targets` is not the old form either.
     let mixed: ElkNode = serde_json::from_value(json!({
         "id": "root",
@@ -242,22 +278,163 @@ fn the_new_edge_form_ignores_the_old_port_keys() {
     }))
     .unwrap();
     assert_eq!(mixed.edges[0].sources, ["a"]);
+    assert_eq!(mixed.edges[0].old_form, None);
 }
 
-// Mutation: let a port key that names no port keep the edge at the node. Here the edge names the
-// id, which is no node, and layout reports it.
+// Mutation: report a port key that names no port as an unknown id. elkjs finds no port in
+// `portIdMap` and leaves the edge at the node.
 #[test]
-fn an_old_port_key_that_names_no_port_is_an_unknown_id() {
-    let graph: ElkNode = serde_json::from_value(json!({
-        "id": "root",
-        "children": [{"id": "a", "width": 60, "height": 30}, {"id": "b", "width": 60, "height": 30}],
-        "edges": [{"id": "e", "source": "a", "target": "b", "sourcePort": "nowhere"}]
-    }))
-    .unwrap();
-    assert!(matches!(
-        layout(&graph),
-        Err(elk_layered::Error::UnknownId { id, .. }) if id == "nowhere"
+fn an_old_port_key_that_names_no_port_leaves_the_edge_at_the_node() {
+    let at_node = laid_out(&graph_with_ports(
+        json!({"id": "e", "source": "a", "target": "b"}),
     ));
+    for key in ["sourcePort", "targetPort"] {
+        let mut edge = json!({"id": "e", "source": "a", "target": "b"});
+        edge[key] = json!("nowhere");
+        let laid = laid_out(&graph_with_ports(edge));
+        assert_eq!(
+            laid["edges"][0]["sections"], at_node["edges"][0]["sections"],
+            "{key}"
+        );
+        assert_eq!(laid["children"], at_node["children"], "{key}");
+    }
+}
+
+/// A graph with nodes `a`, `b` and `other`, and a port `p` on `a` and `q` on `b`. `other` is the
+/// id the test gives to a third node: `p` makes it share the id of the port, a fresh id does not.
+fn graph_with_a_node_named(other: &str, edge: Value) -> ElkNode {
+    serde_json::from_value(json!({
+        "id": "root",
+        "children": [
+            {"id": "a", "width": 60, "height": 30, "layoutOptions": {"elk.portConstraints": "FIXED_SIDE"},
+             "ports": [{"id": "p", "width": 6, "height": 4, "layoutOptions": {"elk.port.side": "EAST"}}]},
+            {"id": "b", "width": 60, "height": 30, "layoutOptions": {"elk.portConstraints": "FIXED_SIDE"},
+             "ports": [{"id": "q", "width": 6, "height": 4, "layoutOptions": {"elk.port.side": "WEST"}}]},
+            {"id": other, "width": 20, "height": 20}
+        ],
+        "edges": [edge]
+    }))
+    .unwrap()
+}
+
+// Mutation: look an old-form port key up among the nodes first, as the new form does. The edge
+// then starts at the node `p` and not at the port `p`.
+#[test]
+fn an_old_port_key_names_a_port_even_when_a_node_has_the_same_id() {
+    for (edge, new_form) in [
+        (
+            json!({"id": "e", "source": "a", "target": "b", "sourcePort": "p"}),
+            json!({"id": "e", "sources": ["p"], "targets": ["b"]}),
+        ),
+        (
+            json!({"id": "e", "source": "a", "target": "b", "targetPort": "q"}),
+            json!({"id": "e", "sources": ["a"], "targets": ["q"]}),
+        ),
+    ] {
+        // The same graph, where the third node does not share the id of the port. In the new form
+        // an id names the node first, so only here does it name the port too.
+        let apart = layout(&graph_with_a_node_named("other", new_form)).unwrap();
+        let shared_id = if edge.get("sourcePort").is_some() {
+            "p"
+        } else {
+            "q"
+        };
+        let shared = layout(&graph_with_a_node_named(shared_id, edge)).unwrap();
+        assert_eq!(shared.edges[0].sections, apart.edges[0].sections);
+    }
+}
+
+// Mutation: let an old-form port key fall back to a node with that id. elkjs looks the key up in
+// `portIdMap` alone, finds nothing, and leaves the edge at the node `source` names.
+#[test]
+fn an_old_port_key_that_only_a_node_has_leaves_the_edge_at_the_named_node() {
+    let graph = |edge: Value| -> ElkNode {
+        serde_json::from_value(json!({
+            "id": "root",
+            "children": [
+                {"id": "a", "width": 60, "height": 30},
+                {"id": "b", "width": 60, "height": 30},
+                {"id": "n", "width": 60, "height": 30}
+            ],
+            "edges": [edge]
+        }))
+        .unwrap()
+    };
+    let with_key = graph(json!({"id": "e", "source": "a", "target": "b", "sourcePort": "n"}));
+    let without = graph(json!({"id": "e", "source": "a", "target": "b"}));
+    let (with_key, without) = (laid_out(&with_key), laid_out(&without));
+    assert_eq!(
+        with_key["edges"][0]["sections"],
+        without["edges"][0]["sections"]
+    );
+    assert_eq!(with_key["children"], without["children"]);
+}
+
+// Mutation: drop the owner check in `find_old`, so a port of another node takes the edge to that
+// node, as before this check.
+#[test]
+fn an_old_port_key_of_another_node_is_an_error() {
+    for (edge, port, node) in [
+        (
+            json!({"id": "e", "source": "a", "target": "b", "sourcePort": "q"}),
+            "q",
+            "a",
+        ),
+        (
+            json!({"id": "e", "source": "a", "target": "b", "targetPort": "p"}),
+            "p",
+            "b",
+        ),
+    ] {
+        assert_eq!(
+            layout(&graph_with_ports(edge)),
+            Err(elk_layered::Error::PortOfOtherNode {
+                edge: "e".into(),
+                port: port.into(),
+                node: node.into(),
+            })
+        );
+    }
+}
+
+// Mutation: let an old-form port key stand in for a missing `source`. elkjs needs the node:
+// "An edge must have a source node".
+#[test]
+fn an_old_port_key_without_its_node_is_an_error() {
+    let edge = json!({"id": "e", "target": "b", "sourcePort": "p"});
+    assert_eq!(
+        layout(&graph_with_ports(edge)),
+        Err(elk_layered::Error::MissingEdgeEnd { edge: "e".into() })
+    );
+    let edge = json!({"id": "e", "source": "nowhere", "target": "b", "sourcePort": "p"});
+    assert_eq!(
+        layout(&graph_with_ports(edge)),
+        Err(elk_layered::Error::UnknownId {
+            edge: "e".into(),
+            id: "nowhere".into(),
+        })
+    );
+}
+
+// Mutation: look an old-form `source` up among the ports too, as the new form does. elkjs looks
+// it up in `nodeIdMap` alone.
+#[test]
+fn an_old_form_end_names_a_node_and_never_a_port() {
+    let edge = json!({"id": "e", "source": "p", "target": "b"});
+    assert_eq!(
+        layout(&graph_with_ports(edge)),
+        Err(elk_layered::Error::UnknownId {
+            edge: "e".into(),
+            id: "p".into(),
+        })
+    );
+    // The new form takes the same id as the port.
+    assert!(
+        layout(&graph_with_ports(
+            json!({"id": "e", "sources": ["p"], "targets": ["b"]})
+        ))
+        .is_ok()
+    );
 }
 
 // Mutation: read a `null` port key as an id.
@@ -269,5 +446,8 @@ fn a_null_old_port_key_is_no_port() {
     }))
     .unwrap();
     assert_eq!(graph.edges[0].sources, ["a"]);
-    assert_eq!(graph.edges[0].targets, ["b"]);
+    assert_eq!(
+        graph.edges[0].old_form,
+        Some(elk_layered::OldFormPorts::default())
+    );
 }

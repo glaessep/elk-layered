@@ -60,7 +60,7 @@ mod transform;
 #[cfg(test)]
 mod snapshot_tests;
 
-pub use api::{ElkEdge, ElkEdgeSection, ElkLabel, ElkNode, ElkPoint, ElkPort};
+pub use api::{ElkEdge, ElkEdgeSection, ElkLabel, ElkNode, ElkPoint, ElkPort, OldFormPorts};
 pub use error::Error;
 pub use layout::layout;
 

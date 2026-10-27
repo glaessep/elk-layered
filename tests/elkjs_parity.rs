@@ -303,8 +303,11 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 31. In `ensure_hierarchy_endpoint_port` (src/importer.rs), leave the side of the port of a
 //    hierarchy edge undefined: 36 cases, such as hierarchy-edge-at-fixed-side-node,
 //    hierarchy-edge-at-fixed-side-node-left and random-group-ports/r002.
-// 32. In `Tree::count_port_facts` (src/layout.rs), count a grandchild as a child: 3 cases,
-//    ports-edge-to-grandchild, random-group-ports/r060 and r067.
+// 32. In `Tree::count_port_facts` (src/layout.rs), count a grandchild as a child, in the net flow
+//    and in the count of child edges: 7 cases, such as ports-edge-to-grandchild,
+//    ports-free-port-edge-to-grandchild-include-children, random-group-ports/r060 and r067.
+//    `ElkGraphImporter.calculateNetFlow` tests the parent of the target, not every ancestor, so
+//    an edge to a grandchild votes for an output port.
 // 33. In `split` (src/components.rs), let every component join no side
 //    (`sides | group::SIDES_NONE`): 15 cases, such as ports-group-components,
 //    ports-group-components-rows and random-group-ports/r006.
@@ -339,6 +342,13 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 45. In `minimize_barycenter_with_counter` (src/p3order/sweep.rs), end the loop with
 //    `old <= new` instead of `!sweep_improved_crossings(old, new)`: the same 2 cases differ, as a `NaN` count no longer
 //    ends the loop.
+// 46. In `original_net_flows` (src/compound.rs), key the source of a hierarchy edge as a made-up
+//    port (`false` for `edge.source_port_named`): 5 cases, such as
+//    ports-caller-id-like-made-up-id-include-children, ports-group-include-flow-of-split-edges-out
+//    and random-group-ports/r037. The first names the ports of G `G:1` and `G:2`, the id the
+//    importer gives to the made-up port of the edge into G, so the two ports must not share a flow.
+// 47. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), look the
+//    flow of a port up as a made-up port (`false` for `port.named`): 2 cases, ports-group-include-flow-of-split-edges and random-group-ports/r037.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

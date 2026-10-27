@@ -18,15 +18,13 @@
 //!
 //! elkjs reads an edge in an old form too: a single `source` and `target` string, with an
 //! optional `sourcePort` and `targetPort`. elkjs picks the old form only when neither `sources`
-//! nor `targets` is present. Then the edge starts at `sourcePort` if it is given, else at
-//! `source`, and ends at `targetPort` or `target` the same way. Here, `source` and `target` read
-//! as one-element `sources` and `targets`, and a port key replaces them, so the edge names the
-//! port alone. Two differences follow. elkjs checks that the port belongs to the named node, and
-//! this mapping drops that check: a port of another node attaches to that port's node. elkjs
-//! also ignores a port key that names no port and attaches the edge to the node; here the edge
-//! then names an id that is no node, and layout reports `UnknownId`. In the new form, elkjs
-//! ignores both port keys, as this crate does. A graph that gives both `source` and `sources`
-//! is a serde error, and `source` next to `targets` reads as one source.
+//! nor `targets` is present. Here, `source` and `target` read as one-element `sources` and
+//! `targets`, and the port keys go to [`ElkEdge::old_form`]. Layout then follows
+//! `transformPrimitiveEdge`: `source` and `target` must name nodes, a port key names a port of
+//! that node, and a port key that names no port leaves the edge at the node. The JSON writer
+//! writes such an edge in the old form again, as elkjs writes its layout into the input. In the new form,
+//! elkjs ignores both port keys, as this crate does. A graph that gives both `source` and
+//! `sources` is a serde error, and `source` next to `targets` reads as one source.
 //!
 //! Source: `org.eclipse.elk.graph.json/src/org/eclipse/elk/graph/json/JsonImporter.xtend`,
 //! which reads this JSON and writes the layout back into it.
@@ -143,7 +141,7 @@ pub struct ElkPort {
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[cfg_attr(feature = "serde", serde(try_from = "EdgeWire"))]
+#[cfg_attr(feature = "serde", serde(try_from = "EdgeWire", into = "EdgeOut"))]
 pub struct ElkEdge {
     /// Unique among all edges of the graph.
     pub id: String,
@@ -200,6 +198,21 @@ pub struct ElkEdge {
         serde(default, skip_serializing_if = "Vec::is_empty")
     )]
     pub junction_points: Vec<ElkPoint>,
+    /// The port keys of an edge in elkjs's old JSON form, or `None` for the new form. When it is
+    /// set, `sources` and `targets` name nodes only, as `transformPrimitiveEdge` reads them. The
+    /// JSON reader sets it, and the JSON writer then writes the edge in the old form again.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub old_form: Option<OldFormPorts>,
+}
+
+/// The `sourcePort` and `targetPort` keys of an edge in elkjs's old JSON form.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OldFormPorts {
+    /// The port of the source node the edge starts at. `None`, or an id that is no port, leaves
+    /// the edge at the node.
+    pub source_port: Option<String>,
+    /// The port of the target node the edge ends at, read the same way.
+    pub target_port: Option<String>,
 }
 
 /// One piece of an edge's route.
@@ -326,26 +339,22 @@ impl TryFrom<EdgeWire> for ElkEdge {
     type Error = String;
 
     /// Ports the old form of `JsonImporter.transformPrimitiveEdge`, which elkjs picks when neither
-    /// `sources` nor `targets` is present: the edge starts at `sourcePort` if it is given, else
-    /// at `source`, and ends at `targetPort` or `target` the same way.
+    /// `sources` nor `targets` is present. The port keys stay apart from the node ids, so that
+    /// layout can check them as elkjs does.
     fn try_from(wire: EdgeWire) -> Result<Self, Self::Error> {
         let old_form = wire.sources.is_none() && wire.targets.is_none();
         let id = wire.id;
-        let end = |plural: Option<Vec<String>>,
-                   single: Option<Vec<String>>,
-                   port: Option<String>,
-                   name: &str| match (plural, single) {
+        let end = |plural: Option<Vec<String>>, single: Option<Vec<String>>, name: &str| match (
+            plural, single,
+        ) {
             (Some(_), Some(_)) => Err(format!(
                 "edge \"{id}\": both \"{name}s\" and \"{name}\" are given"
             )),
             (Some(ids), None) => Ok(ids),
-            (None, single) => Ok(match port {
-                Some(port) if old_form => vec![port],
-                _ => single.unwrap_or_default(),
-            }),
+            (None, single) => Ok(single.unwrap_or_default()),
         };
-        let sources = end(wire.sources, wire.source, wire.source_port, "source")?;
-        let targets = end(wire.targets, wire.target, wire.target_port, "target")?;
+        let sources = end(wire.sources, wire.source, "source")?;
+        let targets = end(wire.targets, wire.target, "target")?;
         Ok(Self {
             id: id.clone(),
             sources,
@@ -355,7 +364,95 @@ impl TryFrom<EdgeWire> for ElkEdge {
             sections: wire.sections,
             container: wire.container,
             junction_points: wire.junction_points,
+            old_form: old_form.then_some(OldFormPorts {
+                source_port: wire.source_port,
+                target_port: wire.target_port,
+            }),
         })
+    }
+}
+
+/// What `ElkEdge` writes to JSON. elkjs writes its layout into the input object, so an edge read
+/// in the old form comes back with the keys it was read with. Writing it in the new form would
+/// lose its port keys, and reading the result again would attach the edge elsewhere.
+#[cfg(feature = "serde")]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EdgeOut {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sources: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<OldEnd>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_port: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    targets: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<OldEnd>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_port: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    labels: Vec<ElkLabel>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    layout_options: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    sections: Vec<ElkEdgeSection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    container: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    junction_points: Vec<ElkPoint>,
+}
+
+/// An old-form `source` or `target`: the one id it was read as, or a list if it was one.
+#[cfg(feature = "serde")]
+#[derive(Serialize)]
+#[serde(untagged)]
+enum OldEnd {
+    One(String),
+    Many(Vec<String>),
+}
+
+#[cfg(feature = "serde")]
+impl From<ElkEdge> for EdgeOut {
+    fn from(edge: ElkEdge) -> Self {
+        let old_end = |mut ids: Vec<String>| match ids.len() {
+            0 => None,
+            1 => ids.pop().map(OldEnd::One),
+            _ => Some(OldEnd::Many(ids)),
+        };
+        let (sources, source, source_port, targets, target, target_port) = match edge.old_form {
+            None => (
+                Some(edge.sources),
+                None,
+                None,
+                Some(edge.targets),
+                None,
+                None,
+            ),
+            Some(ports) => (
+                None,
+                old_end(edge.sources),
+                ports.source_port,
+                None,
+                old_end(edge.targets),
+                ports.target_port,
+            ),
+        };
+        Self {
+            id: edge.id,
+            sources,
+            source,
+            source_port,
+            targets,
+            target,
+            target_port,
+            labels: edge.labels,
+            layout_options: edge.layout_options,
+            sections: edge.sections,
+            container: edge.container,
+            junction_points: edge.junction_points,
+        }
     }
 }
 

@@ -1256,8 +1256,8 @@ impl HierarchySweep {
             total += info
                 .crossings_counter
                 .count_all_crossings_in_order(graph, &info.current_node_order);
-            let child_paths = info.child_paths.clone();
-            for child_path in &child_paths {
+            // `infos` and `index_by_path` are separate fields, so the paths need no copy.
+            for child_path in &self.infos[current].child_paths {
                 if let Some(child_index) = self.index_by_path.get(child_path).copied()
                     && !self.infos[child_index].use_bottom_up
                 {
@@ -1324,8 +1324,9 @@ impl HierarchySweep {
             .count_all_crossings_in_order(graph, &info.current_node_order)
             + model_order_influence;
 
-        let child_paths = info.child_paths.clone();
-        for child_path in &child_paths {
+        // The count below borrows `self` mutably, so each path is looked up again, not copied.
+        for position in 0..self.infos[info_index].child_paths.len() {
+            let child_path = &self.infos[info_index].child_paths[position];
             if let Some(child_index) = self.index_by_path.get(child_path).copied()
                 && !self.infos[child_index].use_bottom_up
             {
@@ -3104,7 +3105,8 @@ impl GreedyPortDistributor {
                 if upper_lower > lower_upper {
                     improved = true;
                     // The counter learns of the switch. The port list changes below, once.
-                    self.crossings_counter.switch_ports(upper_port, lower_port);
+                    self.crossings_counter
+                        .switch_ports(graph, upper_port, lower_port);
                     ports.swap(index, index + 1);
                     continue_switching = true;
                 }
@@ -3127,9 +3129,8 @@ impl GreedyPortDistributor {
             for (slot, port) in slots.iter().zip(&ports) {
                 new_order[*slot] = *port;
             }
-            if let Some(old_to_new) = graph.reorder_node_ports_with_map(node, new_order) {
-                self.crossings_counter.remap_node_ports(node, &old_to_new);
-            }
+            // The counter keys its positions by port id, which stays when a port moves.
+            graph.reorder_node_ports_with_map(node, new_order);
         }
         improved
     }
@@ -6195,8 +6196,8 @@ mod greedy_port_distributor_tests {
         // the switch gave it the position of the other one.
         let counter = &distributor.crossings_counter;
         assert_eq!(graph.layerless_nodes[a].ports[0].id, "a.p1");
-        assert_eq!(counter.position_of(port(a, 0)), 2);
-        assert_eq!(counter.position_of(port(a, 1)), 3);
+        assert_eq!(counter.position_of(&graph, port(a, 0)), 2);
+        assert_eq!(counter.position_of(&graph, port(a, 1)), 3);
     }
 
     // Mutation: leave the positions of the counter at the slot of a port that moved, so that the

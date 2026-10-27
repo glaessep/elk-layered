@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use crate::graph::{
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphNodeRef, GraphPortRef,
     HierarchyEdge, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize, LayeredEdge, PortRef, PortSide,
-    PortType, apply_port_index_to_dummy, create_external_port_dummy,
+    PortType, apply_port_index_to_dummy, create_external_port_dummy, port_side_from_direction,
 };
 use crate::options::{ElkDirection, PortConstraints};
 
@@ -391,7 +391,11 @@ fn preprocess_source_ported_compound_graph_observed(
     graph: &mut LGraph,
     observer: &mut impl CompoundPreprocessObserver,
 ) {
-    let original_net_flows = original_net_flows(graph);
+    // The segments replace the hierarchy edges, so the net flows must be read before they are
+    // introduced. Without a hierarchy edge nothing changes, so a graph that ends up with no
+    // external ports never reads them.
+    let has_hierarchy_edges = hierarchy_has_pending_edges(graph);
+    let flows_before_segments = has_hierarchy_edges.then(|| original_net_flows(graph));
     introduce_source_ported_hierarchy_edge_segments(graph);
     if !hierarchy_has_external_ports(graph) {
         let result = graph.try_for_each_graph_mut(|graph| {
@@ -401,6 +405,7 @@ fn preprocess_source_ported_compound_graph_observed(
         result.expect("compound endpoint preprocessing is infallible");
         return;
     }
+    let original_net_flows = flows_before_segments.unwrap_or_else(|| original_net_flows(graph));
 
     let mut detached = detach_nested_graph_hierarchy(graph);
     // `transformHierarchyEdges` reads the port constraints of each compound node before
@@ -443,29 +448,49 @@ struct OriginalPortConstraints {
     nested: Vec<Vec<PortConstraints>>,
 }
 
-/// The net flow of every port that the input names, as `LPort.getNetFlow` reads it while
-/// `transformHierarchyEdges` still sees the edges as the importer made them: incoming minus
-/// outgoing edges, the ones that cross a level included. It is keyed by the ids of the node and
-/// the port. Edges that are split into segments no longer show up at the port in the same way.
-fn original_net_flows(graph: &mut LGraph) -> HashMap<(String, String), isize> {
-    let mut flows = HashMap::<(String, String), isize>::new();
-    let result = graph.try_for_each_graph_mut(|graph| {
+/// A port by the id of its node and its own id. `named` says whether the caller named the port:
+/// a made-up port can have the id of a named port of the same node, such as the implicit port
+/// `G:2` beside a named port `G:2`, and the two must not share a net flow.
+type OriginalNetFlowKey = (String, String, bool);
+
+/// The net flow of every port, as `LPort.getNetFlow` reads it while `transformHierarchyEdges`
+/// still sees the edges as the importer made them: incoming minus outgoing edges, the ones that
+/// cross a level included. Edges that are split into segments no longer show up at the port in
+/// the same way.
+fn original_net_flows(graph: &LGraph) -> HashMap<OriginalNetFlowKey, isize> {
+    let mut flows = HashMap::<OriginalNetFlowKey, isize>::new();
+    let mut pending = vec![graph];
+    while let Some(graph) = pending.pop() {
         for node in &graph.layerless_nodes {
             for port in &node.ports {
-                *flows.entry((node.id.clone(), port.id.clone())).or_default() += port.net_flow();
+                *flows
+                    .entry((node.id.clone(), port.id.clone(), port.named))
+                    .or_default() += port.net_flow();
             }
         }
         for edge in &graph.hierarchy_edges {
             *flows
-                .entry((edge.source_node_id.clone(), edge.source_port_key.clone()))
+                .entry((
+                    edge.source_node_id.clone(),
+                    edge.source_port_key.clone(),
+                    edge.source_port_named,
+                ))
                 .or_default() -= 1;
             *flows
-                .entry((edge.target_node_id.clone(), edge.target_port_key.clone()))
+                .entry((
+                    edge.target_node_id.clone(),
+                    edge.target_port_key.clone(),
+                    edge.target_port_named,
+                ))
                 .or_default() += 1;
         }
-        Ok::<(), std::convert::Infallible>(())
-    });
-    result.expect("collecting net flows is infallible");
+        pending.extend(
+            graph
+                .layerless_nodes
+                .iter()
+                .filter_map(|node| node.nested_graph.as_deref()),
+        );
+    }
     flows
 }
 
@@ -620,6 +645,8 @@ fn materialize_hierarchy_edge_segments(edge: &HierarchyEdge) -> Vec<ScopedHierar
                 target_node_id: edge.target_node_id.clone(),
                 source_port_key: edge.source_port_key.clone(),
                 target_port_key: edge.target_port_key.clone(),
+                source_port_named: edge.source_port_named,
+                target_port_named: edge.target_port_named,
                 source_path: Vec::new(),
                 target_path: Vec::new(),
                 labels: Vec::new(),
@@ -1598,7 +1625,7 @@ fn ensure_nested_external_dummies_for_parent_ports(
     graph: &mut LGraph,
     mut detached: Vec<DetachedNestedGraph>,
     original: OriginalPortConstraints,
-    net_flows: &HashMap<(String, String), isize>,
+    net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
     while let Some(mut entry) = detached.pop() {
         // Popping from the end keeps the index of every entry that is left.
@@ -1620,7 +1647,7 @@ fn ensure_nested_external_dummies_for_parent_ports(
 fn ensure_direct_nested_external_dummies_for_parent_ports(
     graph: &mut LGraph,
     original_constraints: &[PortConstraints],
-    net_flows: &HashMap<(String, String), isize>,
+    net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
     let graph_id = graph.id.clone();
 
@@ -1663,7 +1690,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
                 port_constraints,
                 port_side,
                 -net_flows
-                    .get(&(parent_node_id.clone(), port.id.clone()))
+                    .get(&(parent_node_id.clone(), port.id.clone(), port.named))
                     .copied()
                     .unwrap_or_else(|| port.net_flow()),
                 LPoint::default(),
@@ -2035,13 +2062,15 @@ fn create_parent_boundary_port(
     PortRef { node, port: 0 }
 }
 
-fn port_side_from_direction(direction: ElkDirection) -> PortSide {
-    match direction {
-        ElkDirection::Right | ElkDirection::Undefined => PortSide::East,
-        ElkDirection::Left => PortSide::West,
-        ElkDirection::Down => PortSide::South,
-        ElkDirection::Up => PortSide::North,
-    }
+/// A port that holds only a position and a size, for [`calc_port_side`] and the port offset.
+///
+/// ELK's `ElkUtil.calcPortSide` and `LGraphUtil.calcPortOffset` read these from the port they
+/// get. Here they take an `LPort`, and the caller has no such port yet.
+pub(crate) fn port_at(id: &str, x: f64, y: f64, width: f64, height: f64) -> LPort {
+    let mut port = LPort::new(id, 0, PortType::Output);
+    port.position = LPoint { x, y };
+    port.size = LSize { width, height };
+    port
 }
 
 pub(crate) fn calc_port_side(port: &LPort, node_size: LSize, direction: ElkDirection) -> PortSide {
@@ -2318,6 +2347,8 @@ mod tests {
             target_node_id: target.into(),
             source_port_key: source_key.into(),
             target_port_key: target_key.into(),
+            source_port_named: false,
+            target_port_named: false,
             source_path: source_path.iter().map(|id| id.to_string()).collect(),
             target_path: target_path.iter().map(|id| id.to_string()).collect(),
             labels: Vec::new(),
@@ -2349,6 +2380,46 @@ mod tests {
         assert_eq!(flows[&("P".to_string(), "P:other".to_string())], -1);
     }
 
+    // Mutation: in `original_net_flows`, key the source of a hierarchy edge as a made-up port
+    // (`false` for `edge.source_port_named`). The edge out of the named port `G:2` then counts at
+    // the made-up port `G:2`, and the named port reads 0 instead of -1.
+    #[test]
+    fn a_made_up_port_keeps_its_net_flow_apart_from_a_named_port_of_the_same_id() {
+        let port = |id: &str| crate::importer::ElkInputPort {
+            id: id.to_string(),
+            x: 0.0,
+            y: 0.0,
+            width: 6.0,
+            height: 6.0,
+            side: crate::graph::PortSide::West,
+            index: None,
+            border_offset: None,
+            net_flow: 0,
+            child_edges: 0,
+            connected_to_external_nodes: false,
+            allow_non_flow_ports_to_switch_sides: false,
+        };
+        let mut group = node("G");
+        group.ports = vec![port("G:1"), port("G:2")];
+        let mut child = node("c");
+        child.parent = Some("G".to_string());
+        // The named port `G:2` leaves for its child: net flow -1.
+        let mut leaving = edge("e1", "G", "c");
+        leaving.source_port = Some("G:2".to_string());
+        leaving.container = Some("root".to_string());
+        // `s` enters `G` at a made-up port. G has two ports, so ELK's `createPort` would add a
+        // third, and this importer calls it `G:2`, too. Net flow +1.
+        let entering = edge("e2", "s", "G");
+        let mut input = graph(vec![node("s"), group, child], vec![leaving, entering]);
+        input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
+        let lgraph = import_graph(&input).unwrap();
+
+        let flows = original_net_flows(&lgraph);
+
+        assert_eq!(flows[&("G".to_string(), "G:2".to_string(), true)], -1);
+        assert_eq!(flows[&("G".to_string(), "G:2".to_string(), false)], 1);
+    }
+
     #[test]
     fn compound_label_buckets_preserve_order_identity_and_single_ownership() {
         for depth in [1, 16, 128] {
@@ -2358,6 +2429,8 @@ mod tests {
                 target_node_id: "B".into(),
                 source_port_key: "A:source".into(),
                 target_port_key: "B:target".into(),
+                source_port_named: false,
+                target_port_named: false,
                 source_path: (0..depth).map(|index| format!("group-{index}")).collect(),
                 target_path: vec!["other".into()],
                 labels: (0..4096)
@@ -2765,6 +2838,8 @@ mod tests {
                     target_node_id: target.to_string(),
                     source_port_key: "Outside:shared".to_string(),
                     target_port_key: format!("{target}:input"),
+                    source_port_named: false,
+                    target_port_named: false,
                     source_path: Vec::new(),
                     target_path: vec!["Inner".to_string()],
                     labels: Vec::new(),
@@ -3145,6 +3220,8 @@ mod tests {
             target_node_id: "sibling".to_string(),
             source_port_key: "leaf:source".to_string(),
             target_port_key: "sibling:target".to_string(),
+            source_port_named: false,
+            target_port_named: false,
             source_path: vec!["inner".to_string()],
             target_path: Vec::new(),
             labels: Vec::new(),

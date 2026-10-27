@@ -19,9 +19,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::api::{ElkEdge, ElkEdgeSection, ElkLabel, ElkNode, ElkPoint, ElkPort};
 use crate::common::networksimplex::NetworkSimplexError;
 use crate::components::ComponentError;
+use crate::compound::{calc_port_side, port_at};
 use crate::error::Error;
 use crate::export::{self, LayoutResult, TransferInput};
-use crate::graph::{LPoint, LPort, LSize, PortSide, PortType};
+use crate::graph::{LPoint, LSize, PortSide, port_side_from_direction};
 use crate::importer::{
     self, ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, ElkInputPort, ParentSettings,
 };
@@ -311,17 +312,37 @@ impl<'a> Tree<'a> {
                             id: id.clone(),
                         })
                 };
+                // Ports `JsonImporter.transformPrimitiveEdge`, the old form: the id names a node,
+                // looked up in `nodeIdMap` alone. A port key is looked up in `portIdMap` alone. A
+                // port of another node is an error, and a key that names no port leaves the edge
+                // at the node.
+                let find_old = |id: &String, port_key: Option<&String>| {
+                    let node = *by_id.get(id.as_str()).ok_or_else(|| Error::UnknownId {
+                        edge: edge.id.clone(),
+                        id: id.clone(),
+                    })?;
+                    match port_key.and_then(|key| port_by_id.get(key.as_str()).map(|p| (key, p))) {
+                        None => Ok((node, None)),
+                        Some((_, &(owner, port))) if owner == node => Ok((node, Some(port))),
+                        Some((key, _)) => Err(Error::PortOfOtherNode {
+                            edge: edge.id.clone(),
+                            port: key.clone(),
+                            node: id.clone(),
+                        }),
+                    }
+                };
+                let end = |ids: &[String], port_key: Option<&String>| {
+                    ids.iter()
+                        .map(|id| match &edge.old_form {
+                            Some(_) => find_old(id, port_key),
+                            None => find(id),
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                };
                 // Check every end before refusing a hyperedge, so an unknown id wins.
-                let sources = edge
-                    .sources
-                    .iter()
-                    .map(find)
-                    .collect::<Result<Vec<_>, _>>()?;
-                let targets = edge
-                    .targets
-                    .iter()
-                    .map(find)
-                    .collect::<Result<Vec<_>, _>>()?;
+                let old = edge.old_form.as_ref();
+                let sources = end(&edge.sources, old.and_then(|o| o.source_port.as_ref()))?;
+                let targets = end(&edge.targets, old.and_then(|o| o.target_port.as_ref()))?;
                 if sources.len() > 1 || targets.len() > 1 {
                     return Err(Error::Unsupported {
                         element,
@@ -373,7 +394,7 @@ impl<'a> Tree<'a> {
         for index in 0..self.edges.len() {
             let (source, target) = (self.edges[index].source, self.edges[index].target);
             if let Some(port) = self.edges[index].source_port {
-                let to_child = self.nodes[target].parent == Some(source) && target != source;
+                let to_child = self.nodes[target].parent == Some(source);
                 let outside = !self.is_descendant(target, source);
                 let facts = &mut self.nodes[source].port_facts[port];
                 facts.net_flow += if to_child { -1 } else { 1 };
@@ -383,7 +404,7 @@ impl<'a> Tree<'a> {
                 facts.connected_to_external_nodes |= outside;
             }
             if let Some(port) = self.edges[index].target_port {
-                let from_child = self.nodes[source].parent == Some(target) && source != target;
+                let from_child = self.nodes[source].parent == Some(target);
                 let outside = !self.is_descendant(source, target);
                 let facts = &mut self.nodes[target].port_facts[port];
                 facts.net_flow += if from_child { 1 } else { -1 };
@@ -998,23 +1019,15 @@ impl<'a, 't> Work<'a, 't> {
             let side = if !constraints.is_side_fixed() {
                 // Free to choose, so the net flow decides.
                 if port.net_flow > 0 {
-                    side_along(direction)
+                    port_side_from_direction(direction)
                 } else {
-                    side_along(direction).opposed()
+                    port_side_from_direction(direction).opposed()
                 }
             } else if port.side == PortSide::Undefined {
                 // The side follows from the position, or else from the direction.
-                let mut lport = LPort::new(port.id.clone(), 0, PortType::Output);
-                lport.position = LPoint {
-                    x: port.x,
-                    y: port.y,
-                };
-                lport.size = LSize {
-                    width: port.width,
-                    height: port.height,
-                };
-                match crate::compound::calc_port_side(&lport, size, direction) {
-                    PortSide::Undefined => side_along(direction),
+                let lport = port_at(&port.id, port.x, port.y, port.width, port.height);
+                match calc_port_side(&lport, size, direction) {
+                    PortSide::Undefined => port_side_from_direction(direction),
                     side => side,
                 }
             } else {
@@ -1165,16 +1178,8 @@ impl<'a, 't> Work<'a, 't> {
                 let mut side = self.port_state[scope][index].side;
                 let port = &mut self.out_node(scope).ports[index];
                 if side == PortSide::Undefined {
-                    let mut lport = LPort::new(port.id.clone(), 0, PortType::Output);
-                    lport.position = LPoint {
-                        x: port.x,
-                        y: port.y,
-                    };
-                    lport.size = LSize {
-                        width: port.width,
-                        height: port.height,
-                    };
-                    side = crate::compound::calc_port_side(&lport, old, direction);
+                    let lport = port_at(&port.id, port.x, port.y, port.width, port.height);
+                    side = calc_port_side(&lport, old, direction);
                 }
                 match side {
                     PortSide::North => {
@@ -1233,6 +1238,14 @@ impl<'a, 't> Work<'a, 't> {
         let tree = self.tree;
         for (index, info) in tree.edges.iter().enumerate() {
             let container = tree.nodes[info.container].node.id.clone();
+            // The shapes the edge was attached to, as elkjs writes their ids. In the old form a
+            // port key names a port that `sources` and `targets` do not.
+            let shape = |node: usize, port: Option<usize>| {
+                let node = tree.nodes[node].node;
+                port.map_or(&node.id, |port| &node.ports[port].id).clone()
+            };
+            let incoming_shape = shape(info.source, info.source_port);
+            let outgoing_shape = shape(info.target, info.target_port);
             let route = self.routes.remove(&index);
             let labels = self.edge_labels.remove(&index).unwrap_or_default();
             let node = self.out_node(info.given_in);
@@ -1250,8 +1263,8 @@ impl<'a, 't> Work<'a, 't> {
                     start_point: point(route.start),
                     end_point: point(route.end),
                     bend_points: route.bend_points.into_iter().map(point).collect(),
-                    incoming_shape: edge.sources.first().cloned(),
-                    outgoing_shape: edge.targets.first().cloned(),
+                    incoming_shape: Some(incoming_shape),
+                    outgoing_shape: Some(outgoing_shape),
                 }];
                 // `JsonImporter.transferLayoutInt` writes junction points only when there are some.
                 // With none, the edge keeps the ones it came with: the layout sets the ELK
@@ -1270,16 +1283,6 @@ impl<'a, 't> Work<'a, 't> {
             }
         }
         self.out
-    }
-}
-
-/// Ports `PortSide.fromDirection`.
-fn side_along(direction: ElkDirection) -> PortSide {
-    match direction {
-        ElkDirection::Right | ElkDirection::Undefined => PortSide::East,
-        ElkDirection::Left => PortSide::West,
-        ElkDirection::Down => PortSide::South,
-        ElkDirection::Up => PortSide::North,
     }
 }
 

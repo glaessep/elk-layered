@@ -1516,9 +1516,8 @@ fn add_junction_point_if_necessary(
 ) {
     let p = if vertical { position.y } else { position.x };
 
-    // Java's `HashSet<KVector>` finds a vector by `hashCode` first, which tells `-0.0` from `0.0`.
-    // The bits stand for that.
-    if created.contains(&(position.x.to_bits(), position.y.to_bits())) {
+    let key = junction_key(position);
+    if key.is_some_and(|key| created.contains(&key)) {
         return;
     }
 
@@ -1539,8 +1538,25 @@ fn add_junction_point_if_necessary(
 
     if inside_segment || at_boundary {
         graph.edges[edge_index].junction_points.push(position);
-        created.insert((position.x.to_bits(), position.y.to_bits()));
+        if let Some(key) = key {
+            created.insert(key);
+        }
     }
+}
+
+/// What `HashSet<KVector>` finds a point by in `createdJunctionPoints`, or `None` for a point it
+/// never finds.
+///
+/// elkjs is GWT, and `Double.hashCode` there is `(int) value`. So `-0.0` and `0.0` fall in one
+/// bucket, and `KVector.equals`, which uses `==`, finds them equal: a point with a negative zero
+/// is the point with a zero. A JVM hashes the bits and tells them apart. A `NaN` is never equal
+/// to itself, so a point with a `NaN` is never found, however often it is added.
+fn junction_key(position: LPoint) -> Option<(u64, u64)> {
+    if position.x.is_nan() || position.y.is_nan() {
+        return None;
+    }
+    // Adding 0.0 turns -0.0 into 0.0 and changes no other number.
+    Some(((position.x + 0.0).to_bits(), (position.y + 0.0).to_bits()))
 }
 
 fn add_bend_point_if_needed(graph: &mut LGraph, edge_index: usize, point: LPoint) {
@@ -1762,6 +1778,61 @@ mod tests {
             &mut graph,
         );
         assert_eq!(graph.edges[0].junction_points.len(), 2);
+    }
+
+    // Mutation: tell `-0.0` from `0.0` by the bits of the point, as a JVM hash does. The second
+    // point is then a new junction point.
+    #[test]
+    fn a_negative_zero_is_the_same_junction_point_as_a_zero() {
+        let both_ends = segment(&[10.0, 40.0], &[10.0, 40.0]);
+        let mut graph = graph_with_one_edge();
+        let mut created = HashSet::new();
+        for x in [0.0, -0.0] {
+            junction(
+                &both_ends,
+                LPoint { x, y: 25.0 },
+                true,
+                &mut created,
+                &mut graph,
+            );
+        }
+        assert_eq!(graph.edges[0].junction_points.len(), 1);
+        // The same holds for the other coordinate, and when the negative zero comes first.
+        let mut graph = graph_with_one_edge();
+        let mut created = HashSet::new();
+        for y in [-0.0, 0.0] {
+            junction(
+                &segment(&[-10.0, 10.0], &[-10.0, 10.0]),
+                LPoint { x: 7.0, y },
+                true,
+                &mut created,
+                &mut graph,
+            );
+        }
+        assert_eq!(graph.edges[0].junction_points.len(), 1);
+    }
+
+    // Mutation: remember a point with a `NaN` by its bits. The second one is then taken for a
+    // point seen before, and only one junction point is made.
+    #[test]
+    fn a_point_with_a_nan_is_never_seen_before() {
+        let both_ends = segment(&[10.0, 40.0], &[10.0, 40.0]);
+        let mut graph = graph_with_one_edge();
+        let mut created = HashSet::new();
+        for _ in 0..2 {
+            junction(
+                &both_ends,
+                LPoint {
+                    x: f64::NAN,
+                    y: 25.0,
+                },
+                true,
+                &mut created,
+                &mut graph,
+            );
+        }
+        assert_eq!(graph.edges[0].junction_points.len(), 2);
+        assert!(created.is_empty());
     }
 
     fn segment(incoming: &[f64], outgoing: &[f64]) -> HyperEdgeSegment {
