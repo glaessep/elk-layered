@@ -3229,10 +3229,12 @@ fn restore_north_south_dummy(graph: &mut LGraph, dummy: usize) {
 
 fn connect_replacement_dummy_to_original(graph: &mut LGraph, replacement: usize, original: usize) {
     // Java: `original.getPorts().get(0)`, the first port of the list, which a reorder may have
-    // moved away from the first port added.
-    let Some(original_port) = graph.layerless_nodes[original].ports.id_at(0) else {
-        return;
-    };
+    // moved away from the first port added. Java throws on an empty list. An external port dummy
+    // always lists its port, so an empty list is a bug here, never caller input.
+    let original_port = graph.layerless_nodes[original]
+        .ports
+        .id_at(0)
+        .expect("a replaced external port dummy lists at least one port");
     if graph.layerless_nodes[replacement].ports.iter().any(|port| {
         port.side == graph.layerless_nodes[replacement].external_port_side
             && port.outgoing_edges.iter().any(|edge| {
@@ -3554,11 +3556,13 @@ fn remove_temporary_north_south_dummy(graph: &mut LGraph, node: usize) {
     outgoing_edge_bend_points.reverse();
     outgoing_edge_bend_points.push(node_relative_port_position(graph, node, node_origin_port));
 
-    // Java: `replacedDummy.getPorts().get(0)`, the first port of the list.
-    let Some(replaced_dummy_first_port) = graph.layerless_nodes[replaced_dummy].ports.id_at(0)
-    else {
-        return;
-    };
+    // Java: `replacedDummy.getPorts().get(0)`, the first port of the list. Java throws on an empty
+    // list. An external port dummy always lists its port, so an empty list is a bug here, never
+    // caller input.
+    let replaced_dummy_first_port = graph.layerless_nodes[replaced_dummy]
+        .ports
+        .id_at(0)
+        .expect("a replaced external port dummy lists at least one port");
     let replaced_dummy_port = PortRef {
         node: replaced_dummy,
         port: replaced_dummy_first_port,
@@ -6060,6 +6064,65 @@ mod tests {
             .find(|edge| edge.id.ends_with(":hierarchical-origin"))
             .unwrap();
         assert_eq!(origin_edge.target.port, listed_first);
+    }
+
+    /// A graph whose north external port dummy has a replacement, as
+    /// `process_hierarchical_port_constraints` makes it. Returns the graph and the dummy.
+    fn graph_with_a_replaced_north_dummy() -> (LGraph, usize) {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        graph.options.port_constraints = PortConstraints::FixedSide;
+        graph.options.spacing.node_node = 20.0;
+        graph.options.spacing.edge_edge = 10.0;
+        graph.size.height = 50.0;
+
+        let north = push_external_dummy(&mut graph, "north", PortSide::North, 0.0);
+        graph.layerless_nodes[north].size.width = 4.0;
+        let source = push_normal_node(&mut graph, "A");
+        graph.layerless_nodes[source].position = LPoint { x: 50.0, y: 30.0 };
+        let source_port = graph
+            .add_port(
+                source,
+                PortType::Output,
+                PortSide::North,
+                LPoint { x: 30.0, y: 0.0 },
+            )
+            .unwrap();
+        graph.set_node_layer(source, 0);
+        graph.set_node_layer(north, 0);
+        add_test_edge(
+            &mut graph,
+            "A-north",
+            source,
+            source_port.port.index(),
+            north,
+            0,
+        );
+        process_hierarchical_port_constraints(&mut graph);
+        (graph, north)
+    }
+
+    // Mutation: return without a word from `connect_replacement_dummy_to_original` when the
+    // replaced dummy lists no port.
+    #[test]
+    #[should_panic(expected = "a replaced external port dummy lists at least one port")]
+    fn connecting_a_replacement_to_a_dummy_without_ports_fails_loudly() {
+        let (mut graph, north) = graph_with_a_replaced_north_dummy();
+        graph.layerless_nodes[north].ports.clear();
+
+        process_hierarchical_port_orthogonal_edges(&mut graph);
+    }
+
+    // Mutation: return without a word from `remove_temporary_north_south_dummy` when the replaced
+    // dummy lists no port. The connect step runs first, with the port, because it makes the edge
+    // the removal looks for.
+    #[test]
+    #[should_panic(expected = "a replaced external port dummy lists at least one port")]
+    fn removing_a_replacement_of_a_dummy_without_ports_fails_loudly() {
+        let (mut graph, north) = graph_with_a_replaced_north_dummy();
+        restore_north_south_dummies(&mut graph);
+        graph.layerless_nodes[north].ports.clear();
+
+        remove_temporary_north_south_dummies(&mut graph);
     }
 
     #[test]
