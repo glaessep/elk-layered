@@ -2997,17 +2997,19 @@ fn minimize_barycenter(graph: &mut LGraph) -> bool {
     let first_try_with_initial_order =
         graph.options.consider_model_order_strategy != OrderingStrategy::None;
 
+    // One heuristic and one port distributor serve every run, as in GraphInfoHolder: the port
+    // ranks and barycenters of an earlier run stay in the arrays until a later run overwrites them.
+    let port_distributor =
+        BarycenterPortDistributor::new(distributor_kind, &graph_info.current_node_order);
+    let mut heuristic = BarycenterHeuristic::new(graph, random.clone(), port_distributor);
     for run_index in 0..thoroughness {
-        let port_distributor =
-            BarycenterPortDistributor::new(distributor_kind, &graph_info.current_node_order);
-        let mut heuristic = BarycenterHeuristic::new(graph, random.clone(), port_distributor);
         let crossings = minimize_crossings_with_counter(
             graph,
             &mut graph_info,
             &mut heuristic,
             first_try_with_initial_order && run_index == 0,
         );
-        random = heuristic.random;
+        random = heuristic.random.clone();
 
         if crossings < best_crossings {
             best_crossings = crossings;

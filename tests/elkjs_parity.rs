@@ -299,6 +299,9 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 41. In the segment code of src/compound.rs, set the flag when the source port already has an
 //    edge, as the compound preprocessor used to: 2 cases,
 //    hierarchy-edge-in-and-out-at-one-port and random-group-ports/r092.
+// 42. In `minimize_barycenter` (src/p3order/sweep.rs), make a new port distributor and heuristic
+//    for each run instead of one for all runs: 3 cases,
+//    free-port-in-and-out-between-separate-layers and its two seed variants.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
