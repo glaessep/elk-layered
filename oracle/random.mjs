@@ -44,6 +44,13 @@ if (!dir) {
   process.exit(2);
 }
 const mode = process.argv[3] ?? "";
+// A mistyped mode must not fall through to the default mode: that mode would delete the files of
+// the directory it was given.
+const MODES = ["", "--group-ends", "--ports", "--group-ports", "--cross-ports", "--inline-labels"];
+if (!MODES.includes(mode)) {
+  console.error(`unknown mode "${mode}"; use one of: ${MODES.slice(1).join(" ")}`);
+  process.exit(2);
+}
 const groupEnds = mode === "--group-ends";
 const groupPorts = mode === "--group-ports";
 const crossPorts = mode === "--cross-ports";
