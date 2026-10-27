@@ -51,6 +51,8 @@ pub(crate) struct EdgeLayout {
     pub(crate) start: LPoint,
     pub(crate) bend_points: Vec<LPoint>,
     pub(crate) end: LPoint,
+    /// Empty when ELK sets no junction points on the edge.
+    pub(crate) junction_points: Vec<LPoint>,
     pub(crate) labels: Vec<(usize, LPoint, LSize)>,
 }
 
@@ -221,6 +223,7 @@ struct JoinedEdge {
     source: PortAt,
     target: PortAt,
     bend_points: Vec<LPoint>,
+    junction_points: Vec<LPoint>,
     labels: Vec<LLabel>,
     target_offset: LPoint,
 }
@@ -228,7 +231,6 @@ struct JoinedEdge {
 /// Joins the pieces of each edge that crosses a hierarchy level.
 ///
 /// Ports `CompoundGraphPostprocessor.process`, with `CrossHierarchyEdgeComparator.compare`.
-/// Junction points are not ported, so there are none to copy.
 fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, JoinedEdge> {
     // Pieces by original edge id, in hierarchy order.
     let mut pieces: BTreeMap<&str, Vec<(usize, &crate::graph::CrossHierarchyEdge)>> =
@@ -269,6 +271,7 @@ fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, Joi
         };
 
         let mut bend_points = Vec::new();
+        let mut junction_points = Vec::new();
         let mut labels = Vec::new();
         let mut target_offset = LPoint::default();
         let mut last_point: Option<LPoint> = None;
@@ -311,6 +314,12 @@ fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, Joi
             bend_points.extend(piece_bends.iter().copied());
             last_point = Some(piece_bends.last().copied().unwrap_or(source_point));
 
+            // `copyJunctionPoints`: the junction points of each piece, moved to the reference graph.
+            junction_points.extend(edge.junction_points.iter().map(|p| LPoint {
+                x: p.x + offset.x,
+                y: p.y + offset.y,
+            }));
+
             if hierarchy.actual_end(graph, edge.target) == target {
                 let target_graph = target.graph;
                 if target_graph != graph {
@@ -338,6 +347,7 @@ fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, Joi
                 source,
                 target,
                 bend_points,
+                junction_points,
                 labels,
                 target_offset,
             },
@@ -352,6 +362,7 @@ struct EdgeToApply<'a> {
     source: PortAt,
     target: PortAt,
     bend_points: Vec<LPoint>,
+    junction_points: Vec<LPoint>,
     labels: Vec<LLabel>,
     target_offset: Option<LPoint>,
 }
@@ -385,6 +396,7 @@ pub(crate) fn apply_layout(
                     port: edge.target,
                 },
                 bend_points: edge.bend_points.clone(),
+                junction_points: edge.junction_points.clone(),
                 labels: edge.labels.clone(),
                 target_offset: None,
             });
@@ -406,6 +418,7 @@ pub(crate) fn apply_layout(
             source: edge.source,
             target: edge.target,
             bend_points: edge.bend_points.clone(),
+            junction_points: edge.junction_points.clone(),
             labels: edge.labels.clone(),
             target_offset: Some(edge.target_offset),
         });
@@ -588,6 +601,8 @@ fn edge_layout(
         start: shift(source_point),
         bend_points: edge.bend_points.iter().copied().map(shift).collect(),
         end: shift(target_point),
+        // `junctionPoints.offset(edgeOffset)`.
+        junction_points: edge.junction_points.iter().copied().map(shift).collect(),
         labels,
     })
 }
@@ -671,6 +686,60 @@ mod tests {
             edge_containers: containers,
         };
         hierarchical_offset(&hierarchy, (1, 0), (2, 0), "e", &input).err()
+    }
+
+    // Mutation: leave out `copyJunctionPoints` in `join_cross_hierarchy_edges`. The joined edge
+    // then has no junction points.
+    #[test]
+    fn the_junction_points_of_an_edge_across_levels_are_joined_and_moved_to_one_graph() {
+        use crate::importer::{ElkInputGraph, import_graph};
+        use crate::options::{ElkDirection, HierarchyHandling};
+        use crate::snapshot_tests::{edge, node};
+
+        let mut group = node("group", 40.0, 30.0, None);
+        group.hierarchy_handling = Some(HierarchyHandling::IncludeChildren);
+        let input = ElkInputGraph {
+            id: "root".to_string(),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Right),
+            nodes: vec![
+                group,
+                node("a", 40.0, 30.0, Some("group")),
+                node("b", 40.0, 30.0, None),
+            ],
+            edges: vec![edge("e", "a", "b")],
+        };
+        let mut graph = import_graph(&input).expect("imports");
+        crate::pipeline::execute_ported_compound_processors(&mut graph).expect("lays out");
+        // Give every piece of the edge a junction point, as a router would.
+        fn mark(graph: &mut LGraph) {
+            for edge in &mut graph.edges {
+                edge.junction_points = vec![LPoint { x: 1.0, y: 2.0 }];
+            }
+            for node in &mut graph.layerless_nodes {
+                if let Some(nested) = node.nested_graph.as_deref_mut() {
+                    mark(nested);
+                }
+            }
+        }
+        mark(&mut graph);
+
+        let parents = HashMap::new();
+        let sized_nodes = HashSet::new();
+        let containers = HashMap::from([("e".to_string(), "root".to_string())]);
+        let input = TransferInput {
+            parents: &parents,
+            sized_nodes: &sized_nodes,
+            edge_containers: &containers,
+        };
+        let result = apply_layout(&graph, &input).expect("transfers");
+        let edge = result
+            .edges
+            .iter()
+            .find(|edge| edge.id == "e")
+            .expect("the edge");
+        // One junction point per piece. The pieces are in two graphs, so they land apart.
+        assert_eq!(edge.junction_points.len(), 2);
+        assert_ne!(edge.junction_points[0], edge.junction_points[1]);
     }
 
     // Mutation: return `Ok(LPoint::default())` when the edge has no container.

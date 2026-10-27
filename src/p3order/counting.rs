@@ -432,6 +432,7 @@ mod tests {
             minlen: 1,
             reversed: false,
             bend_points: Vec::new(),
+            junction_points: Vec::new(),
             model_order: None,
             priority_direction: 0,
             priority_shortness: 0,

@@ -749,6 +749,7 @@ fn clone_inverted_dummy_edge(
         minlen: old_edge.minlen,
         reversed: old_edge.reversed,
         bend_points: Vec::new(),
+        junction_points: Vec::new(),
         model_order: old_edge.model_order,
         priority_direction: old_edge.priority_direction,
         priority_shortness: old_edge.priority_shortness,
@@ -2823,6 +2824,7 @@ fn join_long_edge_pair(
     unnecessary_bendpoint: Option<LPoint>,
 ) {
     let dropped_bend_points = graph.edges[dropped_edge].bend_points.clone();
+    let dropped_junction_points = graph.edges[dropped_edge].junction_points.clone();
     let dropped_labels = std::mem::take(&mut graph.edges[dropped_edge].labels);
 
     graph.edges[surviving_edge].target = dropped_target;
@@ -2836,6 +2838,10 @@ fn join_long_edge_pair(
         .bend_points
         .extend(dropped_bend_points);
     graph.edges[surviving_edge].labels.extend(dropped_labels);
+    // `LongEdgeJoiner.joinAt` joins the junction points too.
+    graph.edges[surviving_edge]
+        .junction_points
+        .extend(dropped_junction_points);
 }
 
 fn long_edge_dummy_anchor(graph: &LGraph, node: usize) -> LPoint {
@@ -3113,6 +3119,7 @@ fn connect_replacement_dummy_to_original(graph: &mut LGraph, replacement: usize,
         minlen: 1,
         reversed: false,
         bend_points: Vec::new(),
+        junction_points: Vec::new(),
         model_order: None,
         priority_direction: 0,
         priority_shortness: 0,
@@ -3869,6 +3876,7 @@ pub fn split_edge(graph: &mut LGraph, edge_index: usize, dummy_node: usize) -> O
         minlen: old_segment.minlen,
         reversed: old_segment.reversed,
         bend_points: Vec::new(),
+        junction_points: Vec::new(),
         model_order: old_segment.model_order,
         priority_direction: old_segment.priority_direction,
         priority_shortness: old_segment.priority_shortness,
@@ -4736,6 +4744,24 @@ mod tests {
                         },
                     ]
                 );
+                // `LongEdgeJoiner` appends the junction points of the dropped edge, unchanged.
+                assert_eq!(
+                    fixture.graph.edges[surviving].junction_points,
+                    vec![
+                        LPoint {
+                            x: pair.surviving_index as f64,
+                            y: 11.0,
+                        },
+                        LPoint {
+                            x: pair.dropped_index as f64,
+                            y: 21.0,
+                        },
+                        LPoint {
+                            x: pair.dropped_index as f64,
+                            y: 31.0,
+                        },
+                    ]
+                );
                 assert_eq!(
                     fixture.graph.edges[surviving]
                         .labels
@@ -5479,6 +5505,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: None,
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -5578,6 +5605,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: None,
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -5696,6 +5724,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: None,
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -5766,6 +5795,10 @@ mod tests {
                 x: pair_index as f64,
                 y: 10.0,
             });
+            graph.edges[surviving].junction_points.push(LPoint {
+                x: pair_index as f64,
+                y: 11.0,
+            });
             surviving_edges.push(surviving);
 
             let dropped = add_test_edge(
@@ -5784,6 +5817,16 @@ mod tests {
                 LPoint {
                     x: pair_index as f64,
                     y: 30.0,
+                },
+            ]);
+            graph.edges[dropped].junction_points.extend([
+                LPoint {
+                    x: pair_index as f64,
+                    y: 21.0,
+                },
+                LPoint {
+                    x: pair_index as f64,
+                    y: 31.0,
                 },
             ]);
             graph.edges[dropped].labels.push(LLabel::new(

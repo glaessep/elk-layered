@@ -416,6 +416,7 @@ struct EdgeRoute {
     start: LPoint,
     bend_points: Vec<LPoint>,
     end: LPoint,
+    junction_points: Vec<LPoint>,
 }
 
 /// One node `layout_recursively` is working through: the children still to visit, in order.
@@ -891,6 +892,7 @@ impl<'a, 't> Work<'a, 't> {
                     start: edge.start,
                     bend_points: edge.bend_points,
                     end: edge.end,
+                    junction_points: edge.junction_points,
                 },
             );
             self.edge_labels.insert(index, edge.labels);
@@ -960,8 +962,12 @@ impl<'a, 't> Work<'a, 't> {
                     incoming_shape: edge.sources.first().cloned(),
                     outgoing_shape: edge.targets.first().cloned(),
                 }];
-                // The layout sets junction points, or clears them.
-                edge.junction_points.clear();
+                // `JsonImporter.transferLayoutInt` writes junction points only when there are some.
+                // With none, the edge keeps the ones it came with: the layout sets the ELK
+                // property to `null`, which leaves the JSON as it was.
+                if !route.junction_points.is_empty() {
+                    edge.junction_points = route.junction_points.into_iter().map(point).collect();
+                }
             }
             for (label, position, size) in labels {
                 if let Some(label) = edge.labels.get_mut(label) {

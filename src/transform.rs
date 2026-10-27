@@ -82,6 +82,10 @@ fn mirror_all_x(graph: &mut LGraph) {
         for point in &mut edge.bend_points {
             point.mirror_x(offset);
         }
+        // The junction points move with the bend points.
+        for point in &mut edge.junction_points {
+            point.mirror_x(offset);
+        }
         for label in &mut edge.labels {
             mirror_label_x(label, offset);
         }
@@ -126,6 +130,10 @@ fn mirror_all_y(graph: &mut LGraph) {
     }
     for edge in &mut graph.edges {
         for point in &mut edge.bend_points {
+            point.mirror_y(offset);
+        }
+        // The junction points move with the bend points.
+        for point in &mut edge.junction_points {
             point.mirror_y(offset);
         }
         for label in &mut edge.labels {
@@ -178,6 +186,10 @@ fn transpose_all(graph: &mut LGraph) {
     }
     for edge in &mut graph.edges {
         for point in &mut edge.bend_points {
+            point.transpose();
+        }
+        // The junction points move with the bend points.
+        for point in &mut edge.junction_points {
             point.transpose();
         }
         for label in &mut edge.labels {
@@ -1129,6 +1141,7 @@ mod tests {
             minlen: 1,
             reversed: false,
             bend_points: vec![LPoint { x: 1.0, y: 2.0 }],
+            junction_points: vec![LPoint { x: 3.0, y: 4.0 }],
             model_order: None,
             priority_direction: 0,
             priority_shortness: 0,
@@ -1153,6 +1166,73 @@ mod tests {
             graph.edges[0].labels[0].position,
             LPoint { x: 40.0, y: 30.0 }
         );
+    }
+
+    // Mutation: leave the junction points out of one of `mirror_all_x`, `mirror_all_y` or
+    // `transpose_all`. The junction point then stays where the bend point has moved from.
+    #[test]
+    fn junction_points_move_like_bend_points_in_every_transformation() {
+        for direction in [ElkDirection::Left, ElkDirection::Down, ElkDirection::Up] {
+            for congruency in [
+                DirectionCongruency::ReadingDirection,
+                DirectionCongruency::Rotation,
+            ] {
+                for mode in [
+                    GraphTransformMode::ToInternalLeftToRight,
+                    GraphTransformMode::ToInputDirection,
+                ] {
+                    let mut graph = graph(direction);
+                    graph.options.direction_congruency = congruency;
+                    graph.size = LSize {
+                        width: 100.0,
+                        height: 60.0,
+                    };
+                    let source = graph.add_node_for_test(LNode::new("A", 10.0, 10.0, None));
+                    let target = graph.add_node_for_test(LNode::new("B", 10.0, 10.0, None));
+                    let from = graph.add_port(
+                        source,
+                        PortType::Output,
+                        PortSide::East,
+                        LPoint { x: 10.0, y: 5.0 },
+                    );
+                    let to = graph.add_port(
+                        target,
+                        PortType::Input,
+                        PortSide::West,
+                        LPoint { x: 0.0, y: 5.0 },
+                    );
+                    let point = LPoint { x: 30.0, y: 20.0 };
+                    graph.add_edge(LayeredEdge {
+                        id: "e".to_string(),
+                        source: from.unwrap(),
+                        target: to.unwrap(),
+                        source_node_id: "A".to_string(),
+                        target_node_id: "B".to_string(),
+                        labels: Vec::new(),
+                        minlen: 1,
+                        reversed: false,
+                        bend_points: vec![point],
+                        junction_points: vec![point],
+                        model_order: None,
+                        priority_direction: 0,
+                        priority_shortness: 0,
+                        priority_straightness: 0,
+                        thickness: 0.0,
+                        original_opposite_port: None,
+                        compound_segment: None,
+                    });
+
+                    transform_graph_direction(&mut graph, mode);
+
+                    let edge = &graph.edges[0];
+                    assert_eq!(
+                        edge.junction_points, edge.bend_points,
+                        "{direction:?} {congruency:?} {mode:?}"
+                    );
+                    assert_ne!(edge.bend_points[0], point, "{direction:?} {congruency:?}");
+                }
+            }
+        }
     }
 
     trait TestGraphExt {

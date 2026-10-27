@@ -416,6 +416,9 @@ pub struct LayeredEdge {
     pub minlen: usize,
     pub reversed: bool,
     pub bend_points: Vec<LPoint>,
+    /// `LayeredOptions.JUNCTION_POINTS` of the edge. ELK keeps `null` until a router adds one, so
+    /// an empty list stands for `null`.
+    pub junction_points: Vec<LPoint>,
     pub model_order: Option<usize>,
     pub priority_direction: i32,
     pub priority_shortness: i32,

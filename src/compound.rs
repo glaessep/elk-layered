@@ -1147,6 +1147,7 @@ fn introduce_hierarchical_edge_segment(
             minlen: edge.minlen,
             reversed: false,
             bend_points: Vec::new(),
+            junction_points: Vec::new(),
             model_order: edge.model_order,
             priority_direction: edge.priority_direction,
             priority_shortness: edge.priority_shortness,

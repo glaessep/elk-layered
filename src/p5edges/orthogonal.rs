@@ -11,7 +11,7 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p5edges/orthogonal/direction/NorthToSouthRoutingStrategy.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p5edges/orthogonal/direction/SouthToNorthRoutingStrategy.java
 
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use crate::graph::{LGraph, LPoint, PortRef, PortSide};
 use crate::random::JavaRandom;
@@ -523,6 +523,8 @@ pub fn route_edges(
     break_non_critical_cycles(&mut hyper_graph, &mut graph.random);
     topological_numbering(&mut hyper_graph);
 
+    // `BaseRoutingDirectionStrategy.createdJunctionPoints`, which `route` clears when it is done.
+    let mut created_junction_points = HashSet::new();
     let mut rank_count = -1;
     for segment in 0..hyper_graph.segments.len() {
         if (hyper_graph.segments[segment].start_coordinate()
@@ -541,6 +543,7 @@ pub fn route_edges(
             segment,
             start_pos,
             edge_spacing,
+            &mut created_junction_points,
         );
     }
 
@@ -654,8 +657,11 @@ fn calculate_bend_points(
     segment_index: usize,
     start_pos: f64,
     edge_spacing: f64,
+    created_junction_points: &mut HashSet<(u64, u64)>,
 ) {
     let segment = &hyper_graph.segments[segment_index];
+    // The three strategies differ only in which axis the connecting segment lies on.
+    let vertical = direction == RoutingDirection::WestToEast;
     if segment.is_dummy() {
         return;
     }
@@ -682,11 +688,17 @@ fn calculate_bend_points(
             }
 
             let mut current_position = segment_position;
+            let mut current_segment = segment;
 
-            add_bend_point_if_needed(
+            let bend = source_bend_point(direction, source_anchor, current_position);
+            add_bend_point_if_needed(graph, edge_index, bend);
+            add_junction_point_if_necessary(
                 graph,
                 edge_index,
-                source_bend_point(direction, source_anchor, current_position),
+                segment,
+                bend,
+                vertical,
+                created_junction_points,
             );
 
             if let Some(split_partner) = segment.split_partner {
@@ -696,10 +708,15 @@ fn calculate_bend_points(
                     .copied()
                     .unwrap_or_else(|| direction.port_position_on_hypernode(graph, *port_ref));
 
-                add_bend_point_if_needed(
+                let bend = split_bend_point(direction, split_position, current_position);
+                add_bend_point_if_needed(graph, edge_index, bend);
+                add_junction_point_if_necessary(
                     graph,
                     edge_index,
-                    split_bend_point(direction, split_position, current_position),
+                    segment,
+                    bend,
+                    vertical,
+                    created_junction_points,
                 );
 
                 current_position = direction.routing_slot_position(
@@ -708,17 +725,28 @@ fn calculate_bend_points(
                     edge_spacing,
                 );
 
-                add_bend_point_if_needed(
+                current_segment = &hyper_graph.segments[split_partner];
+                let bend = split_bend_point(direction, split_position, current_position);
+                add_bend_point_if_needed(graph, edge_index, bend);
+                add_junction_point_if_necessary(
                     graph,
                     edge_index,
-                    split_bend_point(direction, split_position, current_position),
+                    current_segment,
+                    bend,
+                    vertical,
+                    created_junction_points,
                 );
             }
 
-            add_bend_point_if_needed(
+            let bend = target_bend_point(direction, target_anchor, current_position);
+            add_bend_point_if_needed(graph, edge_index, bend);
+            add_junction_point_if_necessary(
                 graph,
                 edge_index,
-                target_bend_point(direction, target_anchor, current_position),
+                current_segment,
+                bend,
+                vertical,
+                created_junction_points,
             );
         }
     }
@@ -1476,6 +1504,45 @@ fn is_self_loop(graph: &LGraph, edge_index: usize) -> bool {
     graph.edges[edge_index].source.node == graph.edges[edge_index].target.node
 }
 
+/// Ports `BaseRoutingDirectionStrategy.addJunctionPointIfNecessary`: a bend point needs a junction
+/// point when it is not at one of the two ends of the hyperedge segment.
+fn add_junction_point_if_necessary(
+    graph: &mut LGraph,
+    edge_index: usize,
+    segment: &HyperEdgeSegment,
+    position: LPoint,
+    vertical: bool,
+    created: &mut HashSet<(u64, u64)>,
+) {
+    let p = if vertical { position.y } else { position.x };
+
+    // Java's `HashSet<KVector>` finds a vector by `hashCode` first, which tells `-0.0` from `0.0`.
+    // The bits stand for that.
+    if created.contains(&(position.x.to_bits(), position.y.to_bits())) {
+        return;
+    }
+
+    let inside_segment = p > segment.start_coordinate() && p < segment.end_coordinate();
+
+    let incoming = &segment.incoming_connection_coordinates;
+    let outgoing = &segment.outgoing_connection_coordinates;
+    let mut at_boundary = false;
+    if let (Some(first_in), Some(last_in), Some(first_out), Some(last_out)) = (
+        incoming.first(),
+        incoming.last(),
+        outgoing.first(),
+        outgoing.last(),
+    ) {
+        at_boundary |= (p - first_in).abs() < TOLERANCE && (p - first_out).abs() < TOLERANCE;
+        at_boundary |= (p - last_in).abs() < TOLERANCE && (p - last_out).abs() < TOLERANCE;
+    }
+
+    if inside_segment || at_boundary {
+        graph.edges[edge_index].junction_points.push(position);
+        created.insert((position.x.to_bits(), position.y.to_bits()));
+    }
+}
+
 fn add_bend_point_if_needed(graph: &mut LGraph, edge_index: usize, point: LPoint) {
     if let Some(last) = graph.edges[edge_index].bend_points.last()
         && (last.x - point.x).abs() < TOLERANCE
@@ -1570,6 +1637,133 @@ mod tests {
     use crate::graph::{LGraph, LNode, LayeredEdge, PortType};
     use crate::options::LayeredOptions;
 
+    /// A graph with one edge, to hold junction points.
+    fn graph_with_one_edge() -> LGraph {
+        let graph = route_test_graph(0.0, 50.0);
+        assert_eq!(graph.edges.len(), 1);
+        graph
+    }
+
+    fn junction(
+        segment: &HyperEdgeSegment,
+        position: LPoint,
+        vertical: bool,
+        created: &mut HashSet<(u64, u64)>,
+        graph: &mut LGraph,
+    ) {
+        add_junction_point_if_necessary(graph, 0, segment, position, vertical, created);
+    }
+
+    // Mutation: use the `x` coordinate for a vertical connecting segment, or drop the strict
+    // inequalities. A point at an end of the segment is then a junction.
+    #[test]
+    fn a_junction_point_is_needed_only_inside_the_segment_or_where_two_edges_join_at_an_end() {
+        // The segment runs from 10 to 40 on the connecting axis. Edges come in at 10 and 40, and
+        // leave at 10 and 40, so both ends have a joining edge on each side.
+        let both_ends = segment(&[10.0, 40.0], &[10.0, 40.0]);
+        // Inside the segment: a junction. Vertical means the connecting segment is vertical, so
+        // the axis is `y`.
+        let mut graph = graph_with_one_edge();
+        let mut created = HashSet::new();
+        junction(
+            &both_ends,
+            LPoint { x: 99.0, y: 25.0 },
+            true,
+            &mut created,
+            &mut graph,
+        );
+        junction(
+            &both_ends,
+            LPoint { x: 25.0, y: 99.0 },
+            false,
+            &mut created,
+            &mut graph,
+        );
+        assert_eq!(graph.edges[0].junction_points.len(), 2);
+
+        // At the ends, with edges on both sides at that coordinate: a junction.
+        let mut graph = graph_with_one_edge();
+        junction(
+            &both_ends,
+            LPoint { x: 0.0, y: 10.0 },
+            true,
+            &mut HashSet::new(),
+            &mut graph,
+        );
+        junction(
+            &both_ends,
+            LPoint { x: 0.0, y: 40.0 },
+            true,
+            &mut HashSet::new(),
+            &mut graph,
+        );
+        assert_eq!(graph.edges[0].junction_points.len(), 2);
+
+        // At the ends of a segment whose incoming and outgoing edges end elsewhere: none.
+        let apart = segment(&[10.0, 30.0], &[20.0, 40.0]);
+        let mut graph = graph_with_one_edge();
+        junction(
+            &apart,
+            LPoint { x: 0.0, y: 10.0 },
+            true,
+            &mut HashSet::new(),
+            &mut graph,
+        );
+        junction(
+            &apart,
+            LPoint { x: 0.0, y: 40.0 },
+            true,
+            &mut HashSet::new(),
+            &mut graph,
+        );
+        assert!(graph.edges[0].junction_points.is_empty());
+
+        // Outside the segment, and on a segment without outgoing edges: none.
+        let open = segment(&[10.0, 40.0], &[]);
+        junction(
+            &open,
+            LPoint { x: 0.0, y: 5.0 },
+            true,
+            &mut HashSet::new(),
+            &mut graph,
+        );
+        junction(
+            &open,
+            LPoint { x: 0.0, y: 10.0 },
+            true,
+            &mut HashSet::new(),
+            &mut graph,
+        );
+        assert!(graph.edges[0].junction_points.is_empty());
+    }
+
+    // Mutation: do not remember the junction points that were made. A bend point that two
+    // edges share then gets its junction point twice.
+    #[test]
+    fn a_junction_point_is_made_once_for_a_position() {
+        let both_ends = segment(&[10.0, 40.0], &[10.0, 40.0]);
+        let mut graph = graph_with_one_edge();
+        let mut created = HashSet::new();
+        for _ in 0..3 {
+            junction(
+                &both_ends,
+                LPoint { x: 7.0, y: 25.0 },
+                true,
+                &mut created,
+                &mut graph,
+            );
+        }
+        assert_eq!(graph.edges[0].junction_points, [LPoint { x: 7.0, y: 25.0 }]);
+        junction(
+            &both_ends,
+            LPoint { x: 8.0, y: 25.0 },
+            true,
+            &mut created,
+            &mut graph,
+        );
+        assert_eq!(graph.edges[0].junction_points.len(), 2);
+    }
+
     fn segment(incoming: &[f64], outgoing: &[f64]) -> HyperEdgeSegment {
         HyperEdgeSegment::with_incoming_outgoing(incoming.to_vec(), outgoing.to_vec())
     }
@@ -1622,6 +1816,7 @@ mod tests {
             minlen: 1,
             reversed: false,
             bend_points: Vec::new(),
+            junction_points: Vec::new(),
             model_order: Some(0),
             priority_direction: 0,
             priority_shortness: 0,
@@ -1695,6 +1890,7 @@ mod tests {
             minlen: 1,
             reversed: false,
             bend_points: Vec::new(),
+            junction_points: Vec::new(),
             model_order: Some(0),
             priority_direction: 0,
             priority_shortness: 0,

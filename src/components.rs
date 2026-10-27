@@ -325,6 +325,10 @@ fn offset_graph(graph: &mut LGraph, delta: LPoint) {
                     point.x += delta.x;
                     point.y += delta.y;
                 }
+                for point in &mut edge.junction_points {
+                    point.x += delta.x;
+                    point.y += delta.y;
+                }
                 for label in &mut edge.labels {
                     label.position.x += delta.x;
                     label.position.y += delta.y;

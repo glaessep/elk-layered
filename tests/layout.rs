@@ -461,9 +461,11 @@ fn zero_sizes_are_allowed() {
     assert_eq!(size(&laid, "root"), (44.0, 24.0));
 }
 
-// Mutation: let `finish` always name the section `<id>_s0`.
+// Mutation: let `finish` always name the section `<id>_s0`, or clear the junction points of an
+// edge that gets none. elkjs 0.9.3 leaves the ones the JSON came with: the layout sets the ELK
+// property to null, and the JSON writer skips a null.
 #[test]
-fn an_edge_with_a_section_keeps_its_id() {
+fn an_edge_with_a_section_keeps_its_id_and_its_junction_points() {
     let mut e = edge("e", "a", "b");
     e.sections = vec![
         elk_layered::ElkEdgeSection {
@@ -484,7 +486,7 @@ fn an_edge_with_a_section_keeps_its_id() {
     let e = find_edge(&laid, "e");
     assert_eq!(e.sections.len(), 1);
     assert_eq!(e.sections[0].id, "mine");
-    assert!(e.junction_points.is_empty());
+    assert_eq!(e.junction_points, [ElkPoint { x: 1.0, y: 1.0 }]);
 }
 
 // --- Ports on nodes without children. ---
@@ -930,6 +932,163 @@ fn the_numbers_of_a_port_are_checked() {
             Error::InvalidSize { element, field: f, .. } if element == "port \"p\"" && f == field
         ));
     }
+}
+
+// --- Junction points. ---
+
+fn junctions(graph: &ElkNode, edge: &str) -> Vec<(f64, f64)> {
+    find_edge(graph, edge)
+        .junction_points
+        .iter()
+        .map(|p| (p.x, p.y))
+        .collect()
+}
+
+/// `a` leaves through one port `p` to `b`, `c` (ports) and `d` (no port).
+fn shared_port_graph(direction: &str, out_side: &str, in_side: &str) -> ElkNode {
+    let mut graph = root(
+        vec![
+            with_ports(
+                node("a", 40.0, 30.0),
+                "FIXED_SIDE",
+                vec![port("p", 6.0, 4.0, out_side)],
+            ),
+            with_ports(
+                node("b", 40.0, 30.0),
+                "FIXED_SIDE",
+                vec![port("q", 6.0, 4.0, in_side)],
+            ),
+            with_ports(
+                node("c", 40.0, 30.0),
+                "FIXED_SIDE",
+                vec![port("r", 6.0, 4.0, in_side)],
+            ),
+            node("d", 50.0, 20.0),
+        ],
+        vec![
+            edge("e", "p", "q"),
+            edge("e2", "p", "r"),
+            edge("e3", "p", "d"),
+        ],
+    );
+    graph
+        .layout_options
+        .insert("elk.direction".into(), direction.into());
+    graph
+}
+
+// Mutation: skip `add_junction_point_if_necessary` in `calculate_bend_points`. Layered routes every
+// direction left to right, so the vertical directions are covered by the mirror and transpose.
+#[test]
+fn a_port_with_several_edges_gets_junction_points_in_every_direction() {
+    // elkjs 0.9.3 returns these. Only the edge that bends where the others join has them.
+    for (direction, out_side, in_side, want) in [
+        ("RIGHT", "EAST", "WEST", [(68.0, 117.0), (68.0, 67.0)]),
+        ("LEFT", "WEST", "EAST", [(72.0, 117.0), (72.0, 67.0)]),
+        ("DOWN", "SOUTH", "NORTH", [(37.0, 56.0), (102.0, 56.0)]),
+        ("UP", "NORTH", "SOUTH", [(37.0, 56.0), (102.0, 56.0)]),
+    ] {
+        let laid = layout(&shared_port_graph(direction, out_side, in_side)).unwrap();
+        assert_eq!(junctions(&laid, "e"), want, "{direction}");
+        assert!(junctions(&laid, "e2").is_empty(), "{direction}");
+        assert!(junctions(&laid, "e3").is_empty(), "{direction}");
+    }
+}
+
+// Mutation: leave the junction points out of `offset_graph` in components.rs.
+#[test]
+fn junction_points_move_with_their_component() {
+    let component = |a: &str, p: &str, q: &str, r: &str, d: &str| {
+        let ids = |s: &str| format!("{a}{s}");
+        (
+            vec![
+                with_ports(
+                    node(a, 40.0, 30.0),
+                    "FIXED_SIDE",
+                    vec![port(p, 6.0, 4.0, "EAST")],
+                ),
+                with_ports(
+                    node(&ids("b"), 40.0, 30.0),
+                    "FIXED_SIDE",
+                    vec![port(q, 6.0, 4.0, "WEST")],
+                ),
+                with_ports(
+                    node(&ids("c"), 40.0, 30.0),
+                    "FIXED_SIDE",
+                    vec![port(r, 6.0, 4.0, "WEST")],
+                ),
+                node(d, 50.0, 20.0),
+            ],
+            vec![
+                edge(&ids("1"), p, q),
+                edge(&ids("2"), p, r),
+                edge(&ids("3"), p, d),
+            ],
+        )
+    };
+    let (mut nodes, mut edges) = component("a", "p", "q", "r", "d");
+    let (more_nodes, more_edges) = component("f", "p5", "q5", "r5", "i");
+    nodes.extend(more_nodes);
+    edges.extend(more_edges);
+    let laid = layout(&root(nodes, edges)).unwrap();
+    // The second component sits right of the first; elkjs 0.9.3 gives these.
+    assert_eq!(junctions(&laid, "a1"), [(68.0, 117.0), (68.0, 67.0)]);
+    assert_eq!(junctions(&laid, "f2"), [(204.0, 117.0), (204.0, 67.0)]);
+    assert!(junctions(&laid, "f1").is_empty());
+}
+
+// Mutation: drop the offset of the group in `edge_layout`, so that the junction point stays in
+// the coordinates of the graph inside the group.
+#[test]
+fn junction_points_are_relative_to_the_container_of_their_edge() {
+    for handling in ["SEPARATE_CHILDREN", "INCLUDE_CHILDREN"] {
+        let inner = group(
+            "g",
+            vec![
+                with_ports(
+                    node("x", 40.0, 30.0),
+                    "FIXED_SIDE",
+                    vec![port("p", 6.0, 4.0, "EAST")],
+                ),
+                with_ports(
+                    node("y", 40.0, 30.0),
+                    "FIXED_SIDE",
+                    vec![port("q", 6.0, 4.0, "WEST")],
+                ),
+                node("z", 40.0, 30.0),
+            ],
+        );
+        let mut inner = inner;
+        inner.edges = vec![
+            edge("e", "p", "q"),
+            edge("e2", "p", "z"),
+            edge("e3", "p", "y"),
+        ];
+        let mut graph = root(vec![inner, node("o", 40.0, 30.0)], vec![]);
+        graph
+            .layout_options
+            .insert("elk.hierarchyHandling".into(), handling.into());
+        let laid = layout(&graph).unwrap();
+        assert_eq!(find_edge(&laid, "e2").container.as_deref(), Some("g"));
+        assert_eq!(
+            junctions(&laid, "e2"),
+            [(68.0, 31.333_333_333_333_332)],
+            "{handling}"
+        );
+        assert!(junctions(&laid, "e").is_empty());
+    }
+}
+
+// Mutation: keep the junction points the JSON came with when the layout sets some.
+#[test]
+fn junction_points_from_the_layout_replace_those_of_the_input() {
+    let mut graph = shared_port_graph("RIGHT", "EAST", "WEST");
+    graph.edges[0].junction_points = vec![ElkPoint { x: 9.0, y: 9.0 }];
+    graph.edges[1].junction_points = vec![ElkPoint { x: 8.0, y: 8.0 }];
+    let laid = layout(&graph).unwrap();
+    assert_eq!(junctions(&laid, "e"), [(68.0, 117.0), (68.0, 67.0)]);
+    // elkjs 0.9.3 keeps the input's junction points where the layout has none.
+    assert_eq!(junctions(&laid, "e2"), [(8.0, 8.0)]);
 }
 
 // --- Errors: one test per variant and cause. ---
