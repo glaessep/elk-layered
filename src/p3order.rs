@@ -167,6 +167,10 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
             let Some(origin) = graph.layerless_nodes[dummy].in_layer_layout_unit else {
                 continue;
             };
+            // `position` and `origin_position` are the final places in the layer. Java compares
+            // the same numbers: `transferNodeAndPortOrdersToGraph` sets `node.id = j` for every
+            // node of the layer first, and only then `assertCorrectPortSides` compares
+            // `dummy.id > origin.id`. The ids from before the sweep play no part.
             let origin_position = position_in_layer[origin];
             if origin_position == usize::MAX {
                 continue;

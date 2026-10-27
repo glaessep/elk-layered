@@ -441,6 +441,14 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 51. In `north_south_port_connection_sides` (src/selfloops.rs), take the ports of the dummy whose
 //    node has an origin port instead of the dummy ports whose origin is this port: 2 cases,
 //    ports-self-loop-ports-restored-beside-a-north-port and random-cross-ports/r023.
+// 52. In `correct_north_south_port_sides` (src/p3order.rs), leave the port on its side after the
+//    dummy has moved (drop both `set_side` calls): 4 cases, ports-switch-sides-north-to-south,
+//    ports-switch-sides-south-to-north, ports-switch-sides-two-north-ports and
+//    ports-switch-sides-both-ways.
+// 53. In the same function, switch a northern port when its dummy sits above the node
+//    (`position < origin_position`): 89 cases, such as the same four.
+// 54. In `origin_allows_side_switch` (src/north_south.rs), always answer no, so the dummy keeps
+//    its order constraint to the node: the same four cases.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
