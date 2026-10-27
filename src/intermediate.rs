@@ -2128,9 +2128,17 @@ fn update_end_label_node_margin(graph: &mut LGraph, node: usize) {
     margin.bottom = height - margin.top - node_size.height;
 }
 
+/// Ports `EndLabelSorter.process`, `initialize` and the label group comparator at commit
+/// `62d5909`.
+///
+/// `initialize` gives every node and every port one ascending id, layer by layer, node by node
+/// and port by port. The comparator compares those ids, so the order of the layers and of the
+/// nodes in them decides, not the order in which the importer made the nodes or the index of a
+/// port inside its own node.
 pub fn sort_end_labels(graph: &mut LGraph) {
+    let (node_ids, port_ids) = end_label_sorter_ids(graph);
     let edge_sort_keys = (0..graph.edges.len())
-        .map(|edge| end_label_sort_key(graph, edge))
+        .map(|edge| end_label_sort_key(graph, edge, &node_ids, &port_ids))
         .collect::<Vec<_>>();
 
     for node in 0..graph.layerless_nodes.len() {
@@ -2156,11 +2164,40 @@ pub fn sort_end_labels(graph: &mut LGraph) {
     }
 }
 
-fn end_label_sort_key(graph: &LGraph, edge: usize) -> (usize, usize, usize) {
+/// `EndLabelSorter.initialize`: ascending ids over the layers, their nodes and those nodes' ports.
+/// A node outside every layer keeps `usize::MAX`.
+fn end_label_sorter_ids(graph: &LGraph) -> (Vec<usize>, Vec<Vec<usize>>) {
+    let mut node_ids = vec![usize::MAX; graph.layerless_nodes.len()];
+    let mut port_ids = graph
+        .layerless_nodes
+        .iter()
+        .map(|node| vec![usize::MAX; node.ports.len()])
+        .collect::<Vec<_>>();
+    let mut next_element_id = 0;
+    for layer in &graph.layers {
+        for &node in &layer.nodes {
+            node_ids[node] = next_element_id;
+            next_element_id += 1;
+            for port_id in &mut port_ids[node] {
+                *port_id = next_element_id;
+                next_element_id += 1;
+            }
+        }
+    }
+    (node_ids, port_ids)
+}
+
+fn end_label_sort_key(
+    graph: &LGraph,
+    edge: usize,
+    node_ids: &[usize],
+    port_ids: &[Vec<usize>],
+) -> (usize, usize, usize) {
     let edge = &graph.edges[edge];
-    let source_port = edge.source.port;
-    let target_node = edge.target.node;
-    let target_port = usize::MAX.saturating_sub(edge.target.port);
+    let source_port = port_ids[edge.source.node][edge.source.port];
+    let target_node = node_ids[edge.target.node];
+    // Java compares the target ports backwards: western ports run bottom to top.
+    let target_port = usize::MAX.saturating_sub(port_ids[edge.target.node][edge.target.port]);
     (source_port, target_node, target_port)
 }
 
