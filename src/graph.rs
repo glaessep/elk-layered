@@ -218,6 +218,10 @@ pub struct LNode {
     /// `layered.edgeRouting.selfLoopOrdering`, which ELK reads from each node.
     pub self_loop_ordering: super::options::SelfLoopOrderingStrategy,
     pub ports: Vec<LPort>,
+    /// How many self-loop ports the pre-processor holds off this node (`SelfLoopHolder::
+    /// hidden_ports`). They keep the indices `ports.len()..ports.len() + hidden_port_count`, so
+    /// a port added meanwhile would take the index of the first hidden one.
+    pub hidden_port_count: usize,
     pub nested_graph: Option<Box<LGraph>>,
     pub model_order: Option<usize>,
     pub component_priority: i32,
@@ -265,6 +269,7 @@ impl LNode {
             self_loop_distribution: Default::default(),
             self_loop_ordering: Default::default(),
             ports: Vec::new(),
+            hidden_port_count: 0,
             nested_graph: None,
             model_order,
             component_priority: 0,
@@ -476,6 +481,9 @@ pub struct SelfLoopHolder {
     pub node: usize,
     pub hyper_loops: Vec<SelfHyperLoop>,
     pub ports_hidden: bool,
+    /// Ports taken off the node while they are hidden, in the order of their node-local indices
+    /// (`SelfLoopPort::port`), which are the last indices of the node's port list.
+    pub hidden_ports: Vec<LPort>,
     pub original_port_constraints: PortConstraints,
 }
 
@@ -812,6 +820,13 @@ impl LGraph {
         position: LPoint,
     ) -> Option<PortRef> {
         let node = self.layerless_nodes.get_mut(node_index)?;
+        // Only a processor that runs between the self-loop pre-processor and the port restorer
+        // could reach this. Caller input cannot, so a failure is an internal bug and stays loud
+        // in release builds.
+        assert_eq!(
+            node.hidden_port_count, 0,
+            "a port added while self-loop ports are hidden takes the index of a hidden port"
+        );
         let port_index = node.ports.len();
         let mut port = LPort::new(format!("{}:{port_index}", node.id), node_index, port_type);
         port.set_side(side);
@@ -845,6 +860,12 @@ impl LGraph {
             });
         }
 
+        // As in `add_port`: only a processor between the self-loop pre-processor and the port
+        // restorer could reach this, never caller input.
+        assert_eq!(
+            node.hidden_port_count, 0,
+            "a collector port made while self-loop ports are hidden takes the index of a hidden port"
+        );
         let port_index = node.ports.len();
         let mut port = LPort::new(
             format!("{}{}", node.id, collector_port_id_suffix(port_type)),
@@ -1037,6 +1058,7 @@ impl LGraph {
     ) -> Option<Vec<usize>> {
         let node = self.layerless_nodes.get(node_index)?;
         let port_count = node.ports.len();
+        let hidden = node.hidden_port_count;
         let new_order = new_order.into_iter().collect::<Vec<_>>();
         if new_order.len() != port_count {
             return None;
@@ -1068,15 +1090,15 @@ impl LGraph {
 
         for edge in &mut self.edges {
             if edge.source.node == node_index {
-                edge.source.port = old_to_new[edge.source.port];
+                edge.source.port = remap_port_index(&old_to_new, hidden, edge.source.port);
             }
             if edge.target.node == node_index {
-                edge.target.port = old_to_new[edge.target.port];
+                edge.target.port = remap_port_index(&old_to_new, hidden, edge.target.port);
             }
             if let Some(port) = edge.original_opposite_port.as_mut()
                 && port.node == node_index
             {
-                port.port = old_to_new[port.port];
+                port.port = remap_port_index(&old_to_new, hidden, port.port);
             }
         }
 
@@ -1086,11 +1108,11 @@ impl LGraph {
             }
             for hyper_loop in &mut holder.hyper_loops {
                 for port in &mut hyper_loop.ports {
-                    port.port = old_to_new[port.port];
+                    port.port = remap_port_index(&old_to_new, hidden, port.port);
                 }
                 for edge in &mut hyper_loop.edges {
-                    edge.source_port = old_to_new[edge.source_port];
-                    edge.target_port = old_to_new[edge.target_port];
+                    edge.source_port = remap_port_index(&old_to_new, hidden, edge.source_port);
+                    edge.target_port = remap_port_index(&old_to_new, hidden, edge.target_port);
                 }
             }
         }
@@ -1102,16 +1124,17 @@ impl LGraph {
                 graph_id.as_str(),
                 node_index,
                 &old_to_new,
+                hidden,
             );
             if let Some(port) = node.long_edge_source.as_mut()
                 && port.node == node_index
             {
-                port.port = old_to_new[port.port];
+                port.port = remap_port_index(&old_to_new, hidden, port.port);
             }
             if let Some(port) = node.long_edge_target.as_mut()
                 && port.node == node_index
             {
-                port.port = old_to_new[port.port];
+                port.port = remap_port_index(&old_to_new, hidden, port.port);
             }
             if let Some(nested_graph) = node.nested_graph.as_deref_mut() {
                 update_graph_port_refs_after_reorder(
@@ -1119,6 +1142,7 @@ impl LGraph {
                     graph_id.as_str(),
                     node_index,
                     &old_to_new,
+                    hidden,
                 );
             }
         }
@@ -1231,17 +1255,32 @@ fn centered_port_position(node_size: LSize, side: PortSide) -> LPoint {
     }
 }
 
+/// Maps a node-local port index after a reorder. An index past the node's port list belongs to a
+/// port hidden by the self-loop pre-processor. It is not part of the reorder, so it stays. The
+/// node holds `hidden` such ports, so any other index past the list is a bug.
+fn remap_port_index(old_to_new: &[usize], hidden: usize, port: usize) -> usize {
+    // A stale index is a bug in a processor, never caller input. It stays loud in release builds,
+    // as the indexing `old_to_new[port]` was.
+    assert!(
+        port < old_to_new.len() + hidden,
+        "port {port} is neither in the reorder ({}) nor hidden ({hidden})",
+        old_to_new.len()
+    );
+    old_to_new.get(port).copied().unwrap_or(port)
+}
+
 fn update_graph_port_ref_after_reorder(
     graph_ref: &mut Option<GraphPortRef>,
     graph_id: &str,
     node_index: usize,
     old_to_new: &[usize],
+    hidden: usize,
 ) {
     if let Some(port_ref) = graph_ref.as_mut()
         && port_ref.graph_id == graph_id
         && port_ref.port.node == node_index
     {
-        port_ref.port.port = old_to_new[port_ref.port.port];
+        port_ref.port.port = remap_port_index(old_to_new, hidden, port_ref.port.port);
     }
 }
 
@@ -1250,6 +1289,7 @@ fn update_graph_port_refs_after_reorder(
     graph_id: &str,
     node_index: usize,
     old_to_new: &[usize],
+    hidden: usize,
 ) {
     for node in &mut graph.layerless_nodes {
         update_graph_port_ref_after_reorder(
@@ -1257,9 +1297,16 @@ fn update_graph_port_refs_after_reorder(
             graph_id,
             node_index,
             old_to_new,
+            hidden,
         );
         if let Some(nested_graph) = node.nested_graph.as_deref_mut() {
-            update_graph_port_refs_after_reorder(nested_graph, graph_id, node_index, old_to_new);
+            update_graph_port_refs_after_reorder(
+                nested_graph,
+                graph_id,
+                node_index,
+                old_to_new,
+                hidden,
+            );
         }
     }
 }
