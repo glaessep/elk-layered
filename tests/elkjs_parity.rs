@@ -111,12 +111,20 @@ fn first_difference(path: &str, want: &Value, got: &Value) -> Option<String> {
     }
 }
 
-fn lay_out(input: &Path) -> Result<Value, String> {
-    let text = std::fs::read_to_string(input).map_err(|e| e.to_string())?;
+/// Why `lay_out` gave no layout. A broken test file is no refusal of the graph.
+enum LayOutError {
+    /// The test could not read the input or write the result.
+    Test(String),
+    /// `layout` refused the graph.
+    Layout(elk_layered::Error),
+}
+
+fn lay_out(input: &Path) -> Result<Value, LayOutError> {
+    let text = std::fs::read_to_string(input).map_err(|e| LayOutError::Test(e.to_string()))?;
     let graph: elk_layered::ElkNode =
-        serde_json::from_str(&text).map_err(|e| format!("read: {e}"))?;
-    let laid = elk_layered::layout(&graph).map_err(|e| format!("layout: {e}"))?;
-    serde_json::to_value(&laid).map_err(|e| format!("write: {e}"))
+        serde_json::from_str(&text).map_err(|e| LayOutError::Test(format!("read: {e}")))?;
+    let laid = elk_layered::layout(&graph).map_err(LayOutError::Layout)?;
+    serde_json::to_value(&laid).map_err(|e| LayOutError::Test(format!("write: {e}")))
 }
 
 fn expected(case: &str) -> Value {
@@ -130,20 +138,31 @@ fn expected(case: &str) -> Value {
 
 /// How the result of `layout` differs from what elkjs gave, or `None` when it does not.
 ///
-/// elkjs refuses some graphs, such as one with an edge into a part laid out on its own.
-/// `record.mjs` then writes `{"elkjsError": ...}`, and `layout` must refuse the graph too. The
-/// two messages are not compared: they come from two programs.
-fn difference(want: &Value, got: Result<Value, String>) -> Option<String> {
+/// elkjs refuses some graphs, such as one with an edge into a part laid out on its own: ELK's
+/// `UnsupportedGraphException`. `record.mjs` then writes `{"elkjsError": ...}`, and `layout` must
+/// refuse the graph with `Error::Unsupported`. A read or write failure of the test, or any other
+/// error, is not that refusal. The two messages are not compared: they come from two programs.
+fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
     match (want.get("elkjsError"), got) {
-        (Some(_), Err(_)) => None,
+        (Some(_), Err(LayOutError::Layout(elk_layered::Error::Unsupported { .. }))) => None,
+        (Some(refusal), Err(LayOutError::Layout(error))) => Some(format!(
+            "elkjs refuses it ({refusal}), elk-layered fails with another error: {error}"
+        )),
+        (Some(refusal), Err(LayOutError::Test(error))) => Some(format!(
+            "elkjs refuses it ({refusal}), but the test failed first: {error}"
+        )),
         (Some(refusal), Ok(_)) => Some(format!(
             "elkjs refuses it ({refusal}), elk-layered lays it out"
         )),
-        (None, Err(error)) => Some(error),
+        (None, Err(LayOutError::Layout(error))) => Some(format!("layout: {error}")),
+        (None, Err(LayOutError::Test(error))) => Some(error),
         (None, Ok(got)) => first_difference("", want, &got),
     }
 }
 
+// Mutation: make `layout` refuse an edge between a node and its own children laid out on their
+// own (src/layout.rs, `to_graph`) with `Error::Internal` instead of `Error::Unsupported`. All 26
+// cases that elkjs refuses, such as random-group-ends/r034, then fail.
 // Mutation: drop the first `graph.random.next_long()` of the greedy switch in
 // src/p3order/sweep.rs. random/r017, r063, r144, r145 and r169 then differ.
 #[test]
