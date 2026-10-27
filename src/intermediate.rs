@@ -1363,7 +1363,10 @@ pub fn switch_label_dummies(graph: &mut LGraph) {
         if let Some(info) = LabelDummyInfo::new(graph, label_dummy) {
             let target_layer = find_median_layer_target_id(&info);
             assign_label_dummy_layer(graph, &info, target_layer);
-            update_long_edge_before_label_dummy_info(graph, info.label_dummy);
+            // Java: LabelDummySwitcher.updateLongEdgeSourceLabelDummyInfo sets
+            // LONG_EDGE_BEFORE_LABEL_DUMMY only. It leaves LONG_EDGE_HAS_LABEL_DUMMIES alone:
+            // that flag comes from LongEdgeSplitter. The merger reads "before the label dummy"
+            // from the graph in `is_before_label_dummy`.
         }
     }
 }
@@ -2490,18 +2493,6 @@ fn swap_label_and_long_edge_dummies(
     }
     for edge in label_outgoing {
         graph.set_edge_source(edge, long_output_ref);
-    }
-}
-
-fn update_long_edge_before_label_dummy_info(graph: &mut LGraph, label_dummy: usize) {
-    let mut current = label_dummy;
-    while let Some(incoming) = graph.node_incoming_edges(current).into_iter().next() {
-        let source = graph.edges[incoming].source.node;
-        if graph.layerless_nodes[source].kind != LNodeKind::LongEdge {
-            break;
-        }
-        graph.layerless_nodes[source].long_edge_has_label_dummies = true;
-        current = source;
     }
 }
 
