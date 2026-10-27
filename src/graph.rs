@@ -12,6 +12,11 @@ use super::options::{
 };
 use crate::random::JavaRandom;
 
+mod ports;
+#[cfg(test)]
+pub(crate) use ports::port_ids;
+pub use ports::{NodePorts, PortId};
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LGraph {
     pub id: String,
@@ -223,7 +228,7 @@ pub struct LNode {
     pub self_loop_distribution: super::options::SelfLoopDistributionStrategy,
     /// `layered.edgeRouting.selfLoopOrdering`, which ELK reads from each node.
     pub self_loop_ordering: super::options::SelfLoopOrderingStrategy,
-    pub ports: Vec<LPort>,
+    pub ports: NodePorts,
     /// How many self-loop ports the pre-processor holds off this node (`SelfLoopHolder::
     /// hidden_ports`). They keep the indices `ports.len()..ports.len() + hidden_port_count`, so
     /// a port added meanwhile would take the index of the first hidden one.
@@ -277,7 +282,7 @@ impl LNode {
             node_size: NodeSizing::default(),
             self_loop_distribution: Default::default(),
             self_loop_ordering: Default::default(),
-            ports: Vec::new(),
+            ports: NodePorts::default(),
             hidden_port_count: 0,
             nested_graph: None,
             model_order,
@@ -483,7 +488,7 @@ pub struct HierarchyEdge {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PortRef {
     pub node: usize,
-    pub port: usize,
+    pub port: PortId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -530,8 +535,8 @@ pub struct SelfHyperLoop {
     pub edges: Vec<SelfLoopEdge>,
     pub labels: Option<SelfHyperLoopLabels>,
     pub self_loop_type: Option<SelfLoopType>,
-    pub leftmost_port: Option<usize>,
-    pub rightmost_port: Option<usize>,
+    pub leftmost_port: Option<PortId>,
+    pub rightmost_port: Option<PortId>,
     pub occupied_sides: Vec<PortSide>,
     pub routing_slots: [usize; 5],
 }
@@ -544,7 +549,7 @@ pub struct SelfHyperLoopLabels {
     pub position: LPoint,
     pub side: Option<PortSide>,
     pub alignment: Option<SelfLoopLabelAlignment>,
-    pub alignment_reference_port: Option<usize>,
+    pub alignment_reference_port: Option<PortId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -563,7 +568,7 @@ pub enum SelfLoopLabelAlignment {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelfLoopPort {
-    pub port: usize,
+    pub port: PortId,
     pub had_only_self_loops: bool,
     pub hidden: bool,
 }
@@ -571,8 +576,8 @@ pub struct SelfLoopPort {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelfLoopEdge {
     pub edge: usize,
-    pub source_port: usize,
-    pub target_port: usize,
+    pub source_port: PortId,
+    pub target_port: PortId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -864,14 +869,17 @@ impl LGraph {
             node.hidden_port_count, 0,
             "a port added while self-loop ports are hidden takes the index of a hidden port"
         );
-        let port_index = node.ports.len();
-        let mut port = LPort::new(format!("{}:{port_index}", node.id), node_index, port_type);
+        let mut port = LPort::new(
+            format!("{}:{}", node.id, node.ports.len()),
+            node_index,
+            port_type,
+        );
         port.set_side(side);
         port.position = position;
-        node.ports.push(port);
+        let port = node.ports.push(port);
         Some(PortRef {
             node: node_index,
-            port: port_index,
+            port,
         })
     }
 
@@ -886,10 +894,10 @@ impl LGraph {
         side: PortSide,
     ) -> Option<PortRef> {
         let node = self.layerless_nodes.get_mut(node_index)?;
-        if let Some(port) = node
+        if let Some((port, _)) = node
             .ports
-            .iter()
-            .position(|port| port.collector_type == Some(port_type))
+            .iter_with_ids()
+            .find(|(_, port)| port.collector_type == Some(port_type))
         {
             return Some(PortRef {
                 node: node_index,
@@ -903,7 +911,6 @@ impl LGraph {
             node.hidden_port_count, 0,
             "a collector port made while self-loop ports are hidden takes the index of a hidden port"
         );
-        let port_index = node.ports.len();
         let mut port = LPort::new(
             format!("{}{}", node.id, collector_port_id_suffix(port_type)),
             node_index,
@@ -912,10 +919,10 @@ impl LGraph {
         port.collector_type = Some(port_type);
         port.set_side(side);
         port.position = centered_port_position(node.size, side);
-        node.ports.push(port);
+        let port = node.ports.push(port);
         Some(PortRef {
             node: node_index,
-            port: port_index,
+            port,
         })
     }
 
@@ -1074,8 +1081,7 @@ impl LGraph {
     pub(crate) fn ports_on_side(&self, node: usize, side: PortSide) -> Vec<PortRef> {
         self.layerless_nodes[node]
             .ports
-            .iter()
-            .enumerate()
+            .iter_with_ids()
             .filter_map(|(port, data)| (data.side == side).then_some(PortRef { node, port }))
             .collect()
     }
@@ -1093,7 +1099,7 @@ impl LGraph {
     pub fn reorder_node_ports(
         &mut self,
         node_index: usize,
-        new_order: impl IntoIterator<Item = usize>,
+        new_order: impl IntoIterator<Item = PortId>,
     ) -> bool {
         self.reorder_node_ports_with_map(node_index, new_order)
             .is_some()
@@ -1102,7 +1108,7 @@ impl LGraph {
     pub fn reorder_node_ports_with_map(
         &mut self,
         node_index: usize,
-        new_order: impl IntoIterator<Item = usize>,
+        new_order: impl IntoIterator<Item = PortId>,
     ) -> Option<Vec<usize>> {
         let node = self.layerless_nodes.get(node_index)?;
         let port_count = node.ports.len();
@@ -1114,27 +1120,18 @@ impl LGraph {
 
         let mut seen = vec![false; port_count];
         for old_index in &new_order {
-            if *old_index >= port_count || seen[*old_index] {
+            let old_index = old_index.index();
+            if old_index >= port_count || seen[old_index] {
                 return None;
             }
-            seen[*old_index] = true;
+            seen[old_index] = true;
         }
 
-        let old_ports = std::mem::take(&mut self.layerless_nodes[node_index].ports);
-        let mut movable_ports = old_ports.into_iter().map(Some).collect::<Vec<_>>();
-        let mut old_to_new = vec![0usize; movable_ports.len()];
-        let mut reordered = Vec::with_capacity(movable_ports.len());
-
-        for (new_index, old_index) in new_order.into_iter().enumerate() {
-            old_to_new[old_index] = new_index;
-            let mut port = movable_ports[old_index]
-                .take()
-                .expect("validated port order visits each port exactly once");
-            port.node = node_index;
-            reordered.push(port);
+        let mut old_to_new = vec![0usize; port_count];
+        for (new_index, old_index) in new_order.iter().enumerate() {
+            old_to_new[old_index.index()] = new_index;
         }
-
-        self.layerless_nodes[node_index].ports = reordered;
+        self.layerless_nodes[node_index].ports.set_order(&new_order);
 
         for edge in &mut self.edges {
             if edge.source.node == node_index {
@@ -1179,7 +1176,7 @@ impl LGraph {
             let Some(dummy) = self.layerless_nodes.get_mut(dummy) else {
                 continue;
             };
-            for port in &mut dummy.ports {
+            for port in dummy.ports.slots_mut() {
                 if let Some(origin) = port.origin_port.as_mut()
                     && origin.node == node_index
                 {
@@ -1328,7 +1325,8 @@ fn centered_port_position(node_size: LSize, side: PortSide) -> LPoint {
 /// Maps a node-local port index after a reorder. An index past the node's port list belongs to a
 /// port hidden by the self-loop pre-processor. It is not part of the reorder, so it stays. The
 /// node holds `hidden` such ports, so any other index past the list is a bug.
-fn remap_port_index(old_to_new: &[usize], hidden: usize, port: usize) -> usize {
+fn remap_port_index(old_to_new: &[usize], hidden: usize, port: PortId) -> PortId {
+    let port = port.index();
     // A stale index is a bug in a processor, never caller input. It stays loud in release builds,
     // as the indexing `old_to_new[port]` was.
     assert!(
@@ -1336,7 +1334,7 @@ fn remap_port_index(old_to_new: &[usize], hidden: usize, port: usize) -> usize {
         "port {port} is neither in the reorder ({}) nor hidden ({hidden})",
         old_to_new.len()
     );
-    old_to_new.get(port).copied().unwrap_or(port)
+    PortId::new(old_to_new.get(port).copied().unwrap_or(port))
 }
 
 fn update_graph_port_ref_after_reorder(
@@ -1623,8 +1621,11 @@ mod tests {
         assert_eq!(dummy.kind, LNodeKind::ExternalPort);
         assert_eq!(dummy.in_layer_constraint, InLayerConstraint::Bottom);
         assert_eq!(dummy.port_constraints, PortConstraints::FixedPos);
-        assert_eq!(dummy.ports[0].side, PortSide::North);
-        assert_eq!(dummy.ports[0].position, LPoint { x: 2.0, y: 0.0 });
+        assert_eq!(dummy.ports[PortId::new(0)].side, PortSide::North);
+        assert_eq!(
+            dummy.ports[PortId::new(0)].position,
+            LPoint { x: 2.0, y: 0.0 }
+        );
     }
 
     #[test]
@@ -1652,10 +1653,16 @@ mod tests {
         assert_eq!(dummy.layer_constraint, LayerConstraint::FirstSeparate);
         assert_eq!(dummy.size.width, 3.0);
         assert_eq!(dummy.size.height, 6.0);
-        assert_eq!(dummy.ports[0].side, PortSide::East);
-        assert_eq!(dummy.ports[0].position, LPoint { x: 0.0, y: 3.0 });
-        assert_eq!(dummy.ports[0].anchor, LPoint { x: 0.0, y: 0.0 });
-        assert_eq!(dummy.ports[0].size, LSize::default());
+        assert_eq!(dummy.ports[PortId::new(0)].side, PortSide::East);
+        assert_eq!(
+            dummy.ports[PortId::new(0)].position,
+            LPoint { x: 0.0, y: 3.0 }
+        );
+        assert_eq!(
+            dummy.ports[PortId::new(0)].anchor,
+            LPoint { x: 0.0, y: 0.0 }
+        );
+        assert_eq!(dummy.ports[PortId::new(0)].size, LSize::default());
         assert_eq!(
             dummy.external_port_size,
             LSize {
@@ -1663,7 +1670,7 @@ mod tests {
                 height: 6.0
             }
         );
-        assert_eq!(dummy.ports[0].border_offset, Some(-3.0));
+        assert_eq!(dummy.ports[PortId::new(0)].border_offset, Some(-3.0));
         assert_eq!(dummy.port_ratio_or_position, 0.5);
     }
 
@@ -1679,18 +1686,24 @@ mod tests {
         dummy.kind = LNodeKind::ExternalPort;
         dummy.origin_port = Some(GraphPortRef {
             graph_id: "root".to_string(),
-            port: PortRef { node: 0, port: 1 },
+            port: PortRef {
+                node: 0,
+                port: PortId::new(1),
+            },
         });
         nested.layerless_nodes.push(dummy);
         compound.nested_graph = Some(Box::new(nested));
         parent.layerless_nodes.push(compound);
 
-        assert!(parent.reorder_node_ports(0, [1, 0]));
+        assert!(parent.reorder_node_ports(0, port_ids([1, 0])));
 
         let nested = parent.layerless_nodes[0].nested_graph.as_ref().unwrap();
         assert_eq!(
             nested.layerless_nodes[0].origin_port.as_ref().unwrap().port,
-            PortRef { node: 0, port: 0 }
+            PortRef {
+                node: 0,
+                port: PortId::new(0)
+            }
         );
     }
 
@@ -1714,11 +1727,23 @@ mod tests {
 
         assert_eq!(
             graph.ports_on_side(0, PortSide::North),
-            [PortRef { node: 0, port: 0 }, PortRef { node: 0, port: 2 }]
+            [
+                PortRef {
+                    node: 0,
+                    port: PortId::new(0)
+                },
+                PortRef {
+                    node: 0,
+                    port: PortId::new(2)
+                }
+            ]
         );
         assert_eq!(
             graph.ports_on_side(0, PortSide::South),
-            [PortRef { node: 0, port: 3 }]
+            [PortRef {
+                node: 0,
+                port: PortId::new(3)
+            }]
         );
         assert!(graph.ports_on_side(0, PortSide::West).is_empty());
     }
@@ -1732,7 +1757,9 @@ mod tests {
         node.ports.push(LPort::new("p2", 0, PortType::Output));
         graph.layerless_nodes.push(node);
 
-        let old_to_new = graph.reorder_node_ports_with_map(0, [2, 0, 1]).unwrap();
+        let old_to_new = graph
+            .reorder_node_ports_with_map(0, port_ids([2, 0, 1]))
+            .unwrap();
 
         assert_eq!(old_to_new, vec![1, 2, 0]);
         assert_eq!(
@@ -1770,27 +1797,34 @@ mod tests {
             }
             dummy
         };
-        let a = |port: usize| PortRef { node: 0, port };
+        let a = |port: usize| PortRef {
+            node: 0,
+            port: PortId::new(port),
+        };
         graph.layerless_nodes.push(node);
         graph.layerless_nodes.push(dummy("n0", &[a(0), a(0)]));
         graph.layerless_nodes.push(dummy("n1", &[a(1)]));
         graph.layerless_nodes.push(other);
-        graph
-            .layerless_nodes
-            .push(dummy("m1", &[PortRef { node: 3, port: 1 }]));
+        graph.layerless_nodes.push(dummy(
+            "m1",
+            &[PortRef {
+                node: 3,
+                port: PortId::new(1),
+            }],
+        ));
         for (port, dummy) in [(0, 1), (1, 2)] {
-            graph.layerless_nodes[0].ports[port].port_dummy = Some(GraphNodeRef {
+            graph.layerless_nodes[0].ports[PortId::new(port)].port_dummy = Some(GraphNodeRef {
                 graph_id: "root".to_string(),
                 node: dummy,
             });
         }
-        graph.layerless_nodes[3].ports[1].port_dummy = Some(GraphNodeRef {
+        graph.layerless_nodes[3].ports[PortId::new(1)].port_dummy = Some(GraphNodeRef {
             graph_id: "root".to_string(),
             node: 4,
         });
 
         // Port 0 goes to place 1, port 1 to place 2, and port 2 to place 0.
-        assert!(graph.reorder_node_ports(0, [2, 0, 1]));
+        assert!(graph.reorder_node_ports(0, port_ids([2, 0, 1])));
 
         let origins = |node: usize| {
             graph.layerless_nodes[node]
@@ -1801,6 +1835,12 @@ mod tests {
         };
         assert_eq!(origins(1), vec![a(1), a(1)]);
         assert_eq!(origins(2), vec![a(2)]);
-        assert_eq!(origins(4), vec![PortRef { node: 3, port: 1 }]);
+        assert_eq!(
+            origins(4),
+            vec![PortRef {
+                node: 3,
+                port: PortId::new(1)
+            }]
+        );
     }
 }

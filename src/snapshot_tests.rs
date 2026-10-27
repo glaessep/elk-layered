@@ -383,7 +383,7 @@ fn dump(graph: &LGraph, origin: LPoint, depth: usize, out: &mut String) {
     for edge in &graph.edges {
         let source = &graph.layerless_nodes[edge.source.node];
         let target = &graph.layerless_nodes[edge.target.node];
-        let end = |n: &LNode, p: usize| {
+        let end = |n: &LNode, p: crate::graph::PortId| {
             let port = &n.ports[p];
             add(add(add(origin, n.position), port.position), port.anchor)
         };

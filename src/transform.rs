@@ -97,7 +97,7 @@ fn mirror_node_x(node: &mut LNode, offset: f64) {
     node.padding.swap_left_right();
     node.node_label_placement = node.node_label_placement.mirror_x();
     node.node_alignment = mirror_alignment_x(node.node_alignment);
-    for port in &mut node.ports {
+    for port in node.ports.slots_mut() {
         mirror_port_x(port, node.size.width);
     }
     if node.kind == LNodeKind::ExternalPort {
@@ -155,7 +155,7 @@ fn mirror_node_y(node: &mut LNode, offset: f64) {
     if node.kind == LNodeKind::ExternalPort {
         node.external_port_side = mirror_port_side_y(node.external_port_side);
     }
-    for port in &mut node.ports {
+    for port in node.ports.slots_mut() {
         mirror_port_y(port, node.size.height);
     }
     for label in &mut node.labels {
@@ -206,7 +206,7 @@ fn transpose_node(node: &mut LNode) {
     // `GraphTransformer.transposeProperties` swaps the minimum size too.
     node.node_size.minimum.transpose();
     node.node_alignment = transpose_alignment(node.node_alignment);
-    for port in &mut node.ports {
+    for port in node.ports.slots_mut() {
         transpose_port(port);
     }
     if node.kind == LNodeKind::ExternalPort {
@@ -444,6 +444,7 @@ impl PaddingTransform for ElkPadding {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::PortId;
     use crate::graph::{EdgeLabelPlacement, LayeredEdge, PortType};
     use crate::options::{
         Alignment, ElkPadding, LayeredOptions, NodeLabelPlacement, PortConstraints,
@@ -966,13 +967,13 @@ mod tests {
         let mut node = LNode::new("A", 20.0, 10.0, None);
         node.position = LPoint { x: 3.0, y: 7.0 };
         let port = graph.add_node_for_test(node);
-        graph.layerless_nodes[port].ports[0].position = LPoint { x: 1.0, y: 2.0 };
-        graph.layerless_nodes[port].ports[0].anchor = LPoint { x: 3.0, y: 4.0 };
-        graph.layerless_nodes[port].ports[0].size = LSize {
+        graph.layerless_nodes[port].ports[PortId::new(0)].position = LPoint { x: 1.0, y: 2.0 };
+        graph.layerless_nodes[port].ports[PortId::new(0)].anchor = LPoint { x: 3.0, y: 4.0 };
+        graph.layerless_nodes[port].ports[PortId::new(0)].size = LSize {
             width: 5.0,
             height: 6.0,
         };
-        graph.layerless_nodes[port].ports[0].side = PortSide::North;
+        graph.layerless_nodes[port].ports[PortId::new(0)].side = PortSide::North;
         graph.size = LSize {
             width: 100.0,
             height: 80.0,
@@ -995,9 +996,12 @@ mod tests {
                 height: 20.0
             }
         );
-        assert_eq!(node.ports[0].position, LPoint { x: 2.0, y: 1.0 });
-        assert_eq!(node.ports[0].anchor, LPoint { x: 4.0, y: 3.0 });
-        assert_eq!(node.ports[0].side, PortSide::West);
+        assert_eq!(
+            node.ports[PortId::new(0)].position,
+            LPoint { x: 2.0, y: 1.0 }
+        );
+        assert_eq!(node.ports[PortId::new(0)].anchor, LPoint { x: 4.0, y: 3.0 });
+        assert_eq!(node.ports[PortId::new(0)].side, PortSide::West);
         assert_eq!(
             graph.size,
             LSize {

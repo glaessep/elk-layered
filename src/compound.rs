@@ -8,8 +8,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphNodeRef, GraphPortRef,
-    HierarchyEdge, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize, LayeredEdge, PortRef, PortSide,
-    PortType, apply_port_index_to_dummy, create_external_port_dummy, port_side_from_direction,
+    HierarchyEdge, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize, LayeredEdge, PortId, PortRef,
+    PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
+    port_side_from_direction,
 };
 use crate::options::{ElkDirection, PortConstraints};
 
@@ -989,7 +990,7 @@ struct ExternalPortKey {
 
 struct GraphPortIndex {
     nodes: HashMap<String, usize>,
-    ports: HashMap<(usize, PortType), HashMap<String, usize>>,
+    ports: HashMap<(usize, PortType), HashMap<String, PortId>>,
 }
 
 impl GraphPortIndex {
@@ -998,7 +999,7 @@ impl GraphPortIndex {
         let mut ports = HashMap::new();
         for (node, data) in graph.layerless_nodes.iter().enumerate() {
             nodes.entry(data.id.clone()).or_insert(node);
-            for (port, data) in data.ports.iter().enumerate() {
+            for (port, data) in data.ports.iter_with_ids() {
                 for &port_type in lookup_types(data) {
                     ports
                         .entry((node, port_type))
@@ -1028,10 +1029,11 @@ impl GraphPortIndex {
             return Some(port);
         }
         let node = *self.nodes.get(node_id)?;
-        let port = graph.layerless_nodes[node].ports.len();
-        graph.layerless_nodes[node]
-            .ports
-            .push(LPort::new(port_key.to_string(), node, port_type));
+        let port = graph.layerless_nodes[node].ports.push(LPort::new(
+            port_key.to_string(),
+            node,
+            port_type,
+        ));
         self.ports
             .entry((node, port_type))
             .or_default()
@@ -1042,7 +1044,7 @@ impl GraphPortIndex {
 
 struct NodePortIndex {
     owner: usize,
-    ports: HashMap<PortType, HashMap<String, usize>>,
+    ports: HashMap<PortType, HashMap<String, PortId>>,
 }
 
 impl NodePortIndex {
@@ -1052,7 +1054,7 @@ impl NodePortIndex {
             .layerless_nodes
             .get(owner)
             .expect("compound parent node must exist while indexing its ports");
-        for (port_index, port) in node.ports.iter().enumerate() {
+        for (port_index, port) in node.ports.iter_with_ids() {
             for &port_type in lookup_types(port) {
                 ports
                     .entry(port_type)
@@ -1076,7 +1078,7 @@ impl NodePortIndex {
         })
     }
 
-    fn record_port(&mut self, graph: &LGraph, port: usize) {
+    fn record_port(&mut self, graph: &LGraph, port: PortId) {
         let port_data = graph
             .layerless_nodes
             .get(self.owner)
@@ -1663,9 +1665,12 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
         let parent_size = graph.layerless_nodes[node_index].size;
         let nested_graph_id = nested_graph.id.clone();
         let nested_direction = nested_graph.options.direction;
-        let port_count = graph.layerless_nodes[node_index].ports.len();
+        let port_ids = graph.layerless_nodes[node_index]
+            .ports
+            .ids()
+            .collect::<Vec<_>>();
 
-        for port_index in 0..port_count {
+        for port_index in port_ids {
             if graph.layerless_nodes[node_index].ports[port_index]
                 .port_dummy
                 .is_some()
@@ -1710,7 +1715,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
                     .as_deref_mut()
                     .expect("nested graph existence checked above");
                 let dummy_node = nested_graph.layerless_nodes.len();
-                dummy.ports[0].node = dummy_node;
+                dummy.ports[PortId::new(0)].node = dummy_node;
                 nested_graph.layerless_nodes.push(dummy);
                 dummy_node
             };
@@ -2057,9 +2062,12 @@ fn create_parent_boundary_port(
     } else {
         Some(dummy_port_type)
     };
-    dummy.ports[0].node = node;
+    dummy.ports[PortId::new(0)].node = node;
     graph.layerless_nodes.push(dummy);
-    PortRef { node, port: 0 }
+    PortRef {
+        node,
+        port: PortId::new(0),
+    }
 }
 
 /// A port that holds only a position and a size, for [`calc_port_side`] and the port offset.
@@ -2587,7 +2595,7 @@ mod tests {
         duplicate.port_dummy = None;
         let duplicate_port = PortRef {
             node: group,
-            port: graph.layerless_nodes[group].ports.len(),
+            port: PortId::new(graph.layerless_nodes[group].ports.len()),
         };
         graph.layerless_nodes[group].ports.push(duplicate);
         if graph.edges[edge_index].source == original_port {
@@ -2708,7 +2716,7 @@ mod tests {
                     .iter()
                     .filter(|node| node.kind == LNodeKind::ExternalPort)
                     .filter_map(|node| {
-                        let port = &node.ports[0];
+                        let port = &node.ports[PortId::new(0)];
                         let edge = if reverse {
                             port.outgoing_edges.first()
                         } else {
@@ -2943,7 +2951,7 @@ mod tests {
             .unwrap();
         group
             .ports
-            .iter_mut()
+            .slots_mut()
             .find(|port| port.id == original_key)
             .unwrap()
             .border_offset = original_offset;
@@ -2973,8 +2981,9 @@ mod tests {
                         .unwrap();
                     let original_port = graph.layerless_nodes[group_index]
                         .ports
-                        .iter()
-                        .position(|port| port.id == key)
+                        .iter_with_ids()
+                        .find(|(_, port)| port.id == key)
+                        .map(|(id, _)| id)
                         .unwrap();
                     preprocess_source_ported_compound_graph(&mut graph);
                     let group = &graph.layerless_nodes[group_index];
@@ -2991,7 +3000,7 @@ mod tests {
                     );
                     assert_eq!(parent.border_offset, Some(original_offset.unwrap_or(0.0)));
                     assert_eq!(
-                        direct.ports[0].border_offset,
+                        direct.ports[PortId::new(0)].border_offset,
                         Some(original_offset.unwrap_or(0.0))
                     );
                     if original_offset == Some(-4.0) {
@@ -3084,7 +3093,7 @@ mod tests {
             .position(|node| node.id == "cluster")
             .unwrap();
         {
-            let parent_port = &mut lgraph.layerless_nodes[cluster_index].ports[0];
+            let parent_port = &mut lgraph.layerless_nodes[cluster_index].ports[PortId::new(0)];
             parent_port.set_side(PortSide::East);
             parent_port.position = LPoint { x: 80.0, y: 20.0 };
             parent_port.size = LSize {
@@ -3097,7 +3106,7 @@ mod tests {
         preprocess_source_ported_compound_graph(&mut lgraph);
 
         let cluster = &lgraph.layerless_nodes[cluster_index];
-        let parent_port = &cluster.ports[0];
+        let parent_port = &cluster.ports[PortId::new(0)];
         let port_dummy = parent_port
             .port_dummy
             .as_ref()
@@ -3112,7 +3121,7 @@ mod tests {
             Some("cluster:0:source")
         );
         assert_eq!(external.parent_port_type, Some(PortType::Output));
-        assert_eq!(external.ports[0].side, PortSide::North);
+        assert_eq!(external.ports[PortId::new(0)].side, PortSide::North);
     }
 
     #[test]
@@ -3136,7 +3145,7 @@ mod tests {
         preprocess_source_ported_compound_graph(&mut lgraph);
 
         let cluster = &lgraph.layerless_nodes[cluster_index];
-        let parent_port = &cluster.ports[0];
+        let parent_port = &cluster.ports[PortId::new(0)];
         assert_eq!(parent_port.net_flow(), 0);
         let port_dummy = parent_port
             .port_dummy
@@ -3147,7 +3156,7 @@ mod tests {
 
         assert_eq!(external.parent_port_type, Some(PortType::Output));
         assert_eq!(external.external_port_side, PortSide::North);
-        assert_eq!(external.ports[0].side, PortSide::South);
+        assert_eq!(external.ports[PortId::new(0)].side, PortSide::South);
     }
 
     // Mutation: read the port constraints of S2 after the sibling's dummy is linked, so S2 is

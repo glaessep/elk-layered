@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 
 use crate::common::cells::grow_label_cell;
 use crate::graph::{
-    LGraph, LMargin, LNodeKind, LPoint, LSize, PortRef, PortSide, SelfHyperLoop,
+    LGraph, LMargin, LNodeKind, LPoint, LSize, NodePorts, PortId, PortRef, PortSide, SelfHyperLoop,
     SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder, SelfLoopLabelAlignment, SelfLoopLabelRef,
     SelfLoopPort, SelfLoopType,
 };
@@ -122,7 +122,7 @@ fn install_self_loop_holder(graph: &LGraph, node: usize) -> SelfLoopHolder {
     }
 }
 
-fn ensure_self_loop_port(graph: &LGraph, node: usize, port: usize, ports: &mut Vec<SelfLoopPort>) {
+fn ensure_self_loop_port(graph: &LGraph, node: usize, port: PortId, ports: &mut Vec<SelfLoopPort>) {
     if ports.iter().any(|candidate| candidate.port == port) {
         return;
     }
@@ -134,7 +134,7 @@ fn ensure_self_loop_port(graph: &LGraph, node: usize, port: usize, ports: &mut V
     });
 }
 
-fn port_had_only_self_loops(graph: &LGraph, node: usize, port: usize) -> bool {
+fn port_had_only_self_loops(graph: &LGraph, node: usize, port: PortId) -> bool {
     let port_data = &graph.layerless_nodes[node].ports[port];
     port_data
         .incoming_edges
@@ -294,12 +294,18 @@ fn hide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
         .filter(|port| port.hidden)
         .map(|port| port.port)
         .collect::<Vec<_>>();
-    hidden_indices.sort_unstable();
+    hidden_indices.sort_unstable_by_key(|port| port.index());
     hidden_indices.dedup();
 
     let port_count = graph.layerless_nodes[holder.node].ports.len();
-    let mut new_order = (0..port_count)
-        .filter(|port| hidden_indices.binary_search(port).is_err())
+    let mut new_order = graph.layerless_nodes[holder.node]
+        .ports
+        .ids()
+        .filter(|port| {
+            hidden_indices
+                .binary_search_by_key(&port.index(), |hidden| hidden.index())
+                .is_err()
+        })
         .collect::<Vec<_>>();
     new_order.extend(hidden_indices.iter().copied());
 
@@ -489,7 +495,7 @@ enum AddMode {
 
 #[derive(Debug, Clone)]
 struct PortRestoreTargetAreas {
-    areas: [[Vec<usize>; 3]; 5],
+    areas: [[Vec<PortId>; 3]; 5],
 }
 
 impl PortRestoreTargetAreas {
@@ -519,7 +525,7 @@ impl PortRestoreTargetAreas {
 
     fn add_port_list(
         &mut self,
-        mut ports: Vec<usize>,
+        mut ports: Vec<PortId>,
         side: PortSide,
         area: PortSideArea,
         mode: AddMode,
@@ -534,11 +540,11 @@ impl PortRestoreTargetAreas {
         }
     }
 
-    fn get(&self, side: PortSide, area: PortSideArea) -> &[usize] {
+    fn get(&self, side: PortSide, area: PortSideArea) -> &[PortId] {
         &self.areas[side.ordinal()][area.ordinal()]
     }
 
-    fn ports(&self) -> Vec<usize> {
+    fn ports(&self) -> Vec<PortId> {
         self.areas
             .iter()
             .flat_map(|side_areas| side_areas.iter())
@@ -818,9 +824,11 @@ fn restored_port_order(
     graph: &LGraph,
     node: usize,
     target_areas: &PortRestoreTargetAreas,
-) -> Vec<usize> {
+) -> Vec<PortId> {
     let hidden_ports = target_areas.ports();
-    let old_ports = (0..graph.layerless_nodes[node].ports.len())
+    let old_ports = graph.layerless_nodes[node]
+        .ports
+        .ids()
         .filter(|port| !hidden_ports.contains(port))
         .collect::<Vec<_>>();
     let mut next_old_port_index = 0usize;
@@ -838,9 +846,9 @@ fn restored_port_order(
         &old_ports,
         next_old_port_index,
         &mut new_order,
-        |port| {
+        |id, port| {
             port.side == PortSide::North
-                && is_north_south_port_with_west_or_west_east_connections(graph, port)
+                && is_north_south_port_with_west_or_west_east_connections(graph, id, port)
         },
     );
     add_target_area(
@@ -855,7 +863,7 @@ fn restored_port_order(
         &old_ports,
         next_old_port_index,
         &mut new_order,
-        |port| port.side == PortSide::North,
+        |_, port| port.side == PortSide::North,
     );
     add_target_area(
         target_areas,
@@ -882,7 +890,7 @@ fn restored_port_order(
         &old_ports,
         next_old_port_index,
         &mut new_order,
-        |port| port.side == PortSide::East,
+        |_, port| port.side == PortSide::East,
     );
     add_target_area(
         target_areas,
@@ -903,8 +911,9 @@ fn restored_port_order(
         &old_ports,
         next_old_port_index,
         &mut new_order,
-        |port| {
-            port.side == PortSide::South && is_north_south_port_with_east_connections(graph, port)
+        |id, port| {
+            port.side == PortSide::South
+                && is_north_south_port_with_east_connections(graph, id, port)
         },
     );
     add_target_area(
@@ -919,7 +928,7 @@ fn restored_port_order(
         &old_ports,
         next_old_port_index,
         &mut new_order,
-        |port| port.side == PortSide::South,
+        |_, port| port.side == PortSide::South,
     );
     add_target_area(
         target_areas,
@@ -940,7 +949,7 @@ fn restored_port_order(
         &old_ports,
         next_old_port_index,
         &mut new_order,
-        |port| port.side == PortSide::West,
+        |_, port| port.side == PortSide::West,
     );
     add_target_area(
         target_areas,
@@ -968,7 +977,7 @@ fn add_target_area(
     target_areas: &PortRestoreTargetAreas,
     side: PortSide,
     area: PortSideArea,
-    new_order: &mut Vec<usize>,
+    new_order: &mut Vec<PortId>,
 ) {
     for port in target_areas.get(side, area) {
         if !new_order.contains(port) {
@@ -980,14 +989,14 @@ fn add_target_area(
 fn add_all_that(
     graph: &LGraph,
     node: usize,
-    old_ports: &[usize],
+    old_ports: &[PortId],
     from_index: usize,
-    new_order: &mut Vec<usize>,
-    condition: impl Fn(&crate::graph::LPort) -> bool,
+    new_order: &mut Vec<PortId>,
+    condition: impl Fn(PortId, &crate::graph::LPort) -> bool,
 ) -> usize {
     for (index, old_port) in old_ports.iter().enumerate().skip(from_index) {
         let port = &graph.layerless_nodes[node].ports[*old_port];
-        if !condition(port) {
+        if !condition(*old_port, port) {
             return index;
         }
         if !new_order.contains(old_port) {
@@ -1000,17 +1009,26 @@ fn add_all_that(
 
 fn is_north_south_port_with_west_or_west_east_connections(
     graph: &LGraph,
+    id: PortId,
     port: &crate::graph::LPort,
 ) -> bool {
-    let connections = north_south_port_connection_sides(graph, port);
+    let connections = north_south_port_connection_sides(graph, id, port);
     connections.contains(&PortSide::West)
 }
 
-fn is_north_south_port_with_east_connections(graph: &LGraph, port: &crate::graph::LPort) -> bool {
-    north_south_port_connection_sides(graph, port).contains(&PortSide::East)
+fn is_north_south_port_with_east_connections(
+    graph: &LGraph,
+    id: PortId,
+    port: &crate::graph::LPort,
+) -> bool {
+    north_south_port_connection_sides(graph, id, port).contains(&PortSide::East)
 }
 
-fn north_south_port_connection_sides(graph: &LGraph, port: &crate::graph::LPort) -> Vec<PortSide> {
+fn north_south_port_connection_sides(
+    graph: &LGraph,
+    id: PortId,
+    port: &crate::graph::LPort,
+) -> Vec<PortSide> {
     let Some(dummy_ref) = port.port_dummy.as_ref() else {
         return Vec::new();
     };
@@ -1025,7 +1043,7 @@ fn north_south_port_connection_sides(graph: &LGraph, port: &crate::graph::LPort)
     // `dummyLPort.getProperty(ORIGIN) == lPort` in Java.
     let origin = crate::graph::PortRef {
         node: port.node,
-        port: port_index(graph, port),
+        port: id,
     };
     let mut sides = dummy_node
         .ports
@@ -1039,18 +1057,6 @@ fn north_south_port_connection_sides(graph: &LGraph, port: &crate::graph::LPort)
     sides.sort_by_key(|side| side.ordinal());
     sides.dedup();
     sides
-}
-
-fn port_index(graph: &LGraph, port: &crate::graph::LPort) -> usize {
-    graph
-        .layerless_nodes
-        .get(port.node)
-        .and_then(|node| {
-            node.ports
-                .iter()
-                .position(|candidate| std::ptr::eq(candidate, port))
-        })
-        .unwrap_or(usize::MAX)
 }
 
 fn graph_by_id<'a>(graph: &'a LGraph, id: &str) -> Option<&'a LGraph> {
@@ -1068,16 +1074,25 @@ fn graph_by_id<'a>(graph: &'a LGraph, id: &str) -> Option<&'a LGraph> {
 fn remap_holder_ports(holder: &mut SelfLoopHolder, old_to_new: &[usize]) {
     for hyper_loop in &mut holder.hyper_loops {
         for port in &mut hyper_loop.ports {
-            port.port = old_to_new[port.port];
+            port.port = PortId::new(old_to_new[port.port.index()]);
         }
         for edge in &mut hyper_loop.edges {
-            edge.source_port = old_to_new[edge.source_port];
-            edge.target_port = old_to_new[edge.target_port];
+            edge.source_port = PortId::new(old_to_new[edge.source_port.index()]);
+            edge.target_port = PortId::new(old_to_new[edge.target_port.index()]);
         }
     }
 }
 
-fn self_loop_port_net_flow(hyper_loop: &SelfHyperLoop, port: usize) -> isize {
+/// Where a port stands in its node's port list. A self-loop port is back in the list, restored,
+/// by the time anything compares places.
+fn place_of(graph: &LGraph, node: usize, port: PortId) -> usize {
+    graph.layerless_nodes[node]
+        .ports
+        .position(port)
+        .expect("a self-loop port is in its node's port list once the ports are restored")
+}
+
+fn self_loop_port_net_flow(hyper_loop: &SelfHyperLoop, port: PortId) -> isize {
     let incoming = hyper_loop
         .edges
         .iter()
@@ -1304,7 +1319,7 @@ fn assign_label_side_and_alignment_to_loop(
     hyper_loop: &mut SelfHyperLoop,
     side: PortSide,
     alignment: SelfLoopLabelAlignment,
-    alignment_reference_port: Option<usize>,
+    alignment_reference_port: Option<PortId>,
 ) {
     if let Some(labels) = &mut hyper_loop.labels {
         labels.side = Some(side);
@@ -1353,7 +1368,9 @@ fn determine_loop_routes(graph: &LGraph, holder: &mut SelfLoopHolder) {
         // Java's `slPortsBySide.keySet()` lists the sides in the order the loop's ports were
         // added, so read it before the ports are sorted by id.
         let sides_in_port_order = loop_sides_in_port_order(graph, holder.node, hyper_loop);
-        hyper_loop.ports.sort_by_key(|port| port.port);
+        hyper_loop
+            .ports
+            .sort_by_key(|port| place_of(graph, holder.node, port.port));
 
         let Some(loop_type) = hyper_loop.self_loop_type else {
             continue;
@@ -1572,13 +1589,13 @@ fn assign_leftmost_rightmost_ports(
         .iter()
         .filter(|port| graph.layerless_nodes[node].ports[port.port].side == leftmost_side)
         .map(|port| port.port)
-        .min();
+        .min_by_key(|port| place_of(graph, node, *port));
     hyper_loop.rightmost_port = hyper_loop
         .ports
         .iter()
         .filter(|port| graph.layerless_nodes[node].ports[port.port].side == rightmost_side)
         .map(|port| port.port)
-        .max();
+        .max_by_key(|port| place_of(graph, node, *port));
 }
 
 fn lowest_port_on_side(
@@ -1586,13 +1603,13 @@ fn lowest_port_on_side(
     node: usize,
     hyper_loop: &SelfHyperLoop,
     side: PortSide,
-) -> Option<usize> {
+) -> Option<PortId> {
     hyper_loop
         .ports
         .iter()
         .filter(|port| graph.layerless_nodes[node].ports[port.port].side == side)
         .map(|port| port.port)
-        .min()
+        .min_by_key(|port| place_of(graph, node, *port))
 }
 
 fn highest_port_on_side(
@@ -1600,13 +1617,13 @@ fn highest_port_on_side(
     node: usize,
     hyper_loop: &SelfHyperLoop,
     side: PortSide,
-) -> Option<usize> {
+) -> Option<PortId> {
     hyper_loop
         .ports
         .iter()
         .filter(|port| graph.layerless_nodes[node].ports[port.port].side == side)
         .map(|port| port.port)
-        .max()
+        .max_by_key(|port| place_of(graph, node, *port))
 }
 
 fn compute_port_penalties(graph: &LGraph, node: usize) -> Vec<usize> {
@@ -1628,11 +1645,18 @@ fn compute_port_penalties(graph: &LGraph, node: usize) -> Vec<usize> {
 fn compute_edge_penalty(
     graph: &LGraph,
     node: usize,
-    leftmost_port: usize,
-    rightmost_port: usize,
+    leftmost_port: PortId,
+    rightmost_port: PortId,
     port_penalties: &[usize],
 ) -> usize {
-    let port_count = graph.layerless_nodes[node].ports.len();
+    let ports = &graph.layerless_nodes[node].ports;
+    let port_count = ports.len();
+    let (Some(leftmost_port), Some(rightmost_port)) = (
+        ports.position(leftmost_port),
+        ports.position(rightmost_port),
+    ) else {
+        return 0;
+    };
     if port_count == 0
         || port_penalties.len() != port_count
         || leftmost_port >= port_count
@@ -1684,8 +1708,12 @@ fn compute_occupied_sides(graph: &LGraph, node: usize, hyper_loop: &mut SelfHype
 fn assign_routing_slots(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
     let label_crossing_matrix = compute_self_loop_label_crossing_matrix(holder);
     let activity_over_ports = compute_loop_activity(graph, holder);
-    let mut slot_graph =
-        create_self_loop_crossing_graph(holder, &activity_over_ports, &label_crossing_matrix);
+    let mut slot_graph = create_self_loop_crossing_graph(
+        &graph.layerless_nodes[holder.node].ports,
+        holder,
+        &activity_over_ports,
+        &label_crossing_matrix,
+    );
 
     break_non_critical_cycles(&mut slot_graph, &mut graph.random);
     assign_raw_routing_slots_to_segments(&mut slot_graph);
@@ -1773,6 +1801,7 @@ fn self_loop_label_matrix_overlaps(
 }
 
 fn create_self_loop_crossing_graph(
+    ports: &NodePorts,
     holder: &SelfLoopHolder,
     activity_over_ports: &[Vec<bool>],
     label_crossing_matrix: &[Vec<bool>],
@@ -1785,6 +1814,7 @@ fn create_self_loop_crossing_graph(
     for first in 0..holder.hyper_loops.len().saturating_sub(1) {
         for second in (first + 1)..holder.hyper_loops.len() {
             create_self_loop_slot_dependencies(
+                ports,
                 holder,
                 activity_over_ports,
                 label_crossing_matrix,
@@ -1799,18 +1829,15 @@ fn create_self_loop_crossing_graph(
 }
 
 fn compute_loop_activity(graph: &LGraph, holder: &SelfLoopHolder) -> Vec<Vec<bool>> {
-    let port_count = graph
-        .layerless_nodes
-        .get(holder.node)
-        .map(|node| node.ports.len())
-        .unwrap_or(0);
-    compute_loop_activity_for_port_count(holder, port_count)
+    let Some(node) = graph.layerless_nodes.get(holder.node) else {
+        return compute_loop_activity_for_ports(holder, &NodePorts::default());
+    };
+    compute_loop_activity_for_ports(holder, &node.ports)
 }
 
-fn compute_loop_activity_for_port_count(
-    holder: &SelfLoopHolder,
-    port_count: usize,
-) -> Vec<Vec<bool>> {
+/// For each loop, which places of the node's port list the loop runs over.
+fn compute_loop_activity_for_ports(holder: &SelfLoopHolder, ports: &NodePorts) -> Vec<Vec<bool>> {
+    let port_count = ports.len();
     holder
         .hyper_loops
         .iter()
@@ -1824,6 +1851,12 @@ fn compute_loop_activity_for_port_count(
             if port_count == 0 {
                 return activity;
             }
+            let (Some(leftmost_port), Some(rightmost_port)) = (
+                ports.position(leftmost_port),
+                ports.position(rightmost_port),
+            ) else {
+                return activity;
+            };
 
             let mut port = leftmost_port as isize - 1;
             while port != rightmost_port as isize {
@@ -1836,6 +1869,7 @@ fn compute_loop_activity_for_port_count(
 }
 
 fn create_self_loop_slot_dependencies(
+    ports: &NodePorts,
     holder: &SelfLoopHolder,
     activity_over_ports: &[Vec<bool>],
     label_crossing_matrix: &[Vec<bool>],
@@ -1843,10 +1877,16 @@ fn create_self_loop_slot_dependencies(
     first: usize,
     second: usize,
 ) {
-    let first_above_second =
-        count_self_loop_slot_crossings(&holder.hyper_loops[first], &activity_over_ports[second]);
-    let second_above_first =
-        count_self_loop_slot_crossings(&holder.hyper_loops[second], &activity_over_ports[first]);
+    let first_above_second = count_self_loop_slot_crossings(
+        ports,
+        &holder.hyper_loops[first],
+        &activity_over_ports[second],
+    );
+    let second_above_first = count_self_loop_slot_crossings(
+        ports,
+        &holder.hyper_loops[second],
+        &activity_over_ports[first],
+    );
 
     if first_above_second < second_above_first {
         graph.add_regular_dependency(
@@ -1869,13 +1909,18 @@ fn create_self_loop_slot_dependencies(
 }
 
 fn count_self_loop_slot_crossings(
+    ports: &NodePorts,
     upper_loop: &SelfHyperLoop,
     lower_loop_activity: &[bool],
 ) -> usize {
     upper_loop
         .ports
         .iter()
-        .filter(|port| lower_loop_activity.get(port.port).copied().unwrap_or(false))
+        .filter(|port| {
+            ports
+                .position(port.port)
+                .is_some_and(|place| lower_loop_activity.get(place).copied().unwrap_or(false))
+        })
         .count()
 }
 
@@ -2094,7 +2139,7 @@ fn compute_edge_routing_direction(
     let target_side = graph.layerless_nodes[node].ports[sl_edge.target_port].side;
 
     if source_side == target_side {
-        if sl_edge.source_port < sl_edge.target_port {
+        if place_of(graph, node, sl_edge.source_port) < place_of(graph, node, sl_edge.target_port) {
             EdgeRoutingDirection::Clockwise
         } else {
             EdgeRoutingDirection::CounterClockwise
@@ -2258,7 +2303,7 @@ fn add_outer_bend_point(
     graph: &LGraph,
     node: usize,
     hyper_loop: &SelfHyperLoop,
-    port: usize,
+    port: PortId,
     routing_slot_positions: &[Vec<f64>; 5],
     bend_points: &mut Vec<LPoint>,
 ) {
@@ -2655,13 +2700,13 @@ mod tests {
         let mut areas = PortRestoreTargetAreas::new();
 
         areas.add_port_list(
-            vec![1, 2],
+            vec![PortId::new(1), PortId::new(2)],
             PortSide::North,
             PortSideArea::Middle,
             AddMode::Append,
         );
         areas.add_port_list(
-            vec![3, 4],
+            vec![PortId::new(3), PortId::new(4)],
             PortSide::North,
             PortSideArea::Middle,
             AddMode::Prepend,
@@ -2669,7 +2714,7 @@ mod tests {
 
         assert_eq!(
             areas.get(PortSide::North, PortSideArea::Middle),
-            &[4, 3, 2, 1]
+            &[4, 3, 2, 1].map(PortId::new)
         );
     }
 
@@ -2727,14 +2772,31 @@ mod tests {
     #[test]
     fn loop_activity_includes_zero_leftmost_port() {
         let hyper_loop = hyper_loop_with_ports(
-            &[PortRef { node: 0, port: 0 }, PortRef { node: 0, port: 2 }],
+            &[
+                PortRef {
+                    node: 0,
+                    port: PortId::new(0),
+                },
+                PortRef {
+                    node: 0,
+                    port: PortId::new(2),
+                },
+            ],
             SelfLoopType::OneSide,
         );
         let mut holder = empty_self_loop_holder(0, hyper_loop);
-        holder.hyper_loops[0].leftmost_port = Some(0);
-        holder.hyper_loops[0].rightmost_port = Some(2);
+        holder.hyper_loops[0].leftmost_port = Some(PortId::new(0));
+        holder.hyper_loops[0].rightmost_port = Some(PortId::new(2));
 
-        let activity = compute_loop_activity_for_port_count(&holder, 4);
+        let mut ports = NodePorts::default();
+        for index in 0..4 {
+            ports.push(crate::graph::LPort::new(
+                format!("p{index}"),
+                0,
+                crate::graph::PortType::Input,
+            ));
+        }
+        let activity = compute_loop_activity_for_ports(&holder, &ports);
 
         assert_eq!(activity[0], vec![true, true, true, false]);
     }
@@ -2925,8 +2987,8 @@ mod tests {
             hyper_loop.occupied_sides,
             vec![PortSide::South, PortSide::West, PortSide::North]
         );
-        assert_eq!(west_1.port, 4);
-        assert_eq!(west_2.port, 5);
+        assert_eq!(west_1.port, PortId::new(4));
+        assert_eq!(west_2.port, PortId::new(5));
     }
 
     #[test]

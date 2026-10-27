@@ -157,10 +157,11 @@ fn sort_port_list(graph: &mut LGraph, node: usize) {
         ids.push(id);
     }
 
-    let mut order = (0..ports.len()).collect::<Vec<_>>();
+    let port_ids = ports.ids().collect::<Vec<_>>();
+    let mut order = (0..port_ids.len()).collect::<Vec<_>>();
     // The sort is stable, as the merge sort of elkjs is.
     order.sort_by(|&first, &second| {
-        let (side1, side2) = (ports[first].side, ports[second].side);
+        let (side1, side2) = (ports[port_ids[first]].side, ports[port_ids[second]].side);
         if side1 != side2 {
             return side1.ordinal().cmp(&side2.ordinal());
         }
@@ -175,6 +176,7 @@ fn sort_port_list(graph: &mut LGraph, node: usize) {
     });
     // A sort of the port indices is a permutation, so a refusal is a bug, never caller input. It
     // stays loud in release builds, as `remap_port_index` does.
+    let order = order.into_iter().map(|position| port_ids[position]);
     assert!(
         graph.reorder_node_ports(node, order),
         "the sorted port order of node {node} is not a permutation of its ports"
@@ -285,10 +287,9 @@ fn push_dummy_port(
     let index = node.ports.len();
     let mut port = LPort::new(format!("{}:{index}", node.id), dummy, port_type);
     port.set_side(side);
-    node.ports.push(port);
     PortRef {
         node: dummy,
-        port: index,
+        port: node.ports.push(port),
     }
 }
 
@@ -310,10 +311,12 @@ pub fn postprocess_north_south_ports(graph: &mut LGraph) {
             let ports = &graph.layerless_nodes[node].ports;
             let same_origin_port = ports.len() >= 2
                 && ports
-                    .windows(2)
-                    .all(|pair| pair[0].origin_port == pair[1].origin_port);
+                    .ids()
+                    .zip(ports.ids().skip(1))
+                    .all(|(first, second)| ports[first].origin_port == ports[second].origin_port);
 
-            for port in 0..graph.layerless_nodes[node].ports.len() {
+            let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
+            for port in port_ids {
                 let dummy_port = PortRef { node, port };
                 if !graph.layerless_nodes[node].ports[port]
                     .incoming_edges
@@ -397,6 +400,7 @@ fn absolute_anchor(graph: &LGraph, port: PortRef) -> LPoint {
 mod tests {
     use super::*;
     use crate::graph::LayeredEdge;
+    use crate::graph::PortId;
     use crate::options::{ElkDirection, LayeredOptions};
 
     fn graph() -> LGraph {
@@ -428,7 +432,10 @@ mod tests {
     }
 
     fn port(node: usize, port: usize) -> PortRef {
-        PortRef { node, port }
+        PortRef {
+            node,
+            port: PortId::new(port),
+        }
     }
 
     fn connect(graph: &mut LGraph, source: PortRef, target: PortRef) -> usize {
@@ -472,7 +479,7 @@ mod tests {
     }
 
     fn dummy_of(graph: &LGraph, node: usize, port: usize) -> usize {
-        graph.layerless_nodes[node].ports[port]
+        graph.layerless_nodes[node].ports[PortId::new(port)]
             .port_dummy
             .as_ref()
             .expect("the port has a dummy")
@@ -502,12 +509,15 @@ mod tests {
         assert_eq!(dummy_node.kind, LNodeKind::NorthSouthPort);
         assert_eq!(dummy_node.port_constraints, PortConstraints::FixedPos);
         assert_eq!(dummy_node.ports.len(), 1);
-        assert_eq!(dummy_node.ports[0].side, PortSide::West);
-        assert_eq!(dummy_node.ports[0].origin_port, Some(port(node, 0)));
+        assert_eq!(dummy_node.ports[PortId::new(0)].side, PortSide::West);
+        assert_eq!(
+            dummy_node.ports[PortId::new(0)].origin_port,
+            Some(port(node, 0))
+        );
         assert_eq!(graph.edges[edge].target, port(dummy, 0));
-        assert_eq!(dummy_node.ports[0].incoming_edges, vec![edge]);
+        assert_eq!(dummy_node.ports[PortId::new(0)].incoming_edges, vec![edge]);
         assert!(
-            graph.layerless_nodes[node].ports[0]
+            graph.layerless_nodes[node].ports[PortId::new(0)]
                 .incoming_edges
                 .is_empty()
         );
@@ -541,11 +551,11 @@ mod tests {
         let dummy = dummy_of(&graph, node, 0);
         let dummy_node = &graph.layerless_nodes[dummy];
         assert_eq!(dummy_node.ports.len(), 1);
-        assert_eq!(dummy_node.ports[0].side, PortSide::East);
-        assert_eq!(dummy_node.ports[0].port_type, PortType::Output);
+        assert_eq!(dummy_node.ports[PortId::new(0)].side, PortSide::East);
+        assert_eq!(dummy_node.ports[PortId::new(0)].port_type, PortType::Output);
         assert_eq!(graph.edges[edge].source, port(dummy, 0));
         assert!(
-            graph.layerless_nodes[node].ports[0]
+            graph.layerless_nodes[node].ports[PortId::new(0)]
                 .outgoing_edges
                 .is_empty()
         );
@@ -611,11 +621,11 @@ mod tests {
         let ports = &graph.layerless_nodes[dummy].ports;
         assert_eq!(ports.len(), 2);
         assert_eq!(
-            (ports[0].side, ports[1].side),
+            (ports[PortId::new(0)].side, ports[PortId::new(1)].side),
             (PortSide::West, PortSide::East)
         );
-        assert_eq!(ports[0].origin_port, Some(port(node, 0)));
-        assert_eq!(ports[1].origin_port, Some(port(node, 0)));
+        assert_eq!(ports[PortId::new(0)].origin_port, Some(port(node, 0)));
+        assert_eq!(ports[PortId::new(1)].origin_port, Some(port(node, 0)));
         assert_eq!(graph.edges[incoming].target, port(dummy, 0));
         assert_eq!(graph.edges[outgoing].source, port(dummy, 1));
         assert_eq!(layer(&graph, 1), vec![dummy, node]);
@@ -731,7 +741,11 @@ mod tests {
         preprocess_north_south_ports(&mut graph);
 
         assert_eq!(layer(&graph, 0), vec![node]);
-        assert!(graph.layerless_nodes[node].ports[0].port_dummy.is_none());
+        assert!(
+            graph.layerless_nodes[node].ports[PortId::new(0)]
+                .port_dummy
+                .is_none()
+        );
         assert!(graph.layerless_nodes[node].barycenter_associates.is_empty());
         assert_eq!(graph.layerless_nodes[node].in_layer_layout_unit, Some(node));
     }
@@ -748,8 +762,10 @@ mod tests {
             &[PortSide::North, PortSide::South],
             1,
         );
-        graph.layerless_nodes[node].ports[0].allow_non_flow_ports_to_switch_sides = true;
-        graph.layerless_nodes[node].ports[1].allow_non_flow_ports_to_switch_sides = true;
+        graph.layerless_nodes[node].ports[PortId::new(0)].allow_non_flow_ports_to_switch_sides =
+            true;
+        graph.layerless_nodes[node].ports[PortId::new(1)].allow_non_flow_ports_to_switch_sides =
+            true;
         connect(&mut graph, port(neighbour, 0), port(node, 0));
         connect(&mut graph, port(neighbour, 0), port(node, 1));
 
@@ -880,8 +896,8 @@ mod tests {
         // The node stands at x = 100, the port 7 right of it and 3 wide, its anchor in the
         // middle. The dummy stands at height 12.
         graph.layerless_nodes[node].position = LPoint { x: 100.0, y: 30.0 };
-        graph.layerless_nodes[node].ports[0].position = LPoint { x: 7.0, y: -4.0 };
-        graph.layerless_nodes[node].ports[0].anchor = LPoint { x: 1.5, y: 0.0 };
+        graph.layerless_nodes[node].ports[PortId::new(0)].position = LPoint { x: 7.0, y: -4.0 };
+        graph.layerless_nodes[node].ports[PortId::new(0)].anchor = LPoint { x: 1.5, y: 0.0 };
         graph.layerless_nodes[dummy].position = LPoint { x: 60.0, y: 12.0 };
         (graph, node, dummy, edges)
     }
@@ -903,7 +919,10 @@ mod tests {
             vec![LPoint { x: 50.0, y: 40.0 }, LPoint { x: 108.5, y: 12.0 }]
         );
         assert!(edge.junction_points.is_empty());
-        assert_eq!(graph.layerless_nodes[node].ports[0].incoming_edges, edges);
+        assert_eq!(
+            graph.layerless_nodes[node].ports[PortId::new(0)].incoming_edges,
+            edges
+        );
         assert_eq!(layer(&graph, 1), vec![node]);
         assert_eq!(graph.layerless_nodes[dummy].layer_index, None);
     }
@@ -923,7 +942,10 @@ mod tests {
             vec![LPoint { x: 108.5, y: 12.0 }, LPoint { x: 50.0, y: 40.0 }]
         );
         assert!(edge.junction_points.is_empty());
-        assert_eq!(graph.layerless_nodes[node].ports[0].outgoing_edges, edges);
+        assert_eq!(
+            graph.layerless_nodes[node].ports[PortId::new(0)].outgoing_edges,
+            edges
+        );
     }
 
     // Mutation: add junction points for a dummy with one port, or never add them.

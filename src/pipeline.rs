@@ -1041,7 +1041,7 @@ fn actual_graph_size(graph: &LGraph) -> LSize {
 fn transfer_external_port_dummy_layout_to_parent_node(
     nested_graph: &mut LGraph,
     parent_node_index: usize,
-    parent_ports: &mut [crate::graph::LPort],
+    parent_ports: &mut crate::graph::NodePorts,
 ) {
     for dummy_index in 0..nested_graph.layerless_nodes.len() {
         if nested_graph.layerless_nodes[dummy_index].kind != LNodeKind::ExternalPort {
@@ -1299,7 +1299,7 @@ fn resize_layered_node(node: &mut LNode, new_size: LSize, move_ports: bool, move
 
     if move_ports {
         let fixed_ports = node.port_constraints == PortConstraints::FixedPos;
-        for port in &mut node.ports {
+        for port in node.ports.slots_mut() {
             match port.side {
                 PortSide::North => {
                     if !fixed_ports {
@@ -1734,6 +1734,7 @@ fn edge_routing_dependencies(options: &LayeredOptions, _processor: ProcessorKind
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::PortId;
     use crate::graph::{LNode, LNodeKind, PortSide, PortType};
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, import_graph};
     use crate::options::{
@@ -3242,7 +3243,7 @@ mod tests {
             );
         }
         for (index, node) in graph.layerless_nodes.iter().enumerate() {
-            for (port_index, port) in node.ports.iter().enumerate() {
+            for (port_index, port) in node.ports.iter_with_ids() {
                 assert_eq!(port.node, index);
                 for &edge in &port.incoming_edges {
                     assert_eq!(
@@ -3266,7 +3267,12 @@ mod tests {
         }
         for edge in &graph.edges {
             for endpoint in [edge.source, edge.target] {
-                assert!(endpoint.port < graph.layerless_nodes[endpoint.node].ports.len());
+                assert!(
+                    graph.layerless_nodes[endpoint.node]
+                        .ports
+                        .get(endpoint.port)
+                        .is_some()
+                );
             }
             for label in &edge.labels {
                 assert!(
@@ -3721,15 +3727,15 @@ mod tests {
             0,
             crate::graph::PortType::Output,
         ));
-        node.ports[0].set_side(PortSide::East);
-        node.ports[0].position = LPoint { x: 100.0, y: 25.0 };
+        node.ports[PortId::new(0)].set_side(PortSide::East);
+        node.ports[PortId::new(0)].position = LPoint { x: 100.0, y: 25.0 };
         node.ports.push(crate::graph::LPort::new(
             "south".to_string(),
             0,
             crate::graph::PortType::Output,
         ));
-        node.ports[1].set_side(PortSide::South);
-        node.ports[1].position = LPoint { x: 50.0, y: 50.0 };
+        node.ports[PortId::new(1)].set_side(PortSide::South);
+        node.ports[PortId::new(1)].position = LPoint { x: 50.0, y: 50.0 };
 
         resize_layered_node(
             &mut node,
@@ -3743,8 +3749,14 @@ mod tests {
 
         assert_eq!(node.size.width, 150.0);
         assert_eq!(node.size.height, 100.0);
-        assert_eq!(node.ports[0].position, LPoint { x: 150.0, y: 50.0 });
-        assert_eq!(node.ports[1].position, LPoint { x: 75.0, y: 100.0 });
+        assert_eq!(
+            node.ports[PortId::new(0)].position,
+            LPoint { x: 150.0, y: 50.0 }
+        );
+        assert_eq!(
+            node.ports[PortId::new(1)].position,
+            LPoint { x: 75.0, y: 100.0 }
+        );
     }
 
     #[test]
@@ -3756,8 +3768,8 @@ mod tests {
             0,
             crate::graph::PortType::Input,
         ));
-        node.ports[0].set_side(PortSide::West);
-        node.ports[0].position = LPoint { x: -2.0, y: 20.0 };
+        node.ports[PortId::new(0)].set_side(PortSide::West);
+        node.ports[PortId::new(0)].position = LPoint { x: -2.0, y: 20.0 };
 
         resize_layered_node(
             &mut node,
@@ -3771,7 +3783,10 @@ mod tests {
 
         assert_eq!(node.size.width, 150.0);
         assert_eq!(node.size.height, 100.0);
-        assert_eq!(node.ports[0].position, LPoint { x: -2.0, y: 20.0 });
+        assert_eq!(
+            node.ports[PortId::new(0)].position,
+            LPoint { x: -2.0, y: 20.0 }
+        );
     }
 
     #[test]

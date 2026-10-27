@@ -44,7 +44,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
         .map(|node| is_flexible(graph, node))
         .collect();
     for &node in &order {
-        for port in &mut graph.layerless_nodes[node].ports {
+        for port in graph.layerless_nodes[node].ports.slots_mut() {
             if flexible[node] {
                 port.anchor.y = java_round(port.anchor.y)?;
             }
@@ -57,7 +57,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
         ports: graph
             .layerless_nodes
             .iter()
-            .map(|node| vec![None; node.ports.len()])
+            .map(|node| vec![None; node.ports.slot_count()])
             .collect(),
         edges: vec![None; graph.edges.len()],
     };
@@ -86,9 +86,9 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
                 transform_ports(graph, &mut aux, node, rep, PortSide::East)?;
                 rep
             } else {
-                for (port, data) in graph.layerless_nodes[node].ports.iter().enumerate() {
+                for (port, data) in graph.layerless_nodes[node].ports.iter_with_ids() {
                     if matches!(data.side, PortSide::East | PortSide::West) {
-                        aux.ports[node][port] = Some(head);
+                        aux.ports[node][port.index()] = Some(head);
                     }
                 }
                 NodeRep {
@@ -123,8 +123,8 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
             }
             let data = &graph.edges[edge];
             let (Some(source), Some(target)) = (
-                aux.ports[data.source.node][data.source.port],
-                aux.ports[data.target.node][data.target.port],
+                aux.ports[data.source.node][data.source.port.index()],
+                aux.ports[data.target.node][data.target.port.index()],
             ) else {
                 continue;
             };
@@ -206,9 +206,9 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
         data.position.y = y;
         if rep.flexible {
             let size_delta = (aux.graph.nodes[rep.tail].layer as f64 - y) - data.size.height;
-            for (port, position) in data.ports.iter_mut().zip(&aux.ports[node]) {
-                if let Some(position) = position {
-                    port.position.y = aux.graph.nodes[*position].layer as f64 - y;
+            for (id, port) in data.ports.slots_mut_with_ids() {
+                if let Some(position) = aux.ports[node][id.index()] {
+                    port.position.y = aux.graph.nodes[position].layer as f64 - y;
                 }
             }
             let label_shift = match data.node_label_placement.location() {
@@ -266,9 +266,8 @@ fn transform_ports(
     let data = &graph.layerless_nodes[node];
     let mut ports: Vec<_> = data
         .ports
-        .iter()
-        .enumerate()
-        .filter_map(|(index, port)| (port.side == side).then_some(index))
+        .iter_with_ids()
+        .filter_map(|(id, port)| (port.side == side).then_some(id))
         .collect();
     if side == PortSide::West {
         ports.reverse();
@@ -278,7 +277,7 @@ fn transform_ports(
     let mut last_height = None;
     for port in ports {
         let position = aux.graph.add_node(None);
-        aux.ports[node][port] = Some(position);
+        aux.ports[node][port.index()] = Some(position);
         let spacing = last_height
             .map(|height| height + graph.options.spacing.port_port)
             .unwrap_or(surrounding.top);
@@ -355,7 +354,7 @@ fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[usi
                 (edge.source, edge.target.node)
             };
             let (Some(port_rep), Some(dummy_rep)) =
-                (aux.ports[port.node][port.port], aux.nodes[dummy])
+                (aux.ports[port.node][port.port.index()], aux.nodes[dummy])
             else {
                 continue;
             };
