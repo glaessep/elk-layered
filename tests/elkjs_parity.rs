@@ -209,12 +209,16 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    random-group-ends/r025, random-group-ends/r033.
 // 7. In `minimize_two_sided_greedy_switch` (src/p3order/sweep.rs), drop the
 //    `graph.random.next_long()`: 6 cases, random/r017, random/r063, random/r144, random/r145,
-//    random/r169 and random-group-ends/r082. Dropping the `next_long()` of
-//    `minimize_one_sided_greedy_switch` fails no case: no input in tests/elkjs sets a greedy
-//    switch type.
-// 8. In the `to_graph` refusal of src/layout.rs, return `Error::Internal` instead of
+//    random/r169 and random-group-ends/r082.
+// 8. In `minimize_one_sided_greedy_switch` (src/p3order/sweep.rs), drop the
+//    `graph.random.next_long()`: 1 case, greedy-switch-one-sided. It has two connected
+//    components and sets the one-sided greedy switch, so the draws decide each component's sweep
+//    direction.
+// 9. In the same function, drop the `graph.random.next_bool()` that comes right after: the same
+//    1 case, greedy-switch-one-sided.
+// 10. In the `to_graph` refusal of src/layout.rs, return `Error::Internal` instead of
 //    `Error::Unsupported`: all 26 cases that elkjs refuses, such as random-group-ends/r034.
-// 9. In the `to_graph` refusal of src/layout.rs, change the `feature` text, for example to "an
+// 11. In the `to_graph` refusal of src/layout.rs, change the `feature` text, for example to "an
 //    edge into a part of the graph laid out on its own". The same 26 cases then fail on the
 //    feature, not on the error kind.
 #[test]
