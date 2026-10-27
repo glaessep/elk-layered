@@ -464,6 +464,14 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    labels-inline-direction-up.
 // 60. In `input_label` (src/layout.rs), always set `inline: false`: 92 cases, such as
 //    labels-inline-bends, labels-inline-direction-down and labels-inline-direction-left.
+// 61. In the inline arm of `apply_label_side`, read the edge label spacing as 2 instead of from the
+//    options: 2 cases, labels-inline-wide-spacing (7) and labels-inline-no-spacing (0).
+// 62. In the same arm, take `(origin_edge / 2.0).ceil()` off the height or off the port position
+//    instead of `origin_edge`, or leave out a `.max(0.0)` of the edge thickness in
+//    `apply_label_side` or `place_label_dummy_labels`: no case fails. The option
+//    `elk.edge.thickness` is not ported, so every edge has thickness 1, where `(1 / 2).ceil()`
+//    is 1 and no thickness is negative. Unit tests in src/intermediate.rs give edges the
+//    thickness 5 and -3 and fail on each of these.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
