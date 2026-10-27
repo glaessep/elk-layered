@@ -18,8 +18,8 @@ use super::options::{
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::configurator::{check_random_seeds, configure_graph_properties, configured_options};
 use crate::graph::{
-    GraphArena, GraphId, LGraph, LNode, LNodeKind, LPoint, LSize, OtherGraphs, PortSide,
-    is_across_flow,
+    GraphArena, GraphId, GraphParent, LGraph, LNode, LNodeKind, LPoint, LSize, OtherGraphs,
+    PortSide, is_across_flow,
 };
 use crate::intermediate::{
     IntermediateError, calculate_layer_sizes_and_graph_height, insert_label_dummies,
@@ -218,7 +218,8 @@ pub struct GraphExecution {
     pub graph: GraphId,
     /// The caller's id of the graph, as `LGraph::name` keeps it.
     pub graph_name: String,
-    pub parent_node_id: Option<String>,
+    /// The node the graph lies in. `None` for the root.
+    pub parent: Option<GraphParent>,
     pub processors: Vec<ProcessorKind>,
 }
 
@@ -226,16 +227,10 @@ pub struct GraphExecution {
 struct GraphAlgorithm {
     graph: GraphId,
     /// The graph and node this graph lies in. `None` for the root.
-    parent: Option<GraphArenaParent>,
+    parent: Option<GraphParent>,
     next_processor: usize,
     processors: Vec<ProcessorSlot>,
     execution: GraphExecution,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct GraphArenaParent {
-    graph: GraphId,
-    node: usize,
 }
 
 /// The algorithms of a compound run, one per graph, in the order ELK finds the graphs.
@@ -248,18 +243,10 @@ impl CompoundRun {
     fn new(graphs: &GraphArena) -> Self {
         // ELK finds the graphs with `ArrayDeque.push`: the last sibling is searched first, and the
         // collected list is later executed in reverse discovery order.
-        let order = graphs.discovery_order(GraphId::ROOT);
-        let mut parents = vec![None; graphs.len()];
-        for &graph in &order {
-            for (node, data) in graphs[graph].layerless_nodes.iter().enumerate() {
-                if let Some(nested) = data.nested_graph {
-                    parents[nested.index()] = Some(GraphArenaParent { graph, node });
-                }
-            }
-        }
-        let algorithms = order
+        let algorithms = graphs
+            .discovery_order(GraphId::ROOT)
             .into_iter()
-            .map(|graph| graph_algorithm(&graphs[graph], parents[graph.index()]))
+            .map(|graph| graph_algorithm(&graphs[graph]))
             .collect();
         Self { algorithms }
     }
@@ -276,16 +263,16 @@ impl CompoundRun {
     }
 }
 
-fn graph_algorithm(graph: &LGraph, parent: Option<GraphArenaParent>) -> GraphAlgorithm {
+fn graph_algorithm(graph: &LGraph) -> GraphAlgorithm {
     GraphAlgorithm {
         graph: graph.id,
-        parent,
+        parent: graph.parent,
         next_processor: 0,
         processors: assemble_processors_for_graph(graph),
         execution: GraphExecution {
             graph: graph.id,
             graph_name: graph.name.clone(),
-            parent_node_id: graph.parent_node_id.clone(),
+            parent: graph.parent,
             processors: Vec::new(),
         },
     }
@@ -469,7 +456,7 @@ pub fn assemble_processors_for_graph(graph: &LGraph) -> Vec<ProcessorSlot> {
     assemble_processors_with_graph_size(
         &options,
         graph.layerless_nodes.len(),
-        graph.parent_node_id.is_none(),
+        graph.parent.is_none(),
     )
 }
 
@@ -1677,7 +1664,6 @@ mod tests {
             holder.compound = true;
             graphs[parent].layerless_nodes.push(holder);
             let mut graph = LGraph::new(format!("graph-{depth}"), options.clone());
-            graph.parent_node_id = Some(format!("node-{}", depth - 1));
             parent = graphs.nest(parent, 0, graph);
         }
         graphs
@@ -1698,7 +1684,6 @@ mod tests {
             graphs.root_mut().layerless_nodes.push(holder);
 
             let mut child = LGraph::new(format!("{branch}-child"), options.clone());
-            child.parent_node_id = Some(format!("{branch}-holder"));
             let mut grandchild_holder =
                 LNode::new(format!("{branch}-grandchild-holder"), 1.0, 1.0, None);
             grandchild_holder.compound = true;
@@ -1706,7 +1691,6 @@ mod tests {
             let child = graphs.nest(GraphId::ROOT, position, child);
 
             let mut grandchild = LGraph::new(format!("{branch}-grandchild"), options.clone());
-            grandchild.parent_node_id = Some(format!("{branch}-grandchild-holder"));
             graphs.nest(child, 0, grandchild);
         }
         graphs
@@ -3627,7 +3611,10 @@ mod tests {
                 ..LayeredOptions::default()
             },
         );
-        nested.parent_node_id = Some("cluster".to_string());
+        nested.parent = Some(GraphParent {
+            graph: GraphId::ROOT,
+            node: 0,
+        });
         assert!(
             !graph_kinds(&nested)
                 .contains(&ProcessorKind::LayerSweepCrossingMinimizerTwoSidedGreedySwitch)

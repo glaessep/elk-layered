@@ -104,17 +104,13 @@ struct Hierarchy<'a> {
 }
 
 impl<'a> Hierarchy<'a> {
-    /// No ELK counterpart: indexes the parent of each graph, which ELK reaches through
+    /// No ELK counterpart: indexes the parent of each graph by slot, which ELK reaches through
     /// `LGraph.getParentNode`.
     fn new(arena: &'a GraphArena) -> Self {
         let order = arena.breadth_first(GraphId::ROOT);
         let mut parents = vec![None; arena.len()];
         for &graph in &order {
-            for (index, node) in arena[graph].layerless_nodes.iter().enumerate() {
-                if let Some(nested) = node.nested_graph {
-                    parents[nested.index()] = Some((graph, index));
-                }
-            }
+            parents[graph.index()] = arena[graph].parent.map(|p| (p.graph, p.node));
         }
         let by_name = order
             .iter()

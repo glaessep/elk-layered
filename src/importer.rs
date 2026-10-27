@@ -936,7 +936,6 @@ fn import_hierarchical_graph(
                     node_materializes_children(index, &parent_graph.options, node);
                 let nested_options = nested_graph_options(&parent_graph.options, node);
                 let mut nested_graph = LGraph::new(node.id.clone(), nested_options);
-                nested_graph.parent_node_id = Some(node.id.clone());
                 // ELK reads the spacings for a node's labels from the node's parent, as the
                 // user set them: `IndividualSpacings.getIndividualOrInherited`.
                 let cell_node = cell_node(node);
@@ -3132,7 +3131,17 @@ mod tests {
             .find(|node| node.id == "cluster")
             .unwrap();
         let nested = &lgraph[cluster.nested_graph.unwrap()];
-        assert_eq!(nested.parent_node_id.as_deref(), Some("cluster"));
+        assert_eq!(
+            nested.parent,
+            Some(crate::graph::GraphParent {
+                graph: GraphId::ROOT,
+                node: lgraph
+                    .layerless_nodes
+                    .iter()
+                    .position(|n| n.id == "cluster")
+                    .unwrap(),
+            })
+        );
         assert_eq!(nested.layerless_nodes[0].id, "A");
     }
 

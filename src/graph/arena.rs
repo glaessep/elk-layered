@@ -32,6 +32,15 @@ impl GraphId {
     }
 }
 
+/// The node a graph lies in: ELK's `LGraph#getParentNode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GraphParent {
+    /// The graph that holds the node.
+    pub graph: GraphId,
+    /// The node's index in that graph.
+    pub node: usize,
+}
+
 /// Every graph of one layout. The root sits in slot [`GraphId::ROOT`].
 ///
 /// Slot order is the order graphs joined. Never walk the slots for a result: ELK visits the
@@ -64,6 +73,10 @@ impl GraphArena {
     /// When `parent` has no such node.
     pub fn nest(&mut self, parent: GraphId, node: usize, graph: LGraph) -> GraphId {
         let id = self.add(graph);
+        self.graphs[id.0].parent = Some(GraphParent {
+            graph: parent,
+            node,
+        });
         self.graphs[parent.0].layerless_nodes[node].nested_graph = Some(id);
         id
     }

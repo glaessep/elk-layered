@@ -14,7 +14,7 @@ use crate::random::JavaRandom;
 
 mod arena;
 mod ports;
-pub use arena::{GraphArena, GraphId, OtherGraphs};
+pub use arena::{GraphArena, GraphId, GraphParent, OtherGraphs};
 #[cfg(test)]
 pub(crate) use ports::port_ids;
 pub use ports::{NodePorts, PortId};
@@ -36,7 +36,8 @@ pub struct LGraph {
     pub graph_properties: GraphProperties,
     pub cyclic: bool,
     pub(crate) random: JavaRandom,
-    pub parent_node_id: Option<String>,
+    /// The node this graph lies in, set when the graph joins a [`GraphArena`] with `nest`.
+    pub parent: Option<GraphParent>,
     pub hidden_nodes: Vec<usize>,
     pub replaced_external_port_dummies: Vec<usize>,
     pub hierarchy_edges: Vec<HierarchyEdge>,
@@ -78,7 +79,7 @@ impl LGraph {
             // `configure_graph_properties` replaces this with the stream seeded from
             // `options.random_seed`. Every public pipeline entry configures first.
             random: JavaRandom::default(),
-            parent_node_id: None,
+            parent: None,
             hidden_nodes: Vec::new(),
             replaced_external_port_dummies: Vec::new(),
             hierarchy_edges: Vec::new(),
@@ -96,7 +97,7 @@ impl LGraph {
         graph.options.node_size.constraints = crate::options::SizeConstraints::FIXED;
         graph.padding = self.padding;
         graph.graph_properties = self.graph_properties.clone();
-        graph.parent_node_id = self.parent_node_id.clone();
+        graph.parent = self.parent;
         graph.random = self.random.clone();
         graph.in_layer_successor_constraints_between_non_dummies =
             self.in_layer_successor_constraints_between_non_dummies;

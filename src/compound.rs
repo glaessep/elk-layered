@@ -8,8 +8,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphArena, GraphId, GraphNodeRef,
-    GraphPortRef, HierarchyEdge, HierarchyStep, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize,
-    LayeredEdge, PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy,
+    GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep, LGraph, LLabel, LNodeKind, LPoint,
+    LPort, LSize, LayeredEdge, PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy,
     create_external_port_dummy, port_side_from_direction,
 };
 use crate::options::{ElkDirection, PortConstraints};
@@ -776,6 +776,9 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
     }
     let mut first_graph = true;
     for graph in graphs.preorder(scope) {
+        let parent_node_name = graphs[graph]
+            .parent
+            .map(|parent| graphs[parent.graph].layerless_nodes[parent.node].id.clone());
         let graph = &mut graphs[graph];
         // The traversal visits parents before children. Each requested parent's ports
         // are copied once, preserving the same first-match identity as GraphPortIndex.
@@ -803,10 +806,8 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
                 }
             }
         }
-        let parent_offsets = graph
-            .parent_node_id
-            .as_ref()
-            .and_then(|id| original_parent_offsets.remove(id))
+        let parent_offsets = parent_node_name
+            .and_then(|id| original_parent_offsets.remove(&id))
             .unwrap_or_default();
         let parent = if first_graph {
             first_graph = false;
@@ -1566,21 +1567,15 @@ fn link_compound_external_dummy_metadata(
     endpoint_plans: &[Option<CompoundEndpointPlan>],
     observer: &mut impl CompoundPreprocessObserver,
 ) {
-    // Where each nested graph lies: the graph and the node of the graph it is inside.
-    let mut parents = vec![None; graphs.len()];
-    let preorder = graphs.preorder(GraphId::ROOT);
-    for &graph in &preorder {
-        for (node, data) in graphs[graph].layerless_nodes.iter().enumerate() {
-            if let Some(nested) = data.nested_graph {
-                parents[nested.index()] = Some((graph, node));
-            }
-        }
-    }
     // Each nested graph, in the order of a walk that finishes one graph's subtree before the next
     // sibling.
-    for &child in preorder.iter().skip(1) {
-        let (parent, parent_node) =
-            parents[child.index()].expect("every nested graph lies inside a node");
+    for child in graphs.preorder(GraphId::ROOT).into_iter().skip(1) {
+        let GraphParent {
+            graph: parent,
+            node: parent_node,
+        } = graphs[child]
+            .parent
+            .expect("every nested graph lies inside a node");
         let plan = endpoint_plans[parent.index()]
             .as_ref()
             .expect("every graph has an endpoint plan");
@@ -3177,7 +3172,6 @@ mod tests {
                 .layerless_nodes
                 .push(crate::graph::LNode::new(holder, 10.0, 10.0, None));
             let mut nested = crate::graph::LGraph::new("dup", options.clone());
-            nested.parent_node_id = Some("dup".to_string());
             for child in ["a", "b"] {
                 nested
                     .layerless_nodes
