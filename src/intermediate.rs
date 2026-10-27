@@ -4489,14 +4489,37 @@ mod tests {
         assert_eq!(graph.node_outgoing_edges(dummy).len(), 1);
     }
 
+    // Mutation: in `size_label_dummy`, start the height at 0 instead of at the edge thickness.
     #[test]
     fn horizontal_inline_label_dummy_retains_split_edge_thickness() {
-        let mut center = ElkInputLabel::center("choice", 30.0, 12.0);
-        center.placement = EdgeLabelPlacement::Center;
+        let (mut graph, dummy, _) = label_dummy_graph(
+            ElkDirection::Right,
+            1.0,
+            vec![ElkInputLabel::center("choice", 30.0, 12.0)],
+        );
+        // The thickness 1, the label 12, the spacing 7 and the thickness 1 again.
+        assert_eq!(graph.layerless_nodes[dummy].size.height, 21.0);
+
+        apply_label_side(&mut graph, dummy, LabelSide::Below);
+
+        assert_eq!(graph.layerless_nodes[dummy].size.height, 13.0);
+        assert_dummy_ports_at(&graph, dummy, 6.5);
+    }
+
+    /// A graph of one edge A-B with centre labels, a label dummy for it, and the numbers the
+    /// tests below need: edge label spacing 7 and the given edge thickness. The option that sets
+    /// a thickness is not ported, so only a test can give an edge another thickness than 1.
+    fn label_dummy_graph(
+        direction: ElkDirection,
+        thickness: f64,
+        labels: Vec<ElkInputLabel>,
+    ) -> (LGraph, usize, usize) {
         let mut labelled = edge("A-B", "A", "B");
-        labelled.labels = vec![center];
+        labelled.labels = labels;
         let mut graph = graph(vec![node("A"), node("B")], vec![labelled]);
-        graph.options.direction = ElkDirection::Right;
+        graph.options.direction = direction;
+        graph.options.spacing.edge_label = 7.0;
+        graph.edges[0].thickness = thickness;
 
         insert_label_dummies(&mut graph);
 
@@ -4505,17 +4528,166 @@ mod tests {
             .iter()
             .position(|node| node.kind == LNodeKind::Label)
             .unwrap();
-        assert_eq!(graph.layerless_nodes[dummy].size.height, 18.0);
+        let edge_index = graph.layerless_nodes[dummy].origin_edge.unwrap();
+        (graph, dummy, edge_index)
+    }
+
+    /// Asserts that the dummy has exactly its input and output port, both at height `y`. A bare
+    /// `.all(..)` over the ports passes when the dummy has none.
+    fn assert_dummy_ports_at(graph: &LGraph, dummy: usize, y: f64) {
+        let ports = &graph.layerless_nodes[dummy].ports;
+        assert_eq!(ports.len(), 2);
+        for port in ports {
+            assert_eq!(port.position.y, y);
+        }
+    }
+
+    // Mutation: in the inline arm of `apply_label_side`, subtract `(origin_edge / 2.0).ceil()`
+    // instead of `origin_edge`, from the height or from the port position.
+    #[test]
+    fn inline_label_dummy_gives_up_the_edge_thickness_and_the_label_spacing() {
+        // The dummy is 12.5 + 7 + 2 * 5 = 29.5 high. Inline, it gives up 7 and 5.
+        let (mut graph, dummy, _) = label_dummy_graph(
+            ElkDirection::Right,
+            5.0,
+            vec![ElkInputLabel::center("choice", 30.0, 12.5)],
+        );
+        assert_eq!(graph.layerless_nodes[dummy].size.height, 29.5);
 
         apply_label_side(&mut graph, dummy, LabelSide::Below);
 
-        assert_eq!(graph.layerless_nodes[dummy].size.height, 13.0);
-        assert!(
-            graph.layerless_nodes[dummy]
-                .ports
-                .iter()
-                .all(|port| port.position.y == 6.5)
+        assert_eq!(graph.layerless_nodes[dummy].label_side, LabelSide::Inline);
+        assert_eq!(graph.layerless_nodes[dummy].size.height, 17.5);
+        // ceil(17.5) / 2, not 17.5 / 2.
+        assert_dummy_ports_at(&graph, dummy, 9.0);
+    }
+
+    // Mutation: in `apply_label_side`, leave out the `.max(0.0)` of the edge thickness.
+    #[test]
+    fn a_negative_edge_thickness_counts_as_zero_in_apply_label_side() {
+        for (side, height, port_y) in [
+            // The inline arm: nothing but the spacing 7 comes off 19.5, and ceil(12.5) / 2.
+            (LabelSide::Below, 12.5, 6.5),
+            // The above arm: the port sits at the bottom of the dummy.
+            (LabelSide::Above, 19.5, 19.5),
+        ] {
+            let mut center = ElkInputLabel::center("choice", 30.0, 12.5);
+            center.inline = side == LabelSide::Below;
+            let (mut graph, dummy, edge_index) =
+                label_dummy_graph(ElkDirection::Right, 0.0, vec![center]);
+            // A thickness the importer never gives, set after the dummy was sized.
+            graph.edges[edge_index].thickness = -3.0;
+
+            apply_label_side(&mut graph, dummy, side);
+
+            assert_eq!(graph.layerless_nodes[dummy].size.height, height, "{side:?}");
+            assert_dummy_ports_at(&graph, dummy, port_y);
+        }
+    }
+
+    // Mutation: in `insert_label_dummies`, leave out the `.max(0.0)` of the edge thickness.
+    #[test]
+    fn a_negative_edge_thickness_counts_as_zero_when_the_label_dummy_is_made() {
+        // A thickness the importer never gives, set before the dummy is made.
+        let (graph, dummy, _) = label_dummy_graph(
+            ElkDirection::Right,
+            -3.0,
+            vec![ElkInputLabel::center("choice", 30.0, 12.5)],
         );
+
+        // Both halves of the split edge keep thickness 0.
+        assert_eq!(graph.edges.len(), 2);
+        assert!(graph.edges.iter().all(|edge| edge.thickness == 0.0));
+        // The label 12.5 and the spacing 7, with nothing for the edge.
+        assert_eq!(graph.layerless_nodes[dummy].size.height, 19.5);
+        assert_dummy_ports_at(&graph, dummy, 0.0);
+    }
+
+    // Mutation: in `split_edge`, leave out the `.max(0.0)` of the edge thickness.
+    #[test]
+    fn split_edge_counts_a_negative_edge_thickness_as_zero() {
+        let mut graph = graph(vec![node("A"), node("B")], vec![edge("A-B", "A", "B")]);
+        graph.edges[0].thickness = -3.0;
+        let dummy = create_label_dummy_node(&mut graph, 0, 0.0);
+
+        let second_half = split_edge(&mut graph, 0, dummy).unwrap();
+
+        assert_eq!(graph.edges[0].thickness, 0.0);
+        assert_eq!(graph.edges[second_half].thickness, 0.0);
+        assert_eq!(graph.layerless_nodes[dummy].size.height, 0.0);
+        // floor(0 / 2), not floor(-3 / 2).
+        assert_dummy_ports_at(&graph, dummy, 0.0);
+    }
+
+    // Mutation: in `place_label_dummy_labels`, leave the edge thickness out of the shift of a
+    // label below the edge.
+    #[test]
+    fn labels_below_an_edge_start_one_thickness_and_one_spacing_below_the_dummy() {
+        let mut plain = ElkInputLabel::center("choice", 30.0, 12.5);
+        plain.inline = false;
+        let (mut graph, dummy, edge_index) =
+            label_dummy_graph(ElkDirection::Right, 5.0, vec![plain]);
+        graph.layerless_nodes[dummy].position = LPoint { x: 20.0, y: 40.0 };
+        graph.layerless_nodes[dummy].label_side = LabelSide::Below;
+
+        place_label_dummy_labels(&mut graph, dummy);
+
+        // 40 + thickness 5 + spacing 7. The label is 30 wide in a dummy 30 wide.
+        let label = &graph.edges[edge_index].labels[0];
+        assert_eq!(label.position, LPoint { x: 20.0, y: 52.0 });
+    }
+
+    // Mutation: in `place_label_dummy_labels`, leave out the `.max(0.0)` of the edge thickness.
+    #[test]
+    fn a_negative_edge_thickness_counts_as_zero_in_place_label_dummy_labels() {
+        let mut plain = ElkInputLabel::center("choice", 30.0, 12.5);
+        plain.inline = false;
+        let (mut graph, dummy, edge_index) =
+            label_dummy_graph(ElkDirection::Right, 0.0, vec![plain]);
+        graph.layerless_nodes[dummy].position = LPoint { x: 20.0, y: 40.0 };
+        graph.layerless_nodes[dummy].label_side = LabelSide::Below;
+        graph.edges[edge_index].thickness = -3.0;
+
+        place_label_dummy_labels(&mut graph, dummy);
+
+        // 40 + 0 + spacing 7, not 40 - 3 + 7.
+        assert_eq!(graph.edges[edge_index].labels[0].position.y, 47.0);
+    }
+
+    // Mutation: in `place_label_dummy_labels`, take the space for the labels as if they were not
+    // inline (`if false`), or leave the edge thickness out of the space of labels that are not.
+    #[test]
+    fn vertical_labels_sit_in_the_space_the_dummy_keeps_for_them() {
+        let centre_labels = |inline: bool| {
+            let mut tall = ElkInputLabel::center("choice", 30.0, 8.0);
+            let mut short = ElkInputLabel::center("on", 12.0, 4.0);
+            tall.inline = inline;
+            short.inline = inline;
+            vec![tall, short]
+        };
+
+        // Inline: the dummy is 8 + 7 + 5 = 20 high and gives up 7 + 5, so 8 are left. Both
+        // labels are centred in them, side by side with the label spacing between.
+        let (mut graph, dummy, edge_index) =
+            label_dummy_graph(ElkDirection::Down, 5.0, centre_labels(true));
+        graph.layerless_nodes[dummy].position = LPoint { x: 20.0, y: 40.0 };
+        apply_label_side(&mut graph, dummy, LabelSide::Below);
+        place_label_dummy_labels(&mut graph, dummy);
+        let labels = &graph.edges[edge_index].labels;
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[0].position.y, 40.0);
+        assert_eq!(labels[1].position.y, 42.0);
+
+        // Not inline, above the edge: the labels end at the bottom of the 20 - 5 - 7 = 8 that
+        // the dummy keeps for them.
+        let (mut graph, dummy, edge_index) =
+            label_dummy_graph(ElkDirection::Down, 5.0, centre_labels(false));
+        graph.layerless_nodes[dummy].position = LPoint { x: 20.0, y: 40.0 };
+        graph.layerless_nodes[dummy].label_side = LabelSide::Above;
+        place_label_dummy_labels(&mut graph, dummy);
+        let labels = &graph.edges[edge_index].labels;
+        assert_eq!(labels[0].position.y, 40.0);
+        assert_eq!(labels[1].position.y, 44.0);
     }
 
     #[test]

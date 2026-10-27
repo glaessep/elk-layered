@@ -1,0 +1,194 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.randomSeed": "261092"
+  },
+  "children": [
+    {
+      "id": "g0",
+      "children": [
+        {
+          "id": "n2",
+          "width": 116.5,
+          "height": 60,
+          "$H": 279,
+          "x": 151.1,
+          "y": 12
+        },
+        {
+          "id": "n3",
+          "width": 119.1,
+          "height": 45.5,
+          "$H": 281,
+          "x": 12,
+          "y": 19.25
+        },
+        {
+          "id": "n4",
+          "width": 75,
+          "height": 25,
+          "labels": [
+            {
+              "text": "A",
+              "width": 6.5,
+              "height": 14,
+              "x": 34.25,
+              "y": 5.5
+            }
+          ],
+          "layoutOptions": {
+            "elk.nodeLabels.placement": "[H_CENTER, V_CENTER, INSIDE]"
+          },
+          "$H": 283,
+          "x": 287.6,
+          "y": 29.5
+        }
+      ],
+      "edges": [
+        {
+          "id": "e0",
+          "sources": [
+            "n3"
+          ],
+          "targets": [
+            "n2"
+          ],
+          "sections": [
+            {
+              "id": "e0_s0",
+              "startPoint": {
+                "x": 131.1,
+                "y": 42
+              },
+              "endPoint": {
+                "x": 151.1,
+                "y": 42
+              },
+              "incomingShape": "n3",
+              "outgoingShape": "n2"
+            }
+          ],
+          "container": "g0"
+        },
+        {
+          "id": "e3",
+          "sources": [
+            "n2"
+          ],
+          "targets": [
+            "n4"
+          ],
+          "sections": [
+            {
+              "id": "e3_s0",
+              "startPoint": {
+                "x": 267.6,
+                "y": 42
+              },
+              "endPoint": {
+                "x": 287.6,
+                "y": 42
+              },
+              "incomingShape": "n2",
+              "outgoingShape": "n4"
+            }
+          ],
+          "container": "g0"
+        }
+      ],
+      "$H": 277,
+      "x": 12,
+      "y": 71,
+      "width": 374.6,
+      "height": 84
+    },
+    {
+      "id": "n0",
+      "width": 57,
+      "height": 39,
+      "labels": [
+        {
+          "text": "A",
+          "width": 6.5,
+          "height": 14,
+          "x": 25.25,
+          "y": 12.5
+        }
+      ],
+      "layoutOptions": {
+        "elk.nodeLabels.placement": "[H_CENTER, V_CENTER, INSIDE]"
+      },
+      "$H": 287,
+      "x": 12,
+      "y": 12
+    },
+    {
+      "id": "n1",
+      "width": 88,
+      "height": 37,
+      "$H": 290,
+      "x": 89,
+      "y": 12
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "sources": [
+        "n2"
+      ],
+      "targets": [
+        "n0"
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e2",
+      "sources": [
+        "n1"
+      ],
+      "targets": [
+        "n4"
+      ],
+      "labels": [
+        {
+          "text": "0..*",
+          "width": 26,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "TAIL"
+          },
+          "x": 0,
+          "y": 0
+        },
+        {
+          "text": "brake request",
+          "width": 84.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "HEAD"
+          },
+          "x": 0,
+          "y": 0
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e4",
+      "sources": [
+        "n1"
+      ],
+      "targets": [
+        "n3"
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 398.6,
+  "height": 167
+}
