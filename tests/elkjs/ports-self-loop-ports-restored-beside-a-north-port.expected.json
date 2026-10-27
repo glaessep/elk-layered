@@ -1,0 +1,123 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered"
+  },
+  "children": [
+    {
+      "id": "n2",
+      "width": 26,
+      "height": 44,
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE"
+      },
+      "ports": [
+        {
+          "id": "p3",
+          "width": 8,
+          "height": 6,
+          "x": 1.25,
+          "y": -6
+        },
+        {
+          "id": "p4",
+          "width": 4,
+          "height": 5,
+          "x": 20.75,
+          "y": -5
+        },
+        {
+          "id": "p6",
+          "width": 9,
+          "height": 7,
+          "x": 10.5,
+          "y": -7
+        }
+      ],
+      "$H": 277,
+      "x": 68,
+      "y": 68.75
+    },
+    {
+      "id": "n6",
+      "width": 36,
+      "height": 59.5,
+      "$H": 283,
+      "x": 12,
+      "y": 12
+    }
+  ],
+  "edges": [
+    {
+      "id": "e4",
+      "sources": [
+        "p6"
+      ],
+      "targets": [
+        "p4"
+      ],
+      "sections": [
+        {
+          "id": "e4_s0",
+          "startPoint": {
+            "x": 83,
+            "y": 61.75
+          },
+          "endPoint": {
+            "x": 90.75,
+            "y": 63.75
+          },
+          "bendPoints": [
+            {
+              "x": 83,
+              "y": 51.75
+            },
+            {
+              "x": 90.75,
+              "y": 51.75
+            }
+          ],
+          "incomingShape": "p6",
+          "outgoingShape": "p4"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e22",
+      "sources": [
+        "n6"
+      ],
+      "targets": [
+        "p3"
+      ],
+      "sections": [
+        {
+          "id": "e22_s0",
+          "startPoint": {
+            "x": 48,
+            "y": 41.75
+          },
+          "endPoint": {
+            "x": 73.25,
+            "y": 62.75
+          },
+          "bendPoints": [
+            {
+              "x": 73.25,
+              "y": 41.75
+            }
+          ],
+          "incomingShape": "n6",
+          "outgoingShape": "p3"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 106,
+  "height": 124.75
+}

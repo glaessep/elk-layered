@@ -1021,14 +1021,16 @@ fn north_south_port_connection_sides(graph: &LGraph, port: &crate::graph::LPort)
         return Vec::new();
     };
 
+    // Only the ports of the dummy that were made for this port count:
+    // `dummyLPort.getProperty(ORIGIN) == lPort` in Java.
+    let origin = crate::graph::PortRef {
+        node: port.node,
+        port: port_index(graph, port),
+    };
     let mut sides = dummy_node
         .ports
         .iter()
-        .filter(|_| {
-            dummy_node.origin_port.as_ref().is_some_and(|origin| {
-                origin.port.node == port.node && origin.port.port == port_index(graph, port)
-            })
-        })
+        .filter(|dummy_port| dummy_port.origin_port == Some(origin))
         .filter(|dummy_port| {
             !dummy_port.incoming_edges.is_empty() || !dummy_port.outgoing_edges.is_empty()
         })
