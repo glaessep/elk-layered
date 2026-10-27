@@ -1056,9 +1056,15 @@ fn transfer_external_port_dummy_layout_to_parent_node(
 
         let external_side = nested_graph.layerless_nodes[dummy_index].external_port_side;
         // The size of the port as the parent graph holds it now: the parent graph has turned
-        // to the internal direction already, and the dummy is still in that direction.
+        // to the internal direction already, and the dummy is still in that direction. The
+        // dummy moves even without its port, as `LGraphUtil.getExternalPortPosition` moves it
+        // for every dummy, so its edges leave from where it ends up.
+        let size = parent_ports.get(origin_port.port.port).map_or(
+            nested_graph.layerless_nodes[dummy_index].external_port_size,
+            |port| port.size,
+        );
+        let port_position = external_port_position(nested_graph, dummy_index, size);
         if let Some(parent_port) = parent_ports.get_mut(origin_port.port.port) {
-            let port_position = external_port_position(nested_graph, dummy_index, parent_port.size);
             parent_port.position = port_position;
             parent_port.set_side(external_side);
         }
