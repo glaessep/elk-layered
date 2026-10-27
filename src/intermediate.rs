@@ -3208,11 +3208,16 @@ fn restore_north_south_dummy(graph: &mut LGraph, dummy: usize) {
 }
 
 fn connect_replacement_dummy_to_original(graph: &mut LGraph, replacement: usize, original: usize) {
+    // Java: `original.getPorts().get(0)`, the first port of the list, which a reorder may have
+    // moved away from the first port added.
+    let Some(original_port) = graph.layerless_nodes[original].ports.id_at(0) else {
+        return;
+    };
     if graph.layerless_nodes[replacement].ports.iter().any(|port| {
         port.side == graph.layerless_nodes[replacement].external_port_side
             && port.outgoing_edges.iter().any(|edge| {
                 graph.edges[*edge].target.node == original
-                    && graph.edges[*edge].target.port == PortId::new(0)
+                    && graph.edges[*edge].target.port == original_port
             })
     }) {
         return;
@@ -3236,7 +3241,7 @@ fn connect_replacement_dummy_to_original(graph: &mut LGraph, replacement: usize,
         source: origin_port,
         target: PortRef {
             node: original,
-            port: PortId::new(0),
+            port: original_port,
         },
         source_node_id: graph.layerless_nodes[replacement].id.clone(),
         target_node_id: graph.layerless_nodes[original].id.clone(),
@@ -3529,9 +3534,14 @@ fn remove_temporary_north_south_dummy(graph: &mut LGraph, node: usize) {
     outgoing_edge_bend_points.reverse();
     outgoing_edge_bend_points.push(node_relative_port_position(graph, node, node_origin_port));
 
+    // Java: `replacedDummy.getPorts().get(0)`, the first port of the list.
+    let Some(replaced_dummy_first_port) = graph.layerless_nodes[replaced_dummy].ports.id_at(0)
+    else {
+        return;
+    };
     let replaced_dummy_port = PortRef {
         node: replaced_dummy,
-        port: PortId::new(0),
+        port: replaced_dummy_first_port,
     };
 
     let incoming_edges = graph.layerless_nodes[node].ports[node_in_port]
@@ -3768,7 +3778,7 @@ fn process_north_south_hierarchical_port_constraints(graph: &mut LGraph) {
     let original_layer_count = graph.layers.len();
     let mut new_dummy_nodes = vec![Vec::<usize>::new(); original_layer_count + 2];
     let mut replacement_maps =
-        vec![Vec::<(NorthSouthReplacementKey, usize)>::new(); original_layer_count + 2];
+        vec![Vec::<(NorthSouthReplacementKey, ReplacementDummy)>::new(); original_layer_count + 2];
     let mut original_external_port_dummies = Vec::new();
 
     for layer_index in 0..original_layer_count {
@@ -3797,8 +3807,8 @@ fn process_north_south_hierarchical_port_constraints(graph: &mut LGraph) {
                 graph.set_edge_source(
                     edge,
                     PortRef {
-                        node: replacement,
-                        port: PortId::new(1),
+                        node: replacement.node,
+                        port: replacement.output,
                     },
                 );
             }
@@ -3820,8 +3830,8 @@ fn process_north_south_hierarchical_port_constraints(graph: &mut LGraph) {
                 graph.set_edge_target(
                     edge,
                     PortRef {
-                        node: replacement,
-                        port: PortId::new(0),
+                        node: replacement.node,
+                        port: replacement.input,
                     },
                 );
             }
@@ -3869,9 +3879,9 @@ fn replacement_dummy_for_original(
     graph: &mut LGraph,
     original_dummy: usize,
     virtual_layer: usize,
-    maps: &mut [Vec<(NorthSouthReplacementKey, usize)>],
+    maps: &mut [Vec<(NorthSouthReplacementKey, ReplacementDummy)>],
     new_dummy_nodes: &mut [Vec<usize>],
-) -> usize {
+) -> ReplacementDummy {
     let key = north_south_replacement_key(graph, original_dummy);
     if let Some((_, replacement)) = maps[virtual_layer]
         .iter()
@@ -3882,8 +3892,18 @@ fn replacement_dummy_for_original(
 
     let replacement = create_hierarchical_port_replacement_dummy(graph, original_dummy);
     maps[virtual_layer].push((key, replacement));
-    new_dummy_nodes[virtual_layer].push(replacement);
+    new_dummy_nodes[virtual_layer].push(replacement.node);
     replacement
+}
+
+/// A north/south replacement dummy and the ids of the two ports it was made with.
+#[derive(Debug, Clone, Copy)]
+struct ReplacementDummy {
+    node: usize,
+    /// The west input port.
+    input: PortId,
+    /// The east output port.
+    output: PortId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3904,7 +3924,10 @@ fn north_south_replacement_key(graph: &LGraph, original_dummy: usize) -> NorthSo
         .unwrap_or(NorthSouthReplacementKey::Dummy(original_dummy))
 }
 
-fn create_hierarchical_port_replacement_dummy(graph: &mut LGraph, original_dummy: usize) -> usize {
+fn create_hierarchical_port_replacement_dummy(
+    graph: &mut LGraph,
+    original_dummy: usize,
+) -> ReplacementDummy {
     let original = graph.layerless_nodes[original_dummy].clone();
     let node_index = graph.layerless_nodes.len();
     let mut replacement = LNode::new(
@@ -3934,7 +3957,7 @@ fn create_hierarchical_port_replacement_dummy(graph: &mut LGraph, original_dummy
     replacement.node_alignment = Alignment::Center;
     graph.layerless_nodes.push(replacement);
 
-    graph
+    let input = graph
         .add_port(
             node_index,
             PortType::Input,
@@ -3942,7 +3965,7 @@ fn create_hierarchical_port_replacement_dummy(graph: &mut LGraph, original_dummy
             Default::default(),
         )
         .expect("replacement node was just inserted");
-    graph
+    let output = graph
         .add_port(
             node_index,
             PortType::Output,
@@ -3950,7 +3973,11 @@ fn create_hierarchical_port_replacement_dummy(graph: &mut LGraph, original_dummy
             Default::default(),
         )
         .expect("replacement node was just inserted");
-    node_index
+    ReplacementDummy {
+        node: node_index,
+        input: input.port,
+        output: output.port,
+    }
 }
 
 fn create_long_edge_dummy_node(
@@ -5948,6 +5975,71 @@ mod tests {
             .unwrap();
         assert!(!graph.edge_source_attached(detached_edge));
         assert!(!graph.edge_target_attached(detached_edge));
+    }
+
+    // Mutation: name the replaced dummy's port `PortId::new(0)` (the first port added) instead of
+    // the first port of its list, in `remove_temporary_north_south_dummy` or in
+    // `connect_replacement_dummy_to_original`.
+    #[test]
+    fn hierarchical_port_orthogonal_router_uses_the_first_listed_port_of_a_reordered_dummy() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        graph.options.port_constraints = PortConstraints::FixedSide;
+        graph.options.spacing.node_node = 20.0;
+        graph.options.spacing.edge_edge = 10.0;
+        graph.size.height = 50.0;
+
+        let north = push_external_dummy(&mut graph, "north", PortSide::North, 0.0);
+        graph.layerless_nodes[north].size.width = 4.0;
+        let source = push_normal_node(&mut graph, "A");
+        graph.layerless_nodes[source].position = LPoint { x: 50.0, y: 30.0 };
+        let source_port = graph
+            .add_port(
+                source,
+                PortType::Output,
+                PortSide::North,
+                LPoint { x: 30.0, y: 0.0 },
+            )
+            .unwrap();
+        graph.set_node_layer(source, 0);
+        graph.set_node_layer(north, 0);
+        let edge = add_test_edge(
+            &mut graph,
+            "A-north",
+            source,
+            source_port.port.index(),
+            north,
+            0,
+        );
+
+        process_hierarchical_port_constraints(&mut graph);
+
+        // The dummy lists a second port first. The first port added is no longer the first one.
+        let added_first = graph.layerless_nodes[north].ports.id_at(0).unwrap();
+        let listed_first = graph
+            .add_port(north, PortType::Input, PortSide::West, Default::default())
+            .unwrap()
+            .port;
+        assert!(
+            graph.layerless_nodes[north]
+                .ports
+                .set_order(&[listed_first, added_first])
+        );
+
+        process_hierarchical_port_orthogonal_edges(&mut graph);
+
+        assert_eq!(
+            graph.edges[edge].target,
+            PortRef {
+                node: north,
+                port: listed_first
+            }
+        );
+        let origin_edge = graph
+            .edges
+            .iter()
+            .find(|edge| edge.id.ends_with(":hierarchical-origin"))
+            .unwrap();
+        assert_eq!(origin_edge.target.port, listed_first);
     }
 
     #[test]
