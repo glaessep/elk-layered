@@ -1246,12 +1246,6 @@ fn introduce_hierarchical_edge_segment(
         graph.graph_properties.self_loops = true;
     }
 
-    if has_incident_edges(&graph.layerless_nodes[source.node].ports[source.port])
-        || has_incident_edges(&graph.layerless_nodes[target.node].ports[target.port])
-    {
-        graph.graph_properties.hyperedges = true;
-    }
-
     apply_label_graph_properties(graph, &labels);
 
     let edge_index = graph
@@ -2039,10 +2033,6 @@ fn create_parent_boundary_port(
     dummy.ports[0].node = node;
     graph.layerless_nodes.push(dummy);
     PortRef { node, port: 0 }
-}
-
-fn has_incident_edges(port: &LPort) -> bool {
-    port.incoming_edges.len() + port.outgoing_edges.len() > 0
 }
 
 fn port_side_from_direction(direction: ElkDirection) -> PortSide {

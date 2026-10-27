@@ -686,6 +686,10 @@ struct ImportGraphPortIndex {
 struct ImportPortIndex {
     root: ImportGraphPortIndex,
     graphs: HashMap<String, ImportGraphPortIndex>,
+    /// The edges that cross a level, as (incoming, outgoing) per port, keyed by the id of the node
+    /// and the key of the port. ELK's importer attaches such an edge to its ports at once. This
+    /// importer keeps it apart until the compound preprocessor splits it, so the count lives here.
+    crossing_edges: HashMap<(String, String), (usize, usize)>,
 }
 
 impl ImportPortIndex {
@@ -693,7 +697,16 @@ impl ImportPortIndex {
         Self {
             root: ImportGraphPortIndex::default(),
             graphs: HashMap::new(),
+            crossing_edges: HashMap::new(),
         }
+    }
+
+    /// The edges that cross a level and end at this port, as (incoming, outgoing).
+    fn crossing_at(&self, node_id: &str, port_key: &str) -> (usize, usize) {
+        self.crossing_edges
+            .get(&(node_id.to_string(), port_key.to_string()))
+            .copied()
+            .unwrap_or_default()
     }
 
     fn get(
@@ -987,6 +1000,7 @@ fn import_hierarchical_graph(
                 transform_cross_hierarchy_edge(
                     edge,
                     &mut arena,
+                    owner_slot,
                     index,
                     edge_order,
                     edge_model_order,
@@ -1544,9 +1558,15 @@ fn transform_edge(
         })
         .expect("ports were created before adding edge");
 
-    if has_parallel_port_edges(&graph.layerless_nodes[source.node].ports[source.port])
-        || has_parallel_port_edges(&graph.layerless_nodes[target.node].ports[target.port])
-    {
+    // `transformEdge`: a port with more than one incoming or more than one outgoing edge makes
+    // the graph one with hyperedges. The edges that cross a level count too.
+    let parallel_at = |graph: &LGraph, end: PortRef| {
+        let node = &graph.layerless_nodes[end.node];
+        let port = &node.ports[end.port];
+        let (incoming, outgoing) = port_index.crossing_at(&node.id, &port.id);
+        port.incoming_edges.len() + incoming > 1 || port.outgoing_edges.len() + outgoing > 1
+    };
+    if parallel_at(graph, source) || parallel_at(graph, target) {
         graph.graph_properties.hyperedges = true;
     }
 
@@ -1634,6 +1654,7 @@ fn scope_port_end(
 fn transform_cross_hierarchy_edge(
     edge: &ElkInputEdge,
     arena: &mut HierarchicalImportArena,
+    owner_slot: usize,
     index: &InputIndex<'_>,
     edge_order: usize,
     model_order: Option<usize>,
@@ -1670,6 +1691,34 @@ fn transform_cross_hierarchy_edge(
         port_index,
     )?;
 
+    // `transformEdge`: a port with more than one incoming or more than one outgoing edge makes
+    // the graph the edge sits in one with hyperedges. The graph is the one the edge belongs to,
+    // not one of the levels its segments will sit in.
+    let (source_incoming, source_outgoing) = {
+        let entry = port_index
+            .crossing_edges
+            .entry((source.node_id.clone(), source.port_key.clone()))
+            .or_default();
+        entry.1 += 1;
+        *entry
+    };
+    let (target_incoming, target_outgoing) = {
+        let entry = port_index
+            .crossing_edges
+            .entry((target.node_id.clone(), target.port_key.clone()))
+            .or_default();
+        entry.0 += 1;
+        *entry
+    };
+    let parallel = |attached: (usize, usize), incoming: usize, outgoing: usize| {
+        attached.0 + incoming > 1 || attached.1 + outgoing > 1
+    };
+    if parallel(source.attached, source_incoming, source_outgoing)
+        || parallel(target.attached, target_incoming, target_outgoing)
+    {
+        arena.graph_mut(owner_slot).graph_properties.hyperedges = true;
+    }
+
     // The owned paths are part of ELK's compound-edge input, not graph locators. Build each once
     // and move it into the retained hierarchy edge so deep-chain cost tracks emitted path data.
     let source_path = index
@@ -1701,6 +1750,8 @@ fn transform_cross_hierarchy_edge(
 struct HierarchyEdgeEnd {
     node_id: String,
     port_key: String,
+    /// The edges attached to the port by now, as (incoming, outgoing).
+    attached: (usize, usize),
 }
 
 /// Finds or makes the port at one end of a hierarchy edge.
@@ -1730,9 +1781,11 @@ fn hierarchy_edge_end(
         // The dummy is a node of the root graph with the id of its port.
         let end = scope_port_end(edge, node_id, port_id, index)?;
         let dummy = &arena.root().layerless_nodes[end.node];
+        let port = &dummy.ports[end.port];
         return Ok(HierarchyEdgeEnd {
             node_id: dummy.id.clone(),
-            port_key: dummy.ports[end.port].id.clone(),
+            port_key: port.id.clone(),
+            attached: (port.incoming_edges.len(), port.outgoing_edges.len()),
         });
     }
     let slot = arena.graph_slot_for_parent(index, graph_parent);
@@ -1752,13 +1805,15 @@ fn hierarchy_edge_end(
         if node.id != node_id || port.port >= node.ports.len() {
             return Err(missing_endpoint());
         }
+        let attached = &node.ports[port.port];
         return Ok(HierarchyEdgeEnd {
             node_id: node_id.to_string(),
             port_key: port_id.to_string(),
+            attached: (attached.incoming_edges.len(), attached.outgoing_edges.len()),
         });
     }
     let port_key = hierarchy_port_key(node_id, edge_order, role, merge_edges, port_type);
-    ensure_hierarchy_endpoint_port(
+    let end = ensure_hierarchy_endpoint_port(
         arena.graph_mut(slot),
         graph_parent,
         index.child_position(node_id),
@@ -1768,9 +1823,12 @@ fn hierarchy_edge_end(
         port_index,
     )
     .ok_or_else(missing_endpoint)?;
+    let port = &arena.graph(slot).layerless_nodes[end.node].ports[end.port];
+    let attached = (port.incoming_edges.len(), port.outgoing_edges.len());
     Ok(HierarchyEdgeEnd {
         node_id: node_id.to_string(),
         port_key,
+        attached,
     })
 }
 

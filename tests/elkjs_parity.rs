@@ -289,6 +289,16 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    importer made: 2 cases, ports-group-include-flow-of-split-edges and random-group-ports/r037.
 // 37. In `original_net_flows`, count the source of a hierarchy edge as incoming (`+= 1`): 5 cases,
 //    such as ports-group-include-flow-of-split-edges-out and random-group-ports/r037.
+// 38. In `transform_edge` (src/importer.rs), leave the edges that cross a level out of the count
+//    at a port (`port.incoming_edges.len() > 1 || port.outgoing_edges.len() > 1`): 2 cases,
+//    random-group-ports/r020 and r042.
+// 39. In `transform_cross_hierarchy_edge`, leave the edges already attached to the port out of
+//    the count (`incoming > 1 || outgoing > 1`): 1 case, hierarchy-edge-and-edge-into-one-port.
+// 40. In `transform_cross_hierarchy_edge`, set the hyperedge flag on the root graph instead of
+//    the graph the edge belongs to: 4 cases, such as random-group-ports/r016, r018 and r047.
+// 41. In the segment code of src/compound.rs, set the flag when the source port already has an
+//    edge, as the compound preprocessor used to: 2 cases,
+//    hierarchy-edge-in-and-out-at-one-port and random-group-ports/r092.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
