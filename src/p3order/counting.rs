@@ -1118,7 +1118,7 @@ mod tests {
         }
     }
 
-    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
+    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> crate::graph::GraphArena {
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
@@ -1127,7 +1127,7 @@ mod tests {
         })
         .unwrap();
         layer_network_simplex(&mut graph).unwrap();
-        process_port_sides(&mut graph);
+        process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
         sort_port_lists(&mut graph);
         crate::p3order::initialize_crossing_minimization_port_ids(&mut graph);
         graph

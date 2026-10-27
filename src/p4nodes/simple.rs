@@ -71,7 +71,7 @@ fn layer_width(graph: &LGraph, layer_index: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{LGraph, LMargin};
+    use crate::graph::LMargin;
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::options::{ElkDirection, LayeredOptions};
 
@@ -117,7 +117,7 @@ mod tests {
         }
     }
 
-    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
+    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> crate::graph::GraphArena {
         import_graph(&ElkInputGraph {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),

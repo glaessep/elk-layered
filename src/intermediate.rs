@@ -4121,7 +4121,7 @@ mod tests {
         }
     }
 
-    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
+    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> crate::graph::GraphArena {
         import_graph(&ElkInputGraph {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
@@ -4538,7 +4538,7 @@ mod tests {
         direction: ElkDirection,
         thickness: f64,
         labels: Vec<ElkInputLabel>,
-    ) -> (LGraph, usize, usize) {
+    ) -> (crate::graph::GraphArena, usize, usize) {
         let mut labelled = edge("A-B", "A", "B");
         labelled.labels = labels;
         let mut graph = graph(vec![node("A"), node("B")], vec![labelled]);
@@ -4865,7 +4865,7 @@ mod tests {
         let mut graph = graph(vec![node("A"), node("B")], vec![labelled]);
 
         layer_network_simplex(&mut graph).unwrap();
-        crate::p3order::process_port_sides(&mut graph);
+        crate::p3order::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
         crate::p4nodes::calculate_label_and_node_sizes(&mut graph);
         crate::p4nodes::calculate_innermost_node_margins(&mut graph);
         select_label_sides(&mut graph);
@@ -4899,7 +4899,7 @@ mod tests {
         graph.options.edge_label_side_selection = EdgeLabelSideSelection::SmartDown;
 
         layer_network_simplex(&mut graph).unwrap();
-        crate::p3order::process_port_sides(&mut graph);
+        crate::p3order::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
         select_label_sides(&mut graph);
 
         // A has one port per edge, and both sit on the same side. ELK pairs them up: the first

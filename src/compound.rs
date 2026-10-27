@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
-    CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphId, GraphNodeRef,
+    CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphArena, GraphId, GraphNodeRef,
     GraphPortRef, HierarchyEdge, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize, LayeredEdge,
     PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
     port_side_from_direction,
@@ -327,8 +327,8 @@ pub(crate) fn record_cross_hierarchy_edge_segment(
 /// keeps hierarchy-crossing input edges as `HierarchyEdge` records during import and introduces
 /// hierarchy-local layout segments here. The second pass still accepts already segmented edges as a
 /// migration bridge for tests and later postprocessor work.
-pub fn preprocess_source_ported_compound_graph(graph: &mut LGraph) {
-    preprocess_source_ported_compound_graph_observed(graph, &mut NoopCompoundPreprocessObserver);
+pub fn preprocess_source_ported_compound_graph(graphs: &mut GraphArena) {
+    preprocess_source_ported_compound_graph_observed(graphs, &mut NoopCompoundPreprocessObserver);
 }
 
 trait CompoundPreprocessObserver {
@@ -388,64 +388,47 @@ impl CompoundPreprocessObserver for CompoundPreprocessWork {
 }
 
 fn preprocess_source_ported_compound_graph_observed(
-    graph: &mut LGraph,
+    graphs: &mut GraphArena,
     observer: &mut impl CompoundPreprocessObserver,
 ) {
     // The segments replace the hierarchy edges, so the net flows must be read before they are
     // introduced. Without a hierarchy edge nothing changes, so a graph that ends up with no
     // external ports never reads them.
-    let has_hierarchy_edges = hierarchy_has_pending_edges(graph);
-    let flows_before_segments = has_hierarchy_edges.then(|| original_net_flows(graph));
-    introduce_source_ported_hierarchy_edge_segments(graph);
-    if !hierarchy_has_external_ports(graph) {
-        let result = graph.try_for_each_graph_mut(|graph| {
+    let has_hierarchy_edges = hierarchy_has_pending_edges(graphs);
+    let flows_before_segments = has_hierarchy_edges.then(|| original_net_flows(graphs));
+    introduce_source_ported_hierarchy_edge_segments(graphs);
+    if !hierarchy_has_external_ports(graphs) {
+        let result = graphs.try_for_each_graph_mut(|graph| {
             prepare_compound_endpoint_metadata(graph, observer);
             Ok::<(), std::convert::Infallible>(())
         });
         result.expect("compound endpoint preprocessing is infallible");
         return;
     }
-    let original_net_flows = flows_before_segments.unwrap_or_else(|| original_net_flows(graph));
+    let original_net_flows = flows_before_segments.unwrap_or_else(|| original_net_flows(graphs));
 
-    let mut detached = detach_nested_graph_hierarchy(graph);
+    // The root first, then the graphs below it level by level.
+    let order = graphs.breadth_first(GraphId::ROOT);
     // `transformHierarchyEdges` reads the port constraints of each compound node before
     // `setSidesOfPortsToSidesOfDummyNodes` fixes them, so keep them.
-    let original_constraints = OriginalPortConstraints {
-        root: port_constraints_of(graph),
-        nested: detached
-            .iter()
-            .map(|entry| port_constraints_of(&entry.graph))
-            .collect(),
-    };
-    let root_endpoint_plan = prepare_compound_endpoint_metadata(graph, observer);
-    let mut detached_endpoint_plans = Vec::with_capacity(detached.len());
-    for entry in &mut detached {
-        detached_endpoint_plans.push(prepare_compound_endpoint_metadata(
-            &mut entry.graph,
+    let mut original_constraints = vec![Vec::new(); graphs.len()];
+    for &graph in &order {
+        original_constraints[graph.index()] = port_constraints_of(&graphs[graph]);
+    }
+    let mut endpoint_plans = (0..graphs.len()).map(|_| None).collect::<Vec<_>>();
+    for &graph in &order {
+        endpoint_plans[graph.index()] = Some(prepare_compound_endpoint_metadata(
+            &mut graphs[graph],
             observer,
         ));
     }
-    link_compound_external_dummy_metadata(
-        graph,
-        &root_endpoint_plan,
-        &mut detached,
-        &detached_endpoint_plans,
-        observer,
-    );
+    link_compound_external_dummy_metadata(graphs, &endpoint_plans, observer);
     ensure_nested_external_dummies_for_parent_ports(
-        graph,
-        detached,
-        original_constraints,
+        graphs,
+        &order,
+        &original_constraints,
         &original_net_flows,
     );
-}
-
-/// The port constraints of every node of the hierarchy before the compound preprocessor links
-/// the external port dummies to the ports.
-struct OriginalPortConstraints {
-    root: Vec<PortConstraints>,
-    /// In the order of the detached graphs.
-    nested: Vec<Vec<PortConstraints>>,
 }
 
 /// A port by the id of its node and its own id. `named` says whether the caller named the port:
@@ -457,10 +440,10 @@ type OriginalNetFlowKey = (String, String, bool);
 /// still sees the edges as the importer made them: incoming minus outgoing edges, the ones that
 /// cross a level included. Edges that are split into segments no longer show up at the port in
 /// the same way.
-fn original_net_flows(graph: &LGraph) -> HashMap<OriginalNetFlowKey, isize> {
+fn original_net_flows(graphs: &GraphArena) -> HashMap<OriginalNetFlowKey, isize> {
     let mut flows = HashMap::<OriginalNetFlowKey, isize>::new();
-    let mut pending = vec![graph];
-    while let Some(graph) = pending.pop() {
+    // The sums do not depend on the order, so slot order will do.
+    for graph in graphs.iter() {
         for node in &graph.layerless_nodes {
             for port in &node.ports {
                 *flows
@@ -484,12 +467,6 @@ fn original_net_flows(graph: &LGraph) -> HashMap<OriginalNetFlowKey, isize> {
                 ))
                 .or_default() += 1;
         }
-        pending.extend(
-            graph
-                .layerless_nodes
-                .iter()
-                .filter_map(|node| node.nested_graph.as_deref()),
-        );
     }
     flows
 }
@@ -502,105 +479,34 @@ fn port_constraints_of(graph: &LGraph) -> Vec<PortConstraints> {
         .collect()
 }
 
-fn introduce_source_ported_hierarchy_edge_segments(graph: &mut LGraph) {
-    if !hierarchy_has_pending_edges(graph) {
+fn introduce_source_ported_hierarchy_edge_segments(graphs: &mut GraphArena) {
+    if !hierarchy_has_pending_edges(graphs) {
         return;
     }
-    struct DetachedGraph {
-        graph: Box<LGraph>,
-        parent: Option<usize>,
-        parent_node: usize,
-    }
-
-    fn process_local_edges(graph: &mut LGraph) {
-        // A hierarchy edge owns a traversal of its relative graph scope. Skipping empty owners is
-        // essential on deep compound chains: otherwise every detached descendant would rescan its
-        // remaining subtree even though the official preprocessor has no segments to introduce.
-        if graph.hierarchy_edges.is_empty() {
-            return;
+    // A hierarchy edge owns a traversal of its relative graph scope. Skipping empty owners is
+    // essential on deep compound chains: otherwise every graph would rescan its remaining
+    // subtree even though the official preprocessor has no segments to introduce.
+    for graph in graphs.breadth_first(GraphId::ROOT) {
+        if graphs[graph].hierarchy_edges.is_empty() {
+            continue;
         }
-        let hierarchy_edges = std::mem::take(&mut graph.hierarchy_edges);
+        let hierarchy_edges = std::mem::take(&mut graphs[graph].hierarchy_edges);
         let mut segments = Vec::new();
         for edge in hierarchy_edges {
             segments.extend(materialize_hierarchy_edge_segments(&edge));
         }
-        introduce_source_ported_scoped_edge_segments(graph, segments);
-    }
-
-    fn take_nested_graphs(graph: &mut LGraph) -> Vec<(usize, Box<LGraph>)> {
-        graph
-            .layerless_nodes
-            .iter_mut()
-            .enumerate()
-            .filter_map(|(node, data)| data.nested_graph.take().map(|graph| (node, graph)))
-            .collect()
-    }
-
-    process_local_edges(graph);
-    let mut detached = take_nested_graphs(graph)
-        .into_iter()
-        .map(|(parent_node, graph)| DetachedGraph {
-            graph,
-            parent: None,
-            parent_node,
-        })
-        .collect::<Vec<_>>();
-    let mut cursor = 0usize;
-    while cursor < detached.len() {
-        process_local_edges(&mut detached[cursor].graph);
-        let children = take_nested_graphs(&mut detached[cursor].graph);
-        detached.extend(
-            children
-                .into_iter()
-                .map(|(parent_node, graph)| DetachedGraph {
-                    graph,
-                    parent: Some(cursor),
-                    parent_node,
-                }),
-        );
-        cursor += 1;
-    }
-    while let Some(detached_graph) = detached.pop() {
-        let parent_node = detached_graph.parent_node;
-        if let Some(parent) = detached_graph.parent {
-            detached[parent].graph.layerless_nodes[parent_node].nested_graph =
-                Some(detached_graph.graph);
-        } else {
-            graph.layerless_nodes[parent_node].nested_graph = Some(detached_graph.graph);
-        }
+        introduce_source_ported_scoped_edge_segments(graphs, graph, segments);
     }
 }
 
-fn hierarchy_has_pending_edges(graph: &LGraph) -> bool {
-    let mut stack = vec![graph];
-    while let Some(current) = stack.pop() {
-        if !current.hierarchy_edges.is_empty() {
-            return true;
-        }
-        stack.extend(
-            current
-                .layerless_nodes
-                .iter()
-                .filter_map(|node| node.nested_graph.as_deref()),
-        );
-    }
-    false
+fn hierarchy_has_pending_edges(graphs: &GraphArena) -> bool {
+    graphs.iter().any(|graph| !graph.hierarchy_edges.is_empty())
 }
 
-fn hierarchy_has_external_ports(graph: &LGraph) -> bool {
-    let mut stack = vec![graph];
-    while let Some(current) = stack.pop() {
-        if current.graph_properties.external_ports {
-            return true;
-        }
-        stack.extend(
-            current
-                .layerless_nodes
-                .iter()
-                .filter_map(|node| node.nested_graph.as_deref()),
-        );
-    }
-    false
+fn hierarchy_has_external_ports(graphs: &GraphArena) -> bool {
+    graphs
+        .iter()
+        .any(|graph| graph.graph_properties.external_ports)
 }
 
 fn materialize_hierarchy_edge_segments(edge: &HierarchyEdge) -> Vec<ScopedHierarchySegment> {
@@ -678,28 +584,18 @@ struct HierarchyPublications {
     local_ports: HashMap<Option<String>, Vec<LocalPortPublication>>,
 }
 
+/// Walks `scope` and the graphs below it, children before the graph they lie in.
 fn order_segments_by_publication(
-    graph: &LGraph,
+    graphs: &GraphArena,
+    scope: GraphId,
     segments: Vec<ScopedHierarchySegment>,
 ) -> HierarchyPublications {
     let mut node_order = HashMap::new();
     let mut nested_nodes = HashSet::new();
     let mut port_order = HashMap::new();
     let mut buckets = Vec::new();
-    let mut stack = vec![(graph, false)];
-    while let Some((current, children_visited)) = stack.pop() {
-        if !children_visited {
-            stack.push((current, true));
-            stack.extend(
-                current
-                    .layerless_nodes
-                    .iter()
-                    .rev()
-                    .filter_map(|node| node.nested_graph.as_deref())
-                    .map(|nested| (nested, false)),
-            );
-            continue;
-        }
+    for current in graphs.postorder(scope) {
+        let current = &graphs[current];
         for node in &current.layerless_nodes {
             if node.nested_graph.is_some() {
                 nested_nodes.insert(node.id.as_str());
@@ -858,14 +754,17 @@ struct ParentPorts<'a> {
     net_flows: &'a ParentPortFlows,
 }
 
+/// Introduces the segments in `scope` and the graphs below it. A segment names the graph it lands
+/// in by the id of that graph's parent node, or by `None` for `scope` itself.
 pub(crate) fn introduce_source_ported_scoped_edge_segments(
-    graph: &mut LGraph,
+    graphs: &mut GraphArena,
+    scope: GraphId,
     segments: Vec<ScopedHierarchySegment>,
 ) {
     if segments.is_empty() {
         return;
     }
-    let publications = order_segments_by_publication(graph, segments);
+    let publications = order_segments_by_publication(graphs, scope, segments);
     let parent_port_flows = parent_port_net_flows(&publications.segments);
     let mut local_port_publications = publications.local_ports;
     let mut segments_by_parent: HashMap<Option<String>, Vec<ScopedHierarchySegment>> =
@@ -883,8 +782,9 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
             .push(scoped);
     }
     let mut first_graph = true;
-    let result = graph.try_for_each_graph_mut(|graph| {
-        // The existing traversal visits parents before children. Each requested parent's ports
+    for graph in graphs.preorder(scope) {
+        let graph = &mut graphs[graph];
+        // The traversal visits parents before children. Each requested parent's ports
         // are copied once, preserving the same first-match identity as GraphPortIndex.
         for node in &graph.layerless_nodes {
             if let Some(info) = original_parent_offsets.get_mut(&node.id) {
@@ -952,9 +852,7 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
                 );
             }
         }
-        Ok::<(), std::convert::Infallible>(())
-    });
-    result.expect("scoped hierarchy segment introduction is infallible");
+    }
     assert!(
         segments_by_parent.is_empty(),
         "scoped hierarchy segment owners were validated before graph mutation"
@@ -1561,108 +1459,42 @@ fn prepare_compound_endpoint_metadata(
     endpoint_plan
 }
 
-struct DetachedNestedGraph {
-    graph: Box<LGraph>,
-    parent: Option<usize>,
-    parent_node: usize,
-}
-
-fn detach_nested_graph_hierarchy(graph: &mut LGraph) -> Vec<DetachedNestedGraph> {
-    fn take_nested_graphs(graph: &mut LGraph) -> Vec<(usize, Box<LGraph>)> {
-        graph
-            .layerless_nodes
-            .iter_mut()
-            .enumerate()
-            .filter_map(|(node, data)| data.nested_graph.take().map(|graph| (node, graph)))
-            .collect()
-    }
-
-    let mut detached = take_nested_graphs(graph)
-        .into_iter()
-        .map(|(parent_node, graph)| DetachedNestedGraph {
-            graph,
-            parent: None,
-            parent_node,
-        })
-        .collect::<Vec<_>>();
-    let mut cursor = 0usize;
-    while cursor < detached.len() {
-        let children = take_nested_graphs(&mut detached[cursor].graph);
-        detached.extend(
-            children
-                .into_iter()
-                .map(|(parent_node, graph)| DetachedNestedGraph {
-                    graph,
-                    parent: Some(cursor),
-                    parent_node,
-                }),
-        );
-        cursor += 1;
-    }
-    detached
-}
-
-fn detached_nested_graph_preorder(detached: &[DetachedNestedGraph]) -> Vec<usize> {
-    let mut root_children = Vec::new();
-    let mut children_by_parent = vec![Vec::new(); detached.len()];
-    for (index, entry) in detached.iter().enumerate() {
-        if let Some(parent) = entry.parent {
-            children_by_parent[parent].push(index);
-        } else {
-            root_children.push(index);
-        }
-    }
-
-    let mut preorder = Vec::with_capacity(detached.len());
-    let mut stack = root_children.into_iter().rev().collect::<Vec<_>>();
-    while let Some(index) = stack.pop() {
-        preorder.push(index);
-        stack.extend(children_by_parent[index].iter().rev().copied());
-    }
-    preorder
-}
-
+/// Gives each parent port that has no dummy yet its dummy in the graph inside the node. Graphs are
+/// handled deepest first, so a graph's nested graphs are done before the graph itself.
 fn ensure_nested_external_dummies_for_parent_ports(
-    graph: &mut LGraph,
-    mut detached: Vec<DetachedNestedGraph>,
-    original: OriginalPortConstraints,
+    graphs: &mut GraphArena,
+    order: &[GraphId],
+    original_constraints: &[Vec<PortConstraints>],
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
-    while let Some(mut entry) = detached.pop() {
-        // Popping from the end keeps the index of every entry that is left.
+    for &graph in order.iter().rev() {
         ensure_direct_nested_external_dummies_for_parent_ports(
-            &mut entry.graph,
-            &original.nested[detached.len()],
+            graphs,
+            graph,
+            &original_constraints[graph.index()],
             net_flows,
         );
-        if let Some(parent) = entry.parent {
-            detached[parent].graph.layerless_nodes[entry.parent_node].nested_graph =
-                Some(entry.graph);
-        } else {
-            graph.layerless_nodes[entry.parent_node].nested_graph = Some(entry.graph);
-        }
     }
-    ensure_direct_nested_external_dummies_for_parent_ports(graph, &original.root, net_flows);
 }
 
 fn ensure_direct_nested_external_dummies_for_parent_ports(
-    graph: &mut LGraph,
+    graphs: &mut GraphArena,
+    graph_id: GraphId,
     original_constraints: &[PortConstraints],
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
-    let graph_id = graph.id;
-
     for (node_index, &parent_constraints) in original_constraints.iter().enumerate() {
-        let Some(nested_graph) = graph.layerless_nodes[node_index].nested_graph.as_ref() else {
+        let Some(nested_graph_id) = graphs[graph_id].layerless_nodes[node_index].nested_graph
+        else {
             continue;
         };
-        if !nested_graph.graph_properties.external_ports {
+        if !graphs[nested_graph_id].graph_properties.external_ports {
             continue;
         }
+        let (graph, nested_graph) = graphs.pair_mut(graph_id, nested_graph_id);
 
         let parent_node_id = graph.layerless_nodes[node_index].id.clone();
         let parent_size = graph.layerless_nodes[node_index].size;
-        let nested_graph_id = nested_graph.id;
         let nested_direction = nested_graph.options.direction;
         let port_ids = graph.layerless_nodes[node_index]
             .ports
@@ -1708,16 +1540,9 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
             dummy.parent_port_type = Some(port.port_type);
             let dummy_side = dummy.external_port_side;
             let dummy_border_offset = port.border_offset;
-            let dummy_node = {
-                let nested_graph = graph.layerless_nodes[node_index]
-                    .nested_graph
-                    .as_deref_mut()
-                    .expect("nested graph existence checked above");
-                let dummy_node = nested_graph.layerless_nodes.len();
-                dummy.ports[PortId::new(0)].node = dummy_node;
-                nested_graph.layerless_nodes.push(dummy);
-                dummy_node
-            };
+            let dummy_node = nested_graph.layerless_nodes.len();
+            dummy.ports[PortId::new(0)].node = dummy_node;
+            nested_graph.layerless_nodes.push(dummy);
 
             link_external_port_dummy(
                 graph,
@@ -1727,12 +1552,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
                 dummy_node,
                 dummy_border_offset,
             );
-            if let Some(nested_graph) = graph.layerless_nodes[node_index]
-                .nested_graph
-                .as_deref_mut()
-            {
-                set_external_dummy_origin(nested_graph, dummy_node, graph_id, parent_port);
-            }
+            set_external_dummy_origin(nested_graph, dummy_node, graph_id, parent_port);
         }
     }
 }
@@ -1749,36 +1569,36 @@ struct ExternalDummyInfo {
 }
 
 fn link_compound_external_dummy_metadata(
-    graph: &mut LGraph,
-    root_endpoint_plan: &CompoundEndpointPlan,
-    detached: &mut [DetachedNestedGraph],
-    detached_endpoint_plans: &[CompoundEndpointPlan],
+    graphs: &mut GraphArena,
+    endpoint_plans: &[Option<CompoundEndpointPlan>],
     observer: &mut impl CompoundPreprocessObserver,
 ) {
-    debug_assert_eq!(detached.len(), detached_endpoint_plans.len());
-    let preorder = detached_nested_graph_preorder(detached);
-    for child in preorder {
-        let parent = detached[child].parent;
-        let parent_node = detached[child].parent_node;
-        if let Some(parent) = parent {
-            debug_assert!(parent < child);
-            let (parents, children) = detached.split_at_mut(child);
-            link_direct_compound_external_dummy_metadata(
-                &mut parents[parent].graph,
-                parent_node,
-                &mut children[0].graph,
-                detached_endpoint_plans[parent].for_node(parent_node),
-                observer,
-            );
-        } else {
-            link_direct_compound_external_dummy_metadata(
-                graph,
-                parent_node,
-                &mut detached[child].graph,
-                root_endpoint_plan.for_node(parent_node),
-                observer,
-            );
+    // Where each nested graph lies: the graph and the node of the graph it is inside.
+    let mut parents = vec![None; graphs.len()];
+    let preorder = graphs.preorder(GraphId::ROOT);
+    for &graph in &preorder {
+        for (node, data) in graphs[graph].layerless_nodes.iter().enumerate() {
+            if let Some(nested) = data.nested_graph {
+                parents[nested.index()] = Some((graph, node));
+            }
         }
+    }
+    // Each nested graph, in the order of a walk that finishes one graph's subtree before the next
+    // sibling.
+    for &child in preorder.iter().skip(1) {
+        let (parent, parent_node) =
+            parents[child.index()].expect("every nested graph lies inside a node");
+        let plan = endpoint_plans[parent.index()]
+            .as_ref()
+            .expect("every graph has an endpoint plan");
+        let (parent_graph, nested_graph) = graphs.pair_mut(parent, child);
+        link_direct_compound_external_dummy_metadata(
+            parent_graph,
+            parent_node,
+            nested_graph,
+            plan.for_node(parent_node),
+            observer,
+        );
     }
 }
 
@@ -2602,7 +2422,7 @@ mod tests {
 
         let nested = graph.layerless_nodes[group]
             .nested_graph
-            .as_deref()
+            .map(|id| &graph[id])
             .expect("compound child graph");
         let incident_dummy = nested
             .layerless_nodes
@@ -2704,7 +2524,7 @@ mod tests {
                     .collect::<Vec<_>>();
                 assert_eq!(published, ["Outer", "Deep", "InnerB"]);
 
-                let nested = outer.nested_graph.as_deref().unwrap();
+                let nested = outer.nested_graph.map(|id| &graph[id]).unwrap();
                 let dummy_edges = nested
                     .layerless_nodes
                     .iter()
@@ -2869,7 +2689,7 @@ mod tests {
                     segments.push(scoped);
                 }
             }
-            introduce_source_ported_scoped_edge_segments(&mut graph, segments);
+            introduce_source_ported_scoped_edge_segments(&mut graph, GraphId::ROOT, segments);
             assert_eq!(
                 graph
                     .edges
@@ -2884,7 +2704,7 @@ mod tests {
                 .find(|node| node.id == "Inner")
                 .unwrap()
                 .nested_graph
-                .as_deref()
+                .map(|id| &graph[id])
                 .unwrap();
             assert_eq!(
                 inner
@@ -2907,7 +2727,7 @@ mod tests {
         reverse: bool,
         spacing: f64,
         original_offset: Option<f64>,
-    ) -> (LGraph, String) {
+    ) -> (GraphArena, String) {
         let mut group = node("group");
         group.hierarchy_handling = Some(HierarchyHandling::IncludeChildren);
         let mut child = node("child");
@@ -2949,13 +2769,8 @@ mod tests {
             .find(|port| port.id == original_key)
             .unwrap()
             .border_offset = original_offset;
-        group
-            .nested_graph
-            .as_deref_mut()
-            .unwrap()
-            .options
-            .spacing
-            .edge_edge = spacing;
+        let nested = group.nested_graph.unwrap();
+        graph[nested].options.spacing.edge_edge = spacing;
         (graph, original_key)
     }
 
@@ -2981,7 +2796,7 @@ mod tests {
                         .unwrap();
                     preprocess_source_ported_compound_graph(&mut graph);
                     let group = &graph.layerless_nodes[group_index];
-                    let nested = group.nested_graph.as_deref().unwrap();
+                    let nested = group.nested_graph.map(|id| &graph[id]).unwrap();
                     let parent = &group.ports[original_port];
                     let dummy_ref = parent.port_dummy.as_ref().unwrap();
                     let direct = &nested.layerless_nodes[dummy_ref.node];
@@ -3105,7 +2920,7 @@ mod tests {
             .port_dummy
             .as_ref()
             .expect("parent port should link to the nested external dummy");
-        let nested = cluster.nested_graph.as_ref().unwrap();
+        let nested = cluster.nested_graph.map(|id| &lgraph[id]).unwrap();
         let external = &nested.layerless_nodes[port_dummy.node];
 
         assert_eq!(parent_port.side, PortSide::South);
@@ -3145,7 +2960,7 @@ mod tests {
             .port_dummy
             .as_ref()
             .expect("parent port should link to the nested external dummy");
-        let nested = cluster.nested_graph.as_ref().unwrap();
+        let nested = cluster.nested_graph.map(|id| &lgraph[id]).unwrap();
         let external = &nested.layerless_nodes[port_dummy.node];
 
         assert_eq!(external.parent_port_type, Some(PortType::Output));
@@ -3189,7 +3004,7 @@ mod tests {
             .port_dummy
             .as_ref()
             .expect("S2 top-level target port should link to nested external dummy");
-        let nested = s2.nested_graph.as_ref().unwrap();
+        let nested = s2.nested_graph.map(|id| &lgraph[id]).unwrap();
         let external = &nested.layerless_nodes[port_dummy.node];
 
         // One edge enters the port, so the flow is -1 for the dummy. The layout flows down, so
@@ -3215,9 +3030,8 @@ mod tests {
         let mut lgraph = import_graph(&input).unwrap();
         let group_graph = lgraph.layerless_nodes[0]
             .nested_graph
-            .as_deref_mut()
             .expect("group graph is materialized");
-        group_graph.hierarchy_edges.push(HierarchyEdge {
+        lgraph[group_graph].hierarchy_edges.push(HierarchyEdge {
             id: "leaf-sibling".to_string(),
             source_node_id: "leaf".to_string(),
             target_node_id: "sibling".to_string(),
@@ -3239,7 +3053,7 @@ mod tests {
 
         let group_graph = lgraph.layerless_nodes[0]
             .nested_graph
-            .as_deref()
+            .map(|id| &lgraph[id])
             .expect("group graph remains materialized");
         assert!(group_graph.hierarchy_edges.is_empty());
         assert_eq!(group_graph.cross_hierarchy_edges.len(), 1);
@@ -3249,7 +3063,7 @@ mod tests {
         );
         let inner_graph = group_graph.layerless_nodes[0]
             .nested_graph
-            .as_deref()
+            .map(|id| &lgraph[id])
             .expect("inner graph remains materialized");
         assert_eq!(inner_graph.cross_hierarchy_edges.len(), 1);
         assert_eq!(
@@ -3316,7 +3130,7 @@ mod tests {
                     );
                     current = group
                         .nested_graph
-                        .as_deref()
+                        .map(|id| &lgraph[id])
                         .expect("every group retains its materialized child graph");
                 }
             })

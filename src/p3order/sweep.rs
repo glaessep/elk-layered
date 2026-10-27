@@ -17,7 +17,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::graph::{GraphId, LGraph, LNode, LNodeKind, PortId, PortRef, PortSide, PortType};
+use crate::graph::{
+    GraphArena, GraphId, LGraph, LNode, LNodeKind, OtherGraphs, PortId, PortRef, PortSide, PortType,
+};
 use crate::options::{OrderingStrategy, PortConstraints};
 use crate::p3order::counting::{
     BinaryIndexedTree, CrossingsCounter, first_port_on_side, north_south_ports_with_incident_edges,
@@ -31,12 +33,9 @@ use super::{
     update_bigger_and_smaller_associations,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct GraphPath(Vec<usize>);
-
 #[derive(Debug, Clone)]
 struct HierarchyGraphInfo {
-    path: GraphPath,
+    graph: GraphId,
     current_node_order: Vec<Vec<usize>>,
     currently_best_node_and_port_order: Option<SweepCopy>,
     best_node_and_port_order: Option<SweepCopy>,
@@ -46,15 +45,15 @@ struct HierarchyGraphInfo {
     /// `GraphInfoHolder.portDistributor`.
     port_distributor: PortDistributor,
     random: JavaRandom,
-    child_paths: Vec<GraphPath>,
-    parent_path: Option<GraphPath>,
+    child_graphs: Vec<GraphId>,
+    parent_graph: Option<GraphId>,
     parent_node_index: Option<usize>,
     has_external_ports: bool,
     use_bottom_up: bool,
 }
 
 impl HierarchyGraphInfo {
-    fn new(graph: &LGraph, path: GraphPath, cross_min_type: CrossMinType) -> Self {
+    fn new(graph: &LGraph, cross_min_type: CrossMinType) -> Self {
         let mut random = graph.random.clone();
         let current_node_order = graph
             .layers
@@ -69,7 +68,7 @@ impl HierarchyGraphInfo {
             BarycenterHeuristic::new(graph, random.clone(), port_distributor.hand_to_heuristic())
         });
         Self {
-            path,
+            graph: graph.id,
             current_node_order,
             currently_best_node_and_port_order: None,
             best_node_and_port_order: None,
@@ -77,8 +76,8 @@ impl HierarchyGraphInfo {
             crossings_counter: CrossingsCounter::default(),
             port_distributor,
             random,
-            child_paths: Vec::new(),
-            parent_path: None,
+            child_graphs: Vec::new(),
+            parent_graph: None,
             parent_node_index: None,
             has_external_ports: graph.graph_properties.external_ports,
             use_bottom_up: true,
@@ -105,7 +104,7 @@ impl HierarchyGraphInfo {
 
 struct HierarchySweep {
     infos: Vec<HierarchyGraphInfo>,
-    index_by_path: HashMap<GraphPath, usize>,
+    index_by_graph: HashMap<GraphId, usize>,
     changed: HashSet<usize>,
     random: JavaRandom,
     random_seed: i64,
@@ -558,84 +557,73 @@ impl BarycenterPortDistributor {
 }
 
 impl HierarchySweep {
-    fn new(root: &mut LGraph, cross_min_type: CrossMinType) -> Self {
-        let mut random = root.random.clone();
+    fn new(graphs: &mut GraphArena, cross_min_type: CrossMinType) -> Self {
+        let mut random = graphs.root().random.clone();
         let random_seed = random.next_long();
-        root.random = random.clone();
+        graphs.root_mut().random = random.clone();
 
         let mut sweep = Self {
             infos: Vec::new(),
-            index_by_path: HashMap::new(),
+            index_by_graph: HashMap::new(),
             changed: HashSet::new(),
             random,
             random_seed,
             cross_min_type,
         };
-        sweep.initialize_graphs(root);
+        sweep.initialize_graphs(graphs);
         sweep
     }
 
-    fn initialize_graphs(&mut self, root: &LGraph) {
-        let mut paths = vec![GraphPath(Vec::new())];
+    fn initialize_graphs(&mut self, graphs: &GraphArena) {
+        // Each graph with the graph and node it lies in. Parents come before their children.
+        let mut found: Vec<(GraphId, Option<(GraphId, usize)>)> = vec![(GraphId::ROOT, None)];
         let mut index = 0usize;
-        while index < paths.len() {
-            let path = paths[index].clone();
-            let graph = graph_at_path(root, &path);
+        while index < found.len() {
+            let (id, parent) = found[index];
+            let graph = &graphs[id];
             let info_index = self.infos.len();
-            self.index_by_path.insert(path.clone(), info_index);
-            let mut info = HierarchyGraphInfo::new(graph, path.clone(), self.cross_min_type);
-            if path.0.is_empty() {
-                self.random = info.random.clone();
+            self.index_by_graph.insert(id, info_index);
+            let mut info = HierarchyGraphInfo::new(graph, self.cross_min_type);
+            match parent {
+                Some((parent_graph, parent_node)) => {
+                    info.parent_graph = Some(parent_graph);
+                    info.parent_node_index = Some(parent_node);
+                }
+                None => self.random = info.random.clone(),
             }
-            let child_paths = graph
+            let children = graph
                 .layers
                 .iter()
                 .flat_map(|layer| layer.nodes.iter().copied())
                 .filter_map(|node_index| {
                     graph.layerless_nodes[node_index]
                         .nested_graph
-                        .as_ref()
-                        .map(|_| {
-                            let mut child_path = path.0.clone();
-                            child_path.push(node_index);
-                            GraphPath(child_path)
-                        })
+                        .map(|nested| (nested, Some((id, node_index))))
                 })
                 .collect::<Vec<_>>();
-            info.child_paths = child_paths.clone();
+            info.child_graphs = children.iter().map(|(nested, _)| *nested).collect();
             self.infos.push(info);
-            paths.extend(child_paths);
+            found.extend(children);
             index += 1;
         }
 
         for index in 0..self.infos.len() {
-            let path = self.infos[index].path.clone();
-            if let Some((parent_node_index, parent_path)) = path.0.split_last() {
-                let parent_path = GraphPath(parent_path.to_vec());
-                self.infos[index].parent_path = Some(parent_path);
-                self.infos[index].parent_node_index = Some(*parent_node_index);
-            }
-        }
-
-        for index in 0..self.infos.len() {
-            let use_bottom_up = self.decide_use_bottom_up(root, index);
+            let use_bottom_up = self.decide_use_bottom_up(graphs, index);
             self.infos[index].use_bottom_up = use_bottom_up;
         }
     }
 
-    fn decide_use_bottom_up(&self, root: &LGraph, info_index: usize) -> bool {
+    fn decide_use_bottom_up(&self, graphs: &GraphArena, info_index: usize) -> bool {
         let info = &self.infos[info_index];
-        let Some(parent_path) = info.parent_path.as_ref() else {
+        let Some(parent_graph) = info.parent_graph else {
             return true;
         };
-        let parent_graph = graph_at_path(root, parent_path);
+        let parent_graph = &graphs[parent_graph];
         let Some(parent_node_index) = info.parent_node_index else {
             return true;
         };
         let parent_node = &parent_graph.layerless_nodes[parent_node_index];
-        let boundary = graph_at_path(root, &info.path)
-            .options
-            .hierarchical_sweepiness;
+        let boundary = graphs[info.graph].options.hierarchical_sweepiness;
 
         if boundary < -1.0
             || parent_node.port_constraints.is_order_fixed()
@@ -649,11 +637,7 @@ impl HierarchySweep {
         }
 
         let mut decider = LayerSweepTypeDecider::default();
-        decider.decide(
-            graph_at_path(root, &info.path),
-            Some(parent_graph),
-            boundary,
-        )
+        decider.decide(&graphs[info.graph], Some(parent_graph), boundary)
     }
 
     fn graphs_to_sweep_on(&self) -> Vec<usize> {
@@ -665,7 +649,7 @@ impl HierarchySweep {
             .collect()
     }
 
-    fn minimize(&mut self, root: &mut LGraph) -> bool {
+    fn minimize(&mut self, graphs: &mut GraphArena) -> bool {
         let graphs_to_sweep_on = self.graphs_to_sweep_on();
         for info_index in graphs_to_sweep_on {
             if self.infos[info_index].current_node_order.is_empty() {
@@ -673,15 +657,15 @@ impl HierarchySweep {
             }
 
             if self.cross_min_type.always_improves() {
-                self.minimize_no_counter(root, info_index);
+                self.minimize_no_counter(graphs, info_index);
             } else if self.cross_min_type.is_deterministic() {
-                self.minimize_with_counter(root, info_index);
+                self.minimize_with_counter(graphs, info_index);
             } else {
-                self.compare_different_randomized_layouts(root, info_index);
+                self.compare_different_randomized_layouts(graphs, info_index);
             }
 
-            if self.infos[info_index].parent_path.is_some() {
-                self.set_port_order_on_parent_graph(root, info_index);
+            if self.infos[info_index].parent_graph.is_some() {
+                self.set_port_order_on_parent_graph(graphs, info_index);
             }
         }
 
@@ -689,17 +673,17 @@ impl HierarchySweep {
         // Return every consumed stream even when no better node order was found, so
         // later processors continue from the same state as the source implementation.
         for (index, info) in self.infos.iter().enumerate() {
-            graph_mut_at_path(root, &info.path).random = self.barycenter_random(index);
+            graphs[info.graph].random = self.barycenter_random(index);
         }
-        self.transfer_node_and_port_orders_to_graph(root)
+        self.transfer_node_and_port_orders_to_graph(graphs)
     }
 
-    fn minimize_no_counter(&mut self, root: &mut LGraph, info_index: usize) {
+    fn minimize_no_counter(&mut self, graphs: &mut GraphArena, info_index: usize) {
         let mut is_forward_sweep = self.random.next_bool();
         loop {
             let mut heuristic = GreedySwitchHeuristic::new(self.cross_min_type);
             let mut improved = {
-                let graph = graph_at_path(root, &self.infos[info_index].path);
+                let graph = &graphs[self.infos[info_index].graph];
                 heuristic.set_first_layer_order(
                     graph,
                     &mut self.infos[info_index].current_node_order,
@@ -707,7 +691,7 @@ impl HierarchySweep {
                 )
             };
             improved |= self.sweep_reducing_crossings_greedy(
-                root,
+                graphs,
                 info_index,
                 &mut heuristic,
                 is_forward_sweep,
@@ -717,13 +701,13 @@ impl HierarchySweep {
             }
             is_forward_sweep = !is_forward_sweep;
         }
-        self.set_currently_best_node_orders(root);
+        self.set_currently_best_node_orders(graphs);
     }
 
-    fn minimize_with_counter(&mut self, root: &mut LGraph, info_index: usize) -> f64 {
+    fn minimize_with_counter(&mut self, graphs: &mut GraphArena, info_index: usize) -> f64 {
         let mut is_forward_sweep = self.random.next_bool();
         {
-            let graph = graph_at_path(root, &self.infos[info_index].path);
+            let graph = &graphs[self.infos[info_index].graph];
             let mut heuristic = GreedySwitchHeuristic::new(self.cross_min_type);
             heuristic.set_first_layer_order(
                 graph,
@@ -731,16 +715,16 @@ impl HierarchySweep {
                 is_forward_sweep,
             );
             self.sweep_reducing_crossings_greedy(
-                root,
+                graphs,
                 info_index,
                 &mut heuristic,
                 is_forward_sweep,
             );
         }
 
-        let mut crossings_in_graph = self.count_current_number_of_crossings(root, info_index);
+        let mut crossings_in_graph = self.count_current_number_of_crossings(graphs, info_index);
         loop {
-            self.set_currently_best_node_orders(root);
+            self.set_currently_best_node_orders(graphs);
             if crossings_in_graph == 0.0 {
                 return 0.0;
             }
@@ -749,21 +733,21 @@ impl HierarchySweep {
             let old_number_of_crossings = crossings_in_graph;
             let mut heuristic = GreedySwitchHeuristic::new(self.cross_min_type);
             self.sweep_reducing_crossings_greedy(
-                root,
+                graphs,
                 info_index,
                 &mut heuristic,
                 is_forward_sweep,
             );
-            crossings_in_graph = self.count_current_number_of_crossings(root, info_index);
+            crossings_in_graph = self.count_current_number_of_crossings(graphs, info_index);
             if !sweep_improved_crossings(old_number_of_crossings, crossings_in_graph) {
                 return old_number_of_crossings;
             }
         }
     }
 
-    fn compare_different_randomized_layouts(&mut self, root: &mut LGraph, info_index: usize) {
+    fn compare_different_randomized_layouts(&mut self, graphs: &mut GraphArena, info_index: usize) {
         self.random.set_seed(self.random_seed);
-        if self.infos[info_index].path.0.is_empty() {
+        if self.infos[info_index].parent_graph.is_none() {
             self.infos[info_index].random = self.random.clone();
         }
         self.changed.clear();
@@ -771,27 +755,27 @@ impl HierarchySweep {
         // ELK InternalProperties uses "firstTryWithInitialOrder" for BOTH initial-order
         // flags, and Property equality is ID-based. Clearing SECOND also clears FIRST,
         // so only run zero preserves model order; run one already randomizes its first layer.
-        let first_try_with_initial_order = graph_at_path(root, &self.infos[info_index].path)
+        let first_try_with_initial_order = graphs[self.infos[info_index].graph]
             .options
             .consider_model_order_strategy
             != OrderingStrategy::None;
-        let thoroughness = graph_at_path(root, &self.infos[info_index].path)
+        let thoroughness = graphs[self.infos[info_index].graph]
             .options
             .thoroughness
             .max(1);
         let use_node_port_order_counter =
-            self.use_node_port_order_crossing_counter(root, info_index);
+            self.use_node_port_order_crossing_counter(graphs, info_index);
         let mut best_crossings = f64::MAX;
         for run_index in 0..thoroughness {
             let crossings = self.minimize_barycenter_with_counter(
-                root,
+                graphs,
                 info_index,
                 first_try_with_initial_order && run_index == 0,
                 use_node_port_order_counter,
             );
             if crossings < best_crossings {
                 best_crossings = crossings;
-                self.save_all_node_orders_of_changed_graphs(root);
+                self.save_all_node_orders_of_changed_graphs(graphs);
                 if best_crossings == 0.0 {
                     break;
                 }
@@ -801,26 +785,26 @@ impl HierarchySweep {
 
     fn minimize_barycenter_with_counter(
         &mut self,
-        root: &mut LGraph,
+        graphs: &mut GraphArena,
         info_index: usize,
         first_try_with_initial_order: bool,
         use_node_port_order_counter: bool,
     ) -> f64 {
         let mut is_forward_sweep = self.next_sweep_direction(info_index);
         let initial_crossings =
-            self.count_current_crossing_score(root, info_index, use_node_port_order_counter);
+            self.count_current_crossing_score(graphs, info_index, use_node_port_order_counter);
         if initial_crossings == 0.0 && first_try_with_initial_order {
-            self.set_currently_best_node_orders(root);
+            self.set_currently_best_node_orders(graphs);
             return 0.0;
         }
 
         let should_set_first_layer_order = {
-            let graph = graph_at_path(root, &self.infos[info_index].path);
+            let graph = &graphs[self.infos[info_index].graph];
             !first_try_with_initial_order
                 || graph.options.consider_model_order_strategy == OrderingStrategy::None
         };
         if should_set_first_layer_order {
-            self.with_barycenter_heuristic(root, info_index, |heuristic, graph, order| {
+            self.with_barycenter_heuristic(graphs, info_index, |heuristic, graph, order| {
                 heuristic.set_first_layer_order(graph, order, is_forward_sweep);
             });
         } else {
@@ -828,7 +812,7 @@ impl HierarchySweep {
         }
 
         self.sweep_reducing_crossings_barycenter(
-            root,
+            graphs,
             info_index,
             is_forward_sweep,
             true,
@@ -836,9 +820,9 @@ impl HierarchySweep {
         );
 
         let mut crossings_in_graph =
-            self.count_current_crossing_score(root, info_index, use_node_port_order_counter);
+            self.count_current_crossing_score(graphs, info_index, use_node_port_order_counter);
         loop {
-            self.set_currently_best_node_orders(root);
+            self.set_currently_best_node_orders(graphs);
             if crossings_in_graph == 0.0 {
                 return 0.0;
             }
@@ -846,14 +830,14 @@ impl HierarchySweep {
             is_forward_sweep = !is_forward_sweep;
             let old_number_of_crossings = crossings_in_graph;
             self.sweep_reducing_crossings_barycenter(
-                root,
+                graphs,
                 info_index,
                 is_forward_sweep,
                 false,
                 false,
             );
             crossings_in_graph =
-                self.count_current_crossing_score(root, info_index, use_node_port_order_counter);
+                self.count_current_crossing_score(graphs, info_index, use_node_port_order_counter);
             if !sweep_improved_crossings(old_number_of_crossings, crossings_in_graph) {
                 return old_number_of_crossings;
             }
@@ -862,7 +846,7 @@ impl HierarchySweep {
 
     fn sweep_reducing_crossings_barycenter(
         &mut self,
-        root: &mut LGraph,
+        graphs: &mut GraphArena,
         info_index: usize,
         forward: bool,
         first_sweep: bool,
@@ -873,7 +857,7 @@ impl HierarchySweep {
             return false;
         }
 
-        self.with_barycenter_heuristic(root, info_index, |heuristic, graph, order| {
+        self.with_barycenter_heuristic(graphs, info_index, |heuristic, graph, order| {
             heuristic.port_distributor.distribute_ports_while_sweeping(
                 graph,
                 order,
@@ -884,13 +868,18 @@ impl HierarchySweep {
 
         let first_layer =
             self.infos[info_index].current_node_order[first_index(forward, length)].clone();
-        let mut improved =
-            self.sweep_in_hierarchical_nodes(root, info_index, &first_layer, forward, first_sweep);
+        let mut improved = self.sweep_in_hierarchical_nodes(
+            graphs,
+            info_index,
+            &first_layer,
+            forward,
+            first_sweep,
+        );
         let mut index = first_free(forward, length);
         while is_not_end(length, index, forward) {
             let free_layer_index = index as usize;
             let first_sweep_for_heuristic = first_sweep && !try_with_initial_order;
-            self.with_barycenter_heuristic(root, info_index, |heuristic, graph, order| {
+            self.with_barycenter_heuristic(graphs, info_index, |heuristic, graph, order| {
                 heuristic.minimize_crossings(
                     graph,
                     order,
@@ -907,7 +896,7 @@ impl HierarchySweep {
             });
             let layer = self.infos[info_index].current_node_order[free_layer_index].clone();
             improved |=
-                self.sweep_in_hierarchical_nodes(root, info_index, &layer, forward, first_sweep);
+                self.sweep_in_hierarchical_nodes(graphs, info_index, &layer, forward, first_sweep);
             index = next_index(index, forward);
         }
 
@@ -917,7 +906,7 @@ impl HierarchySweep {
 
     fn sweep_reducing_crossings_greedy(
         &mut self,
-        root: &mut LGraph,
+        graphs: &mut GraphArena,
         info_index: usize,
         heuristic: &mut GreedySwitchHeuristic,
         forward: bool,
@@ -928,16 +917,16 @@ impl HierarchySweep {
         }
 
         let mut improved =
-            self.distribute_greedy_ports(root, info_index, first_index(forward, length), forward);
+            self.distribute_greedy_ports(graphs, info_index, first_index(forward, length), forward);
         let first_layer =
             self.infos[info_index].current_node_order[first_index(forward, length)].clone();
         improved |=
-            self.sweep_in_hierarchical_nodes(root, info_index, &first_layer, forward, false);
+            self.sweep_in_hierarchical_nodes(graphs, info_index, &first_layer, forward, false);
         let mut index = first_free(forward, length);
         while is_not_end(length, index, forward) {
             let free_layer_index = index as usize;
             {
-                let graph = graph_at_path(root, &self.infos[info_index].path);
+                let graph = &graphs[self.infos[info_index].graph];
                 improved |= heuristic.minimize_crossings(
                     graph,
                     &mut self.infos[info_index].current_node_order,
@@ -945,9 +934,10 @@ impl HierarchySweep {
                     forward,
                 );
             }
-            improved |= self.distribute_greedy_ports(root, info_index, free_layer_index, forward);
+            improved |= self.distribute_greedy_ports(graphs, info_index, free_layer_index, forward);
             let layer = self.infos[info_index].current_node_order[free_layer_index].clone();
-            improved |= self.sweep_in_hierarchical_nodes(root, info_index, &layer, forward, false);
+            improved |=
+                self.sweep_in_hierarchical_nodes(graphs, info_index, &layer, forward, false);
             index = next_index(index, forward);
         }
 
@@ -960,15 +950,16 @@ impl HierarchySweep {
     /// here.
     fn distribute_greedy_ports(
         &mut self,
-        root: &mut LGraph,
+        graphs: &mut GraphArena,
         info_index: usize,
         layer_index: usize,
         forward: bool,
     ) -> bool {
         let info = &mut self.infos[info_index];
-        let graph = graph_mut_at_path(root, &info.path);
+        let (graph, others) = graphs.split_mut(info.graph);
         info.port_distributor.distribute_ports_while_sweeping(
             graph,
+            others,
             &info.current_node_order,
             layer_index,
             forward,
@@ -977,7 +968,7 @@ impl HierarchySweep {
 
     fn sweep_in_hierarchical_nodes(
         &mut self,
-        root: &mut LGraph,
+        graphs: &mut GraphArena,
         parent_info_index: usize,
         layer: &[usize],
         forward: bool,
@@ -985,7 +976,8 @@ impl HierarchySweep {
     ) -> bool {
         let mut improved = false;
         for node in layer {
-            let Some(child_index) = self.child_info_for_parent_node(parent_info_index, *node)
+            let Some(child_index) =
+                self.child_info_for_parent_node(graphs, parent_info_index, *node)
             else {
                 continue;
             };
@@ -993,14 +985,14 @@ impl HierarchySweep {
                 continue;
             }
             improved |=
-                self.sweep_in_hierarchical_node(root, child_index, *node, forward, first_sweep);
+                self.sweep_in_hierarchical_node(graphs, child_index, *node, forward, first_sweep);
         }
         improved
     }
 
     fn sweep_in_hierarchical_node(
         &mut self,
-        root: &mut LGraph,
+        graphs: &mut GraphArena,
         child_info_index: usize,
         parent_node_index: usize,
         forward: bool,
@@ -1019,15 +1011,11 @@ impl HierarchySweep {
             .copied();
 
         if let Some(first_node) = first_node {
-            let child_graph = graph_at_path(root, &self.infos[child_info_index].path);
+            let child_graph = &graphs[self.infos[child_info_index].graph];
             if child_graph.layerless_nodes[first_node].kind == LNodeKind::ExternalPort {
-                let parent_graph = graph_at_path(
-                    root,
-                    self.infos[child_info_index]
-                        .parent_path
-                        .as_ref()
-                        .expect("child graph should have parent graph"),
-                );
+                let parent_graph = &graphs[self.infos[child_info_index]
+                    .parent_graph
+                    .expect("child graph should have parent graph")];
                 let sorted = sort_port_dummies_by_port_positions(
                     parent_graph,
                     child_graph,
@@ -1041,11 +1029,11 @@ impl HierarchySweep {
                 );
                 self.infos[child_info_index].current_node_order[start_index] = sorted;
             } else {
-                let child_graph = graph_at_path(root, &self.infos[child_info_index].path);
+                let child_graph = &graphs[self.infos[child_info_index].graph];
                 match self.cross_min_type {
                     CrossMinType::Barycenter => {
                         self.with_barycenter_heuristic(
-                            root,
+                            graphs,
                             child_info_index,
                             |heuristic, graph, order| {
                                 heuristic.set_first_layer_order(graph, order, forward);
@@ -1066,7 +1054,7 @@ impl HierarchySweep {
 
         let improved = match self.cross_min_type {
             CrossMinType::Barycenter => self.sweep_reducing_crossings_barycenter(
-                root,
+                graphs,
                 child_info_index,
                 forward,
                 first_sweep,
@@ -1075,20 +1063,20 @@ impl HierarchySweep {
             CrossMinType::OneSidedGreedySwitch | CrossMinType::TwoSidedGreedySwitch => {
                 let mut heuristic = GreedySwitchHeuristic::new(self.cross_min_type);
                 self.sweep_reducing_crossings_greedy(
-                    root,
+                    graphs,
                     child_info_index,
                     &mut heuristic,
                     forward,
                 )
             }
         };
-        self.sort_ports_by_dummy_positions_in_last_layer(root, child_info_index, forward);
+        self.sort_ports_by_dummy_positions_in_last_layer(graphs, child_info_index, forward);
         improved
     }
 
     fn sort_ports_by_dummy_positions_in_last_layer(
         &mut self,
-        root: &mut LGraph,
+        graphs: &mut GraphArena,
         child_info_index: usize,
         on_right_most_layer: bool,
     ) {
@@ -1106,18 +1094,18 @@ impl HierarchySweep {
         } else {
             last_layer.len() - 1
         };
-        let child_graph = graph_at_path(root, &self.infos[child_info_index].path);
+        let child_graph = &graphs[self.infos[child_info_index].graph];
         if child_graph.layerless_nodes[last_layer[first]].kind != LNodeKind::ExternalPort {
             return;
         }
 
-        let Some(parent_path) = self.infos[child_info_index].parent_path.clone() else {
+        let Some(parent_path) = self.infos[child_info_index].parent_graph else {
             return;
         };
         let Some(parent_node_index) = self.infos[child_info_index].parent_node_index else {
             return;
         };
-        let parent_graph = graph_at_path(root, &parent_path);
+        let parent_graph = &graphs[parent_path];
         let parent_order = parent_port_order_by_dummy_layer(
             child_graph,
             parent_graph,
@@ -1125,7 +1113,7 @@ impl HierarchySweep {
             parent_node_index,
             on_right_most_layer,
         );
-        let parent_graph = graph_mut_at_path(root, &parent_path);
+        let parent_graph = &mut graphs[parent_path];
         apply_parent_hierarchical_port_order_on_sweep_side(
             parent_graph,
             parent_node_index,
@@ -1134,7 +1122,7 @@ impl HierarchySweep {
         );
     }
 
-    fn set_port_order_on_parent_graph(&mut self, root: &mut LGraph, info_index: usize) {
+    fn set_port_order_on_parent_graph(&mut self, graphs: &mut GraphArena, info_index: usize) {
         if !self.infos[info_index].has_external_ports {
             return;
         }
@@ -1145,12 +1133,12 @@ impl HierarchySweep {
             return;
         };
         for on_right_most_layer in [true, false] {
-            self.sort_ports_by_sweep_copy(root, info_index, &best_sweep, on_right_most_layer);
+            self.sort_ports_by_sweep_copy(graphs, info_index, &best_sweep, on_right_most_layer);
         }
-        if let Some(parent_path) = self.infos[info_index].parent_path.clone()
+        if let Some(parent_path) = self.infos[info_index].parent_graph
             && let Some(parent_node_index) = self.infos[info_index].parent_node_index
         {
-            let parent_graph = graph_mut_at_path(root, &parent_path);
+            let parent_graph = &mut graphs[parent_path];
             parent_graph.layerless_nodes[parent_node_index].port_constraints =
                 PortConstraints::FixedOrder;
         }
@@ -1158,7 +1146,7 @@ impl HierarchySweep {
 
     fn sort_ports_by_sweep_copy(
         &mut self,
-        root: &mut LGraph,
+        graphs: &mut GraphArena,
         info_index: usize,
         sweep: &SweepCopy,
         on_right_most_layer: bool,
@@ -1171,7 +1159,7 @@ impl HierarchySweep {
         if last_layer.is_empty() {
             return;
         }
-        let child_graph = graph_at_path(root, &self.infos[info_index].path);
+        let child_graph = &graphs[self.infos[info_index].graph];
         let first = if on_right_most_layer {
             0
         } else {
@@ -1180,13 +1168,13 @@ impl HierarchySweep {
         if child_graph.layerless_nodes[last_layer[first]].kind != LNodeKind::ExternalPort {
             return;
         }
-        let Some(parent_path) = self.infos[info_index].parent_path.clone() else {
+        let Some(parent_path) = self.infos[info_index].parent_graph else {
             return;
         };
         let Some(parent_node_index) = self.infos[info_index].parent_node_index else {
             return;
         };
-        let parent_graph = graph_at_path(root, &parent_path);
+        let parent_graph = &graphs[parent_path];
         let parent_order = parent_port_order_by_dummy_layer(
             child_graph,
             parent_graph,
@@ -1194,7 +1182,7 @@ impl HierarchySweep {
             parent_node_index,
             on_right_most_layer,
         );
-        let parent_graph = graph_mut_at_path(root, &parent_path);
+        let parent_graph = &mut graphs[parent_path];
         apply_parent_hierarchical_port_order_on_sweep_side(
             parent_graph,
             parent_node_index,
@@ -1205,11 +1193,11 @@ impl HierarchySweep {
 
     fn with_barycenter_heuristic<R>(
         &mut self,
-        root: &mut LGraph,
+        graphs: &mut GraphArena,
         info_index: usize,
         action: impl FnOnce(&mut BarycenterHeuristic, &mut LGraph, &mut [Vec<usize>]) -> R,
     ) -> R {
-        let path = self.infos[info_index].path.clone();
+        let path = self.infos[info_index].graph;
         let mut heuristic = self.infos[info_index]
             .barycenter_heuristic
             .take()
@@ -1217,7 +1205,7 @@ impl HierarchySweep {
         heuristic.random = self.barycenter_random(info_index);
 
         let result = {
-            let graph = graph_mut_at_path(root, &path);
+            let graph = &mut graphs[path];
             let order = &mut self.infos[info_index].current_node_order;
             action(&mut heuristic, graph, order)
         };
@@ -1232,7 +1220,7 @@ impl HierarchySweep {
     }
 
     fn barycenter_random(&self, info_index: usize) -> JavaRandom {
-        if self.infos[info_index].path.0.is_empty() {
+        if self.infos[info_index].parent_graph.is_none() {
             self.random.clone()
         } else {
             self.infos[info_index].random.clone()
@@ -1240,24 +1228,24 @@ impl HierarchySweep {
     }
 
     fn set_barycenter_random(&mut self, info_index: usize, random: JavaRandom) {
-        if self.infos[info_index].path.0.is_empty() {
+        if self.infos[info_index].parent_graph.is_none() {
             self.random = random.clone();
         }
         self.infos[info_index].random = random;
     }
 
-    fn count_current_number_of_crossings(&mut self, root: &LGraph, info_index: usize) -> f64 {
+    fn count_current_number_of_crossings(&mut self, graphs: &GraphArena, info_index: usize) -> f64 {
         let mut total = 0.0f64;
         let mut stack = vec![info_index];
         while let Some(current) = stack.pop() {
             let info = &mut self.infos[current];
-            let graph = graph_at_path(root, &info.path);
+            let graph = &graphs[info.graph];
             total += info
                 .crossings_counter
                 .count_all_crossings_in_order(graph, &info.current_node_order);
-            // `infos` and `index_by_path` are separate fields, so the paths need no copy.
-            for child_path in &self.infos[current].child_paths {
-                if let Some(child_index) = self.index_by_path.get(child_path).copied()
+            // `infos` and `index_by_graph` are separate fields, so the ids need no copy.
+            for child_graph in &self.infos[current].child_graphs {
+                if let Some(child_index) = self.index_by_graph.get(child_graph).copied()
                     && !self.infos[child_index].use_bottom_up
                 {
                     stack.push(child_index);
@@ -1268,8 +1256,8 @@ impl HierarchySweep {
     }
 
     #[allow(clippy::eq_op, clippy::nonminimal_bool)]
-    fn use_node_port_order_crossing_counter(&self, root: &LGraph, info_index: usize) -> bool {
-        let graph = graph_at_path(root, &self.infos[info_index].path);
+    fn use_node_port_order_crossing_counter(&self, graphs: &GraphArena, info_index: usize) -> bool {
+        let graph = &graphs[self.infos[info_index].graph];
         // layout-base compatibility: port influence alone must not enable this counter gate.
         graph
             .options
@@ -1283,24 +1271,24 @@ impl HierarchySweep {
 
     fn count_current_crossing_score(
         &mut self,
-        root: &LGraph,
+        graphs: &GraphArena,
         info_index: usize,
         use_node_port_order_counter: bool,
     ) -> f64 {
         if use_node_port_order_counter {
-            self.count_current_number_of_crossings_node_port_order(root, info_index)
+            self.count_current_number_of_crossings_node_port_order(graphs, info_index)
         } else {
-            self.count_current_number_of_crossings(root, info_index)
+            self.count_current_number_of_crossings(graphs, info_index)
         }
     }
 
     fn count_current_number_of_crossings_node_port_order(
         &mut self,
-        root: &LGraph,
+        graphs: &GraphArena,
         info_index: usize,
     ) -> f64 {
         let info = &mut self.infos[info_index];
-        let graph = graph_at_path(root, &info.path);
+        let graph = &graphs[info.graph];
         let mut model_order_influence = 0.0;
         let model_order_strategy = graph.options.consider_model_order_strategy;
         if model_order_strategy != OrderingStrategy::None {
@@ -1323,28 +1311,28 @@ impl HierarchySweep {
             .count_all_crossings_in_order(graph, &info.current_node_order)
             + model_order_influence;
 
-        // The count below borrows `self` mutably, so each path is looked up again, not copied.
-        for position in 0..self.infos[info_index].child_paths.len() {
-            let child_path = &self.infos[info_index].child_paths[position];
-            if let Some(child_index) = self.index_by_path.get(child_path).copied()
+        // The count below borrows `self` mutably, so each id is looked up again, not copied.
+        for position in 0..self.infos[info_index].child_graphs.len() {
+            let child_graph = &self.infos[info_index].child_graphs[position];
+            if let Some(child_index) = self.index_by_graph.get(child_graph).copied()
                 && !self.infos[child_index].use_bottom_up
             {
-                total += self.count_current_number_of_crossings(root, child_index);
+                total += self.count_current_number_of_crossings(graphs, child_index);
             }
         }
 
         total
     }
 
-    fn set_currently_best_node_orders(&mut self, root: &LGraph) {
+    fn set_currently_best_node_orders(&mut self, graphs: &GraphArena) {
         let changed = self.changed.iter().copied().collect::<Vec<_>>();
         for index in changed {
-            let graph = graph_at_path(root, &self.infos[index].path);
+            let graph = &graphs[self.infos[index].graph];
             self.infos[index].set_currently_best_node_and_port_order(graph);
         }
     }
 
-    fn save_all_node_orders_of_changed_graphs(&mut self, _root: &LGraph) {
+    fn save_all_node_orders_of_changed_graphs(&mut self, _graphs: &GraphArena) {
         let changed = self.changed.iter().copied().collect::<Vec<_>>();
         for index in changed {
             if let Some(copy) = self.infos[index].currently_best_node_and_port_order.clone() {
@@ -1353,7 +1341,7 @@ impl HierarchySweep {
         }
     }
 
-    fn transfer_node_and_port_orders_to_graph(&self, root: &mut LGraph) -> bool {
+    fn transfer_node_and_port_orders_to_graph(&self, graphs: &mut GraphArena) -> bool {
         let mut changed = false;
         for index in 0..self.infos.len() {
             let Some(best_sweep) = self.infos[index]
@@ -1362,20 +1350,22 @@ impl HierarchySweep {
             else {
                 continue;
             };
-            let graph = graph_mut_at_path(root, &self.infos[index].path);
+            let graph = &mut graphs[self.infos[index].graph];
             changed |= best_sweep.transfer_node_and_port_orders_to_graph(graph, true);
         }
         changed
     }
 
+    /// The info of the graph inside a node of the graph that `parent_info_index` describes.
     fn child_info_for_parent_node(
         &self,
+        graphs: &GraphArena,
         parent_info_index: usize,
         parent_node_index: usize,
     ) -> Option<usize> {
-        let mut child_path = self.infos[parent_info_index].path.0.clone();
-        child_path.push(parent_node_index);
-        self.index_by_path.get(&GraphPath(child_path)).copied()
+        let parent = self.infos[parent_info_index].graph;
+        let child = graphs[parent].layerless_nodes[parent_node_index].nested_graph?;
+        self.index_by_graph.get(&child).copied()
     }
 }
 
@@ -2999,14 +2989,19 @@ impl PortDistributor {
     fn distribute_ports_while_sweeping(
         &mut self,
         graph: &mut LGraph,
+        others: OtherGraphs<'_>,
         order: &[Vec<usize>],
         current_index: usize,
         forward: bool,
     ) -> bool {
         match self {
-            Self::Greedy(distributor) => {
-                distributor.distribute_ports_while_sweeping(graph, order, current_index, forward)
-            }
+            Self::Greedy(distributor) => distributor.distribute_ports_while_sweeping(
+                graph,
+                others,
+                order,
+                current_index,
+                forward,
+            ),
             Self::Barycenter(distributor) => {
                 distributor.distribute_ports_while_sweeping(graph, order, current_index, forward);
                 // `AbstractBarycenterPortDistributor` cannot tell whether it improved anything.
@@ -3030,10 +3025,12 @@ struct GreedyPortDistributor {
 }
 
 impl GreedyPortDistributor {
-    /// `GreedyPortDistributor.distributePortsWhileSweeping`.
+    /// `GreedyPortDistributor.distributePortsWhileSweeping`. `others` holds the graphs inside the
+    /// nodes of `graph`, whose layers count in the crossings at a node's ports.
     fn distribute_ports_while_sweeping(
         &mut self,
         graph: &mut LGraph,
+        others: OtherGraphs<'_>,
         order: &[Vec<usize>],
         current_index: usize,
         forward: bool,
@@ -3042,7 +3039,7 @@ impl GreedyPortDistributor {
             return false;
         }
         self.initialize(graph, order, current_index, forward);
-        self.distribute_ports_in_layer(graph, order, current_index, forward)
+        self.distribute_ports_in_layer(graph, others, order, current_index, forward)
     }
 
     /// `GreedyPortDistributor.initialize`: numbers the ports the counts will compare.
@@ -3083,6 +3080,7 @@ impl GreedyPortDistributor {
     fn distribute_ports_in_layer(
         &mut self,
         graph: &mut LGraph,
+        others: OtherGraphs<'_>,
         order: &[Vec<usize>],
         current_index: usize,
         forward: bool,
@@ -3100,7 +3098,7 @@ impl GreedyPortDistributor {
             {
                 continue;
             }
-            improved |= self.distribute_ports_on_node(graph, node, side, forward);
+            improved |= self.distribute_ports_on_node(graph, others, node, side, forward);
         }
         improved
     }
@@ -3109,6 +3107,7 @@ impl GreedyPortDistributor {
     fn distribute_ports_on_node(
         &mut self,
         graph: &mut LGraph,
+        others: OtherGraphs<'_>,
         node: usize,
         side: PortSide,
         forward: bool,
@@ -3134,10 +3133,11 @@ impl GreedyPortDistributor {
         let nested_graph = if ports.is_empty() {
             None
         } else {
-            graph.layerless_nodes[node].nested_graph.take()
+            graph.layerless_nodes[node]
+                .nested_graph
+                .and_then(|nested| others.get(nested))
         };
         let inner_layers = nested_graph
-            .as_deref()
             .map(|nested| nested.layers.as_slice())
             .filter(|layers| !layers.is_empty());
         let mut hierarchical_counter = BetweenLayerEdgeTwoNodeCrossingsCounter::new();
@@ -3160,11 +3160,9 @@ impl GreedyPortDistributor {
                 let (mut upper_lower, mut lower_upper) = self
                     .crossings_counter
                     .count_crossings_between_ports_in_both_orders(graph, upper_port, lower_port);
-                if let (Some(nested), Some(layers), Some(free_layer)) = (
-                    nested_graph.as_deref(),
-                    inner_layers.as_ref(),
-                    inner_free_layer,
-                ) {
+                if let (Some(nested), Some(layers), Some(free_layer)) =
+                    (nested_graph, inner_layers.as_ref(), inner_free_layer)
+                {
                     let dummy_of = |port: PortRef| {
                         graph.layerless_nodes[node].ports[port.port]
                             .port_dummy
@@ -3194,10 +3192,6 @@ impl GreedyPortDistributor {
             if !continue_switching {
                 break;
             }
-        }
-
-        if nested_graph.is_some() {
-            graph.layerless_nodes[node].nested_graph = nested_graph;
         }
 
         if improved {
@@ -3334,11 +3328,12 @@ impl GreedySwitchHeuristic {
 
 #[cfg(test)]
 pub(crate) fn minimize_crossings_layer_sweep(graph: &mut LGraph) -> bool {
-    minimize_crossings_layer_sweep_with_type(graph, CrossMinType::Barycenter)
+    minimize_crossings_layer_sweep_with_type(graph, OtherGraphs::none(), CrossMinType::Barycenter)
 }
 
 pub(crate) fn minimize_crossings_layer_sweep_with_type(
     graph: &mut LGraph,
+    others: OtherGraphs<'_>,
     cross_min_type: CrossMinType,
 ) -> bool {
     if graph.layers.is_empty() || graph.layers.iter().all(|layer| layer.nodes.is_empty()) {
@@ -3351,21 +3346,23 @@ pub(crate) fn minimize_crossings_layer_sweep_with_type(
     initialize_crossing_minimization_port_ids(graph);
     match cross_min_type {
         CrossMinType::Barycenter => minimize_barycenter(graph),
-        CrossMinType::OneSidedGreedySwitch => minimize_one_sided_greedy_switch(graph),
-        CrossMinType::TwoSidedGreedySwitch => minimize_two_sided_greedy_switch(graph),
+        CrossMinType::OneSidedGreedySwitch => minimize_one_sided_greedy_switch(graph, others),
+        CrossMinType::TwoSidedGreedySwitch => minimize_two_sided_greedy_switch(graph, others),
     }
 }
 
 pub(crate) fn minimize_crossings_layer_sweep_hierarchical_with_type(
-    graph: &mut LGraph,
+    graphs: &mut GraphArena,
     cross_min_type: CrossMinType,
 ) -> bool {
+    let graph = graphs.root();
     if graph.layers.is_empty() || graph.layers.iter().all(|layer| layer.nodes.is_empty()) {
         let hierarchical_graphs = graph
             .layerless_nodes
             .iter()
-            .filter_map(|node| node.nested_graph.as_deref())
+            .filter_map(|node| node.nested_graph)
             .any(|nested| {
+                let nested = &graphs[nested];
                 !nested.layers.is_empty()
                     && nested.layers.iter().any(|layer| !layer.nodes.is_empty())
             });
@@ -3374,9 +3371,9 @@ pub(crate) fn minimize_crossings_layer_sweep_hierarchical_with_type(
         }
     }
 
-    initialize_crossing_minimization_port_ids_hierarchy(graph);
-    let mut sweep = HierarchySweep::new(graph, cross_min_type);
-    sweep.minimize(graph)
+    initialize_crossing_minimization_port_ids_hierarchy(graphs);
+    let mut sweep = HierarchySweep::new(graphs, cross_min_type);
+    sweep.minimize(graphs)
 }
 
 fn minimize_barycenter(graph: &mut LGraph) -> bool {
@@ -3429,7 +3426,7 @@ fn minimize_barycenter(graph: &mut LGraph) -> bool {
     best_sweep.transfer_node_and_port_orders_to_graph(graph, true)
 }
 
-fn minimize_two_sided_greedy_switch(graph: &mut LGraph) -> bool {
+fn minimize_two_sided_greedy_switch(graph: &mut LGraph, others: OtherGraphs<'_>) -> bool {
     let mut graph_info = GraphInfoHolder::new(graph);
     // LayerSweepCrossingMinimizer.initialize draws a seed for every cross-min type, also for
     // the greedy switch. This one is never used, but the draw moves the shared Random on for
@@ -3451,6 +3448,7 @@ fn minimize_two_sided_greedy_switch(graph: &mut LGraph) -> bool {
         );
         sweep_improved |= sweep_reducing_crossings_greedy(
             graph,
+            others,
             &mut graph_info,
             &mut heuristic,
             &mut port_distributor,
@@ -3470,7 +3468,7 @@ fn minimize_two_sided_greedy_switch(graph: &mut LGraph) -> bool {
     best_sweep.transfer_node_and_port_orders_to_graph(graph, true)
 }
 
-fn minimize_one_sided_greedy_switch(graph: &mut LGraph) -> bool {
+fn minimize_one_sided_greedy_switch(graph: &mut LGraph, others: OtherGraphs<'_>) -> bool {
     let mut graph_info = GraphInfoHolder::new(graph);
     // LayerSweepCrossingMinimizer.initialize draws a seed. That seed is never used, but the draw
     // moves the shared Random on for the next connected component. ISweepPortDistributor.create
@@ -3487,6 +3485,7 @@ fn minimize_one_sided_greedy_switch(graph: &mut LGraph) -> bool {
     heuristic.set_first_layer_order(graph, &mut graph_info.current_node_order, is_forward_sweep);
     sweep_reducing_crossings_greedy(
         graph,
+        others,
         &mut graph_info,
         &mut heuristic,
         &mut port_distributor,
@@ -3506,6 +3505,7 @@ fn minimize_one_sided_greedy_switch(graph: &mut LGraph) -> bool {
         let old_number_of_crossings = crossings_in_graph;
         sweep_reducing_crossings_greedy(
             graph,
+            others,
             &mut graph_info,
             &mut heuristic,
             &mut port_distributor,
@@ -3629,6 +3629,7 @@ fn sweep_reducing_crossings(
 
 fn sweep_reducing_crossings_greedy(
     graph: &mut LGraph,
+    others: OtherGraphs<'_>,
     graph_info: &mut GraphInfoHolder,
     heuristic: &mut GreedySwitchHeuristic,
     port_distributor: &mut PortDistributor,
@@ -3641,6 +3642,7 @@ fn sweep_reducing_crossings_greedy(
 
     let mut improved = port_distributor.distribute_ports_while_sweeping(
         graph,
+        others,
         &graph_info.current_node_order,
         first_index(forward, length),
         forward,
@@ -3656,6 +3658,7 @@ fn sweep_reducing_crossings_greedy(
         );
         improved |= port_distributor.distribute_ports_while_sweeping(
             graph,
+            others,
             &graph_info.current_node_order,
             free_layer_index,
             forward,
@@ -4065,26 +4068,6 @@ fn connected_ports_for_sweep(graph: &LGraph, port: PortRef, forward: bool) -> Ve
         .collect()
 }
 
-fn graph_at_path<'a>(mut graph: &'a LGraph, path: &GraphPath) -> &'a LGraph {
-    for index in &path.0 {
-        graph = graph.layerless_nodes[*index]
-            .nested_graph
-            .as_deref()
-            .expect("graph path should only contain nested graph nodes");
-    }
-    graph
-}
-
-fn graph_mut_at_path<'a>(mut graph: &'a mut LGraph, path: &GraphPath) -> &'a mut LGraph {
-    for index in &path.0 {
-        graph = graph.layerless_nodes[*index]
-            .nested_graph
-            .as_deref_mut()
-            .expect("graph path should only contain nested graph nodes");
-    }
-    graph
-}
-
 fn fewer_than_two_in_out_parent_ports(parent_node: &LNode) -> bool {
     let east = parent_node
         .ports
@@ -4390,7 +4373,10 @@ mod tests {
         }
     }
 
-    fn prepared_graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
+    fn prepared_graph(
+        nodes: Vec<ElkInputNode>,
+        edges: Vec<ElkInputEdge>,
+    ) -> crate::graph::GraphArena {
         let mut graph = import_graph(&ElkInputGraph {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
@@ -4400,7 +4386,7 @@ mod tests {
         .unwrap();
         layer_network_simplex(&mut graph).unwrap();
         split_long_edges(&mut graph);
-        process_port_sides(&mut graph);
+        process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
         sort_port_lists(&mut graph);
         graph
     }
@@ -4482,10 +4468,11 @@ mod tests {
             root.random = JavaRandom::new(17);
             let mut child = LGraph::new("child", LayeredOptions::default());
             child.random = JavaRandom::new(31);
-            let mut parent = LNode::new("parent", 10.0, 10.0, None);
-            parent.nested_graph = Some(Box::new(child));
+            let parent = LNode::new("parent", 10.0, 10.0, None);
             root.layerless_nodes.push(parent);
             root.set_node_layer(0, 0);
+            let mut graphs = GraphArena::new(root);
+            let child_id = graphs.nest(GraphId::ROOT, 0, child);
 
             // Source initialize() draws nextLong from the root. GraphInfoHolder draws
             // a distributor boolean from each graph except for two-sided greedy switch.
@@ -4503,16 +4490,11 @@ mod tests {
             }
             expected_root.next_bool();
 
-            minimize_crossings_layer_sweep_hierarchical_with_type(&mut root, cross_min_type);
-            assert_eq!(root.layers[0].nodes, vec![0]);
-            assert_eq!(root.random, expected_root, "{cross_min_type:?}");
+            minimize_crossings_layer_sweep_hierarchical_with_type(&mut graphs, cross_min_type);
+            assert_eq!(graphs.root().layers[0].nodes, vec![0]);
+            assert_eq!(graphs.root().random, expected_root, "{cross_min_type:?}");
             assert_eq!(
-                root.layerless_nodes[0]
-                    .nested_graph
-                    .as_ref()
-                    .unwrap()
-                    .random,
-                expected_child,
+                graphs[child_id].random, expected_child,
                 "{cross_min_type:?}",
             );
         }
@@ -4532,43 +4514,48 @@ mod tests {
             .options
             .consider_model_order_crossing_counter_port_influence = 1.0;
 
-        let sweep = HierarchySweep::new(&mut graph, CrossMinType::Barycenter);
+        let mut graphs = GraphArena::new(graph);
+        let sweep = HierarchySweep::new(&mut graphs, CrossMinType::Barycenter);
 
-        assert!(!sweep.use_node_port_order_crossing_counter(&graph, 0));
+        assert!(!sweep.use_node_port_order_crossing_counter(&graphs, 0));
 
-        graph
+        graphs
+            .root_mut()
             .options
             .consider_model_order_crossing_counter_node_influence = 1.0;
 
-        assert!(sweep.use_node_port_order_crossing_counter(&graph, 0));
+        assert!(sweep.use_node_port_order_crossing_counter(&graphs, 0));
     }
 
     #[test]
     fn hierarchical_sweep_discovers_child_graphs_in_current_node_order() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
-        let mut second = LNode::new("second", 10.0, 10.0, None);
-        second.nested_graph = Some(Box::new(LGraph::new(
-            "second:nested",
-            LayeredOptions::default(),
-        )));
-        let mut first = LNode::new("first", 10.0, 10.0, None);
-        first.nested_graph = Some(Box::new(LGraph::new(
-            "first:nested",
-            LayeredOptions::default(),
-        )));
-        graph.layerless_nodes.push(second);
-        graph.layerless_nodes.push(first);
+        graph
+            .layerless_nodes
+            .push(LNode::new("second", 10.0, 10.0, None));
+        graph
+            .layerless_nodes
+            .push(LNode::new("first", 10.0, 10.0, None));
         graph.layers = vec![crate::graph::Layer {
             nodes: vec![1, 0],
             size: Default::default(),
         }];
-
-        let sweep = HierarchySweep::new(&mut graph, CrossMinType::Barycenter);
-
-        assert_eq!(
-            sweep.infos[0].child_paths,
-            vec![GraphPath(vec![1]), GraphPath(vec![0])]
+        let mut graphs = GraphArena::new(graph);
+        let second = graphs.nest(
+            GraphId::ROOT,
+            0,
+            LGraph::new("second:nested", LayeredOptions::default()),
         );
+        let first = graphs.nest(
+            GraphId::ROOT,
+            1,
+            LGraph::new("first:nested", LayeredOptions::default()),
+        );
+
+        let sweep = HierarchySweep::new(&mut graphs, CrossMinType::Barycenter);
+
+        // The root lists node 1 before node 0, so its nested graph comes first.
+        assert_eq!(sweep.infos[0].child_graphs, vec![first, second]);
     }
 
     #[test]
@@ -4609,12 +4596,13 @@ mod tests {
         graph.set_node_layer(0, 0);
         graph.set_node_layer(1, 0);
 
-        let mut sweep = HierarchySweep::new(&mut graph, CrossMinType::Barycenter);
+        let mut graphs = GraphArena::new(graph);
+        let mut sweep = HierarchySweep::new(&mut graphs, CrossMinType::Barycenter);
         sweep.changed.insert(0);
-        sweep.set_currently_best_node_orders(&graph);
+        sweep.set_currently_best_node_orders(&graphs);
         sweep.infos[0].current_node_order[0] = vec![1, 0];
 
-        sweep.save_all_node_orders_of_changed_graphs(&graph);
+        sweep.save_all_node_orders_of_changed_graphs(&graphs);
 
         assert_eq!(
             sweep.infos[0]
@@ -5302,8 +5290,13 @@ mod tests {
 
         graph.layers[0].nodes = vec![top, bottom, fixed];
         graph.layers[1].nodes = vec![free, right, left];
-        for (layer_index, layer) in graph.layers.iter().enumerate() {
-            for node in &layer.nodes {
+        let layer_nodes = graph
+            .layers
+            .iter()
+            .map(|layer| layer.nodes.clone())
+            .collect::<Vec<_>>();
+        for (layer_index, nodes) in layer_nodes.iter().enumerate() {
+            for node in nodes {
                 graph.layerless_nodes[*node].layer_index = Some(layer_index);
             }
         }
@@ -5357,8 +5350,8 @@ mod tests {
         crate::pipeline::execute_ported_compound_processors(&mut graph).unwrap();
 
         // The layout is top to bottom, so the order inside a layer is the order along x.
-        let o = graph.layerless_nodes[0].nested_graph.as_ref().unwrap();
-        let a = o.layerless_nodes[0].nested_graph.as_ref().unwrap();
+        let o = &graph[graph.layerless_nodes[0].nested_graph.unwrap()];
+        let a = &graph[o.layerless_nodes[0].nested_graph.unwrap()];
         let x_of = |id: &str| {
             a.layerless_nodes
                 .iter()
@@ -5570,8 +5563,13 @@ mod tests {
         graph.layers[0].nodes = vec![left_top, left_bottom];
         graph.layers[1].nodes = vec![middle_top, middle_bottom];
         graph.layers[2].nodes = vec![right_top, right_bottom];
-        for (layer_index, layer) in graph.layers.iter().enumerate() {
-            for node in &layer.nodes {
+        let layer_nodes = graph
+            .layers
+            .iter()
+            .map(|layer| layer.nodes.clone())
+            .collect::<Vec<_>>();
+        for (layer_index, nodes) in layer_nodes.iter().enumerate() {
+            for node in nodes {
                 graph.layerless_nodes[*node].layer_index = Some(layer_index);
             }
         }
@@ -5625,14 +5623,23 @@ mod tests {
             .unwrap();
         graph.layers[0].nodes = vec![top, bottom];
         graph.layers[1].nodes = vec![left, right];
-        for (layer_index, layer) in graph.layers.iter().enumerate() {
-            for node in &layer.nodes {
+        let layer_nodes = graph
+            .layers
+            .iter()
+            .map(|layer| layer.nodes.clone())
+            .collect::<Vec<_>>();
+        for (layer_index, nodes) in layer_nodes.iter().enumerate() {
+            for node in nodes {
                 graph.layerless_nodes[*node].layer_index = Some(layer_index);
             }
         }
 
         let before = CrossingsCounter::default().count_all_crossings(&graph);
-        minimize_crossings_layer_sweep_with_type(&mut graph, CrossMinType::OneSidedGreedySwitch);
+        minimize_crossings_layer_sweep_with_type(
+            &mut graph,
+            OtherGraphs::none(),
+            CrossMinType::OneSidedGreedySwitch,
+        );
         let after = CrossingsCounter::default().count_all_crossings(&graph);
 
         assert_eq!(before, 1.0);
@@ -6151,7 +6158,13 @@ mod greedy_port_distributor_tests {
         let order = order(&graph);
         let mut distributor = GreedyPortDistributor::default();
 
-        let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
+        let improved = distributor.distribute_ports_while_sweeping(
+            &mut graph,
+            crate::graph::OtherGraphs::none(),
+            &order,
+            1,
+            true,
+        );
 
         assert!(improved);
         // The list runs from bottom to top, so the upper edge now ends at the second port.
@@ -6177,11 +6190,23 @@ mod greedy_port_distributor_tests {
         let (mut graph, a) = crossed(PortConstraints::FixedSide);
         let order = order(&graph);
         let mut distributor = GreedyPortDistributor::default();
-        distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
+        distributor.distribute_ports_while_sweeping(
+            &mut graph,
+            crate::graph::OtherGraphs::none(),
+            &order,
+            1,
+            true,
+        );
         assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
 
         // A second pass finds nothing to improve.
-        let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
+        let improved = distributor.distribute_ports_while_sweeping(
+            &mut graph,
+            crate::graph::OtherGraphs::none(),
+            &order,
+            1,
+            true,
+        );
 
         assert!(!improved);
         assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
@@ -6195,7 +6220,13 @@ mod greedy_port_distributor_tests {
             let order = order(&graph);
             let mut distributor = GreedyPortDistributor::default();
 
-            let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
+            let improved = distributor.distribute_ports_while_sweeping(
+                &mut graph,
+                crate::graph::OtherGraphs::none(),
+                &order,
+                1,
+                true,
+            );
 
             assert!(!improved, "{constraints:?}");
             assert_eq!(port_ids(&graph, a), ["a.p0", "a.p1"], "{constraints:?}");
@@ -6209,7 +6240,13 @@ mod greedy_port_distributor_tests {
         let order = order(&graph);
         let mut distributor = GreedyPortDistributor::default();
 
-        let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, false);
+        let improved = distributor.distribute_ports_while_sweeping(
+            &mut graph,
+            crate::graph::OtherGraphs::none(),
+            &order,
+            1,
+            false,
+        );
 
         assert!(!improved);
         assert_eq!(port_ids(&graph, a), ["a.p0", "a.p1"]);
@@ -6248,7 +6285,13 @@ mod greedy_port_distributor_tests {
         let order = order(&graph);
         let mut distributor = GreedyPortDistributor::default();
 
-        let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 0, false);
+        let improved = distributor.distribute_ports_while_sweeping(
+            &mut graph,
+            crate::graph::OtherGraphs::none(),
+            &order,
+            0,
+            false,
+        );
 
         assert!(improved);
         assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
@@ -6276,7 +6319,13 @@ mod greedy_port_distributor_tests {
         let order = order(&graph);
         let mut distributor = GreedyPortDistributor::default();
 
-        let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 0, true);
+        let improved = distributor.distribute_ports_while_sweeping(
+            &mut graph,
+            crate::graph::OtherGraphs::none(),
+            &order,
+            0,
+            true,
+        );
 
         assert!(!improved);
         assert_eq!(port_ids(&graph, a), ["a.p0", "a.p1"]);
@@ -6289,7 +6338,13 @@ mod greedy_port_distributor_tests {
         let (mut graph, a) = crossed(PortConstraints::FixedSide);
         let order = order(&graph);
         let mut distributor = GreedyPortDistributor::default();
-        distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
+        distributor.distribute_ports_while_sweeping(
+            &mut graph,
+            crate::graph::OtherGraphs::none(),
+            &order,
+            1,
+            true,
+        );
 
         // The west ports of layer 1 are numbered after the east ports of layer 0, so they get 2
         // and 3. The port `a.p0` had position 2 before the switch. It is the second in the list
@@ -6307,7 +6362,13 @@ mod greedy_port_distributor_tests {
         let (mut graph, a) = crossed(PortConstraints::FixedSide);
         let order = order(&graph);
         let mut distributor = GreedyPortDistributor::default();
-        distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
+        distributor.distribute_ports_while_sweeping(
+            &mut graph,
+            crate::graph::OtherGraphs::none(),
+            &order,
+            1,
+            true,
+        );
 
         // The port that was first (port 0) is second now. In the numbering of the west side of
         // layer 1, a west port further down the list is further up, so the first port of the list
@@ -6369,7 +6430,11 @@ mod greedy_port_distributor_tests {
         graph.random = JavaRandom::new(seed_for_a_forward_first_sweep(
             CrossMinType::TwoSidedGreedySwitch,
         ));
-        minimize_crossings_layer_sweep_with_type(&mut graph, CrossMinType::TwoSidedGreedySwitch);
+        minimize_crossings_layer_sweep_with_type(
+            &mut graph,
+            OtherGraphs::none(),
+            CrossMinType::TwoSidedGreedySwitch,
+        );
         assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
     }
 
@@ -6382,7 +6447,11 @@ mod greedy_port_distributor_tests {
         graph.random = JavaRandom::new(seed_for_a_forward_first_sweep(
             CrossMinType::OneSidedGreedySwitch,
         ));
-        minimize_crossings_layer_sweep_with_type(&mut graph, CrossMinType::OneSidedGreedySwitch);
+        minimize_crossings_layer_sweep_with_type(
+            &mut graph,
+            OtherGraphs::none(),
+            CrossMinType::OneSidedGreedySwitch,
+        );
         assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
     }
 
@@ -6397,15 +6466,20 @@ mod greedy_port_distributor_tests {
         ] {
             let (mut graph, a) = crossed_between_two_nodes();
             graph.random = JavaRandom::new(seed_for_a_forward_first_sweep(cross_min_type));
-            minimize_crossings_layer_sweep_hierarchical_with_type(&mut graph, cross_min_type);
-            assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"], "{cross_min_type:?}");
+            let mut graphs = GraphArena::new(graph);
+            minimize_crossings_layer_sweep_hierarchical_with_type(&mut graphs, cross_min_type);
+            assert_eq!(
+                port_ids(graphs.root(), a),
+                ["a.p1", "a.p0"],
+                "{cross_min_type:?}"
+            );
         }
     }
 
     /// A parent node `p` in layer 0 with two west ports and a nested graph. The nested graph has
     /// the dummies of the ports in layer 0 and two nodes in layer 1, joined so that the edges
     /// cross when the ports stay as they are. The parent has no edge outside.
-    fn parent_with_crossing_inside() -> (LGraph, usize) {
+    fn parent_with_crossing_inside() -> (GraphArena, usize) {
         let mut inner = graph("inner");
         let first = inner.layerless_nodes.len();
         inner.layerless_nodes.push(LNode::new("d0", 1.0, 1.0, None));
@@ -6452,24 +6526,28 @@ mod greedy_port_distributor_tests {
                     node: dummy,
                 });
         }
-        outer.layerless_nodes[parent].nested_graph = Some(Box::new(inner));
         crate::p3order::initialize_crossing_minimization_port_ids(&mut outer);
-        (outer, parent)
+        let mut graphs = GraphArena::new(outer);
+        let nested = graphs.nest(GraphId::ROOT, parent, inner);
+        assert_eq!(
+            nested, inner_id,
+            "the dummies name the graph inside the node"
+        );
+        (graphs, parent)
     }
 
-    // Mutation: leave out the crossings inside the node, or drop the nested graph from the node
-    // after the count.
+    // Mutation: leave out the crossings inside the node.
     #[test]
     fn the_crossings_inside_a_node_with_children_decide_the_order_of_its_ports() {
-        let (mut graph, parent) = parent_with_crossing_inside();
-        let order = order(&graph);
+        let (mut graphs, parent) = parent_with_crossing_inside();
+        let order = order(graphs.root());
         let mut distributor = GreedyPortDistributor::default();
 
-        let improved = distributor.distribute_ports_while_sweeping(&mut graph, &order, 0, true);
+        let (graph, others) = graphs.split_mut(GraphId::ROOT);
+        let improved = distributor.distribute_ports_while_sweeping(graph, others, &order, 0, true);
 
         assert!(improved);
-        assert_eq!(port_ids(&graph, parent), ["p.p1", "p.p0"]);
-        assert!(graph.layerless_nodes[parent].nested_graph.is_some());
+        assert_eq!(port_ids(graph, parent), ["p.p1", "p.p0"]);
         // The dummies keep their ports.
         let dummies = graph.layerless_nodes[parent]
             .ports
@@ -6477,17 +6555,5 @@ mod greedy_port_distributor_tests {
             .map(|port| port.port_dummy.as_ref().unwrap().node)
             .collect::<Vec<_>>();
         assert_eq!(dummies, vec![1, 0]);
-    }
-
-    // Mutation: take the nested graph out of a node and not put it back.
-    #[test]
-    fn a_node_without_ports_on_the_side_keeps_its_nested_graph() {
-        let (mut graph, parent) = parent_with_crossing_inside();
-        let order = order(&graph);
-        let mut distributor = GreedyPortDistributor::default();
-
-        distributor.distribute_ports_while_sweeping(&mut graph, &order, 0, false);
-
-        assert!(graph.layerless_nodes[parent].nested_graph.is_some());
     }
 }

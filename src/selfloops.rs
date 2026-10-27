@@ -11,9 +11,9 @@ use std::collections::VecDeque;
 
 use crate::common::cells::grow_label_cell;
 use crate::graph::{
-    GraphId, LGraph, LMargin, LNodeKind, LPoint, LSize, NodePorts, PortId, PortRef, PortSide,
-    SelfHyperLoop, SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder, SelfLoopLabelAlignment,
-    SelfLoopLabelRef, SelfLoopPort, SelfLoopType,
+    GraphId, LGraph, LMargin, LNodeKind, LPoint, LSize, NodePorts, OtherGraphs, PortId, PortRef,
+    PortSide, SelfHyperLoop, SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder,
+    SelfLoopLabelAlignment, SelfLoopLabelRef, SelfLoopPort, SelfLoopType,
 };
 use crate::options::{SelfLoopDistributionStrategy, SelfLoopOrderingStrategy};
 use crate::p5edges::orthogonal::{HyperEdgeGraph, HyperEdgeSegment, break_non_critical_cycles};
@@ -21,7 +21,7 @@ use crate::p5edges::orthogonal::{HyperEdgeGraph, HyperEdgeSegment, break_non_cri
 const UNCONNECTED_PORT_PENALTY: usize = 1;
 const CONNECTED_PORT_PENALTY: usize = 3;
 
-pub fn preprocess_self_loops(graph: &mut LGraph) {
+pub fn preprocess_self_loops(graph: &mut LGraph, others: OtherGraphs<'_>) {
     graph.self_loop_holders.clear();
 
     let node_count = graph.layerless_nodes.len();
@@ -33,12 +33,12 @@ pub fn preprocess_self_loops(graph: &mut LGraph) {
 
         let mut holder = install_self_loop_holder(graph, node);
         hide_self_loop_edges(graph, &holder);
-        hide_ports(graph, &mut holder);
+        hide_ports(graph, others, &mut holder);
         graph.self_loop_holders.push(holder);
     }
 }
 
-pub fn restore_self_loop_ports(graph: &mut LGraph) {
+pub fn restore_self_loop_ports(graph: &mut LGraph, others: OtherGraphs<'_>) {
     let mut holders = std::mem::take(&mut graph.self_loop_holders);
     for holder in &mut holders {
         unhide_ports(graph, holder);
@@ -47,7 +47,7 @@ pub fn restore_self_loop_ports(graph: &mut LGraph) {
         }
         compute_self_loop_types(graph, holder);
         if holder.ports_hidden {
-            restore_hidden_ports(graph, holder);
+            restore_hidden_ports(graph, others, holder);
         }
     }
     graph.self_loop_holders = holders;
@@ -259,11 +259,11 @@ fn hide_self_loop_edges(graph: &mut LGraph, holder: &SelfLoopHolder) {
     }
 }
 
-fn hide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
+fn hide_ports(graph: &mut LGraph, others: OtherGraphs<'_>, holder: &mut SelfLoopHolder) {
     let order_fixed = holder.original_port_constraints.is_order_fixed();
     let hierarchy_mode = graph.layerless_nodes[holder.node]
         .nested_graph
-        .as_deref()
+        .and_then(|nested| others.get(nested))
         .is_some_and(|nested| nested.graph_properties.external_ports);
 
     if order_fixed || hierarchy_mode {
@@ -441,11 +441,11 @@ fn compute_self_loop_types(graph: &LGraph, holder: &mut SelfLoopHolder) {
     }
 }
 
-fn restore_hidden_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
+fn restore_hidden_ports(graph: &mut LGraph, others: OtherGraphs<'_>, holder: &mut SelfLoopHolder) {
     let mut target_areas = PortRestoreTargetAreas::new();
     collect_restore_target_areas(graph, holder, &mut target_areas);
 
-    let new_order = restored_port_order(graph, holder.node, &target_areas);
+    let new_order = restored_port_order(graph, others, holder.node, &target_areas);
     if !graph.reorder_node_ports(holder.node, new_order) {
         return;
     }
@@ -800,6 +800,7 @@ fn three_side_restore_sides(
 
 fn restored_port_order(
     graph: &LGraph,
+    others: OtherGraphs<'_>,
     node: usize,
     target_areas: &PortRestoreTargetAreas,
 ) -> Vec<PortId> {
@@ -826,7 +827,7 @@ fn restored_port_order(
         &mut new_order,
         |id, port| {
             port.side == PortSide::North
-                && is_north_south_port_with_west_or_west_east_connections(graph, id, port)
+                && is_north_south_port_with_west_or_west_east_connections(graph, others, id, port)
         },
     );
     add_target_area(
@@ -891,7 +892,7 @@ fn restored_port_order(
         &mut new_order,
         |id, port| {
             port.side == PortSide::South
-                && is_north_south_port_with_east_connections(graph, id, port)
+                && is_north_south_port_with_east_connections(graph, others, id, port)
         },
     );
     add_target_area(
@@ -987,30 +988,33 @@ fn add_all_that(
 
 fn is_north_south_port_with_west_or_west_east_connections(
     graph: &LGraph,
+    others: OtherGraphs<'_>,
     id: PortId,
     port: &crate::graph::LPort,
 ) -> bool {
-    let connections = north_south_port_connection_sides(graph, id, port);
+    let connections = north_south_port_connection_sides(graph, others, id, port);
     connections.contains(&PortSide::West)
 }
 
 fn is_north_south_port_with_east_connections(
     graph: &LGraph,
+    others: OtherGraphs<'_>,
     id: PortId,
     port: &crate::graph::LPort,
 ) -> bool {
-    north_south_port_connection_sides(graph, id, port).contains(&PortSide::East)
+    north_south_port_connection_sides(graph, others, id, port).contains(&PortSide::East)
 }
 
 fn north_south_port_connection_sides(
     graph: &LGraph,
+    others: OtherGraphs<'_>,
     id: PortId,
     port: &crate::graph::LPort,
 ) -> Vec<PortSide> {
     let Some(dummy_ref) = port.port_dummy.as_ref() else {
         return Vec::new();
     };
-    let Some(dummy_graph) = graph_by_id(graph, dummy_ref.graph_id) else {
+    let Some(dummy_graph) = graph_by_id(graph, others, dummy_ref.graph_id) else {
         return Vec::new();
     };
     let Some(dummy_node) = dummy_graph.layerless_nodes.get(dummy_ref.node) else {
@@ -1037,16 +1041,13 @@ fn north_south_port_connection_sides(
     sides
 }
 
-fn graph_by_id(graph: &LGraph, id: GraphId) -> Option<&LGraph> {
+/// The graph a dummy lives in: `graph` itself, or one of the graphs inside its nodes.
+fn graph_by_id<'a>(graph: &'a LGraph, others: OtherGraphs<'a>, id: GraphId) -> Option<&'a LGraph> {
     if graph.id == id {
-        return Some(graph);
+        Some(graph)
+    } else {
+        others.get(id)
     }
-
-    graph
-        .layerless_nodes
-        .iter()
-        .filter_map(|node| node.nested_graph.as_deref())
-        .find_map(|nested| graph_by_id(nested, id))
 }
 
 /// Where a port stands in its node's port list. A self-loop port is back in the list, restored,
@@ -2697,8 +2698,8 @@ mod tests {
         let target = add_port(&mut graph, node, PortSide::North);
         graph.add_edge(self_loop_edge("loop", "A", source, target));
 
-        preprocess_self_loops(&mut graph);
-        restore_self_loop_ports(&mut graph);
+        preprocess_self_loops(&mut graph, crate::graph::OtherGraphs::none());
+        restore_self_loop_ports(&mut graph, crate::graph::OtherGraphs::none());
 
         let order = graph.layerless_nodes[node]
             .ports
@@ -2724,8 +2725,8 @@ mod tests {
         graph.add_edge(self_loop_edge("loop-1", "A", p0, p1));
         graph.add_edge(self_loop_edge("loop-2", "A", p2, p3));
 
-        preprocess_self_loops(&mut graph);
-        restore_self_loop_ports(&mut graph);
+        preprocess_self_loops(&mut graph, crate::graph::OtherGraphs::none());
+        restore_self_loop_ports(&mut graph, crate::graph::OtherGraphs::none());
 
         let order = graph.layerless_nodes[node]
             .ports
@@ -2777,7 +2778,7 @@ mod tests {
         })
         .unwrap();
 
-        preprocess_self_loops(&mut graph);
+        preprocess_self_loops(&mut graph, crate::graph::OtherGraphs::none());
 
         assert_eq!(graph.self_loop_holders.len(), 1);
         assert!(!graph.edge_source_attached(0));
@@ -2795,8 +2796,8 @@ mod tests {
         })
         .unwrap();
 
-        preprocess_self_loops(&mut graph);
-        restore_self_loop_ports(&mut graph);
+        preprocess_self_loops(&mut graph, crate::graph::OtherGraphs::none());
+        restore_self_loop_ports(&mut graph, crate::graph::OtherGraphs::none());
 
         assert!(
             graph.layerless_nodes[0]
@@ -2852,8 +2853,8 @@ mod tests {
         graph.add_edge(self_loop_edge("first", "A", first_source, first_target));
         graph.add_edge(self_loop_edge("second", "A", second_source, second_target));
 
-        preprocess_self_loops(&mut graph);
-        restore_self_loop_ports(&mut graph);
+        preprocess_self_loops(&mut graph, crate::graph::OtherGraphs::none());
+        restore_self_loop_ports(&mut graph, crate::graph::OtherGraphs::none());
 
         assert!(
             graph.layerless_nodes[node]
@@ -2901,11 +2902,11 @@ mod tests {
         graph.add_edge(self_loop_edge("single", "A", single_port, single_port));
         graph.add_edge(self_loop_edge("double", "A", double_source, double_target));
 
-        preprocess_self_loops(&mut graph);
+        preprocess_self_loops(&mut graph, crate::graph::OtherGraphs::none());
         assert_eq!(graph.self_loop_holders[0].hyper_loops[0].ports.len(), 1);
         assert_eq!(graph.self_loop_holders[0].hyper_loops[1].ports.len(), 2);
 
-        restore_self_loop_ports(&mut graph);
+        restore_self_loop_ports(&mut graph, crate::graph::OtherGraphs::none());
 
         assert_eq!(
             graph.layerless_nodes[node].ports[graph.edges[0].source.port].side,
@@ -3112,8 +3113,8 @@ mod tests {
         edge.labels.push(LLabel::new("loop label", 60.0, 12.0));
         graph.add_edge(edge);
 
-        preprocess_self_loops(&mut graph);
-        restore_self_loop_ports(&mut graph);
+        preprocess_self_loops(&mut graph, crate::graph::OtherGraphs::none());
+        restore_self_loop_ports(&mut graph, crate::graph::OtherGraphs::none());
         route_self_loops(&mut graph);
 
         let label = &graph.edges[0].labels[0];

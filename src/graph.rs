@@ -14,7 +14,7 @@ use crate::random::JavaRandom;
 
 mod arena;
 mod ports;
-pub use arena::GraphId;
+pub use arena::{GraphArena, GraphId, OtherGraphs};
 #[cfg(test)]
 pub(crate) use ports::port_ids;
 pub use ports::{NodePorts, PortId};
@@ -102,94 +102,6 @@ impl LGraph {
             self.in_layer_successor_constraints_between_non_dummies;
         graph
     }
-
-    pub fn sync_graph_properties_to_options(&mut self) {
-        let result = self.try_for_each_graph_mut(|graph| {
-            graph.graph_properties.apply_to_options(&mut graph.options);
-            Ok::<(), std::convert::Infallible>(())
-        });
-        result.expect("infallible graph property synchronization");
-    }
-
-    pub(crate) fn try_for_each_graph_mut<E>(
-        &mut self,
-        mut visit: impl FnMut(&mut LGraph) -> Result<(), E>,
-    ) -> Result<(), E> {
-        struct DetachedGraph {
-            graph: Box<LGraph>,
-            parent: Option<usize>,
-            parent_node: usize,
-        }
-
-        fn take_nested_graphs(graph: &mut LGraph) -> Vec<(usize, Box<LGraph>)> {
-            graph
-                .layerless_nodes
-                .iter_mut()
-                .enumerate()
-                .filter_map(|(node, data)| data.nested_graph.take().map(|graph| (node, graph)))
-                .collect()
-        }
-
-        let mut detached = take_nested_graphs(self)
-            .into_iter()
-            .map(|(parent_node, graph)| DetachedGraph {
-                graph,
-                parent: None,
-                parent_node,
-            })
-            .collect::<Vec<_>>();
-        let mut cursor = 0usize;
-        while cursor < detached.len() {
-            let children = take_nested_graphs(&mut detached[cursor].graph);
-            detached.extend(
-                children
-                    .into_iter()
-                    .map(|(parent_node, graph)| DetachedGraph {
-                        graph,
-                        parent: Some(cursor),
-                        parent_node,
-                    }),
-            );
-            cursor += 1;
-        }
-
-        let mut root_children = Vec::new();
-        let mut children_by_parent = vec![Vec::new(); detached.len()];
-        for (index, detached_graph) in detached.iter().enumerate() {
-            if let Some(parent) = detached_graph.parent {
-                children_by_parent[parent].push(index);
-            } else {
-                root_children.push(index);
-            }
-        }
-        let mut traversal = Vec::with_capacity(detached.len());
-        let mut stack = root_children.into_iter().rev().collect::<Vec<_>>();
-        while let Some(index) = stack.pop() {
-            traversal.push(index);
-            stack.extend(children_by_parent[index].iter().rev().copied());
-        }
-
-        let mut result = visit(self);
-        if result.is_ok() {
-            for index in traversal {
-                if let Err(error) = visit(&mut detached[index].graph) {
-                    result = Err(error);
-                    break;
-                }
-            }
-        }
-
-        while let Some(detached_graph) = detached.pop() {
-            let parent_node = detached_graph.parent_node;
-            if let Some(parent) = detached_graph.parent {
-                detached[parent].graph.layerless_nodes[parent_node].nested_graph =
-                    Some(detached_graph.graph);
-            } else {
-                self.layerless_nodes[parent_node].nested_graph = Some(detached_graph.graph);
-            }
-        }
-        result
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -237,7 +149,8 @@ pub struct LNode {
     /// `layered.edgeRouting.selfLoopOrdering`, which ELK reads from each node.
     pub self_loop_ordering: super::options::SelfLoopOrderingStrategy,
     pub ports: NodePorts,
-    pub nested_graph: Option<Box<LGraph>>,
+    /// The graph inside this node, which the layout's [`GraphArena`] holds.
+    pub nested_graph: Option<GraphId>,
     pub model_order: Option<usize>,
     pub component_priority: i32,
     pub layer_index: Option<usize>,
@@ -1521,12 +1434,14 @@ mod tests {
         };
         dummy.origin_port = Some(origin);
         nested.layerless_nodes.push(dummy);
-        compound.nested_graph = Some(Box::new(nested));
         parent.layerless_nodes.push(compound);
+        let mut graphs = GraphArena::new(parent);
+        let nested_id = graphs.nest(GraphId::ROOT, 0, nested);
 
-        assert!(parent.reorder_node_ports(0, port_ids([1, 0])));
+        assert!(graphs.root_mut().reorder_node_ports(0, port_ids([1, 0])));
 
-        let nested = parent.layerless_nodes[0].nested_graph.as_ref().unwrap();
+        let nested = &graphs[nested_id];
+        let parent = graphs.root();
         assert_eq!(nested.layerless_nodes[0].origin_port, Some(origin));
         // The origin still names the port "p1", which now comes first.
         let compound = &parent.layerless_nodes[0];

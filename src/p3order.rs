@@ -10,7 +10,9 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::{GraphId, LGraph, LNodeKind, PortId, PortRef, PortSide};
+use crate::graph::{
+    GraphArena, GraphId, LGraph, LNodeKind, OtherGraphs, PortId, PortRef, PortSide,
+};
 use crate::options::{OrderingStrategy, PortConstraints, PortSortingStrategy};
 
 pub mod counting;
@@ -26,12 +28,10 @@ pub(crate) fn initialize_crossing_minimization_port_ids(graph: &mut LGraph) {
     assign_crossing_minimization_port_ids(graph, &order);
 }
 
-pub(crate) fn initialize_crossing_minimization_port_ids_hierarchy(graph: &mut LGraph) {
-    initialize_crossing_minimization_port_ids(graph);
-    for node in &mut graph.layerless_nodes {
-        if let Some(nested_graph) = node.nested_graph.as_deref_mut() {
-            initialize_crossing_minimization_port_ids_hierarchy(nested_graph);
-        }
+pub(crate) fn initialize_crossing_minimization_port_ids_hierarchy(graphs: &mut GraphArena) {
+    // The ids are numbered inside each graph, so the order of the graphs does not matter.
+    for graph in graphs.iter_mut() {
+        initialize_crossing_minimization_port_ids(graph);
     }
 }
 
@@ -260,10 +260,10 @@ impl PartialOrd for SortableF64 {
     }
 }
 
-pub fn process_port_sides(graph: &mut LGraph) {
+pub fn process_port_sides(graph: &mut LGraph, others: OtherGraphs<'_>) {
     let layerless_nodes = (0..graph.layerless_nodes.len()).collect::<Vec<_>>();
     for node in layerless_nodes {
-        process_node_port_sides(graph, node);
+        process_node_port_sides(graph, others, node);
     }
 
     let layered_nodes = graph
@@ -272,17 +272,17 @@ pub fn process_port_sides(graph: &mut LGraph) {
         .flat_map(|layer| layer.nodes.iter().copied())
         .collect::<Vec<_>>();
     for node in layered_nodes {
-        process_node_port_sides(graph, node);
+        process_node_port_sides(graph, others, node);
     }
 }
 
-fn process_node_port_sides(graph: &mut LGraph, node: usize) {
+fn process_node_port_sides(graph: &mut LGraph, others: OtherGraphs<'_>, node: usize) {
     let side_fixed = graph.layerless_nodes[node].port_constraints.is_side_fixed();
     let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
 
     for port in port_ids {
         if !side_fixed || graph.layerless_nodes[node].ports[port].side == PortSide::Undefined {
-            set_port_side(graph, PortRef { node, port });
+            set_port_side(graph, others, PortRef { node, port });
         }
     }
 
@@ -291,10 +291,10 @@ fn process_node_port_sides(graph: &mut LGraph, node: usize) {
     }
 }
 
-pub fn set_port_side(graph: &mut LGraph, port: PortRef) {
+pub fn set_port_side(graph: &mut LGraph, others: OtherGraphs<'_>, port: PortRef) {
     let port_data = &graph.layerless_nodes[port.node].ports[port.port];
     let side = if let Some(dummy) = port_data.port_dummy.as_ref() {
-        external_port_dummy_side(graph, port.node, dummy.graph_id, dummy.node)
+        external_port_dummy_side(graph, others, port.node, dummy.graph_id, dummy.node)
     } else if port_data.net_flow() < 0 {
         PortSide::East
     } else {
@@ -307,6 +307,7 @@ pub fn set_port_side(graph: &mut LGraph, port: PortRef) {
 
 fn external_port_dummy_side(
     graph: &LGraph,
+    others: OtherGraphs<'_>,
     port_node: usize,
     dummy_graph_id: GraphId,
     dummy_node: usize,
@@ -319,11 +320,13 @@ fn external_port_dummy_side(
             .unwrap_or(PortSide::Undefined);
     }
 
+    // The dummy is in the graph inside the port's node, and no other graph.
     graph
         .layerless_nodes
         .get(port_node)
-        .and_then(|node| node.nested_graph.as_deref())
-        .filter(|nested| nested.id == dummy_graph_id)
+        .and_then(|node| node.nested_graph)
+        .filter(|&nested| nested == dummy_graph_id)
+        .and_then(|nested| others.get(nested))
         .and_then(|nested| nested.layerless_nodes.get(dummy_node))
         .map(|node| node.external_port_side)
         .unwrap_or(PortSide::Undefined)
@@ -1309,7 +1312,7 @@ mod tests {
         }
     }
 
-    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
+    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> crate::graph::GraphArena {
         import_graph(&ElkInputGraph {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
@@ -1466,7 +1469,7 @@ mod tests {
         );
         // Reordering must also keep each child external port's origin linked
         // to its corresponding parent port, including detached self-loop ports.
-        let child = parent.nested_graph.as_ref().unwrap();
+        let child = &graph[parent.nested_graph.unwrap()];
         for (index, port) in parent.ports.iter_with_ids() {
             let dummy = port.port_dummy.as_ref().unwrap();
             let origin = child.layerless_nodes[dummy.node]
@@ -1487,7 +1490,7 @@ mod tests {
     fn port_side_processor_assigns_by_net_flow_and_fixes_constraints() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("A-B", "A", "B")]);
 
-        process_port_sides(&mut graph);
+        process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
 
         let a = graph
             .layerless_nodes
@@ -1542,7 +1545,7 @@ mod tests {
             node: dummy,
         });
 
-        set_port_side(&mut graph, port);
+        set_port_side(&mut graph, crate::graph::OtherGraphs::none(), port);
 
         assert_eq!(
             graph.layerless_nodes[parent].ports[port.port].side,
@@ -1811,7 +1814,7 @@ mod tests {
             ],
         );
         layer_network_simplex(&mut graph).unwrap();
-        process_port_sides(&mut graph);
+        process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
         sort_port_lists(&mut graph);
 
         let left = graph

@@ -501,7 +501,7 @@ mod tests {
         }
     }
 
-    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
+    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> crate::graph::GraphArena {
         import_graph(&ElkInputGraph {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
@@ -721,8 +721,9 @@ mod tests {
             .collect::<Vec<_>>();
 
         break_cycles_greedy(&mut graph);
+        let node_count = graph.layerless_nodes.len();
         graph.layers.push(Layer {
-            nodes: (0..graph.layerless_nodes.len()).collect(),
+            nodes: (0..node_count).collect(),
             size: Default::default(),
         });
         restore_reversed_edges(&mut graph);

@@ -707,7 +707,7 @@ mod tests {
         }
     }
 
-    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
+    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> crate::graph::GraphArena {
         import_graph(&ElkInputGraph {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
@@ -814,7 +814,7 @@ mod tests {
                     graph.set_node_layer(node, node);
                 }
                 graph.options.direction = ElkDirection::Right;
-                crate::p3order::process_port_sides(&mut graph);
+                crate::p3order::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
                 let mut label = crate::graph::LLabel::new("bottom", 20.0, 10.0);
                 label.position.y = height + 7.0;
                 graph.layerless_nodes[1].labels.push(label);
