@@ -151,8 +151,14 @@ impl SweepCopy {
 /// each dummy and of each node that has a dummy are sorted again, side by side.
 fn correct_north_south_port_sides(graph: &mut LGraph) {
     let mut to_sort: Vec<usize> = Vec::new();
+    // Which nodes are in `to_sort` already, and where a node sits in the layer being read.
+    let mut queued = vec![false; graph.layerless_nodes.len()];
+    let mut position_in_layer = vec![usize::MAX; graph.layerless_nodes.len()];
     for layer_index in 0..graph.layers.len() {
         let layer = graph.layers[layer_index].nodes.clone();
+        for (position, node) in layer.iter().copied().enumerate() {
+            position_in_layer[node] = position;
+        }
         for (position, dummy) in layer.iter().copied().enumerate() {
             if graph.layerless_nodes[dummy].kind != LNodeKind::NorthSouthPort {
                 continue;
@@ -161,9 +167,10 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
             let Some(origin) = graph.layerless_nodes[dummy].in_layer_layout_unit else {
                 continue;
             };
-            let Some(origin_position) = layer.iter().position(|node| *node == origin) else {
+            let origin_position = position_in_layer[origin];
+            if origin_position == usize::MAX {
                 continue;
-            };
+            }
             let origin_port = graph.layerless_nodes[dummy]
                 .ports
                 .first()
@@ -177,21 +184,28 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
                 }
             }
             for node in [origin, dummy] {
-                if !to_sort.contains(&node) {
+                if !queued[node] {
+                    queued[node] = true;
                     to_sort.push(node);
                 }
             }
         }
+        for node in layer {
+            position_in_layer[node] = usize::MAX;
+        }
     }
 
     // The side of a port may have changed, so the list is sorted again, as `PortListSorter` sorts
-    // a node with a fixed port order.
+    // a node with a fixed port order. An order that is already sorted changes nothing, so the
+    // node's references to its ports are left alone.
     for node in to_sort {
         let constraints = graph.layerless_nodes[node].port_constraints;
         let mut order = (0..graph.layerless_nodes[node].ports.len()).collect::<Vec<_>>();
         order
             .sort_by(|left, right| compare_combined_ports(graph, node, *left, *right, constraints));
-        graph.reorder_node_ports(node, order);
+        if order.iter().enumerate().any(|(index, old)| index != *old) {
+            graph.reorder_node_ports(node, order);
+        }
     }
 }
 
