@@ -1900,6 +1900,28 @@ mod tests {
         assert_eq!(label_settings(&map(&[])).unwrap(), LabelSettings::default());
     }
 
+    // Mutation: read `elk.edgeLabels.inline` as true whatever the value is.
+    #[test]
+    fn a_label_is_not_inline_when_the_option_says_false() {
+        let label = label_settings(&map(&[("elk.edgeLabels.inline", "false")])).unwrap();
+        assert!(!label.inline);
+    }
+
+    // Mutation: read `elk.edgeLabels.inline` with `parse_bool(value).unwrap_or(false)`, so a bad
+    // value counts as false.
+    #[test]
+    fn a_bad_inline_value_is_an_invalid_value_error() {
+        let error = label_settings(&map(&[("elk.edgeLabels.inline", "yes")])).unwrap_err();
+        assert_eq!(
+            error,
+            OptionError {
+                key: "elk.edgeLabels.inline".to_string(),
+                value: "yes".to_string(),
+                problem: OptionProblem::InvalidValue,
+            }
+        );
+    }
+
     // Mutation: ignore `elk.algorithm` in `apply_node_option`.
     #[test]
     fn every_supported_node_option_is_read() {
