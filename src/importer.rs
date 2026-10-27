@@ -1411,7 +1411,8 @@ fn transform_port(
         x: port.x,
         y: port.y,
     };
-    // `lport.copyProperties(elkport)` copies the two options. `containsKey` asks whether one is set.
+    // `lport.copyProperties(elkport)` copies the three options. `containsKey` asks whether one is
+    // set.
     lport.port_index = port.index.map(|index| index as isize);
     lport.border_offset = port.border_offset;
     lport.allow_non_flow_ports_to_switch_sides = port.allow_non_flow_ports_to_switch_sides;
