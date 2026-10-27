@@ -130,7 +130,8 @@ fn cases_dir() -> PathBuf {
 /// `oracle/random.mjs` writes: `tests/elkjs/random/`, `tests/elkjs/random-group-ends/`, whose
 /// edges may also end at a group, `tests/elkjs/random-ports/`, whose nodes have ports, and
 /// `tests/elkjs/random-group-ports/`, whose groups have ports too, and
-/// `tests/elkjs/random-cross-ports/`, whose ports sit on all four sides.
+/// `tests/elkjs/random-cross-ports/`, whose ports sit on all four sides, and
+/// `tests/elkjs/random-inline-labels/`, whose centre labels are often inline.
 fn cases() -> Vec<PathBuf> {
     let mut inputs = Vec::new();
     for dir in [
@@ -140,6 +141,7 @@ fn cases() -> Vec<PathBuf> {
         cases_dir().join("random-ports"),
         cases_dir().join("random-group-ports"),
         cases_dir().join("random-cross-ports"),
+        cases_dir().join("random-inline-labels"),
     ] {
         let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|_| panic!("{} exists", dir.display()))
@@ -449,6 +451,60 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    (`position < origin_position`): 89 cases, such as the same four.
 // 54. In `origin_allows_side_switch` (src/north_south.rs), always answer no, so the dummy keeps
 //    its order constraint to the node: the same four cases.
+// 55. In `apply_label_side` (src/intermediate.rs), call a label dummy inline when any of its
+//    labels is inline, not all: 24 cases, such as labels-inline-mixed-one-edge,
+//    labels-inline-mixed-one-edge-down and random-inline-labels/r012. The two hand cases put an
+//    inline and a plain centre label on one edge, in both orders.
+// 56. In the same function, leave out the `.ceil()` of the inline port position: 35 cases, such as
+//    labels-inline-direction-down, labels-inline-direction-up and random-inline-labels/r005.
+// 57. In `place_label_dummy_labels`, take the space for the labels as if they were not inline
+//    (`if false`): 40 cases, such as the same two hand cases and random-inline-labels/r005.
+// 58. In `place_labels_for_vertical_layout`, treat inline labels as not inline: 11 cases, such as
+//    labels-inline-direction-down, labels-inline-direction-up and random-inline-labels/r006.
+// 59. In the inline arm of `apply_label_side`, do not take the edge thickness off the height of
+//    the dummy: 67 cases, such as labels-inline-bends, labels-inline-direction-down and
+//    labels-inline-direction-up.
+// 60. In `input_label` (src/layout.rs), always set `inline: false`: 92 cases, such as
+//    labels-inline-bends, labels-inline-direction-down and labels-inline-direction-left.
+// 61. In the inline arm of `apply_label_side`, read the edge label spacing as 2 instead of from the
+//    options: 2 cases, labels-inline-wide-spacing (7) and labels-inline-no-spacing (0).
+// 62. In the same arm, take `(origin_edge / 2.0).ceil()` off the height or off the port position
+//    instead of `origin_edge`, or leave out a `.max(0.0)` of the edge thickness in
+//    `apply_label_side` or `place_label_dummy_labels`: no case fails. The option
+//    `elk.edge.thickness` is not ported, so every edge has thickness 1, where `(1 / 2).ceil()`
+//    is 1 and no thickness is negative. Unit tests in src/intermediate.rs give edges the
+//    thickness 5 and -3 and fail on each of these.
+// 63. In `place_label_dummy_labels`, call the labels inline when any of them is, not all: 7 cases,
+//    such as labels-inline-mixed-one-edge-down and random-inline-labels/r069.
+// 64. In `place_labels_for_vertical_layout`, do the same: 10 cases, such as
+//    labels-inline-mixed-one-edge-down and random-inline-labels/r012.
+// 65. In `input_label` (src/layout.rs), make a label whose `elk.edgeLabels.inline` is true a
+//    centre label whatever its placement is: 2 cases, labels-inline-on-end-labels and
+//    labels-inline-on-end-labels-down. Only these set the option on HEAD and TAIL labels. elkjs
+//    ignores it there: the label dummy inserter takes centre labels alone.
+// 66. In the inline arm of `apply_label_side`, leave out the `/ 2.0` of the port position
+//    (`.ceil()` alone): 98 cases, such as labels-inline-straight, the smallest, with one inline
+//    label on one edge, and the other five cases below.
+// 67. In `place_labels_for_horizontal_layout`, leave out the `/ 2.0` of the x position: 237 cases,
+//    such as labels-inline-two-labels and labels-inline-direction-right. Both have labels of
+//    different widths on one edge, so a label that is not the widest must be centred.
+// 68. In `size_label_dummy`, add the widths of the labels instead of taking the greatest (the
+//    horizontal branch): 138 cases, such as labels-inline-two-labels and
+//    labels-inline-include-children.
+// 69. In `insert_label_dummies`, take only an edge whose labels are all centre labels
+//    (`!labels.is_empty() && labels.all(centre)`): 538 cases, such as labels-inline-mixed. Its
+//    edges e2 and e3 each hold a centre label and an end label.
+// 70. In `move_center_labels_to_dummy`, move every label of the edge to the dummy, not only the
+//    centre labels: 342 cases, such as labels-inline-mixed.
+// 71. In `find_median_layer_target_id`, use `total / 2` instead of `(total - 1) / 2`: 431 cases,
+//    such as labels-inline-long-edge and labels-inline-direction-right. Both have an edge over
+//    several layers whose label dummy must land in the lower median layer.
+// 72. In `materialize_hierarchy_edge_segments` (src/compound.rs), set `inline: false` on each label
+//    it copies to a segment: 33 cases, such as labels-inline-include-children.
+// 73. In the direction table of `apply_node_option` (src/layout_options.rs), read "RIGHT" as
+//    `ElkDirection::Down`: 231 cases, such as labels-inline-direction-right. It is the one hand
+//    case with inline labels that sets `elk.direction` to RIGHT, which is also the default. Random
+//    cases set it too, so this case adds no other coverage; it stays as the small readable one.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

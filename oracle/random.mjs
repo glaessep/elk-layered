@@ -21,23 +21,46 @@
 // side of a port follows the direction of the run that lays its node out. A group under
 // SEPARATE_CHILDREN sets no direction, so its children and its nested run use RIGHT.
 //
+//   node random.mjs ../tests/elkjs/random-cross-ports --cross-ports && node record.mjs ../tests/elkjs/random-cross-ports --drop-crashes
+//
+// With `--cross-ports`, the generator is that of `--ports`, with its own seed and count, but a
+// port may sit on any of the four sides, so many sit across the layout flow. elkjs crashes on
+// some of these graphs; `--drop-crashes` lists them in `dropped.txt`.
+//
+//   node random.mjs ../tests/elkjs/random-inline-labels --inline-labels && node record.mjs ../tests/elkjs/random-inline-labels
+//
+// With `--inline-labels`, the generator is that of the default mode, with its own seed and count,
+// and each centre label sets `elk.edgeLabels.inline` with a chance of 0.6, so inline and plain
+// labels mix in one graph.
+//
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
 // a feature, and then write and record the whole corpus again.
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+const USAGE = "usage: node random.mjs <directory> [--group-ends | --ports | --group-ports | --cross-ports | --inline-labels]";
 const dir = process.argv[2];
-if (!dir) {
-  console.error("usage: node random.mjs <directory> [--group-ends | --ports]");
+// A mode typed first would be read as the directory, and the script deletes the files of that
+// directory. So a directory that starts with `-` is refused, and so is any extra argument.
+if (!dir || dir.startsWith("-") || process.argv.length > 4) {
+  console.error(USAGE);
   process.exit(2);
 }
 const mode = process.argv[3] ?? "";
+// A mistyped mode must not fall through to the default mode: that mode would delete the files of
+// the directory it was given.
+const MODES = ["", "--group-ends", "--ports", "--group-ports", "--cross-ports", "--inline-labels"];
+if (!MODES.includes(mode)) {
+  console.error(`unknown mode "${mode}"; use one of: ${MODES.slice(1).join(" ")}`);
+  process.exit(2);
+}
 const groupEnds = mode === "--group-ends";
 const groupPorts = mode === "--group-ports";
 const crossPorts = mode === "--cross-ports";
+const inlineLabels = mode === "--inline-labels";
 const withPorts = mode === "--ports" || groupPorts || crossPorts;
-const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200 }[mode] ?? 200;
-const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed }[mode] ?? 0x5eed;
+const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200, "--inline-labels": 150 }[mode] ?? 200;
+const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed, "--inline-labels": 0xaeed }[mode] ?? 0x5eed;
 
 // mulberry32: a small generator with a fixed seed. Its numbers only pick the graphs, so any
 // generator with a fixed seed would do.
@@ -182,6 +205,10 @@ function graph() {
         const lab = label(rand.pick(WORDS));
         const placement = rand.pick([null, "CENTER", "HEAD", "TAIL"]);
         if (placement) lab.layoutOptions = { "elk.edgeLabels.placement": placement };
+        // The draw happens only in this mode, so the other corpora keep their random numbers.
+        if (inlineLabels && (placement === null || placement === "CENTER") && rand.chance(0.6)) {
+          (lab.layoutOptions ??= {})["elk.edgeLabels.inline"] = "true";
+        }
         edge.labels.push(lab);
       }
     }

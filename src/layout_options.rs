@@ -1344,7 +1344,13 @@ fn parse_node_label_placement(value: &str) -> Result<NodeLabelPlacement, OptionP
     Ok(placement)
 }
 
-/// Ports `LayoutOptionData.parseValue`, case `BOOLEAN`.
+/// Ports `LayoutOptionData.parseValue`, case `BOOLEAN`: only "true" and "false" parse, and the
+/// match ignores case, as in Java.
+///
+/// This differs from elkjs on purpose. Java's `parseValue` returns `null` for any other text,
+/// such as "yes". `JsonImporter.setOption` then skips the option, so elkjs lays the graph out
+/// with the default and says nothing. Here the caller gets `InvalidValue`: malformed input is an
+/// error, not a silent default.
 pub(crate) fn parse_bool(value: &str) -> Result<bool, OptionProblem> {
     if value.eq_ignore_ascii_case("true") {
         Ok(true)
@@ -1898,6 +1904,28 @@ mod tests {
         assert!(label.inline);
         assert!(label.node_label_placement.is_some());
         assert_eq!(label_settings(&map(&[])).unwrap(), LabelSettings::default());
+    }
+
+    // Mutation: read `elk.edgeLabels.inline` as true whatever the value is.
+    #[test]
+    fn a_label_is_not_inline_when_the_option_says_false() {
+        let label = label_settings(&map(&[("elk.edgeLabels.inline", "false")])).unwrap();
+        assert!(!label.inline);
+    }
+
+    // Mutation: read `elk.edgeLabels.inline` with `parse_bool(value).unwrap_or(false)`, so a bad
+    // value counts as false.
+    #[test]
+    fn a_bad_inline_value_is_an_invalid_value_error() {
+        let error = label_settings(&map(&[("elk.edgeLabels.inline", "yes")])).unwrap_err();
+        assert_eq!(
+            error,
+            OptionError {
+                key: "elk.edgeLabels.inline".to_string(),
+                value: "yes".to_string(),
+                problem: OptionProblem::InvalidValue,
+            }
+        );
     }
 
     // Mutation: ignore `elk.algorithm` in `apply_node_option`.
