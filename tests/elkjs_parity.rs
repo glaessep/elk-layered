@@ -136,15 +136,44 @@ fn expected(case: &str) -> Value {
     want
 }
 
+/// What `layout` must answer for each exception elkjs throws: the `feature` of the
+/// `Error::Unsupported` it returns. A new kind of exception needs a deliberate entry here.
+const REFUSALS: &[(&str, &str)] = &[(
+    "UnsupportedGraphException",
+    // `run_layered` in src/layout.rs: an edge between a node and its own children, which the
+    // importer of the child level cannot find.
+    "an edge between a node and its own children laid out on their own",
+)];
+
+/// The `feature` that `layout` must give for the exception that `refusal` names, or `None` when
+/// the table has no entry for it.
+fn expected_feature(refusal: &Value) -> Option<&'static str> {
+    let text = refusal.as_str()?;
+    REFUSALS
+        .iter()
+        .find(|(exception, _)| text.contains(exception))
+        .map(|(_, feature)| *feature)
+}
+
 /// How the result of `layout` differs from what elkjs gave, or `None` when it does not.
 ///
 /// elkjs refuses some graphs, such as one with an edge into a part laid out on its own: ELK's
 /// `UnsupportedGraphException`. `record.mjs` then writes `{"elkjsError": ...}`, and `layout` must
-/// refuse the graph with `Error::Unsupported`. A read or write failure of the test, or any other
-/// error, is not that refusal. The two messages are not compared: they come from two programs.
+/// refuse the graph with `Error::Unsupported` and the feature that `REFUSALS` gives for that
+/// exception. A read or write failure of the test, or any other error, is not that refusal. The
+/// two messages are not compared: they come from two programs.
 fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
     match (want.get("elkjsError"), got) {
-        (Some(_), Err(LayOutError::Layout(elk_layered::Error::Unsupported { .. }))) => None,
+        (
+            Some(refusal),
+            Err(LayOutError::Layout(elk_layered::Error::Unsupported { feature, .. })),
+        ) if expected_feature(refusal) == Some(feature.as_str()) => None,
+        (
+            Some(refusal),
+            Err(LayOutError::Layout(elk_layered::Error::Unsupported { feature, .. })),
+        ) => Some(format!(
+            "elkjs refuses it ({refusal}), elk-layered refuses it for another reason: {feature}"
+        )),
         (Some(refusal), Err(LayOutError::Layout(error))) => Some(format!(
             "elkjs refuses it ({refusal}), elk-layered fails with another error: {error}"
         )),
@@ -185,6 +214,9 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    switch type.
 // 8. In the `to_graph` refusal of src/layout.rs, return `Error::Internal` instead of
 //    `Error::Unsupported`: all 26 cases that elkjs refuses, such as random-group-ends/r034.
+// 9. In the `to_graph` refusal of src/layout.rs, change the `feature` text, for example to "an
+//    edge into a part of the graph laid out on its own". The same 26 cases then fail on the
+//    feature, not on the error kind.
 #[test]
 fn every_case_lays_out_exactly_as_elkjs_does() {
     let mut failures = Vec::new();
