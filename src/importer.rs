@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::common::cells::{self, CellLabel, CellNode};
 use crate::compound::{
     PendingCompoundSegment, PendingSegmentEndpoint, ScopedHierarchySegment,
-    compound_label_segment_index, introduce_source_ported_scoped_edge_segments,
+    compound_label_segment_index, introduce_source_ported_scoped_edge_segments, port_at,
     source_ported_cross_hierarchy_segments,
 };
 use crate::graph::{
@@ -340,15 +340,7 @@ fn import_external_ports(
             if port.x == 0.0 && port.y == 0.0 {
                 0.0
             } else {
-                let mut lport = LPort::new(port.id.clone(), 0, PortType::Output);
-                lport.position = LPoint {
-                    x: port.x,
-                    y: port.y,
-                };
-                lport.size = LSize {
-                    width: port.width,
-                    height: port.height,
-                };
+                let lport = port_at(&port.id, port.x, port.y, port.width, port.height);
                 calc_port_offset(&lport, scope.node_size, port.side)
             }
         });
@@ -1586,21 +1578,7 @@ fn edge_end_port(
     }
     let position = index.child_position(node_id);
     if let Some(port_id) = port_id {
-        let port = index
-            .port_ref(node_id, port_id)
-            .ok_or_else(|| ImportError::MissingPort {
-                edge_id: edge.id.clone(),
-                node_id: node_id.to_string(),
-                port_id: port_id.to_string(),
-            })?;
-        let node = graph
-            .layerless_nodes
-            .get(port.node)
-            .ok_or_else(missing_node)?;
-        if node.id != node_id || port.port >= node.ports.len() {
-            return Err(missing_node());
-        }
-        return Ok(port);
+        return named_port(edge, node_id, port_id, index, graph).map(|(port, _)| port);
     }
     ensure_port_at_node(
         graph,
@@ -1611,6 +1589,38 @@ fn edge_end_port(
         port_index,
     )
     .ok_or_else(missing_node)
+}
+
+/// The port a caller named at one end of an edge, in the graph the node sits in.
+///
+/// The port must belong to a node of that graph with that id, or the edge has no end there.
+fn named_port<'g>(
+    edge: &ElkInputEdge,
+    node_id: &str,
+    port_id: &str,
+    index: &InputIndex<'_>,
+    graph: &'g LGraph,
+) -> ImportResult<(PortRef, &'g LPort)> {
+    let missing_endpoint = || ImportError::MissingEndpoint {
+        edge_id: edge.id.clone(),
+        node_id: node_id.to_string(),
+    };
+    let port = index
+        .port_ref(node_id, port_id)
+        .ok_or_else(|| ImportError::MissingPort {
+            edge_id: edge.id.clone(),
+            node_id: node_id.to_string(),
+            port_id: port_id.to_string(),
+        })?;
+    let node = graph
+        .layerless_nodes
+        .get(port.node)
+        .ok_or_else(missing_endpoint)?;
+    if node.id != node_id {
+        return Err(missing_endpoint());
+    }
+    let found = node.ports.get(port.port).ok_or_else(missing_endpoint)?;
+    Ok((port, found))
 }
 
 /// The port of the dummy that stands for a port of the node the run lays out.
@@ -1783,22 +1793,7 @@ fn hierarchy_edge_end(
     }
     let slot = arena.graph_slot_for_parent(index, graph_parent);
     if let Some(port_id) = port_id {
-        let port = index
-            .port_ref(node_id, port_id)
-            .ok_or_else(|| ImportError::MissingPort {
-                edge_id: edge.id.clone(),
-                node_id: node_id.to_string(),
-                port_id: port_id.to_string(),
-            })?;
-        let graph = arena.graph(slot);
-        let node = graph
-            .layerless_nodes
-            .get(port.node)
-            .ok_or_else(missing_endpoint)?;
-        if node.id != node_id || port.port >= node.ports.len() {
-            return Err(missing_endpoint());
-        }
-        let attached = &node.ports[port.port];
+        let (_, attached) = named_port(edge, node_id, port_id, index, arena.graph(slot))?;
         return Ok(HierarchyEdgeEnd {
             node_id: node_id.to_string(),
             port_key: port_id.to_string(),

@@ -19,9 +19,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::api::{ElkEdge, ElkEdgeSection, ElkLabel, ElkNode, ElkPoint, ElkPort};
 use crate::common::networksimplex::NetworkSimplexError;
 use crate::components::ComponentError;
+use crate::compound::{calc_port_side, port_at};
 use crate::error::Error;
 use crate::export::{self, LayoutResult, TransferInput};
-use crate::graph::{LPoint, LPort, LSize, PortSide, PortType, port_side_from_direction};
+use crate::graph::{LPoint, LSize, PortSide, port_side_from_direction};
 use crate::importer::{
     self, ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, ElkInputPort, ParentSettings,
 };
@@ -1009,16 +1010,8 @@ impl<'a, 't> Work<'a, 't> {
                 }
             } else if port.side == PortSide::Undefined {
                 // The side follows from the position, or else from the direction.
-                let mut lport = LPort::new(port.id.clone(), 0, PortType::Output);
-                lport.position = LPoint {
-                    x: port.x,
-                    y: port.y,
-                };
-                lport.size = LSize {
-                    width: port.width,
-                    height: port.height,
-                };
-                match crate::compound::calc_port_side(&lport, size, direction) {
+                let lport = port_at(&port.id, port.x, port.y, port.width, port.height);
+                match calc_port_side(&lport, size, direction) {
                     PortSide::Undefined => port_side_from_direction(direction),
                     side => side,
                 }
@@ -1170,16 +1163,8 @@ impl<'a, 't> Work<'a, 't> {
                 let mut side = self.port_state[scope][index].side;
                 let port = &mut self.out_node(scope).ports[index];
                 if side == PortSide::Undefined {
-                    let mut lport = LPort::new(port.id.clone(), 0, PortType::Output);
-                    lport.position = LPoint {
-                        x: port.x,
-                        y: port.y,
-                    };
-                    lport.size = LSize {
-                        width: port.width,
-                        height: port.height,
-                    };
-                    side = crate::compound::calc_port_side(&lport, old, direction);
+                    let lport = port_at(&port.id, port.x, port.y, port.width, port.height);
+                    side = calc_port_side(&lport, old, direction);
                 }
                 match side {
                     PortSide::North => {

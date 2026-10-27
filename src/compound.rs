@@ -2035,6 +2035,17 @@ fn create_parent_boundary_port(
     PortRef { node, port: 0 }
 }
 
+/// A port that holds only a position and a size, for [`calc_port_side`] and the port offset.
+///
+/// ELK's `ElkUtil.calcPortSide` and `LGraphUtil.calcPortOffset` read these from the port they
+/// get. Here they take an `LPort`, and the caller has no such port yet.
+pub(crate) fn port_at(id: &str, x: f64, y: f64, width: f64, height: f64) -> LPort {
+    let mut port = LPort::new(id, 0, PortType::Output);
+    port.position = LPoint { x, y };
+    port.size = LSize { width, height };
+    port
+}
+
 pub(crate) fn calc_port_side(port: &LPort, node_size: LSize, direction: ElkDirection) -> PortSide {
     let node_width = node_size.width;
     let node_height = node_size.height;
