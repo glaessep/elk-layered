@@ -5,6 +5,12 @@
 //! write the JSON elkjs reads and writes: field names in camel case, missing numbers as zero,
 //! missing lists as empty, and empty lists left out.
 //!
+//! Parse the JSON with an exact number reader. JavaScript reads every number to the nearest
+//! double. Plain `serde_json` may read one bit off, and one bit in the input can change the
+//! layout, so it no longer matches elkjs. Turn on the `float_roundtrip` feature of `serde_json`,
+//! or use another parser that reads to the nearest double. This crate sets the feature only for
+//! its own tests.
+//!
 //! elkjs also reads the options from a legacy `properties` key (`transformProperties` in the
 //! importer below). Every type that has `layout_options` takes that key as an alias. elkjs
 //! reads `properties` only when `layoutOptions` is missing. A graph with both keys is a serde

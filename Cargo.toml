@@ -22,7 +22,7 @@ serde = ["dep:serde"]
 [dev-dependencies]
 # `float_roundtrip` reads every number to the nearest double, as JavaScript does. Without it,
 # serde_json may read 127.58333333333333 one bit off, and the parity test would see a layout
-# difference that is not there.
+# difference that is not there. A caller who parses JSON needs the same feature: README.md says so.
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 
 [[test]]

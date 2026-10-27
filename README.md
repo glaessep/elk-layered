@@ -7,6 +7,12 @@ gives every box a position and every edge a route at right angles, the way
 **The goal is the same geometry as elkjs 0.9.3 for the same input.** elkjs is ELK's Java compiled
 to JavaScript. Where it behaves differently from Java on a JVM, this crate follows elkjs.
 
+**Read the JSON with an exact number parser.** JavaScript reads every number to the nearest
+double. Plain `serde_json` may read a number such as `127.58333333333333` one bit off, and one bit
+in the input can change the layout. If you parse the graph with `serde_json`, turn on its
+`float_roundtrip` feature. With another parser, use one that reads to the nearest double. This
+crate sets `float_roundtrip` only for its own tests.
+
 ## Status
 
 Version 0.1.0 is in development. The crate is being turned from a building block of another
