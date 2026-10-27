@@ -452,6 +452,11 @@ pub struct HierarchyEdge {
     pub target_node_id: String,
     pub source_port_key: String,
     pub target_port_key: String,
+    /// Whether the caller named the source port. A made-up port can have the id of a named port
+    /// of the same node, so the key alone does not say which of the two an end sits at.
+    pub source_port_named: bool,
+    /// The same for the target port.
+    pub target_port_named: bool,
     pub source_path: Vec<String>,
     pub target_path: Vec<String>,
     pub labels: Vec<LLabel>,

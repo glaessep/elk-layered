@@ -537,6 +537,10 @@ fn materialize_scoped_edge_segments(
                     target_node_id: scoped.edge.target.clone(),
                     source_port_key: source_port_key.clone(),
                     target_port_key: target_port_key.clone(),
+                    // A scoped segment never reaches `original_net_flows`, and the keys here are
+                    // all made up.
+                    source_port_named: false,
+                    target_port_named: false,
                     source_path: Vec::new(),
                     target_path: Vec::new(),
                     labels: Vec::new(),
@@ -678,7 +682,30 @@ struct ImportPortIndex {
     /// and the key of the port. ELK's importer attaches such an edge to its ports at once. This
     /// importer keeps it apart until the compound preprocessor splits it, so the count lives here.
     /// Two maps, so a lookup by `&str` needs no `String` for the key.
-    crossing_edges: HashMap<String, HashMap<String, (usize, usize)>>,
+    crossing_edges: HashMap<String, NodeCrossings>,
+}
+
+/// The crossing edges of one node, by port key. A made-up port can have the id of a port the caller
+/// named at the same node, such as the implicit port `G:2` beside a named port `G:2`. ELK tells
+/// ports apart by object, so each kind of port has a map of its own.
+#[derive(Default)]
+struct NodeCrossings {
+    named: HashMap<String, (usize, usize)>,
+    made_up: HashMap<String, (usize, usize)>,
+}
+
+impl NodeCrossings {
+    fn of(&self, named: bool) -> &HashMap<String, (usize, usize)> {
+        if named { &self.named } else { &self.made_up }
+    }
+
+    fn of_mut(&mut self, named: bool) -> &mut HashMap<String, (usize, usize)> {
+        if named {
+            &mut self.named
+        } else {
+            &mut self.made_up
+        }
+    }
 }
 
 impl ImportPortIndex {
@@ -690,11 +717,12 @@ impl ImportPortIndex {
         }
     }
 
-    /// The edges that cross a level and end at this port, as (incoming, outgoing).
-    fn crossing_at(&self, node_id: &str, port_key: &str) -> (usize, usize) {
+    /// The edges that cross a level and end at this port, as (incoming, outgoing). `named` says
+    /// whether the caller named the port.
+    fn crossing_at(&self, node_id: &str, port_key: &str, named: bool) -> (usize, usize) {
         self.crossing_edges
             .get(node_id)
-            .and_then(|ports| ports.get(port_key))
+            .and_then(|ports| ports.of(named).get(port_key))
             .copied()
             .unwrap_or_default()
     }
@@ -1544,7 +1572,7 @@ fn transform_edge(
     let parallel_at = |graph: &LGraph, end: PortRef| {
         let node = &graph.layerless_nodes[end.node];
         let port = &node.ports[end.port];
-        let (incoming, outgoing) = port_index.crossing_at(&node.id, &port.id);
+        let (incoming, outgoing) = port_index.crossing_at(&node.id, &port.id, port.named);
         port.incoming_edges.len() + incoming > 1 || port.outgoing_edges.len() + outgoing > 1
     };
     if parallel_at(graph, source) || parallel_at(graph, target) {
@@ -1698,6 +1726,7 @@ fn transform_cross_hierarchy_edge(
             .crossing_edges
             .entry(source.node_id.clone())
             .or_default()
+            .of_mut(source.named)
             .entry(source.port_key.clone())
             .or_default();
         entry.1 += 1;
@@ -1708,6 +1737,7 @@ fn transform_cross_hierarchy_edge(
             .crossing_edges
             .entry(target.node_id.clone())
             .or_default()
+            .of_mut(target.named)
             .entry(target.port_key.clone())
             .or_default();
         entry.0 += 1;
@@ -1736,6 +1766,8 @@ fn transform_cross_hierarchy_edge(
         target_node_id: target.node_id,
         source_port_key: source.port_key,
         target_port_key: target.port_key,
+        source_port_named: source.named,
+        target_port_named: target.named,
         source_path,
         target_path,
         labels: edge.labels.iter().map(label_to_lgraph).collect(),
@@ -1753,6 +1785,8 @@ fn transform_cross_hierarchy_edge(
 struct HierarchyEdgeEnd {
     node_id: String,
     port_key: String,
+    /// Whether the caller named the port. The key of a made-up port can equal the id of a named one.
+    named: bool,
     /// The edges attached to the port by now, as (incoming, outgoing).
     attached: (usize, usize),
 }
@@ -1788,6 +1822,7 @@ fn hierarchy_edge_end(
         return Ok(HierarchyEdgeEnd {
             node_id: dummy.id.clone(),
             port_key: port.id.clone(),
+            named: port.named,
             attached: (port.incoming_edges.len(), port.outgoing_edges.len()),
         });
     }
@@ -1797,6 +1832,7 @@ fn hierarchy_edge_end(
         return Ok(HierarchyEdgeEnd {
             node_id: node_id.to_string(),
             port_key: port_id.to_string(),
+            named: true,
             attached: (attached.incoming_edges.len(), attached.outgoing_edges.len()),
         });
     }
@@ -1816,6 +1852,7 @@ fn hierarchy_edge_end(
     Ok(HierarchyEdgeEnd {
         node_id: node_id.to_string(),
         port_key,
+        named: false,
         attached,
     })
 }
@@ -4106,6 +4143,45 @@ mod tests {
         assert!(!build(vec![from_port("e1", "B"), into_port("e2", "B")]));
         assert!(build(vec![from_port("e1", "B"), from_port("e2", "B")]));
         assert!(build(vec![into_port("e1", "B"), into_port("e2", "B")]));
+    }
+
+    // Mutation: look up the crossing edges of a port by its id alone (`crossing_at` and the
+    // writes in `transform_cross_hierarchy_edge` ignore `named`). The implicit port `G:2` then
+    // reads the edge into the named port `G:2` and the graph becomes one with hyperedges.
+    #[test]
+    fn a_made_up_port_does_not_share_crossing_edges_with_a_named_port_of_the_same_id() {
+        let build = |flat_target_port: Option<&str>| {
+            let mut child = node("c");
+            child.parent = Some("G".to_string());
+            let mut into_port = edge("e1", "c", "G");
+            into_port.target_port = Some("G:2".to_string());
+            // The root owns the edge, so it is imported before the flat edge, as the bug needs.
+            into_port.container = Some("root".to_string());
+            let mut flat = edge("e2", "s", "G");
+            flat.target_port = flat_target_port.map(str::to_string);
+            let mut input = flat_graph(
+                ElkDirection::Right,
+                vec![
+                    node("s"),
+                    ported(
+                        "G",
+                        None,
+                        vec![
+                            input_port("G:1", PortSide::West),
+                            input_port("G:2", PortSide::West),
+                        ],
+                    ),
+                    child,
+                ],
+                vec![into_port, flat],
+            );
+            input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
+            import_graph(&input).unwrap().graph_properties.hyperedges
+        };
+        // G has two ports, so the edge from `s` gets a made-up port that is also called `G:2`.
+        assert!(!build(None));
+        // Control: two edges into the named port do make a hyperedge.
+        assert!(build(Some("G:2")));
     }
 
     // Mutation: reject a port that has the id of a node, or let two ports share an id.

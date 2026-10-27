@@ -344,6 +344,13 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 45. In `minimize_barycenter_with_counter` (src/p3order/sweep.rs), end the loop with
 //    `old <= new` instead of `!sweep_improved_crossings(old, new)`: the same 2 cases differ, as a `NaN` count no longer
 //    ends the loop.
+// 46. In `original_net_flows` (src/compound.rs), key the source of a hierarchy edge as a made-up
+//    port (`false` for `edge.source_port_named`): 5 cases, such as
+//    ports-caller-id-like-made-up-id-include-children, ports-group-include-flow-of-split-edges-out
+//    and random-group-ports/r037. The first names the ports of G `G:1` and `G:2`, the id the
+//    importer gives to the made-up port of the edge into G, so the two ports must not share a flow.
+// 47. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), look the
+//    flow of a port up as a made-up port (`false` for `port.named`): 2 cases, ports-group-include-flow-of-split-edges and random-group-ports/r037.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
