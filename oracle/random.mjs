@@ -21,6 +21,11 @@
 // side of a port follows the direction of the run that lays its node out. A group under
 // SEPARATE_CHILDREN sets no direction, so its children and its nested run use RIGHT.
 //
+//   node random.mjs ../tests/elkjs/random-inline-labels --inline-labels && node record.mjs ../tests/elkjs/random-inline-labels
+//
+// With `--inline-labels`, the graphs are those of the default mode, but each centre label sets
+// `elk.edgeLabels.inline` with a chance of 0.6, so inline and plain labels mix in one graph.
+//
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
 // a feature, and then write and record the whole corpus again.
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -28,16 +33,17 @@ import { join } from "node:path";
 
 const dir = process.argv[2];
 if (!dir) {
-  console.error("usage: node random.mjs <directory> [--group-ends | --ports]");
+  console.error("usage: node random.mjs <directory> [--group-ends | --ports | --group-ports | --cross-ports | --inline-labels]");
   process.exit(2);
 }
 const mode = process.argv[3] ?? "";
 const groupEnds = mode === "--group-ends";
 const groupPorts = mode === "--group-ports";
 const crossPorts = mode === "--cross-ports";
+const inlineLabels = mode === "--inline-labels";
 const withPorts = mode === "--ports" || groupPorts || crossPorts;
-const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200 }[mode] ?? 200;
-const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed }[mode] ?? 0x5eed;
+const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200, "--inline-labels": 150 }[mode] ?? 200;
+const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed, "--inline-labels": 0xaeed }[mode] ?? 0x5eed;
 
 // mulberry32: a small generator with a fixed seed. Its numbers only pick the graphs, so any
 // generator with a fixed seed would do.
@@ -182,6 +188,10 @@ function graph() {
         const lab = label(rand.pick(WORDS));
         const placement = rand.pick([null, "CENTER", "HEAD", "TAIL"]);
         if (placement) lab.layoutOptions = { "elk.edgeLabels.placement": placement };
+        // The draw happens only in this mode, so the other corpora keep their random numbers.
+        if (inlineLabels && (placement === null || placement === "CENTER") && rand.chance(0.6)) {
+          (lab.layoutOptions ??= {})["elk.edgeLabels.inline"] = "true";
+        }
         edge.labels.push(lab);
       }
     }

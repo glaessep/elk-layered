@@ -130,7 +130,8 @@ fn cases_dir() -> PathBuf {
 /// `oracle/random.mjs` writes: `tests/elkjs/random/`, `tests/elkjs/random-group-ends/`, whose
 /// edges may also end at a group, `tests/elkjs/random-ports/`, whose nodes have ports, and
 /// `tests/elkjs/random-group-ports/`, whose groups have ports too, and
-/// `tests/elkjs/random-cross-ports/`, whose ports sit on all four sides.
+/// `tests/elkjs/random-cross-ports/`, whose ports sit on all four sides, and
+/// `tests/elkjs/random-inline-labels/`, whose centre labels are often inline.
 fn cases() -> Vec<PathBuf> {
     let mut inputs = Vec::new();
     for dir in [
@@ -140,6 +141,7 @@ fn cases() -> Vec<PathBuf> {
         cases_dir().join("random-ports"),
         cases_dir().join("random-group-ports"),
         cases_dir().join("random-cross-ports"),
+        cases_dir().join("random-inline-labels"),
     ] {
         let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|_| panic!("{} exists", dir.display()))
@@ -449,6 +451,19 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    (`position < origin_position`): 89 cases, such as the same four.
 // 54. In `origin_allows_side_switch` (src/north_south.rs), always answer no, so the dummy keeps
 //    its order constraint to the node: the same four cases.
+// 55. In `apply_label_side` (src/intermediate.rs), call a label dummy inline when any of its
+//    labels is inline, not all: 22 cases, such as random-inline-labels/r012, r028 and r036.
+// 56. In the same function, leave out the `.ceil()` of the inline port position: 35 cases, such as
+//    labels-inline-direction-down, labels-inline-direction-up and random-inline-labels/r005.
+// 57. In `place_label_dummy_labels`, take the space for the labels as if they were not inline
+//    (`if false`): 40 cases, such as the same two hand cases and random-inline-labels/r005.
+// 58. In `place_labels_for_vertical_layout`, treat inline labels as not inline: 11 cases, such as
+//    labels-inline-direction-down, labels-inline-direction-up and random-inline-labels/r006.
+// 59. In the inline arm of `apply_label_side`, do not take the edge thickness off the height of
+//    the dummy: 67 cases, such as labels-inline-bends, labels-inline-direction-down and
+//    labels-inline-direction-up.
+// 60. In `input_label` (src/layout.rs), always set `inline: false`: 92 cases, such as
+//    labels-inline-bends, labels-inline-direction-down and labels-inline-direction-left.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
