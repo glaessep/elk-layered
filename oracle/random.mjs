@@ -34,9 +34,10 @@ if (!dir) {
 const mode = process.argv[3] ?? "";
 const groupEnds = mode === "--group-ends";
 const groupPorts = mode === "--group-ports";
-const withPorts = mode === "--ports" || groupPorts;
-const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150 }[mode] ?? 200;
-const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed }[mode] ?? 0x5eed;
+const crossPorts = mode === "--cross-ports";
+const withPorts = mode === "--ports" || groupPorts || crossPorts;
+const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200 }[mode] ?? 200;
+const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed }[mode] ?? 0x5eed;
 
 // mulberry32: a small generator with a fixed seed. Its numbers only pick the graphs, so any
 // generator with a fixed seed would do.
@@ -152,6 +153,7 @@ function graph() {
     // root's children and for everything under INCLUDE_CHILDREN. A group under
     // SEPARATE_CHILDREN sets no direction, so the run of its children uses the default, RIGHT.
     const sidesOf = (node) => {
+      if (crossPorts) return ["NORTH", "EAST", "SOUTH", "WEST"];
       const own = parent.get(node.id) === root || hierarchy === "include" ? direction : null;
       return own === "DOWN" || own === "UP" ? ["NORTH", "SOUTH"] : ["WEST", "EAST"];
     };
