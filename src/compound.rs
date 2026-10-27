@@ -391,7 +391,11 @@ fn preprocess_source_ported_compound_graph_observed(
     graph: &mut LGraph,
     observer: &mut impl CompoundPreprocessObserver,
 ) {
-    let original_net_flows = original_net_flows(graph);
+    // The segments replace the hierarchy edges, so the net flows must be read before they are
+    // introduced. Without a hierarchy edge nothing changes, so a graph that ends up with no
+    // external ports never reads them.
+    let has_hierarchy_edges = hierarchy_has_pending_edges(graph);
+    let flows_before_segments = has_hierarchy_edges.then(|| original_net_flows(graph));
     introduce_source_ported_hierarchy_edge_segments(graph);
     if !hierarchy_has_external_ports(graph) {
         let result = graph.try_for_each_graph_mut(|graph| {
@@ -401,6 +405,7 @@ fn preprocess_source_ported_compound_graph_observed(
         result.expect("compound endpoint preprocessing is infallible");
         return;
     }
+    let original_net_flows = flows_before_segments.unwrap_or_else(|| original_net_flows(graph));
 
     let mut detached = detach_nested_graph_hierarchy(graph);
     // `transformHierarchyEdges` reads the port constraints of each compound node before
