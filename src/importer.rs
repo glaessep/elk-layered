@@ -14,8 +14,8 @@ use crate::compound::{
     source_ported_cross_hierarchy_segments,
 };
 use crate::graph::{
-    CompoundEdgeSegment, EdgeLabelPlacement, HierarchyEdge, LGraph, LLabel, LNode, LPoint, LPort,
-    LSize, LayeredEdge, PortRef, PortSide, PortType, apply_port_index_to_dummy,
+    CompoundEdgeSegment, EdgeLabelPlacement, HierarchyEdge, LGraph, LLabel, LNode, LNodeKind,
+    LPoint, LPort, LSize, LayeredEdge, PortRef, PortSide, PortType, apply_port_index_to_dummy,
     create_external_port_dummy, is_across_flow, port_side_from_direction,
 };
 use crate::options::{
@@ -397,7 +397,7 @@ fn check_north_south_ports(root: &LGraph) -> ImportResult<()> {
             let offender = graph
                 .layerless_nodes
                 .iter()
-                .filter(|node| node.nested_graph.is_some())
+                .filter(|node| has_children(node))
                 .flat_map(|node| node.ports.iter().map(move |port| (node, port)))
                 .find(|(_, port)| {
                     port.input_index.is_some() && is_across_flow(graph.options.direction, port.side)
@@ -418,6 +418,19 @@ fn check_north_south_ports(root: &LGraph) -> ImportResult<()> {
         );
     }
     Ok(())
+}
+
+/// Whether the importer put children into the nested graph of a node. A node can also have a
+/// nested graph of dummies only, for an inside self loop: it has no children, as
+/// `node_materializes_children` says, and every node the importer makes for a child is a normal
+/// node.
+fn has_children(node: &LNode) -> bool {
+    node.nested_graph.as_deref().is_some_and(|nested| {
+        nested
+            .layerless_nodes
+            .iter()
+            .any(|child| child.kind == LNodeKind::Normal)
+    })
 }
 
 /// Rejects a scoped segment before any graph object is built. It checks that every endpoint is
@@ -4349,6 +4362,32 @@ mod tests {
                 assert!(result.is_ok(), "{direction:?} {side:?}");
             }
         }
+    }
+
+    // Mutation: test `nested_graph.is_some()` instead of children in `check_north_south_ports`,
+    // so the dummy-only nested graph of an inside self loop makes the node count as one with
+    // children.
+    #[test]
+    fn a_node_with_only_an_inside_self_loop_has_no_children_for_its_ports() {
+        let mut input = graph(
+            vec![ported(
+                "A",
+                Some(PortConstraints::FixedSide),
+                vec![input_port("p", PortSide::North)],
+            )],
+            vec![ElkInputEdge {
+                source_port: None,
+                target_port: None,
+                inside_self_loops_yo: true,
+                ..edge("A-A", "A", "A")
+            }],
+        );
+        input.options.direction = ElkDirection::Right;
+        input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
+        input.options.inside_self_loops_activate = true;
+        let lgraph = import_graph(&input).unwrap();
+        // The node has a nested graph, so only the test for children lets the port pass.
+        assert!(layered_node(&lgraph, "A").nested_graph.is_some());
     }
 
     // Mutation: refuse a port across the flow although every node has free ports.
