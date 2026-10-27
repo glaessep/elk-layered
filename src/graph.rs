@@ -1148,9 +1148,24 @@ impl LGraph {
             }
         }
 
-        // The ports of north and south port dummies point at the ports that were reordered.
-        for node in &mut self.layerless_nodes {
-            for port in &mut node.ports {
+        // The ports of north and south port dummies point at the ports that were reordered. A
+        // port with such a dummy names it in `port_dummy`, so only those dummies are visited.
+        // A dummy made for an input and an output port is named once, so it is remapped once.
+        let graph_id = self.id.clone();
+        let mut dummies = self.layerless_nodes[node_index]
+            .ports
+            .iter()
+            .filter_map(|port| port.port_dummy.as_ref())
+            .filter(|dummy| dummy.graph_id == graph_id)
+            .map(|dummy| dummy.node)
+            .collect::<Vec<_>>();
+        dummies.sort_unstable();
+        dummies.dedup();
+        for dummy in dummies {
+            let Some(dummy) = self.layerless_nodes.get_mut(dummy) else {
+                continue;
+            };
+            for port in &mut dummy.ports {
                 if let Some(origin) = port.origin_port.as_mut()
                     && origin.node == node_index
                 {
@@ -1159,7 +1174,6 @@ impl LGraph {
             }
         }
 
-        let graph_id = self.id.clone();
         for node in &mut self.layerless_nodes {
             update_graph_port_ref_after_reorder(
                 &mut node.origin_port,
