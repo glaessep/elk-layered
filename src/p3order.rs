@@ -185,22 +185,19 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
     }
 
     // The side of a port may have changed, so the list is sorted again, as `PortListSorter` sorts
-    // a node with a fixed port order. An order that is already sorted changes nothing, so the
-    // node's references to its ports are left alone.
+    // a node with a fixed port order. Writing the list back costs one copy of the ids, and a
+    // port keeps its id, so a sorted list needs no special case.
     for node in to_sort {
         let constraints = graph.layerless_nodes[node].port_constraints;
         let mut order = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-        let before = order.clone();
         order
             .sort_by(|left, right| compare_combined_ports(graph, node, *left, *right, constraints));
-        if order != before {
-            // A sort of the port indices is a permutation, so a refusal is a bug, never caller
-            // input. It stays loud in release builds.
-            assert!(
-                graph.reorder_node_ports(node, order),
-                "the sorted port order of node {node} is not a permutation of its ports"
-            );
-        }
+        // A sort of the port indices is a permutation, so a refusal is a bug, never caller
+        // input. It stays loud in release builds.
+        assert!(
+            graph.reorder_node_ports(node, order),
+            "the sorted port order of node {node} is not a permutation of its ports"
+        );
     }
 }
 

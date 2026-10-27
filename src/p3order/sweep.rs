@@ -397,7 +397,6 @@ impl BarycenterPortDistributor {
 
     fn sort_ports(&self, graph: &mut LGraph, node: usize) {
         let mut order = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-        let before = order.clone();
         order.sort_by(|left, right| {
             let left_port = &graph.layerless_nodes[node].ports[*left];
             let right_port = &graph.layerless_nodes[node].ports[*right];
@@ -428,9 +427,6 @@ impl BarycenterPortDistributor {
                 left_barycenter.total_cmp(&right_barycenter)
             }
         });
-        if order == before {
-            return;
-        }
         graph.reorder_node_ports(node, order);
     }
 
