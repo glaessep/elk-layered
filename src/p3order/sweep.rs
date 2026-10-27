@@ -43,12 +43,8 @@ struct HierarchyGraphInfo {
     barycenter_heuristic: Option<BarycenterHeuristic>,
     /// `GraphInfoHolder.crossingsCounter`, whose port positions outlive each count.
     crossings_counter: CrossingsCounter,
-    /// `GraphInfoHolder.portDistributor` of the two-sided greedy switch.
-    greedy_port_distributor: GreedyPortDistributor,
-    /// `GraphInfoHolder.portDistributor` of the one-sided greedy switch, a barycenter port
-    /// distributor as `ISweepPortDistributor.create` makes it. The barycenter type keeps its own
-    /// in `barycenter_heuristic`.
-    one_sided_port_distributor: Option<BarycenterPortDistributor>,
+    /// `GraphInfoHolder.portDistributor`.
+    port_distributor: PortDistributor,
     random: JavaRandom,
     child_paths: Vec<GraphPath>,
     parent_path: Option<GraphPath>,
@@ -60,21 +56,18 @@ struct HierarchyGraphInfo {
 impl HierarchyGraphInfo {
     fn new(graph: &LGraph, path: GraphPath, cross_min_type: CrossMinType) -> Self {
         let mut random = graph.random.clone();
-        let port_distributor_kind = create_port_distributor_kind(cross_min_type, &mut random);
         let current_node_order = graph
             .layers
             .iter()
             .map(|layer| layer.nodes.clone())
             .collect::<Vec<_>>();
+        let mut port_distributor =
+            PortDistributor::create(cross_min_type, &mut random, &current_node_order);
+        // The barycenter type keeps its distributor in its heuristic. The greedy switch types
+        // keep theirs here.
         let barycenter_heuristic = (cross_min_type == CrossMinType::Barycenter).then(|| {
-            BarycenterHeuristic::new(
-                graph,
-                random.clone(),
-                BarycenterPortDistributor::new(port_distributor_kind, &current_node_order),
-            )
+            BarycenterHeuristic::new(graph, random.clone(), port_distributor.hand_to_heuristic())
         });
-        let one_sided_port_distributor = (cross_min_type == CrossMinType::OneSidedGreedySwitch)
-            .then(|| BarycenterPortDistributor::new(port_distributor_kind, &current_node_order));
         Self {
             path,
             current_node_order,
@@ -82,8 +75,7 @@ impl HierarchyGraphInfo {
             best_node_and_port_order: None,
             barycenter_heuristic,
             crossings_counter: CrossingsCounter::default(),
-            greedy_port_distributor: GreedyPortDistributor::default(),
-            one_sided_port_distributor,
+            port_distributor,
             random,
             child_paths: Vec::new(),
             parent_path: None,
@@ -964,9 +956,8 @@ impl HierarchySweep {
     }
 
     /// The port distribution of `LayerSweepCrossingMinimizer.sweepReducingCrossings` for the
-    /// greedy switch. The two-sided type has its own distributor. The one-sided type has a
-    /// barycenter one, which never reports an improvement: `AbstractBarycenterPortDistributor`
-    /// returns `false`.
+    /// greedy switch. The barycenter type distributes inside its heuristic, so it does nothing
+    /// here.
     fn distribute_greedy_ports(
         &mut self,
         root: &mut LGraph,
@@ -976,30 +967,12 @@ impl HierarchySweep {
     ) -> bool {
         let info = &mut self.infos[info_index];
         let graph = graph_mut_at_path(root, &info.path);
-        match self.cross_min_type {
-            CrossMinType::TwoSidedGreedySwitch => {
-                SweepPortDistributor::Greedy(&mut info.greedy_port_distributor)
-                    .distribute_ports_while_sweeping(
-                        graph,
-                        &info.current_node_order,
-                        layer_index,
-                        forward,
-                    )
-            }
-            CrossMinType::OneSidedGreedySwitch => info
-                .one_sided_port_distributor
-                .as_mut()
-                .is_some_and(|distributor| {
-                    SweepPortDistributor::Barycenter(distributor).distribute_ports_while_sweeping(
-                        graph,
-                        &info.current_node_order,
-                        layer_index,
-                        forward,
-                    )
-                }),
-            // The barycenter type distributes ports inside its heuristic.
-            CrossMinType::Barycenter => false,
-        }
+        info.port_distributor.distribute_ports_while_sweeping(
+            graph,
+            &info.current_node_order,
+            layer_index,
+            forward,
+        )
     }
 
     fn sweep_in_hierarchical_nodes(
@@ -2980,14 +2953,48 @@ impl SwitchDecider {
     }
 }
 
-/// `ISweepPortDistributor` for the two greedy switch types: `ISweepPortDistributor.create` makes
-/// a `GreedyPortDistributor` for the two-sided type and a barycenter one for the one-sided type.
-enum SweepPortDistributor<'a> {
-    Greedy(&'a mut GreedyPortDistributor),
-    Barycenter(&'a mut BarycenterPortDistributor),
+/// `GraphInfoHolder.portDistributor`, which `ISweepPortDistributor.create` makes once for each
+/// graph: a `GreedyPortDistributor` for the two-sided greedy switch and a barycenter one for the
+/// other two types.
+#[derive(Debug, Clone)]
+enum PortDistributor {
+    Greedy(GreedyPortDistributor),
+    Barycenter(BarycenterPortDistributor),
+    /// The barycenter type hands its distributor to `BarycenterHeuristic`, which distributes the
+    /// ports itself.
+    InHeuristic,
 }
 
-impl SweepPortDistributor<'_> {
+impl PortDistributor {
+    /// `ISweepPortDistributor.create`. It draws from `random` as ELK does: nothing for the
+    /// two-sided type, and one boolean for the others, which picks the kind of barycenter
+    /// distributor.
+    fn create(
+        cross_min_type: CrossMinType,
+        random: &mut JavaRandom,
+        current_order: &[Vec<usize>],
+    ) -> Self {
+        if cross_min_type == CrossMinType::TwoSidedGreedySwitch {
+            Self::Greedy(GreedyPortDistributor::default())
+        } else {
+            let kind = create_port_distributor_kind(cross_min_type, random);
+            Self::Barycenter(BarycenterPortDistributor::new(kind, current_order))
+        }
+    }
+
+    /// Hands the barycenter distributor to the heuristic of the barycenter type, which owns it.
+    ///
+    /// Panics if the distributor is not a barycenter one that is still here. That is a bug in the
+    /// caller, never caller input: only the barycenter type hands it over, once.
+    fn hand_to_heuristic(&mut self) -> BarycenterPortDistributor {
+        match std::mem::replace(self, Self::InHeuristic) {
+            Self::Barycenter(distributor) => distributor,
+            _ => {
+                panic!("only a barycenter port distributor that is still here goes to a heuristic")
+            }
+        }
+    }
+
     fn distribute_ports_while_sweeping(
         &mut self,
         graph: &mut LGraph,
@@ -3004,6 +3011,7 @@ impl SweepPortDistributor<'_> {
                 // `AbstractBarycenterPortDistributor` cannot tell whether it improved anything.
                 false
             }
+            Self::InHeuristic => false,
         }
     }
 }
@@ -3372,11 +3380,11 @@ fn minimize_barycenter(graph: &mut LGraph) -> bool {
 
     let mut random = graph.random.clone();
     let random_seed = random.next_long();
-    let distributor_kind = if random.next_bool() {
-        PortDistributorKind::NodeRelative
-    } else {
-        PortDistributorKind::LayerTotal
-    };
+    let mut port_distributor = PortDistributor::create(
+        CrossMinType::Barycenter,
+        &mut random,
+        &graph_info.current_node_order,
+    );
     random.set_seed(random_seed);
 
     let mut best_crossings = f64::MAX;
@@ -3388,9 +3396,8 @@ fn minimize_barycenter(graph: &mut LGraph) -> bool {
 
     // One heuristic and one port distributor serve every run, as in GraphInfoHolder: the port
     // ranks and barycenters of an earlier run stay in the arrays until a later run overwrites them.
-    let port_distributor =
-        BarycenterPortDistributor::new(distributor_kind, &graph_info.current_node_order);
-    let mut heuristic = BarycenterHeuristic::new(graph, random.clone(), port_distributor);
+    let mut heuristic =
+        BarycenterHeuristic::new(graph, random.clone(), port_distributor.hand_to_heuristic());
     for run_index in 0..thoroughness {
         let crossings = minimize_crossings_with_counter(
             graph,
@@ -3425,7 +3432,11 @@ fn minimize_two_sided_greedy_switch(graph: &mut LGraph) -> bool {
     // the next connected component. ISweepPortDistributor.create draws nothing for two-sided.
     graph.random.next_long();
     let mut heuristic = GreedySwitchHeuristic::new(CrossMinType::TwoSidedGreedySwitch);
-    let mut port_distributor = GreedyPortDistributor::default();
+    let mut port_distributor = PortDistributor::create(
+        CrossMinType::TwoSidedGreedySwitch,
+        &mut graph.random,
+        &graph_info.current_node_order,
+    );
     let mut is_forward_sweep = graph.random.next_bool();
 
     loop {
@@ -3438,7 +3449,7 @@ fn minimize_two_sided_greedy_switch(graph: &mut LGraph) -> bool {
             graph,
             &mut graph_info,
             &mut heuristic,
-            SweepPortDistributor::Greedy(&mut port_distributor),
+            &mut port_distributor,
             is_forward_sweep,
         );
         if !sweep_improved {
@@ -3461,10 +3472,11 @@ fn minimize_one_sided_greedy_switch(graph: &mut LGraph) -> bool {
     // moves the shared Random on for the next connected component. ISweepPortDistributor.create
     // then draws a boolean to choose the barycenter port distributor.
     graph.random.next_long();
-    let distributor_kind =
-        create_port_distributor_kind(CrossMinType::OneSidedGreedySwitch, &mut graph.random);
-    let mut port_distributor =
-        BarycenterPortDistributor::new(distributor_kind, &graph_info.current_node_order);
+    let mut port_distributor = PortDistributor::create(
+        CrossMinType::OneSidedGreedySwitch,
+        &mut graph.random,
+        &graph_info.current_node_order,
+    );
     let mut heuristic = GreedySwitchHeuristic::new(CrossMinType::OneSidedGreedySwitch);
     let mut is_forward_sweep = graph.random.next_bool();
 
@@ -3473,7 +3485,7 @@ fn minimize_one_sided_greedy_switch(graph: &mut LGraph) -> bool {
         graph,
         &mut graph_info,
         &mut heuristic,
-        SweepPortDistributor::Barycenter(&mut port_distributor),
+        &mut port_distributor,
         is_forward_sweep,
     );
 
@@ -3492,7 +3504,7 @@ fn minimize_one_sided_greedy_switch(graph: &mut LGraph) -> bool {
             graph,
             &mut graph_info,
             &mut heuristic,
-            SweepPortDistributor::Barycenter(&mut port_distributor),
+            &mut port_distributor,
             is_forward_sweep,
         );
         crossings_in_graph = graph_info
@@ -3615,7 +3627,7 @@ fn sweep_reducing_crossings_greedy(
     graph: &mut LGraph,
     graph_info: &mut GraphInfoHolder,
     heuristic: &mut GreedySwitchHeuristic,
-    mut port_distributor: SweepPortDistributor<'_>,
+    port_distributor: &mut PortDistributor,
     forward: bool,
 ) -> bool {
     let length = graph_info.current_node_order.len();
@@ -5993,6 +6005,31 @@ mod greedy_port_distributor_tests {
             id,
             LayeredOptions::flowchart_test_defaults(ElkDirection::Right),
         )
+    }
+
+    // Mutation: draw a boolean for the two-sided type too, or draw none for the one-sided type.
+    // The shared `Random` then sits one step off for the next connected component.
+    #[test]
+    fn creating_a_port_distributor_draws_as_isweep_port_distributor_create_does() {
+        let order = vec![vec![0]];
+        let next = |cross_min_type| {
+            let mut random = JavaRandom::new(7);
+            let distributor = PortDistributor::create(cross_min_type, &mut random, &order);
+            (distributor, random.next_long())
+        };
+        let untouched = JavaRandom::new(7).next_long();
+        let mut after_one_draw = JavaRandom::new(7);
+        after_one_draw.next_bool();
+        let after_one_draw = after_one_draw.next_long();
+
+        let (two_sided, seen) = next(CrossMinType::TwoSidedGreedySwitch);
+        assert!(matches!(two_sided, PortDistributor::Greedy(_)));
+        assert_eq!(seen, untouched);
+        for cross_min_type in [CrossMinType::OneSidedGreedySwitch, CrossMinType::Barycenter] {
+            let (distributor, seen) = next(cross_min_type);
+            assert!(matches!(distributor, PortDistributor::Barycenter(_)));
+            assert_eq!(seen, after_one_draw);
+        }
     }
 
     fn port(node: usize, port: usize) -> PortRef {
