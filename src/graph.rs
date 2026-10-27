@@ -1254,7 +1254,9 @@ fn centered_port_position(node_size: LSize, side: PortSide) -> LPoint {
 /// port hidden by the self-loop pre-processor. It is not part of the reorder, so it stays. The
 /// node holds `hidden` such ports, so any other index past the list is a bug.
 fn remap_port_index(old_to_new: &[usize], hidden: usize, port: usize) -> usize {
-    debug_assert!(
+    // A stale index is a bug in a processor, never caller input. It stays loud in release builds,
+    // as the indexing `old_to_new[port]` was.
+    assert!(
         port < old_to_new.len() + hidden,
         "port {port} is neither in the reorder ({}) nor hidden ({hidden})",
         old_to_new.len()
