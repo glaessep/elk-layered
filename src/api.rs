@@ -21,7 +21,8 @@
 //! nor `targets` is present. Here, `source` and `target` read as one-element `sources` and
 //! `targets`, and the port keys go to [`ElkEdge::old_form`]. Layout then follows
 //! `transformPrimitiveEdge`: `source` and `target` must name nodes, a port key names a port of
-//! that node, and a port key that names no port leaves the edge at the node. In the new form,
+//! that node, and a port key that names no port leaves the edge at the node. The JSON writer
+//! writes such an edge in the old form again, as elkjs writes its layout into the input. In the new form,
 //! elkjs ignores both port keys, as this crate does. A graph that gives both `source` and
 //! `sources` is a serde error, and `source` next to `targets` reads as one source.
 //!
@@ -140,7 +141,7 @@ pub struct ElkPort {
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[cfg_attr(feature = "serde", serde(try_from = "EdgeWire"))]
+#[cfg_attr(feature = "serde", serde(try_from = "EdgeWire", into = "EdgeOut"))]
 pub struct ElkEdge {
     /// Unique among all edges of the graph.
     pub id: String,
@@ -199,7 +200,7 @@ pub struct ElkEdge {
     pub junction_points: Vec<ElkPoint>,
     /// The port keys of an edge in elkjs's old JSON form, or `None` for the new form. When it is
     /// set, `sources` and `targets` name nodes only, as `transformPrimitiveEdge` reads them. The
-    /// JSON reader sets it, and the JSON writer leaves it out.
+    /// JSON reader sets it, and the JSON writer then writes the edge in the old form again.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub old_form: Option<OldFormPorts>,
 }
@@ -368,6 +369,90 @@ impl TryFrom<EdgeWire> for ElkEdge {
                 target_port: wire.target_port,
             }),
         })
+    }
+}
+
+/// What `ElkEdge` writes to JSON. elkjs writes its layout into the input object, so an edge read
+/// in the old form comes back with the keys it was read with. Writing it in the new form would
+/// lose its port keys, and reading the result again would attach the edge elsewhere.
+#[cfg(feature = "serde")]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EdgeOut {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sources: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<OldEnd>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_port: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    targets: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<OldEnd>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_port: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    labels: Vec<ElkLabel>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    layout_options: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    sections: Vec<ElkEdgeSection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    container: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    junction_points: Vec<ElkPoint>,
+}
+
+/// An old-form `source` or `target`: the one id it was read as, or a list if it was one.
+#[cfg(feature = "serde")]
+#[derive(Serialize)]
+#[serde(untagged)]
+enum OldEnd {
+    One(String),
+    Many(Vec<String>),
+}
+
+#[cfg(feature = "serde")]
+impl From<ElkEdge> for EdgeOut {
+    fn from(edge: ElkEdge) -> Self {
+        let old_end = |mut ids: Vec<String>| match ids.len() {
+            0 => None,
+            1 => ids.pop().map(OldEnd::One),
+            _ => Some(OldEnd::Many(ids)),
+        };
+        let (sources, source, source_port, targets, target, target_port) = match edge.old_form {
+            None => (
+                Some(edge.sources),
+                None,
+                None,
+                Some(edge.targets),
+                None,
+                None,
+            ),
+            Some(ports) => (
+                None,
+                old_end(edge.sources),
+                ports.source_port,
+                None,
+                old_end(edge.targets),
+                ports.target_port,
+            ),
+        };
+        Self {
+            id: edge.id,
+            sources,
+            source,
+            source_port,
+            targets,
+            target,
+            target_port,
+            labels: edge.labels,
+            layout_options: edge.layout_options,
+            sections: edge.sections,
+            container: edge.container,
+            junction_points: edge.junction_points,
+        }
     }
 }
 

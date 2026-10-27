@@ -1,6 +1,6 @@
 //! The graph types read and write elkjs's JSON shape.
 
-use elk_layered::{ElkNode, layout};
+use elk_layered::{ElkEdge, ElkNode, layout};
 use serde_json::{Value, json};
 
 // Mutation: drop `default` from `ElkNode::x`.
@@ -150,11 +150,50 @@ fn the_old_edge_form_reads_like_sources_and_targets() {
     assert_eq!(old.edges[0].sources, ["a"]);
     assert_eq!(old.edges[0].targets, ["b"]);
     let new = graph(json!({"id": "e", "sources": ["a"], "targets": ["b"]}));
-    let json = |graph: &ElkNode| serde_json::to_value(layout(graph).unwrap()).unwrap();
-    assert_eq!(json(&old), json(&new));
-    // The result is written in the new form.
-    assert_eq!(json(&old)["edges"][0]["sources"], json!(["a"]));
-    assert!(json(&old)["edges"][0].get("source").is_none());
+    assert_eq!(
+        layout(&old).unwrap().edges[0].sections,
+        layout(&new).unwrap().edges[0].sections
+    );
+}
+
+// Mutation: in `EdgeOut::from`, write an old-form edge with `sources` and `targets`.
+#[test]
+fn an_old_form_edge_is_written_back_in_the_old_form() {
+    let graph: ElkNode = serde_json::from_value(json!({
+        "id": "root",
+        "children": [{"id": "a", "width": 60, "height": 30}, {"id": "b", "width": 60, "height": 30}],
+        "edges": [{"id": "e", "source": "a", "target": "b"}]
+    }))
+    .unwrap();
+    let edge = &laid_out(&graph)["edges"][0];
+    assert_eq!(edge["source"], "a");
+    assert_eq!(edge["target"], "b");
+    assert!(edge.get("sources").is_none() && edge.get("sourcePort").is_none());
+    // The new form stays the new form.
+    let new = serde_json::to_value(ElkEdge {
+        id: "e".into(),
+        sources: vec!["a".into()],
+        targets: vec!["b".into()],
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(new["sources"], json!(["a"]));
+    assert!(new.get("source").is_none());
+}
+
+// Mutation: leave the port keys out of the written edge. Read again, `sources: ["p"]` then names
+// the node `p` first, and the second layout differs from the first.
+#[test]
+fn an_old_form_edge_lays_out_the_same_after_a_round_trip() {
+    let first = graph_with_a_node_named(
+        "p",
+        json!({"id": "e", "source": "a", "target": "b", "sourcePort": "p", "targetPort": "q"}),
+    );
+    let written = laid_out(&first);
+    assert_eq!(written["edges"][0]["sourcePort"], "p");
+    assert_eq!(written["edges"][0]["targetPort"], "q");
+    let again: ElkNode = serde_json::from_value(written.clone()).unwrap();
+    assert_eq!(laid_out(&again), written);
 }
 
 // Mutation: let the `ends` deserializer accept only a list.
@@ -219,7 +258,7 @@ fn the_old_edge_form_attaches_to_a_port_when_it_gives_one() {
         laid_out(&graph_with_ports(new))["edges"][0]["sections"]
     );
     assert_eq!(old["edges"][0]["sections"][0]["incomingShape"], "p");
-    assert_eq!(old["edges"][0]["sources"], json!(["a"]));
+    assert_eq!(old["edges"][0]["source"], "a");
 }
 
 // Mutation: read the port keys also in the new form. elkjs ignores them there.
@@ -252,7 +291,12 @@ fn an_old_port_key_that_names_no_port_leaves_the_edge_at_the_node() {
     for key in ["sourcePort", "targetPort"] {
         let mut edge = json!({"id": "e", "source": "a", "target": "b"});
         edge[key] = json!("nowhere");
-        assert_eq!(laid_out(&graph_with_ports(edge)), at_node, "{key}");
+        let laid = laid_out(&graph_with_ports(edge));
+        assert_eq!(
+            laid["edges"][0]["sections"], at_node["edges"][0]["sections"],
+            "{key}"
+        );
+        assert_eq!(laid["children"], at_node["children"], "{key}");
     }
 }
 
@@ -318,7 +362,12 @@ fn an_old_port_key_that_only_a_node_has_leaves_the_edge_at_the_named_node() {
     };
     let with_key = graph(json!({"id": "e", "source": "a", "target": "b", "sourcePort": "n"}));
     let without = graph(json!({"id": "e", "source": "a", "target": "b"}));
-    assert_eq!(laid_out(&with_key), laid_out(&without));
+    let (with_key, without) = (laid_out(&with_key), laid_out(&without));
+    assert_eq!(
+        with_key["edges"][0]["sections"],
+        without["edges"][0]["sections"]
+    );
+    assert_eq!(with_key["children"], without["children"]);
 }
 
 // Mutation: drop the owner check in `find_old`, so a port of another node takes the edge to that
