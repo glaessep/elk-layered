@@ -1473,6 +1473,23 @@ fn port_side_from_direction(direction: ElkDirection) -> PortSide {
     }
 }
 
+/// Whether a port on `side` lies across the layout flow: on a north or south side of a horizontal
+/// layout, or on an east or west side of a vertical one.
+///
+/// An undefined direction has no flow, so no side lies across it. The importer resolves the
+/// direction of the root graph before any caller asks, as `LGraphUtil.getDirection` does.
+pub(crate) fn is_across_flow(direction: ElkDirection, side: PortSide) -> bool {
+    match direction {
+        ElkDirection::Left | ElkDirection::Right => {
+            matches!(side, PortSide::North | PortSide::South)
+        }
+        ElkDirection::Up | ElkDirection::Down => {
+            matches!(side, PortSide::East | PortSide::West)
+        }
+        ElkDirection::Undefined => false,
+    }
+}
+
 fn port_ratio_or_position(
     side: PortSide,
     port_position: LPoint,
@@ -1501,6 +1518,35 @@ fn port_ratio_or_position(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Mutation: swap the two arms of `is_across_flow`, or give an undefined direction the
+    // horizontal arm. A case of the table then fails.
+    #[test]
+    fn a_side_across_the_flow_is_a_north_or_south_side_of_a_horizontal_layout() {
+        use ElkDirection::{Down, Left, Right, Undefined, Up};
+        use PortSide::{East, North, South, West};
+        for (direction, across) in [
+            (Left, [North, South]),
+            (Right, [North, South]),
+            (Up, [East, West]),
+            (Down, [East, West]),
+        ] {
+            for side in [North, East, South, West] {
+                assert_eq!(
+                    is_across_flow(direction, side),
+                    across.contains(&side),
+                    "{direction:?} {side:?}"
+                );
+            }
+        }
+        // No flow, so nothing lies across it. A port without a side lies across no flow either.
+        for side in [North, East, South, West, PortSide::Undefined] {
+            assert!(!is_across_flow(Undefined, side), "{side:?}");
+        }
+        for direction in [Left, Right, Up, Down] {
+            assert!(!is_across_flow(direction, PortSide::Undefined));
+        }
+    }
 
     #[test]
     fn external_port_dummy_uses_direction_and_net_flow_for_free_ports() {

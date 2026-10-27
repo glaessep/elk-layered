@@ -17,7 +17,7 @@ use super::options::{
 };
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::configurator::{check_random_seeds, configure_graph_properties, configured_options};
-use crate::graph::{LGraph, LNode, LNodeKind, LPoint, LSize, PortSide};
+use crate::graph::{LGraph, LNode, LNodeKind, LPoint, LSize, PortSide, is_across_flow};
 use crate::intermediate::{
     IntermediateError, calculate_layer_sizes_and_graph_height, insert_label_dummies,
     join_long_edges, merge_hyperedge_dummies, position_interactive_external_ports,
@@ -958,12 +958,6 @@ fn execute_hierarchy_aware_processor(
 fn check_external_port_sides(root: &LGraph) -> PipelineResult<()> {
     let mut pending = vec![root];
     while let Some(graph) = pending.pop() {
-        let across_flow = |side: PortSide| match graph.options.direction {
-            ElkDirection::Up | ElkDirection::Down => {
-                matches!(side, PortSide::East | PortSide::West)
-            }
-            _ => matches!(side, PortSide::North | PortSide::South),
-        };
         for node in &graph.layerless_nodes {
             if node.kind != LNodeKind::ExternalPort {
                 continue;
@@ -973,7 +967,7 @@ fn check_external_port_sides(root: &LGraph) -> PipelineResult<()> {
                     reason: "a port of a node with children that has no side, on a node with fixed port sides",
                 });
             }
-            if across_flow(node.external_port_side) {
+            if is_across_flow(graph.options.direction, node.external_port_side) {
                 return Err(PipelineError::UnsupportedCompoundGraph {
                     reason: "ports of a node with children on a side across the layout direction, which wait for north and south ports (issue #5)",
                 });

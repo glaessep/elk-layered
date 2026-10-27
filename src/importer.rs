@@ -16,7 +16,7 @@ use crate::compound::{
 use crate::graph::{
     CompoundEdgeSegment, EdgeLabelPlacement, HierarchyEdge, LGraph, LLabel, LNode, LPoint, LPort,
     LSize, LayeredEdge, PortRef, PortSide, PortType, apply_port_index_to_dummy,
-    create_external_port_dummy,
+    create_external_port_dummy, is_across_flow,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
@@ -394,17 +394,13 @@ fn check_north_south_ports(root: &LGraph) -> ImportResult<()> {
     while let Some(graph) = pending.pop() {
         let properties = &graph.graph_properties;
         if properties.north_south_ports && properties.non_free_ports {
-            let across_flow = |side: PortSide| match graph.options.direction {
-                ElkDirection::Left | ElkDirection::Right => {
-                    matches!(side, PortSide::North | PortSide::South)
-                }
-                _ => matches!(side, PortSide::East | PortSide::West),
-            };
             let offender = graph
                 .layerless_nodes
                 .iter()
                 .flat_map(|node| node.ports.iter().map(move |port| (node, port)))
-                .find(|(_, port)| port.input_index.is_some() && across_flow(port.side));
+                .find(|(_, port)| {
+                    port.input_index.is_some() && is_across_flow(graph.options.direction, port.side)
+                });
             if let Some((node, port)) = offender {
                 return Err(ImportError::NorthSouthPort {
                     node_id: node.id.clone(),
@@ -1391,16 +1387,7 @@ fn transform_port(
     // Inside self loops are refused, so `INSIDE_CONNECTIONS` stays false.
     initialize_port(&mut lport, constraints, node_size, graph.options.direction);
 
-    let across_flow = match graph.options.direction {
-        ElkDirection::Left | ElkDirection::Right => {
-            matches!(lport.side, PortSide::North | PortSide::South)
-        }
-        ElkDirection::Up | ElkDirection::Down => {
-            matches!(lport.side, PortSide::East | PortSide::West)
-        }
-        ElkDirection::Undefined => false,
-    };
-    if across_flow {
+    if is_across_flow(graph.options.direction, lport.side) {
         graph.graph_properties.north_south_ports = true;
     }
     lport
