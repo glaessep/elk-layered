@@ -27,9 +27,10 @@ if (!dir) {
 }
 const mode = process.argv[3] ?? "";
 const groupEnds = mode === "--group-ends";
-const withPorts = mode === "--ports";
-const COUNT = { "--group-ends": 120, "--ports": 150 }[mode] ?? 200;
-const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed }[mode] ?? 0x5eed;
+const groupPorts = mode === "--group-ports";
+const withPorts = mode === "--ports" || groupPorts;
+const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150 }[mode] ?? 200;
+const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed }[mode] ?? 0x5eed;
 
 // mulberry32: a small generator with a fixed seed. Its numbers only pick the graphs, so any
 // generator with a fixed seed would do.
@@ -68,7 +69,11 @@ function graph() {
   const options = { "elk.algorithm": "layered" };
   const direction = rand.pick([null, "RIGHT", "LEFT", "DOWN", "UP"]);
   if (direction) options["elk.direction"] = direction;
-  const hierarchy = withPorts ? "flat" : rand.pick(["flat", "flat", "include", "include", "separate"]);
+  const hierarchy = groupPorts
+    ? rand.pick(["include", "include", "separate"])
+    : withPorts
+      ? "flat"
+      : rand.pick(["flat", "flat", "include", "include", "separate"]);
   if (hierarchy === "include") options["elk.hierarchyHandling"] = "INCLUDE_CHILDREN";
   if (rand.chance(0.5)) options["elk.layered.considerModelOrder.strategy"] = "NODES_AND_EDGES";
   const seed = rand.pick([null, null, "1", String(rand.int(2, 1000000))]);
@@ -139,7 +144,7 @@ function graph() {
     // Along the flow, so that no port needs the north and south port steps of layered.
     const flowSides = direction === "DOWN" || direction === "UP" ? ["NORTH", "SOUTH"] : ["WEST", "EAST"];
     let p = 0;
-    for (const node of leaves) {
+    for (const node of groupPorts ? [...leaves, ...groups] : leaves) {
       if (!rand.chance(0.6)) continue;
       const constraint = rand.pick([null, "FIXED_SIDE", "FIXED_SIDE", "FIXED_ORDER"]);
       if (constraint) (node.layoutOptions ??= {})["elk.portConstraints"] = constraint;

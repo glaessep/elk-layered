@@ -3,6 +3,11 @@
 // those files, number for number.
 //
 //   cd oracle && npm install && node record.mjs ../tests/elkjs
+//   node record.mjs ../tests/elkjs/random-group-ports --drop-crashes
+//
+// An elkjs exception other than ELK's `UnsupportedGraphException` stops the recording, so someone
+// looks at the case. For a random corpus, `--drop-crashes` deletes such an input instead and lists
+// it with its message in `dropped.txt`: there is no layout to hold elk-layered to.
 //
 // Record again only when a case's input changes. Never edit an expected file by hand. elkjs is
 // installed here to record and nowhere else: it is never committed and never part of the crate.
@@ -12,15 +17,19 @@
 // the order of ELK's hash sets, and with it a layout, depends on the graphs laid out earlier in
 // the same process. A fresh process gives each case the layout a caller sees on its first run.
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const [, , dir, one] = process.argv;
+const [, , dir, arg] = process.argv;
 if (!dir) {
-  console.error("usage: node record.mjs <directory of *.input.json>");
+  console.error("usage: node record.mjs <directory of *.input.json> [--drop-crashes]");
   process.exit(2);
 }
+const dropCrashes = arg === "--drop-crashes";
+const one = dropCrashes ? undefined : arg;
+// The exit code by which the child tells the parent that elkjs crashed.
+const CRASHED = 3;
 
 if (one) {
   // The child: lay out one case and write it.
@@ -39,7 +48,7 @@ if (one) {
       // Any other exception (TypeError, stack overflow, ClassCastException...) is not a refusal.
       // Nothing is written, so someone looks at the case.
       console.error(`${one}: elkjs failed with something other than a refusal: ${message}`);
-      process.exit(1);
+      process.exit(CRASHED);
     }
     laid = { elkjsError: message };
   }
@@ -54,7 +63,23 @@ if (one) {
     process.exit(1);
   }
   const self = fileURLToPath(import.meta.url);
+  const dropped = [];
   for (const name of inputs) {
-    execFileSync(process.execPath, [self, dir, name], { stdio: "inherit" });
+    try {
+      execFileSync(process.execPath, [self, dir, name], { stdio: ["ignore", "inherit", "pipe"] });
+    } catch (error) {
+      const stderr = String(error.stderr ?? "").trim();
+      if (!dropCrashes || error.status !== CRASHED) {
+        console.error(stderr);
+        process.exit(1);
+      }
+      rmSync(join(dir, name));
+      dropped.push(stderr.split("\n")[0]);
+      console.log(`dropped ${name}`);
+    }
+  }
+  if (dropCrashes) {
+    const list = dropped.map((line) => `${line}\n`).join("");
+    writeFileSync(join(dir, "dropped.txt"), list);
   }
 }

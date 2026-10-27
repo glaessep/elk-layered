@@ -26,7 +26,8 @@ fn cases_dir() -> PathBuf {
 
 /// Every input: the hand-written cases in `tests/elkjs/`, then the random ones that
 /// `oracle/random.mjs` writes: `tests/elkjs/random/`, `tests/elkjs/random-group-ends/`, whose
-/// edges may also end at a group, and `tests/elkjs/random-ports/`, whose nodes have ports.
+/// edges may also end at a group, `tests/elkjs/random-ports/`, whose nodes have ports, and
+/// `tests/elkjs/random-group-ports/`, whose groups have ports too.
 fn cases() -> Vec<PathBuf> {
     let mut inputs = Vec::new();
     for dir in [
@@ -34,6 +35,7 @@ fn cases() -> Vec<PathBuf> {
         cases_dir().join("random"),
         cases_dir().join("random-group-ends"),
         cases_dir().join("random-ports"),
+        cases_dir().join("random-group-ports"),
     ] {
         let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|_| panic!("{} exists", dir.display()))
