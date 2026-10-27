@@ -820,7 +820,10 @@ impl LGraph {
         position: LPoint,
     ) -> Option<PortRef> {
         let node = self.layerless_nodes.get_mut(node_index)?;
-        debug_assert_eq!(
+        // Only a processor that runs between the self-loop pre-processor and the port restorer
+        // could reach this. Caller input cannot, so a failure is an internal bug and stays loud
+        // in release builds.
+        assert_eq!(
             node.hidden_port_count, 0,
             "a port added while self-loop ports are hidden takes the index of a hidden port"
         );
@@ -857,7 +860,9 @@ impl LGraph {
             });
         }
 
-        debug_assert_eq!(
+        // As in `add_port`: only a processor between the self-loop pre-processor and the port
+        // restorer could reach this, never caller input.
+        assert_eq!(
             node.hidden_port_count, 0,
             "a collector port made while self-loop ports are hidden takes the index of a hidden port"
         );
