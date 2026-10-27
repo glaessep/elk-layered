@@ -38,9 +38,12 @@
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+const USAGE = "usage: node random.mjs <directory> [--group-ends | --ports | --group-ports | --cross-ports | --inline-labels]";
 const dir = process.argv[2];
-if (!dir) {
-  console.error("usage: node random.mjs <directory> [--group-ends | --ports | --group-ports | --cross-ports | --inline-labels]");
+// A mode typed first would be read as the directory, and the script deletes the files of that
+// directory. So a directory that starts with `-` is refused, and so is any extra argument.
+if (!dir || dir.startsWith("-") || process.argv.length > 4) {
+  console.error(USAGE);
   process.exit(2);
 }
 const mode = process.argv[3] ?? "";
