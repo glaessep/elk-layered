@@ -2055,55 +2055,12 @@ mod tests {
         assert_eq!(target_node(&graph, source), None);
     }
 
+    // The two ports share one id string, so only the `PortId` tells them apart.
+    //
     // Mutation: leave the ports in the order the sweep put them, by skipping the
     // `reorder_node_ports` call in `SweepCopy::transfer_node_and_port_orders_to_graph`.
     #[test]
-    fn sweep_copy_restores_ports_by_stable_id_after_reorder() {
-        let mut graph = graph(vec![node("A")], vec![]);
-        let a = graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap();
-        graph.layerless_nodes[a].ports.clear();
-        let first = graph
-            .add_port(
-                a,
-                PortType::Output,
-                PortSide::East,
-                LPoint { x: 0.0, y: 0.0 },
-            )
-            .unwrap();
-        let second = graph
-            .add_port(
-                a,
-                PortType::Output,
-                PortSide::East,
-                LPoint { x: 0.0, y: 0.0 },
-            )
-            .unwrap();
-        graph.layerless_nodes[a].ports[first.port].id = "first".to_string();
-        graph.layerless_nodes[a].ports[second.port].id = "second".to_string();
-        graph.set_node_layer(a, 0);
-
-        let copy = SweepCopy::new(&graph, &[vec![a]]);
-        graph.reorder_node_ports(a, crate::graph::port_ids([1, 0]));
-
-        assert!(copy.transfer_node_and_port_orders_to_graph(&mut graph, false));
-        assert_eq!(
-            graph.layerless_nodes[a]
-                .ports
-                .iter()
-                .map(|port| port.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["first", "second"]
-        );
-    }
-
-    // Mutation: leave the ports where the sweep put them, which skips `reorder_node_ports` in the
-    // transfer.
-    #[test]
-    fn sweep_copy_restores_ports_when_external_ids_repeat() {
+    fn sweep_copy_restores_the_port_order_by_port_id_when_id_strings_repeat() {
         let mut graph = graph(vec![node("A")], vec![]);
         let a = graph
             .layerless_nodes
