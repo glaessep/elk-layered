@@ -1663,7 +1663,7 @@ mod tests {
             let mut holder = LNode::new(format!("node-{}", depth - 1), 1.0, 1.0, None);
             holder.compound = true;
             graphs[parent].layerless_nodes.push(holder);
-            let mut graph = LGraph::new(format!("graph-{depth}"), options.clone());
+            let graph = LGraph::new(format!("graph-{depth}"), options.clone());
             parent = graphs.nest(parent, 0, graph);
         }
         graphs
@@ -1690,7 +1690,7 @@ mod tests {
             child.layerless_nodes.push(grandchild_holder);
             let child = graphs.nest(GraphId::ROOT, position, child);
 
-            let mut grandchild = LGraph::new(format!("{branch}-grandchild"), options.clone());
+            let grandchild = LGraph::new(format!("{branch}-grandchild"), options.clone());
             graphs.nest(child, 0, grandchild);
         }
         graphs
