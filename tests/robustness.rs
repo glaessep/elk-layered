@@ -240,12 +240,35 @@ fn all_paths(node: &ElkNode) -> Vec<Vec<usize>> {
     out
 }
 
+/// The path to the node with this id, or `None` when no node has it.
+fn path_to(node: &ElkNode, id: &str) -> Option<Vec<usize>> {
+    node.children.iter().enumerate().find_map(|(i, child)| {
+        if child.id == id {
+            return Some(vec![i]);
+        }
+        let mut path = path_to(child, id)?;
+        path.insert(0, i);
+        Some(path)
+    })
+}
+
 /// A graph with one defect from the list below. Some defects are only odd, not wrong (an empty
 /// id, a size of zero); `layout` may then lay the graph out.
 fn broken_graph(rng: &mut Rng) -> ElkNode {
     let mut graph = valid_graph(rng);
     let defect = rng.int(0, 16);
-    let paths = all_paths(&graph);
+    let mut paths = all_paths(&graph);
+    match defect {
+        // The root already has the id "root", so only another node makes a duplicate.
+        0 => paths.retain(|path| !path.is_empty()),
+        // An edge from a node to one inside it only breaks the rules when the node is an ancestor
+        // of "n0": the root, or a group on the way to it.
+        11 => {
+            let n0 = path_to(&graph, "n0").expect("every valid graph has a node n0");
+            paths.retain(|path| n0.starts_with(path) && path.len() < n0.len());
+        }
+        _ => {}
+    }
     let path = paths[rng.int(0, paths.len() as u64 - 1) as usize].clone();
     let node = at(&mut graph, &path);
     match defect {
