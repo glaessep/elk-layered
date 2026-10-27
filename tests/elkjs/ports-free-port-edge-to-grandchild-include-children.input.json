@@ -1,0 +1,59 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "s",
+      "width": 40,
+      "height": 20
+    },
+    {
+      "id": "g",
+      "ports": [
+        {
+          "id": "gp",
+          "width": 8,
+          "height": 8
+        }
+      ],
+      "children": [
+        {
+          "id": "g2",
+          "children": [
+            {
+              "id": "x",
+              "width": 40,
+              "height": 20
+            }
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "id": "e",
+          "sources": [
+            "gp"
+          ],
+          "targets": [
+            "x"
+          ]
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "se",
+      "sources": [
+        "s"
+      ],
+      "targets": [
+        "g"
+      ]
+    }
+  ]
+}
