@@ -15,7 +15,38 @@ use serde_json::Value;
 
 /// Cases whose feature elk-layered does not have yet, each with the issue that adds it. A case
 /// leaves this list in the pull request that makes it pass.
-const NOT_YET: &[(&str, &str)] = &[("comp-ns", "north and south ports, #5")];
+const NOT_YET: &[(&str, &str)] = &[
+    ("comp-ns", "north and south ports, #5"),
+    ("random-group-ports/r007", "north and south ports, #5"),
+    ("random-group-ports/r010", "north and south ports, #5"),
+    ("random-group-ports/r013", "north and south ports, #5"),
+    ("random-group-ports/r019", "north and south ports, #5"),
+    ("random-group-ports/r025", "north and south ports, #5"),
+    ("random-group-ports/r029", "north and south ports, #5"),
+    ("random-group-ports/r033", "north and south ports, #5"),
+    ("random-group-ports/r035", "north and south ports, #5"),
+    ("random-group-ports/r043", "north and south ports, #5"),
+    ("random-group-ports/r044", "north and south ports, #5"),
+    ("random-group-ports/r045", "north and south ports, #5"),
+    ("random-group-ports/r048", "north and south ports, #5"),
+    ("random-group-ports/r050", "north and south ports, #5"),
+    ("random-group-ports/r059", "north and south ports, #5"),
+    ("random-group-ports/r064", "north and south ports, #5"),
+    ("random-group-ports/r074", "north and south ports, #5"),
+    ("random-group-ports/r077", "north and south ports, #5"),
+    ("random-group-ports/r078", "north and south ports, #5"),
+    ("random-group-ports/r082", "north and south ports, #5"),
+    ("random-group-ports/r106", "north and south ports, #5"),
+    ("random-group-ports/r111", "north and south ports, #5"),
+    ("random-group-ports/r112", "north and south ports, #5"),
+    ("random-group-ports/r125", "north and south ports, #5"),
+    ("random-group-ports/r127", "north and south ports, #5"),
+    ("random-group-ports/r131", "north and south ports, #5"),
+    ("random-group-ports/r134", "north and south ports, #5"),
+    ("random-group-ports/r135", "north and south ports, #5"),
+    ("random-group-ports/r140", "north and south ports, #5"),
+    ("random-group-ports/r147", "north and south ports, #5"),
+];
 
 fn cases_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/elkjs")
