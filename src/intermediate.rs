@@ -4565,6 +4565,8 @@ mod tests {
         );
     }
 
+    // Mutation: sort the gathered labels by ascending index in `remove_gathered_end_labels`. Each
+    // removal then shifts the next one, and the edge keeps head labels and loses center labels.
     #[test]
     fn end_label_gather_preserves_large_mixed_label_order_and_identity() {
         let mut input = edge("A-B", "A", "B");
