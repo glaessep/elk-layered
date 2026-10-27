@@ -185,6 +185,12 @@ pub struct Layer {
     pub size: LSize,
 }
 
+impl AsRef<[usize]> for Layer {
+    fn as_ref(&self) -> &[usize] {
+        &self.nodes
+    }
+}
+
 impl Layer {
     pub fn new() -> Self {
         Self {

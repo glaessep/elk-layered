@@ -2196,7 +2196,12 @@ struct AdjacencyList {
 }
 
 impl AdjacencyList {
-    fn new(graph: &LGraph, current_node_order: &[Vec<usize>], node: usize, side: PortSide) -> Self {
+    fn new<L: AsRef<[usize]>>(
+        graph: &LGraph,
+        current_node_order: &[L],
+        node: usize,
+        side: PortSide,
+    ) -> Self {
         let mut adjacency_list = Vec::new();
         let mut size = 0usize;
         let port_positions =
@@ -2335,10 +2340,10 @@ impl BetweenLayerEdgeTwoNodeCrossingsCounter {
         );
     }
 
-    fn count_both_side_crossings(
+    fn count_both_side_crossings<L: AsRef<[usize]>>(
         &mut self,
         graph: &LGraph,
-        current_node_order: &[Vec<usize>],
+        current_node_order: &[L],
         free_layer_index: usize,
         upper_node: usize,
         lower_node: usize,
@@ -2370,10 +2375,10 @@ impl BetweenLayerEdgeTwoNodeCrossingsCounter {
         self.lower_upper_crossings = 0;
     }
 
-    fn add_crossings(
+    fn add_crossings<L: AsRef<[usize]>>(
         &mut self,
         graph: &LGraph,
-        current_node_order: &[Vec<usize>],
+        current_node_order: &[L],
         free_layer_index: usize,
         upper_node: usize,
         lower_node: usize,
@@ -3063,14 +3068,8 @@ impl GreedyPortDistributor {
         };
         let inner_layers = nested_graph
             .as_deref()
-            .filter(|nested| !nested.layers.is_empty())
-            .map(|nested| {
-                nested
-                    .layers
-                    .iter()
-                    .map(|layer| layer.nodes.clone())
-                    .collect::<Vec<_>>()
-            });
+            .map(|nested| nested.layers.as_slice())
+            .filter(|layers| !layers.is_empty());
         let mut hierarchical_counter = BetweenLayerEdgeTwoNodeCrossingsCounter::new();
         let inner_free_layer = inner_layers
             .as_ref()
@@ -3713,16 +3712,16 @@ fn port_side_order(side: PortSide) -> u8 {
     }
 }
 
-fn build_adjacencies(
+fn build_adjacencies<L: AsRef<[usize]>>(
     graph: &LGraph,
-    current_node_order: &[Vec<usize>],
+    current_node_order: &[L],
     free_layer_index: usize,
     side: PortSide,
 ) -> HashMap<usize, AdjacencyList> {
     current_node_order
         .get(free_layer_index)
         .into_iter()
-        .flatten()
+        .flat_map(|layer| layer.as_ref().iter())
         .copied()
         .map(|node| {
             (
@@ -3748,9 +3747,9 @@ fn merge_equal_adjacencies(adjacencies: Vec<Adjacency>) -> Vec<Adjacency> {
     merged
 }
 
-fn neighboring_layer_port_positions(
+fn neighboring_layer_port_positions<L: AsRef<[usize]>>(
     graph: &LGraph,
-    current_node_order: &[Vec<usize>],
+    current_node_order: &[L],
     node: usize,
     side: PortSide,
 ) -> HashMap<PortRef, usize> {
@@ -3770,6 +3769,7 @@ fn neighboring_layer_port_positions(
     };
 
     for (position, port) in current_node_order[neighbor_index]
+        .as_ref()
         .iter()
         .copied()
         .flat_map(|node| ports_in_north_south_east_west_order(graph, node, neighbor_side))
@@ -3780,8 +3780,8 @@ fn neighboring_layer_port_positions(
     positions
 }
 
-fn neighboring_layer_exists(
-    current_node_order: &[Vec<usize>],
+fn neighboring_layer_exists<L: AsRef<[usize]>>(
+    current_node_order: &[L],
     free_layer_index: usize,
     side: PortSide,
 ) -> bool {
