@@ -478,6 +478,10 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    such as labels-inline-mixed-one-edge-down and random-inline-labels/r069.
 // 64. In `place_labels_for_vertical_layout`, do the same: 10 cases, such as
 //    labels-inline-mixed-one-edge-down and random-inline-labels/r012.
+// 65. In `input_label` (src/layout.rs), make a label whose `elk.edgeLabels.inline` is true a
+//    centre label whatever its placement is: 2 cases, labels-inline-on-end-labels and
+//    labels-inline-on-end-labels-down. Only these set the option on HEAD and TAIL labels. elkjs
+//    ignores it there: the label dummy inserter takes centre labels alone.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
