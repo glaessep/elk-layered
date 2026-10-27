@@ -1665,11 +1665,7 @@ fn compute_edge_penalty(
     else {
         return 0;
     };
-    if port_count == 0
-        || port_penalties.len() != port_count
-        || leftmost_port >= port_count
-        || rightmost_port >= port_count
-    {
+    if port_penalties.len() != port_count {
         return 0;
     }
 
