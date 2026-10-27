@@ -396,7 +396,6 @@ impl BarycenterPortDistributor {
 
     fn sort_ports(&self, graph: &mut LGraph, node: usize) {
         let mut order = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-        let before = order.clone();
         order.sort_by(|left, right| {
             let left_port = &graph.layerless_nodes[node].ports[*left];
             let right_port = &graph.layerless_nodes[node].ports[*right];
@@ -427,7 +426,12 @@ impl BarycenterPortDistributor {
                 left_barycenter.total_cmp(&right_barycenter)
             }
         });
-        if order == before {
+        // A sort that moves nothing is the common case, so skip the write.
+        if order
+            .iter()
+            .copied()
+            .eq(graph.layerless_nodes[node].ports.ids())
+        {
             return;
         }
         graph.reorder_node_ports(node, order);
@@ -1706,12 +1710,8 @@ impl BarycenterHeuristic {
             state.barycenter = None;
         }
 
-        let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-        for port_index in port_ids {
-            let free_port = PortRef {
-                node,
-                port: port_index,
-            };
+        for port in graph.layerless_nodes[node].ports.ids() {
+            let free_port = PortRef { node, port };
             for fixed_port in connected_ports_for_sweep(graph, free_port, forward) {
                 if graph.layerless_nodes[fixed_port.node].layer_index
                     == graph.layerless_nodes[node].layer_index

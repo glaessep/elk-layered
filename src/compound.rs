@@ -1490,12 +1490,12 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
         let parent_node_id = graph.layerless_nodes[node_index].id.clone();
         let parent_size = graph.layerless_nodes[node_index].size;
         let nested_direction = nested_graph.options.direction;
-        let port_ids = graph.layerless_nodes[node_index]
-            .ports
-            .ids()
-            .collect::<Vec<_>>();
 
-        for port_index in port_ids {
+        // Linking a dummy writes the port's dummy and never changes the node's list.
+        for position in 0..graph.layerless_nodes[node_index].ports.len() {
+            let Some(port_index) = graph.layerless_nodes[node_index].ports.id_at(position) else {
+                continue;
+            };
             if graph.layerless_nodes[node_index].ports[port_index]
                 .port_dummy
                 .is_some()
@@ -2400,6 +2400,8 @@ mod tests {
         }
     }
 
+    // Mutation: skip the `origin_port` branch of `parent_port_for_external_dummy`, so the port is
+    // found by its name and the first port of that name wins.
     #[test]
     fn compound_endpoint_link_uses_exact_port_identity_when_ids_repeat() {
         let mut graph = import_graph(&compound_fanout_graph(1)).expect("compound fixture import");
@@ -2428,9 +2430,8 @@ mod tests {
         duplicate.port_dummy = None;
         let duplicate_port = PortRef {
             node: group,
-            port: PortId::new(graph.layerless_nodes[group].ports.len()),
+            port: graph.layerless_nodes[group].ports.push(duplicate),
         };
-        graph.layerless_nodes[group].ports.push(duplicate);
         if graph.edges[edge_index].source == original_port {
             assert!(graph.set_edge_source(edge_index, duplicate_port));
         } else {

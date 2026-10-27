@@ -283,7 +283,8 @@ fn push_dummy_port(
     side: PortSide,
 ) -> PortRef {
     let node = &mut graph.layerless_nodes[dummy];
-    let index = node.ports.len();
+    // `slot_count`, like `LGraph::add_port`: a port off the list still holds its name.
+    let index = node.ports.slot_count();
     let mut port = LPort::new(format!("{}:{index}", node.id), dummy, port_type);
     port.set_side(side);
     PortRef {
@@ -314,8 +315,11 @@ pub fn postprocess_north_south_ports(graph: &mut LGraph) {
                     .zip(ports.ids().skip(1))
                     .all(|(first, second)| ports[first].origin_port == ports[second].origin_port);
 
-            let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-            for port in port_ids {
+            // Moving an edge to the origin port never changes the dummy's list.
+            for position in 0..graph.layerless_nodes[node].ports.len() {
+                let Some(port) = graph.layerless_nodes[node].ports.id_at(position) else {
+                    continue;
+                };
                 let dummy_port = PortRef { node, port };
                 if !graph.layerless_nodes[node].ports[port]
                     .incoming_edges
@@ -1001,6 +1005,19 @@ mod tests {
         assert!(graph.edges[edges[0]].junction_points.is_empty());
         assert!(graph.edges[second].junction_points.is_empty());
         assert_eq!(graph.edges[second].bend_points.len(), 1);
+    }
+
+    // Mutation: name a new dummy port after `ports.len()` instead of `ports.slot_count()`.
+    #[test]
+    fn a_new_dummy_port_gets_a_name_no_unlisted_port_has() {
+        let (mut graph, _, dummy, _) = placed_graph(true, false);
+        let listed = graph.layerless_nodes[dummy].ports.id_at(0).unwrap();
+        graph.layerless_nodes[dummy].ports.unlist(&[listed]);
+
+        let extra = push_dummy_port(&mut graph, dummy, PortType::Output, PortSide::East);
+
+        let ports = &graph.layerless_nodes[dummy].ports;
+        assert_ne!(ports[extra.port].id, ports[listed].id);
     }
 
     // Mutation: remove every node of the layer, or only the first dummy.

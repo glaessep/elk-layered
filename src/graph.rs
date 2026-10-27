@@ -1022,7 +1022,7 @@ impl LGraph {
         let new_order = new_order.into_iter().collect::<Vec<_>>();
         self.layerless_nodes
             .get_mut(node_index)
-            .is_some_and(|node| node.ports.set_order(&new_order))
+            .is_some_and(|node| node.ports.set_order(new_order))
     }
 }
 

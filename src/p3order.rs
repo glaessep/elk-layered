@@ -50,11 +50,10 @@ fn assign_crossing_minimization_port_ids(graph: &mut LGraph, order: &[Vec<usize>
             let Some(node_data) = graph.layerless_nodes.get_mut(*node) else {
                 continue;
             };
-            let port_ids = node_data.ports.ids().collect::<Vec<_>>();
-            for port in port_ids {
-                node_data.ports[port].crossing_minimization_id = Some(next_port_id);
+            node_data.ports.for_each_listed_mut(|port| {
+                port.crossing_minimization_id = Some(next_port_id);
                 next_port_id += 1;
-            }
+            });
         }
     }
 }
@@ -185,22 +184,19 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
     }
 
     // The side of a port may have changed, so the list is sorted again, as `PortListSorter` sorts
-    // a node with a fixed port order. An order that is already sorted changes nothing, so the
-    // node's references to its ports are left alone.
+    // a node with a fixed port order. Writing the list back costs one copy of the ids, and a
+    // port keeps its id, so a sorted list needs no special case.
     for node in to_sort {
         let constraints = graph.layerless_nodes[node].port_constraints;
         let mut order = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-        let before = order.clone();
         order
             .sort_by(|left, right| compare_combined_ports(graph, node, *left, *right, constraints));
-        if order != before {
-            // A sort of the port indices is a permutation, so a refusal is a bug, never caller
-            // input. It stays loud in release builds.
-            assert!(
-                graph.reorder_node_ports(node, order),
-                "the sorted port order of node {node} is not a permutation of its ports"
-            );
-        }
+        // A sort of the port indices is a permutation, so a refusal is a bug, never caller
+        // input. It stays loud in release builds.
+        assert!(
+            graph.reorder_node_ports(node, order),
+            "the sorted port order of node {node} is not a permutation of its ports"
+        );
     }
 }
 
@@ -278,9 +274,12 @@ pub fn process_port_sides(graph: &mut LGraph, others: OtherGraphs<'_>) {
 
 fn process_node_port_sides(graph: &mut LGraph, others: OtherGraphs<'_>, node: usize) {
     let side_fixed = graph.layerless_nodes[node].port_constraints.is_side_fixed();
-    let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
 
-    for port in port_ids {
+    // `set_port_side` writes a side and never changes the list, so the places stay valid.
+    for position in 0..graph.layerless_nodes[node].ports.len() {
+        let Some(port) = graph.layerless_nodes[node].ports.id_at(position) else {
+            continue;
+        };
         if !side_fixed || graph.layerless_nodes[node].ports[port].side == PortSide::Undefined {
             set_port_side(graph, others, PortRef { node, port });
         }
@@ -629,8 +628,10 @@ pub fn long_edge_target_node_preprocessing(
         port.long_edge_target_node = None;
     }
 
-    let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-    for port in port_ids {
+    for position in 0..graph.layerless_nodes[node].ports.len() {
+        let Some(port) = graph.layerless_nodes[node].ports.id_at(position) else {
+            continue;
+        };
         if graph.layerless_nodes[node].ports[port]
             .outgoing_edges
             .is_empty()
@@ -750,10 +751,12 @@ pub(super) fn count_model_order_port_changes(graph: &LGraph, layers: &[Vec<usize
                 &target_orders,
                 graph.options.consider_model_order_port_model_order,
             );
-            let port_ids = graph.layerless_nodes[*node].ports.ids().collect::<Vec<_>>();
-            for i in 0..port_ids.len() {
-                for j in (i + 1)..port_ids.len() {
-                    if comparator.compare(port_ids[i], port_ids[j]) == Ordering::Greater {
+            let ports = &graph.layerless_nodes[*node].ports;
+            for i in 0..ports.len() {
+                for j in (i + 1)..ports.len() {
+                    if let (Some(left), Some(right)) = (ports.id_at(i), ports.id_at(j))
+                        && comparator.compare(left, right) == Ordering::Greater
+                    {
                         wrong_model_order += 1;
                     }
                 }
@@ -1434,6 +1437,9 @@ mod tests {
         }
     }
 
+    // Mutation: add a new port at the front of the node's list, not at its end (`NodePorts::push`
+    // with `order.insert(0, id)`). The test reads both places with `unwrap`, because a port off
+    // the list has no place and `None` sorts before every place.
     #[test]
     fn compound_self_loop_keeps_input_ports_in_source_model_order() {
         let mut parent = node("Active");
@@ -1463,10 +1469,10 @@ mod tests {
         assert_eq!(parent.ports[loop_edge.source.port].side, PortSide::South);
         assert_eq!(parent.ports[loop_edge.target.port].side, PortSide::North);
         assert_eq!(parent.ports[cross_edge.target.port].side, PortSide::North);
-        assert!(
-            parent.ports.position(loop_edge.target.port)
-                < parent.ports.position(cross_edge.target.port)
-        );
+        // Both ports must be in the list: `None` would sort below any place.
+        let loop_place = parent.ports.position(loop_edge.target.port).unwrap();
+        let cross_place = parent.ports.position(cross_edge.target.port).unwrap();
+        assert!(loop_place < cross_place);
         // Reordering must also keep each child external port's origin linked
         // to its corresponding parent port, including detached self-loop ports.
         let child = &graph[parent.nested_graph.unwrap()];
@@ -2052,53 +2058,12 @@ mod tests {
         assert_eq!(target_node(&graph, source), None);
     }
 
+    // The two ports share one id string, so only the `PortId` tells them apart.
+    //
+    // Mutation: leave the ports in the order the sweep put them, by skipping the
+    // `reorder_node_ports` call in `SweepCopy::transfer_node_and_port_orders_to_graph`.
     #[test]
-    fn sweep_copy_restores_ports_by_stable_id_after_reorder() {
-        let mut graph = graph(vec![node("A")], vec![]);
-        let a = graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap();
-        graph.layerless_nodes[a].ports.clear();
-        let first = graph
-            .add_port(
-                a,
-                PortType::Output,
-                PortSide::East,
-                LPoint { x: 0.0, y: 0.0 },
-            )
-            .unwrap();
-        let second = graph
-            .add_port(
-                a,
-                PortType::Output,
-                PortSide::East,
-                LPoint { x: 0.0, y: 0.0 },
-            )
-            .unwrap();
-        graph.layerless_nodes[a].ports[first.port].id = "first".to_string();
-        graph.layerless_nodes[a].ports[second.port].id = "second".to_string();
-        graph.set_node_layer(a, 0);
-
-        let copy = SweepCopy::new(&graph, &[vec![a]]);
-        graph.reorder_node_ports(a, crate::graph::port_ids([1, 0]));
-
-        assert!(copy.transfer_node_and_port_orders_to_graph(&mut graph, false));
-        assert_eq!(
-            graph.layerless_nodes[a]
-                .ports
-                .iter()
-                .map(|port| port.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["first", "second"]
-        );
-    }
-
-    // Mutation: leave the ports where the sweep put them, which skips `reorder_node_ports` in the
-    // transfer.
-    #[test]
-    fn sweep_copy_restores_ports_when_external_ids_repeat() {
+    fn sweep_copy_restores_the_port_order_by_port_id_when_id_strings_repeat() {
         let mut graph = graph(vec![node("A")], vec![]);
         let a = graph
             .layerless_nodes

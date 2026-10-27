@@ -242,6 +242,8 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
     }
 
     for node_index in 0..node_count {
+        // `reverse_edge` with `adapt_ports` can add a collector port to the node's list, so the
+        // loop walks a copy of the ids.
         let port_ids = graph.layerless_nodes[node_index]
             .ports
             .ids()

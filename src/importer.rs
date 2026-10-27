@@ -1954,7 +1954,8 @@ fn ensure_port_at_node(
         return port;
     }
 
-    let port_number = graph.layerless_nodes[node].ports.len();
+    // `slot_count`, like `LGraph::add_port`: a port off the list still holds its name.
+    let port_number = graph.layerless_nodes[node].ports.slot_count();
     let mut implicit_port = LPort::new(format!("{node_id}:{port_number:?}"), node, port_type);
     // Mirror Mermaid's ELK `LGraphUtil.createPort`: dedicated implicit ports receive
     // a direction-derived side before direction preprocessing/transposition runs.
@@ -3614,6 +3615,39 @@ mod tests {
                 .all(|port| port.collector_type.is_none())
         );
         assert!(!lgraph.graph_properties.hyperedges);
+    }
+
+    // Mutation: name a made-up port after `ports.len()` instead of `ports.slot_count()`.
+    #[test]
+    fn a_made_up_port_gets_a_name_no_unlisted_port_has() {
+        let mut lgraph = LGraph::new("root", LayeredOptions::default());
+        lgraph.options.merge_edges = false;
+        lgraph
+            .layerless_nodes
+            .push(LNode::new("A", 10.0, 10.0, None));
+        let first = lgraph.add_port(0, PortType::Output, PortSide::East, Default::default());
+        lgraph.add_port(0, PortType::Output, PortSide::East, Default::default());
+        lgraph.layerless_nodes[0]
+            .ports
+            .unlist(&[first.unwrap().port]);
+
+        let made_up = ensure_port_at_node(
+            &mut lgraph,
+            None,
+            0,
+            "A",
+            PortType::Output,
+            &mut ImportPortIndex::new(),
+        )
+        .unwrap();
+
+        let ports = &lgraph.layerless_nodes[0].ports;
+        assert_eq!(ports.slot_count(), 3);
+        let made_up_name = &ports[made_up.port].id;
+        let same_name = (0..ports.slot_count())
+            .filter(|index| ports[PortId::new(*index)].id == *made_up_name)
+            .count();
+        assert_eq!(same_name, 1);
     }
 
     #[test]
