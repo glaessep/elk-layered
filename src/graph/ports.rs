@@ -170,7 +170,9 @@ impl NodePorts {
         }
     }
 
-    /// Removes every port.
+    /// Removes every port. Only tests call it: the next `push` would give out `PortId::new(0)`
+    /// again, and a port id must stay the name of one port for the life of its node.
+    #[cfg(test)]
     pub fn clear(&mut self) {
         self.slots.clear();
         self.order.clear();
