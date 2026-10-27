@@ -180,7 +180,13 @@ impl NodePorts {
 
     /// Puts the listed ports in this order. Returns `false` and changes nothing unless `order`
     /// names each listed port exactly once. No port changes its id.
-    pub fn set_order(&mut self, order: &[PortId]) -> bool {
+    ///
+    /// The list takes `order` as it is, with no copy. An order that is already the list's order
+    /// costs one comparison, which is the common case when a sort leaves the ports where they were.
+    pub fn set_order(&mut self, order: Vec<PortId>) -> bool {
+        if order == self.order {
+            return true;
+        }
         if order.len() != self.order.len() {
             return false;
         }
@@ -188,15 +194,14 @@ impl NodePorts {
         for id in &self.order {
             listed[id.0] = true;
         }
-        for id in order {
+        for id in &order {
             // A listed port is cleared as it is named, so a second naming of it fails.
             if !listed.get(id.0).copied().unwrap_or(false) {
                 return false;
             }
             listed[id.0] = false;
         }
-        self.order.clear();
-        self.order.extend_from_slice(order);
+        self.order = order;
         true
     }
 }
@@ -252,13 +257,36 @@ mod tests {
     fn a_port_keeps_its_id_when_the_order_changes() {
         let mut ports = ports(&["a", "b", "c"]);
 
-        assert!(ports.set_order(&port_ids([2, 0, 1])));
+        assert!(ports.set_order(port_ids([2, 0, 1]).to_vec()));
 
         assert_eq!(names(&ports), ["c", "a", "b"]);
         assert_eq!(ports[PortId::new(0)].id, "a");
         assert_eq!(ports[PortId::new(2)].id, "c");
         assert_eq!(ports.position(PortId::new(0)), Some(1));
         assert_eq!(ports.id_at(0), Some(PortId::new(2)));
+    }
+
+    // Mutation: make `set_order` return `false` for an order that is already the list's order.
+    #[test]
+    fn an_order_that_is_already_there_is_accepted_and_changes_nothing() {
+        let mut ports = ports(&["a", "b", "c"]);
+        assert!(ports.set_order(port_ids([2, 0, 1]).to_vec()));
+
+        assert!(ports.set_order(port_ids([2, 0, 1]).to_vec()));
+
+        assert_eq!(names(&ports), ["c", "a", "b"]);
+    }
+
+    // Mutation: swap in the new order before `set_order` has checked it.
+    #[test]
+    fn a_refused_order_leaves_the_list_as_it_was() {
+        let mut ports = ports(&["a", "b", "c"]);
+
+        assert!(!ports.set_order(port_ids([0, 1, 1]).to_vec()));
+        assert!(!ports.set_order(port_ids([0, 1]).to_vec()));
+        assert!(!ports.set_order(port_ids([0, 1, 7]).to_vec()));
+
+        assert_eq!(names(&ports), ["a", "b", "c"]);
     }
 
     // Mutation: drop the port in `unlist`, or give its slot to the next port that is pushed.
@@ -278,8 +306,8 @@ mod tests {
             Some("b")
         );
         // A listed order may not name the port that is off the list.
-        assert!(!ports.set_order(&port_ids([0, 1, 2])));
-        assert!(ports.set_order(&port_ids([3, 2, 0])));
+        assert!(!ports.set_order(port_ids([0, 1, 2]).to_vec()));
+        assert!(ports.set_order(port_ids([3, 2, 0]).to_vec()));
         assert_eq!(names(&ports), ["d", "c", "a"]);
     }
 
@@ -298,7 +326,7 @@ mod tests {
     #[test]
     fn first_and_last_follow_the_list_not_the_slots() {
         let mut ports = ports(&["a", "b", "c"]);
-        assert!(ports.set_order(&port_ids([2, 1, 0])));
+        assert!(ports.set_order(port_ids([2, 1, 0]).to_vec()));
 
         assert_eq!(ports.first().map(|port| port.id.as_str()), Some("c"));
         assert_eq!(ports.last().map(|port| port.id.as_str()), Some("a"));

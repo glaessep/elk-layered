@@ -6022,7 +6022,7 @@ mod tests {
         assert!(
             graph.layerless_nodes[north]
                 .ports
-                .set_order(&[listed_first, added_first])
+                .set_order(vec![listed_first, added_first])
         );
 
         process_hierarchical_port_orthogonal_edges(&mut graph);

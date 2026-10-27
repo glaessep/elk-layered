@@ -2977,7 +2977,7 @@ mod tests {
         let fourth = add_port(&mut graph, node, PortSide::North).port;
         let ports = &mut graph.layerless_nodes[node].ports;
         ports.unlist(&[second]);
-        assert!(ports.set_order(&[fourth, first, third]));
+        assert!(ports.set_order(vec![fourth, first, third]));
 
         let places = PortPlaces::new(ports);
 

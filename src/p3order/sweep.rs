@@ -427,6 +427,14 @@ impl BarycenterPortDistributor {
                 left_barycenter.total_cmp(&right_barycenter)
             }
         });
+        // A sort that moves nothing is the common case, so skip the write.
+        if order
+            .iter()
+            .copied()
+            .eq(graph.layerless_nodes[node].ports.ids())
+        {
+            return;
+        }
         graph.reorder_node_ports(node, order);
     }
 
