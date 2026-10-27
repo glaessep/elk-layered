@@ -316,8 +316,11 @@ pub fn postprocess_north_south_ports(graph: &mut LGraph) {
                     .zip(ports.ids().skip(1))
                     .all(|(first, second)| ports[first].origin_port == ports[second].origin_port);
 
-            let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-            for port in port_ids {
+            // Moving an edge to the origin port never changes the dummy's list.
+            for position in 0..graph.layerless_nodes[node].ports.len() {
+                let Some(port) = graph.layerless_nodes[node].ports.id_at(position) else {
+                    continue;
+                };
                 let dummy_port = PortRef { node, port };
                 if !graph.layerless_nodes[node].ports[port]
                     .incoming_edges

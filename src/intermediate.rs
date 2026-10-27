@@ -241,9 +241,14 @@ pub fn restore_reversed_edges(graph: &mut LGraph) {
             let Some(node) = graph.layerless_nodes.get(node_index) else {
                 continue;
             };
-            let port_ids = node.ports.ids().collect::<Vec<_>>();
+            let port_count = node.ports.len();
 
-            for port_index in port_ids {
+            // `reverse_edge` without `adapt_ports` never changes a node's list.
+            for position in 0..port_count {
+                let Some(port_index) = graph.layerless_nodes[node_index].ports.id_at(position)
+                else {
+                    continue;
+                };
                 let outgoing_edges = graph.layerless_nodes[node_index].ports[port_index]
                     .outgoing_edges
                     .clone();
@@ -336,6 +341,8 @@ fn reverse_node_edges(
     node_layer_constraint: LayerConstraint,
     target_port_type: EdgeReversalPortType,
 ) {
+    // `reverse_edge` with `adapt_ports` can add a collector port to the node's list, so the loop
+    // walks a copy of the ids.
     let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
     for port in port_ids {
         if matches!(
@@ -1154,11 +1161,11 @@ fn merge_hyperedge_dummy_nodes(
         return;
     };
 
-    let port_ids = graph.layerless_nodes[merge_source]
-        .ports
-        .ids()
-        .collect::<Vec<_>>();
-    for port_index in port_ids {
+    // Moving an edge to another port never changes the source's list.
+    for position in 0..graph.layerless_nodes[merge_source].ports.len() {
+        let Some(port_index) = graph.layerless_nodes[merge_source].ports.id_at(position) else {
+            continue;
+        };
         while let Some(edge_index) = graph.layerless_nodes[merge_source].ports[port_index]
             .incoming_edges
             .first()
@@ -1654,9 +1661,12 @@ fn apply_label_sides_to_label_dummy_run(
 fn smart_for_regular_node(graph: &mut LGraph, node: usize, default_side: LabelSide) {
     let mut end_label_queue: VecDeque<Vec<EndLabelRef>> = VecDeque::new();
     let mut current_port_side = None;
-    let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
 
-    for port_index in port_ids {
+    // Gathering end labels reads edges and writes labels; it never changes the node's list.
+    for position in 0..graph.layerless_nodes[node].ports.len() {
+        let Some(port_index) = graph.layerless_nodes[node].ports.id_at(position) else {
+            continue;
+        };
         let port_side = graph.layerless_nodes[node].ports[port_index].side;
         if Some(port_side) != current_port_side {
             if !end_label_queue.is_empty() {
@@ -1774,8 +1784,10 @@ fn gather_end_labels(
             node,
             port: port_index,
         };
-        let dummy_ports = graph.layerless_nodes[dummy].ports.ids().collect::<Vec<_>>();
-        for dummy_port in dummy_ports {
+        for position in 0..graph.layerless_nodes[dummy].ports.len() {
+            let Some(dummy_port) = graph.layerless_nodes[dummy].ports.id_at(position) else {
+                continue;
+            };
             if graph.layerless_nodes[dummy].ports[dummy_port].origin_port == Some(origin) {
                 max_edge_thickness = max_edge_thickness.max(gather_port_end_labels(
                     graph,
@@ -1853,8 +1865,10 @@ fn gather_end_labels_for_node(graph: &mut LGraph, node: usize) -> NodeEndLabels 
         max_edge_thickness: vec![NO_INCIDENT_EDGE_THICKNESS; slot_count],
         labels: vec![Vec::new(); slot_count],
     };
-    let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-    for port_index in port_ids {
+    for position in 0..graph.layerless_nodes[node].ports.len() {
+        let Some(port_index) = graph.layerless_nodes[node].ports.id_at(position) else {
+            continue;
+        };
         graph.layerless_nodes[node].ports[port_index].labels.clear();
         graph.layerless_nodes[node].ports[port_index].end_label_cell = None;
         let Some(gathered) = gather_end_labels(graph, node, port_index) else {
@@ -1868,8 +1882,10 @@ fn gather_end_labels_for_node(graph: &mut LGraph, node: usize) -> NodeEndLabels 
 
 /// Copies the gathered end labels of each port of `node` into the port.
 fn copy_gathered_end_labels_into_ports(graph: &mut LGraph, node: usize, gathered: &NodeEndLabels) {
-    let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-    for port_index in port_ids {
+    for position in 0..graph.layerless_nodes[node].ports.len() {
+        let Some(port_index) = graph.layerless_nodes[node].ports.id_at(position) else {
+            continue;
+        };
         let labels = &gathered.labels[port_index.index()];
         let copies = labels
             .iter()
@@ -1897,8 +1913,10 @@ fn place_end_label_cells_for_node(
     edge_label_spacing: f64,
     vertical_layout: bool,
 ) {
-    let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-    for port_index in port_ids {
+    for position in 0..graph.layerless_nodes[node].ports.len() {
+        let Some(port_index) = graph.layerless_nodes[node].ports.id_at(position) else {
+            continue;
+        };
         let labels = &gathered.labels[port_index.index()];
         if labels.is_empty() {
             continue;
@@ -2252,14 +2270,13 @@ pub fn sort_end_labels(graph: &mut LGraph) {
         .collect::<Vec<_>>();
 
     for node in 0..graph.layerless_nodes.len() {
-        let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-        for port in port_ids {
-            if graph.layerless_nodes[node].ports[port].labels.len() < 2 {
-                continue;
-            }
-            graph.layerless_nodes[node].ports[port]
-                .labels
-                .sort_by(|a, b| {
+        graph.layerless_nodes[node]
+            .ports
+            .for_each_listed_mut(|port| {
+                if port.labels.len() < 2 {
+                    return;
+                }
+                port.labels.sort_by(|a, b| {
                     let a_key = a
                         .end_label_edge
                         .and_then(|edge| edge_sort_keys.get(edge).copied())
@@ -2270,7 +2287,7 @@ pub fn sort_end_labels(graph: &mut LGraph) {
                         .unwrap_or((usize::MAX, usize::MAX, usize::MAX));
                     a_key.cmp(&b_key)
                 });
-        }
+            });
     }
 }
 
@@ -2321,8 +2338,11 @@ pub fn postprocess_end_labels(graph: &mut LGraph) {
             continue;
         }
         let node_position = graph.layerless_nodes[node].position;
-        let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-        for port_index in port_ids {
+        // Applying a cell layout writes labels and positions; it never changes the node's list.
+        for position in 0..graph.layerless_nodes[node].ports.len() {
+            let Some(port_index) = graph.layerless_nodes[node].ports.id_at(position) else {
+                continue;
+            };
             let Some(cell) = graph.layerless_nodes[node].ports[port_index].end_label_cell else {
                 continue;
             };

@@ -1665,12 +1665,12 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
         let parent_size = graph.layerless_nodes[node_index].size;
         let nested_graph_id = nested_graph.id.clone();
         let nested_direction = nested_graph.options.direction;
-        let port_ids = graph.layerless_nodes[node_index]
-            .ports
-            .ids()
-            .collect::<Vec<_>>();
 
-        for port_index in port_ids {
+        // Linking a dummy writes the port's dummy and never changes the node's list.
+        for position in 0..graph.layerless_nodes[node_index].ports.len() {
+            let Some(port_index) = graph.layerless_nodes[node_index].ports.id_at(position) else {
+                continue;
+            };
             if graph.layerless_nodes[node_index].ports[port_index]
                 .port_dummy
                 .is_some()

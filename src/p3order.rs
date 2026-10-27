@@ -50,11 +50,10 @@ fn assign_crossing_minimization_port_ids(graph: &mut LGraph, order: &[Vec<usize>
             let Some(node_data) = graph.layerless_nodes.get_mut(*node) else {
                 continue;
             };
-            let port_ids = node_data.ports.ids().collect::<Vec<_>>();
-            for port in port_ids {
-                node_data.ports[port].crossing_minimization_id = Some(next_port_id);
+            node_data.ports.for_each_listed_mut(|port| {
+                port.crossing_minimization_id = Some(next_port_id);
                 next_port_id += 1;
-            }
+            });
         }
     }
 }
@@ -275,9 +274,12 @@ pub fn process_port_sides(graph: &mut LGraph) {
 
 fn process_node_port_sides(graph: &mut LGraph, node: usize) {
     let side_fixed = graph.layerless_nodes[node].port_constraints.is_side_fixed();
-    let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
 
-    for port in port_ids {
+    // `set_port_side` writes a side and never changes the list, so the places stay valid.
+    for position in 0..graph.layerless_nodes[node].ports.len() {
+        let Some(port) = graph.layerless_nodes[node].ports.id_at(position) else {
+            continue;
+        };
         if !side_fixed || graph.layerless_nodes[node].ports[port].side == PortSide::Undefined {
             set_port_side(graph, PortRef { node, port });
         }
@@ -623,8 +625,10 @@ pub fn long_edge_target_node_preprocessing(
         port.long_edge_target_node = None;
     }
 
-    let port_ids = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-    for port in port_ids {
+    for position in 0..graph.layerless_nodes[node].ports.len() {
+        let Some(port) = graph.layerless_nodes[node].ports.id_at(position) else {
+            continue;
+        };
         if graph.layerless_nodes[node].ports[port]
             .outgoing_edges
             .is_empty()
@@ -744,10 +748,12 @@ pub(super) fn count_model_order_port_changes(graph: &LGraph, layers: &[Vec<usize
                 &target_orders,
                 graph.options.consider_model_order_port_model_order,
             );
-            let port_ids = graph.layerless_nodes[*node].ports.ids().collect::<Vec<_>>();
-            for i in 0..port_ids.len() {
-                for j in (i + 1)..port_ids.len() {
-                    if comparator.compare(port_ids[i], port_ids[j]) == Ordering::Greater {
+            let ports = &graph.layerless_nodes[*node].ports;
+            for i in 0..ports.len() {
+                for j in (i + 1)..ports.len() {
+                    if let (Some(left), Some(right)) = (ports.id_at(i), ports.id_at(j))
+                        && comparator.compare(left, right) == Ordering::Greater
+                    {
                         wrong_model_order += 1;
                     }
                 }

@@ -86,6 +86,14 @@ impl NodePorts {
         self.order.iter().copied()
     }
 
+    /// Calls `visit` on each listed port in the node's order, so a loop that only changes the
+    /// ports needs no copy of the ids. `visit` cannot list, unlist or reorder ports.
+    pub fn for_each_listed_mut(&mut self, mut visit: impl FnMut(&mut LPort)) {
+        for id in &self.order {
+            visit(&mut self.slots[id.0]);
+        }
+    }
+
     /// The listed ports with their ids, in the node's order.
     pub fn iter_with_ids(&self) -> impl DoubleEndedIterator<Item = (PortId, &LPort)> {
         self.order.iter().map(|id| (*id, &self.slots[id.0]))
@@ -287,6 +295,24 @@ mod tests {
         assert!(!ports.set_order(port_ids([0, 1, 7]).to_vec()));
 
         assert_eq!(names(&ports), ["a", "b", "c"]);
+    }
+
+    // Mutation: visit the slots in slot order, or visit a port that is off the list.
+    #[test]
+    fn for_each_listed_mut_visits_the_listed_ports_in_the_nodes_order() {
+        let mut ports = ports(&["a", "b", "c", "d"]);
+        ports.unlist(&port_ids([1]));
+        assert!(ports.set_order(port_ids([3, 2, 0]).to_vec()));
+
+        let mut visited = Vec::new();
+        ports.for_each_listed_mut(|port| {
+            visited.push(port.id.clone());
+            port.id.push('!');
+        });
+
+        assert_eq!(visited, ["d", "c", "a"]);
+        assert_eq!(names(&ports), ["d!", "c!", "a!"]);
+        assert_eq!(ports[PortId::new(1)].id, "b");
     }
 
     // Mutation: drop the port in `unlist`, or give its slot to the next port that is pushed.
