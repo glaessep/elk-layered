@@ -1431,6 +1431,9 @@ mod tests {
         }
     }
 
+    // Mutation: add a new port at the front of the node's list, not at its end (`NodePorts::push`
+    // with `order.insert(0, id)`). The test reads both places with `unwrap`, because a port off
+    // the list has no place and `None` sorts before every place.
     #[test]
     fn compound_self_loop_keeps_input_ports_in_source_model_order() {
         let mut parent = node("Active");
@@ -1460,10 +1463,10 @@ mod tests {
         assert_eq!(parent.ports[loop_edge.source.port].side, PortSide::South);
         assert_eq!(parent.ports[loop_edge.target.port].side, PortSide::North);
         assert_eq!(parent.ports[cross_edge.target.port].side, PortSide::North);
-        assert!(
-            parent.ports.position(loop_edge.target.port)
-                < parent.ports.position(cross_edge.target.port)
-        );
+        // Both ports must be in the list: `None` would sort below any place.
+        let loop_place = parent.ports.position(loop_edge.target.port).unwrap();
+        let cross_place = parent.ports.position(cross_edge.target.port).unwrap();
+        assert!(loop_place < cross_place);
         // Reordering must also keep each child external port's origin linked
         // to its corresponding parent port, including detached self-loop ports.
         let child = parent.nested_graph.as_ref().unwrap();
@@ -2049,6 +2052,8 @@ mod tests {
         assert_eq!(target_node(&graph, source), None);
     }
 
+    // Mutation: leave the ports in the order the sweep put them, by skipping the
+    // `reorder_node_ports` call in `SweepCopy::transfer_node_and_port_orders_to_graph`.
     #[test]
     fn sweep_copy_restores_ports_by_stable_id_after_reorder() {
         let mut graph = graph(vec![node("A")], vec![]);

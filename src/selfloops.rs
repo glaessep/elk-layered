@@ -2775,6 +2775,8 @@ mod tests {
         assert_eq!(order, vec!["A:0", "A:2", "A:3", "A:1"]);
     }
 
+    // Mutation: start the walk one place after the leftmost port (`leftmost_port as isize`
+    // instead of `- 1`), which leaves a leftmost port at place 0 out of the loop's activity.
     #[test]
     fn loop_activity_includes_zero_leftmost_port() {
         let hyper_loop = hyper_loop_with_ports(
