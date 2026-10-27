@@ -969,11 +969,10 @@ impl HierarchySweep {
         if self.cross_min_type != CrossMinType::TwoSidedGreedySwitch {
             return false;
         }
-        let order = self.infos[info_index].current_node_order.clone();
-        let graph = graph_mut_at_path(root, &self.infos[info_index].path);
-        self.infos[info_index]
-            .greedy_port_distributor
-            .distribute_ports_while_sweeping(graph, &order, layer_index, forward)
+        let info = &mut self.infos[info_index];
+        let graph = graph_mut_at_path(root, &info.path);
+        info.greedy_port_distributor
+            .distribute_ports_while_sweeping(graph, &info.current_node_order, layer_index, forward)
     }
 
     fn sweep_in_hierarchical_nodes(
