@@ -1344,7 +1344,13 @@ fn parse_node_label_placement(value: &str) -> Result<NodeLabelPlacement, OptionP
     Ok(placement)
 }
 
-/// Ports `LayoutOptionData.parseValue`, case `BOOLEAN`.
+/// Ports `LayoutOptionData.parseValue`, case `BOOLEAN`: only "true" and "false" parse, and the
+/// match ignores case, as in Java.
+///
+/// This differs from elkjs on purpose. Java's `parseValue` returns `null` for any other text,
+/// such as "yes". `JsonImporter.setOption` then skips the option, so elkjs lays the graph out
+/// with the default and says nothing. Here the caller gets `InvalidValue`: malformed input is an
+/// error, not a silent default.
 pub(crate) fn parse_bool(value: &str) -> Result<bool, OptionProblem> {
     if value.eq_ignore_ascii_case("true") {
         Ok(true)
