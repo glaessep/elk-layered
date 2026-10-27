@@ -1,0 +1,383 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "src",
+      "width": 50,
+      "height": 30,
+      "$H": 277,
+      "x": 12,
+      "y": 18
+    },
+    {
+      "id": "dst",
+      "width": 50,
+      "height": 30,
+      "$H": 279,
+      "x": 302,
+      "y": 80
+    },
+    {
+      "id": "g",
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_ORDER"
+      },
+      "ports": [
+        {
+          "id": "gin",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "WEST",
+            "elk.port.index": "0"
+          },
+          "x": -8,
+          "y": 79
+        },
+        {
+          "id": "gout",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          },
+          "x": 184,
+          "y": 79
+        },
+        {
+          "id": "gin2",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "WEST",
+            "elk.port.index": "1"
+          },
+          "x": -8,
+          "y": 12
+        }
+      ],
+      "children": [
+        {
+          "id": "x",
+          "width": 50,
+          "height": 24,
+          "$H": 287,
+          "x": 32,
+          "y": 27
+        },
+        {
+          "id": "y",
+          "width": 50,
+          "height": 24,
+          "$H": 289,
+          "x": 102,
+          "y": 23
+        },
+        {
+          "id": "z",
+          "width": 50,
+          "height": 24,
+          "$H": 291,
+          "x": 32,
+          "y": 71
+        }
+      ],
+      "edges": [
+        {
+          "id": "gi",
+          "sources": [
+            "gin"
+          ],
+          "targets": [
+            "x"
+          ],
+          "sections": [
+            {
+              "id": "gi_s0",
+              "startPoint": {
+                "x": -8,
+                "y": 83
+              },
+              "endPoint": {
+                "x": 32,
+                "y": 39
+              },
+              "bendPoints": [
+                {
+                  "x": 22,
+                  "y": 83
+                },
+                {
+                  "x": 22,
+                  "y": 39
+                }
+              ],
+              "incomingShape": "gin",
+              "outgoingShape": "x"
+            }
+          ],
+          "junctionPoints": [
+            {
+              "x": 22,
+              "y": 83
+            }
+          ],
+          "container": "g"
+        },
+        {
+          "id": "gi2",
+          "sources": [
+            "gin"
+          ],
+          "targets": [
+            "z"
+          ],
+          "sections": [
+            {
+              "id": "gi2_s0",
+              "startPoint": {
+                "x": -8,
+                "y": 83
+              },
+              "endPoint": {
+                "x": 32,
+                "y": 83
+              },
+              "incomingShape": "gin",
+              "outgoingShape": "z"
+            }
+          ],
+          "container": "g"
+        },
+        {
+          "id": "gx",
+          "sources": [
+            "x"
+          ],
+          "targets": [
+            "y"
+          ],
+          "sections": [
+            {
+              "id": "gx_s0",
+              "startPoint": {
+                "x": 82,
+                "y": 39
+              },
+              "endPoint": {
+                "x": 102,
+                "y": 39
+              },
+              "incomingShape": "x",
+              "outgoingShape": "y"
+            }
+          ],
+          "container": "g"
+        },
+        {
+          "id": "go",
+          "sources": [
+            "y"
+          ],
+          "targets": [
+            "gout"
+          ],
+          "sections": [
+            {
+              "id": "go_s0",
+              "startPoint": {
+                "x": 152,
+                "y": 35
+              },
+              "endPoint": {
+                "x": 192,
+                "y": 83
+              },
+              "bendPoints": [
+                {
+                  "x": 162,
+                  "y": 35
+                },
+                {
+                  "x": 162,
+                  "y": 83
+                }
+              ],
+              "incomingShape": "y",
+              "outgoingShape": "gout"
+            }
+          ],
+          "junctionPoints": [
+            {
+              "x": 162,
+              "y": 83
+            }
+          ],
+          "container": "g"
+        },
+        {
+          "id": "go2",
+          "sources": [
+            "z"
+          ],
+          "targets": [
+            "gout"
+          ],
+          "sections": [
+            {
+              "id": "go2_s0",
+              "startPoint": {
+                "x": 82,
+                "y": 83
+              },
+              "endPoint": {
+                "x": 192,
+                "y": 83
+              },
+              "incomingShape": "z",
+              "outgoingShape": "gout"
+            }
+          ],
+          "container": "g"
+        },
+        {
+          "id": "gi3",
+          "sources": [
+            "gin2"
+          ],
+          "targets": [
+            "y"
+          ],
+          "sections": [
+            {
+              "id": "gi3_s0",
+              "startPoint": {
+                "x": -8,
+                "y": 16
+              },
+              "endPoint": {
+                "x": 102,
+                "y": 31
+              },
+              "bendPoints": [
+                {
+                  "x": 92,
+                  "y": 16
+                },
+                {
+                  "x": 92,
+                  "y": 31
+                }
+              ],
+              "incomingShape": "gin2",
+              "outgoingShape": "y"
+            }
+          ],
+          "container": "g"
+        }
+      ],
+      "$H": 281,
+      "x": 90,
+      "y": 12,
+      "width": 184,
+      "height": 107
+    }
+  ],
+  "edges": [
+    {
+      "id": "o1",
+      "sources": [
+        "src"
+      ],
+      "targets": [
+        "gin"
+      ],
+      "sections": [
+        {
+          "id": "o1_s0",
+          "startPoint": {
+            "x": 62,
+            "y": 38
+          },
+          "endPoint": {
+            "x": 82,
+            "y": 95
+          },
+          "bendPoints": [
+            {
+              "x": 72,
+              "y": 38
+            },
+            {
+              "x": 72,
+              "y": 95
+            }
+          ],
+          "incomingShape": "src",
+          "outgoingShape": "gin"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "o2",
+      "sources": [
+        "gout"
+      ],
+      "targets": [
+        "dst"
+      ],
+      "sections": [
+        {
+          "id": "o2_s0",
+          "startPoint": {
+            "x": 282,
+            "y": 95
+          },
+          "endPoint": {
+            "x": 302,
+            "y": 95
+          },
+          "incomingShape": "gout",
+          "outgoingShape": "dst"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "o3",
+      "sources": [
+        "src"
+      ],
+      "targets": [
+        "gin2"
+      ],
+      "sections": [
+        {
+          "id": "o3_s0",
+          "startPoint": {
+            "x": 62,
+            "y": 28
+          },
+          "endPoint": {
+            "x": 82,
+            "y": 28
+          },
+          "incomingShape": "src",
+          "outgoingShape": "gin2"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 364,
+  "height": 131
+}

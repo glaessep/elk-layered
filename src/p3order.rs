@@ -197,6 +197,8 @@ pub struct GraphInfoHolder {
     pub current_node_order: Vec<Vec<usize>>,
     pub currently_best_node_and_port_order: Option<SweepCopy>,
     pub best_node_and_port_order: Option<SweepCopy>,
+    /// `GraphInfoHolder.crossingsCounter`, whose port positions outlive each count.
+    pub crossings_counter: crate::p3order::counting::CrossingsCounter,
 }
 
 impl GraphInfoHolder {
@@ -209,6 +211,7 @@ impl GraphInfoHolder {
                 .collect(),
             currently_best_node_and_port_order: None,
             best_node_and_port_order: None,
+            crossings_counter: Default::default(),
         }
     }
 
@@ -1238,6 +1241,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            ports: Vec::new(),
             parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
@@ -1261,6 +1265,8 @@ mod tests {
 
     fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
         ElkInputEdge {
+            source_port: None,
+            target_port: None,
             id: id.to_string(),
             source: source.to_string(),
             target: target.to_string(),
@@ -1296,6 +1302,7 @@ mod tests {
             minlen: 1,
             reversed: false,
             bend_points: Vec::new(),
+            junction_points: Vec::new(),
             model_order: None,
             priority_direction: 0,
             priority_shortness: 0,
@@ -1863,6 +1870,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: Some(1),
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -1883,6 +1891,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: Some(0),
                 priority_direction: 0,
                 priority_shortness: 0,

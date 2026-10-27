@@ -1,0 +1,210 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT"
+  },
+  "children": [
+    {
+      "id": "src",
+      "width": 50,
+      "height": 30,
+      "$H": 277,
+      "x": 12,
+      "y": 21
+    },
+    {
+      "id": "dst",
+      "width": 50,
+      "height": 30,
+      "$H": 279,
+      "x": 262,
+      "y": 21
+    },
+    {
+      "id": "g",
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE"
+      },
+      "ports": [
+        {
+          "id": "gin",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "x": -8,
+          "y": 20
+        },
+        {
+          "id": "gout",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          },
+          "x": 144,
+          "y": 20
+        }
+      ],
+      "children": [
+        {
+          "id": "x",
+          "width": 50,
+          "height": 24,
+          "$H": 286,
+          "x": 12,
+          "y": 12
+        },
+        {
+          "id": "y",
+          "width": 50,
+          "height": 24,
+          "$H": 288,
+          "x": 82,
+          "y": 12
+        }
+      ],
+      "edges": [
+        {
+          "id": "gi",
+          "sources": [
+            "gin"
+          ],
+          "targets": [
+            "x"
+          ],
+          "sections": [
+            {
+              "id": "gi_s0",
+              "startPoint": {
+                "x": 0,
+                "y": 24
+              },
+              "endPoint": {
+                "x": 12,
+                "y": 24
+              },
+              "incomingShape": "gin",
+              "outgoingShape": "x"
+            }
+          ],
+          "container": "g"
+        },
+        {
+          "id": "gx",
+          "sources": [
+            "x"
+          ],
+          "targets": [
+            "y"
+          ],
+          "sections": [
+            {
+              "id": "gx_s0",
+              "startPoint": {
+                "x": 62,
+                "y": 24
+              },
+              "endPoint": {
+                "x": 82,
+                "y": 24
+              },
+              "incomingShape": "x",
+              "outgoingShape": "y"
+            }
+          ],
+          "container": "g"
+        },
+        {
+          "id": "go",
+          "sources": [
+            "y"
+          ],
+          "targets": [
+            "gout"
+          ],
+          "sections": [
+            {
+              "id": "go_s0",
+              "startPoint": {
+                "x": 132,
+                "y": 24
+              },
+              "endPoint": {
+                "x": 144,
+                "y": 24
+              },
+              "incomingShape": "y",
+              "outgoingShape": "gout"
+            }
+          ],
+          "container": "g"
+        }
+      ],
+      "$H": 281,
+      "x": 90,
+      "y": 12,
+      "width": 144,
+      "height": 48
+    }
+  ],
+  "edges": [
+    {
+      "id": "o1",
+      "sources": [
+        "src"
+      ],
+      "targets": [
+        "gin"
+      ],
+      "sections": [
+        {
+          "id": "o1_s0",
+          "startPoint": {
+            "x": 62,
+            "y": 36
+          },
+          "endPoint": {
+            "x": 82,
+            "y": 36
+          },
+          "incomingShape": "src",
+          "outgoingShape": "gin"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "o2",
+      "sources": [
+        "gout"
+      ],
+      "targets": [
+        "dst"
+      ],
+      "sections": [
+        {
+          "id": "o2_s0",
+          "startPoint": {
+            "x": 242,
+            "y": 36
+          },
+          "endPoint": {
+            "x": 262,
+            "y": 36
+          },
+          "incomingShape": "gout",
+          "outgoingShape": "dst"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 324,
+  "height": 72
+}

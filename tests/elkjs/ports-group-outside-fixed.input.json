@@ -1,0 +1,94 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT"
+  },
+  "children": [
+    {
+      "id": "src",
+      "width": 50,
+      "height": 30
+    },
+    {
+      "id": "dst",
+      "width": 50,
+      "height": 30
+    },
+    {
+      "id": "g",
+      "ports": [
+        {
+          "id": "gin",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          }
+        },
+        {
+          "id": "gout",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          }
+        },
+        {
+          "id": "gs",
+          "width": 6,
+          "height": 6,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          }
+        }
+      ],
+      "children": [
+        {
+          "id": "x",
+          "width": 50,
+          "height": 24
+        },
+        {
+          "id": "y",
+          "width": 50,
+          "height": 24
+        }
+      ],
+      "edges": [
+        {
+          "id": "gx",
+          "sources": [
+            "x"
+          ],
+          "targets": [
+            "y"
+          ]
+        }
+      ],
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "o1",
+      "sources": [
+        "src"
+      ],
+      "targets": [
+        "gin"
+      ]
+    },
+    {
+      "id": "o2",
+      "sources": [
+        "gout"
+      ],
+      "targets": [
+        "dst"
+      ]
+    }
+  ]
+}

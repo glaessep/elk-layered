@@ -1,0 +1,150 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered"
+  },
+  "children": [
+    {
+      "id": "n1",
+      "width": 75,
+      "height": 49,
+      "ports": [
+        {
+          "id": "p1",
+          "width": 6,
+          "height": 5,
+          "x": -6,
+          "y": 14.666666666666668
+        }
+      ],
+      "$H": 277,
+      "x": 38,
+      "y": 12
+    },
+    {
+      "id": "A1",
+      "width": 0,
+      "height": 0,
+      "layoutOptions": {
+        "elk.layered.layering.layerConstraint": "FIRST_SEPARATE"
+      },
+      "$H": 281,
+      "x": 12,
+      "y": 29.166666666666668
+    },
+    {
+      "id": "A3",
+      "width": 0,
+      "height": 0,
+      "layoutOptions": {
+        "elk.layered.layering.layerConstraint": "FIRST_SEPARATE"
+      },
+      "$H": 283,
+      "x": 12,
+      "y": 49.16666666666667
+    },
+    {
+      "id": "B",
+      "width": 0,
+      "height": 0,
+      "layoutOptions": {
+        "elk.layered.layering.layerConstraint": "LAST_SEPARATE"
+      },
+      "$H": 285,
+      "x": 133,
+      "y": 29.166666666666668
+    }
+  ],
+  "edges": [
+    {
+      "id": "e19",
+      "sources": [
+        "p1"
+      ],
+      "targets": [
+        "A1"
+      ],
+      "sections": [
+        {
+          "id": "e19_s0",
+          "startPoint": {
+            "x": 32,
+            "y": 29.166666666666668
+          },
+          "endPoint": {
+            "x": 12,
+            "y": 29.166666666666668
+          },
+          "incomingShape": "p1",
+          "outgoingShape": "A1"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e23",
+      "sources": [
+        "B"
+      ],
+      "targets": [
+        "p1"
+      ],
+      "sections": [
+        {
+          "id": "e23_s0",
+          "startPoint": {
+            "x": 133,
+            "y": 29.166666666666668
+          },
+          "endPoint": {
+            "x": 32,
+            "y": 29.166666666666668
+          },
+          "incomingShape": "B",
+          "outgoingShape": "p1"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e11",
+      "sources": [
+        "n1"
+      ],
+      "targets": [
+        "A3"
+      ],
+      "sections": [
+        {
+          "id": "e11_s0",
+          "startPoint": {
+            "x": 38,
+            "y": 46.333333333333336
+          },
+          "endPoint": {
+            "x": 12,
+            "y": 49.16666666666667
+          },
+          "bendPoints": [
+            {
+              "x": 22,
+              "y": 46.333333333333336
+            },
+            {
+              "x": 22,
+              "y": 49.16666666666667
+            }
+          ],
+          "incomingShape": "n1",
+          "outgoingShape": "A3"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 145,
+  "height": 73
+}

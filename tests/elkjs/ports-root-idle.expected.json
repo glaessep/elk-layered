@@ -1,0 +1,90 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.portConstraints": "FIXED_SIDE"
+  },
+  "ports": [
+    {
+      "id": "rin",
+      "width": 10,
+      "height": 10,
+      "layoutOptions": {
+        "elk.port.side": "WEST"
+      },
+      "x": 0,
+      "y": null
+    },
+    {
+      "id": "rout",
+      "width": 10,
+      "height": 10,
+      "layoutOptions": {
+        "elk.port.side": "EAST"
+      },
+      "x": 164,
+      "y": null
+    },
+    {
+      "id": "rtop",
+      "width": 6,
+      "height": 6,
+      "layoutOptions": {
+        "elk.port.side": "NORTH"
+      },
+      "x": null,
+      "y": 0
+    }
+  ],
+  "children": [
+    {
+      "id": "a",
+      "width": 60,
+      "height": 30,
+      "$H": 281,
+      "x": 12,
+      "y": 12
+    },
+    {
+      "id": "b",
+      "width": 60,
+      "height": 30,
+      "$H": 283,
+      "x": 92,
+      "y": 12
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "sources": [
+        "a"
+      ],
+      "targets": [
+        "b"
+      ],
+      "sections": [
+        {
+          "id": "e1_s0",
+          "startPoint": {
+            "x": 72,
+            "y": 27
+          },
+          "endPoint": {
+            "x": 92,
+            "y": 27
+          },
+          "incomingShape": "a",
+          "outgoingShape": "b"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 164,
+  "height": 54
+}

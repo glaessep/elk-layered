@@ -17,7 +17,7 @@ use super::options::{
 };
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::configurator::{check_random_seeds, configure_graph_properties, configured_options};
-use crate::graph::{LGraph, LNode, LNodeKind, LPoint, LSize, PortSide};
+use crate::graph::{LGraph, LNode, LNodeKind, LPoint, LSize, PortSide, is_across_flow};
 use crate::intermediate::{
     IntermediateError, calculate_layer_sizes_and_graph_height, insert_label_dummies,
     join_long_edges, merge_hyperedge_dummies, position_interactive_external_ports,
@@ -622,6 +622,7 @@ pub fn execute_ported_processors(graph: &mut LGraph) -> PipelineResult<Vec<Proce
     // the caller's graph. Both checks only read it. `assemble_processors_for_graph` applies the
     // same option rewrites as the configurator, on a copy of the options.
     check_random_seeds(graph)?;
+    check_external_port_sides(graph)?;
     validate_ported_processors(&assemble_processors_for_graph(graph))?;
     let processors = prepare_single_graph_processors(graph)?;
 
@@ -694,6 +695,7 @@ pub fn execute_ported_compound_processors(
     // Check every seed before the preprocessor and the configurator change the caller's graph.
     check_random_seeds(graph)?;
     preprocess_source_ported_compound_graph(graph);
+    check_external_port_sides(graph)?;
     configure_graph_properties(graph)?;
     review_and_correct_hierarchical_processors(graph)?;
 
@@ -945,6 +947,42 @@ fn execute_hierarchy_aware_processor(
     Ok(())
 }
 
+/// Refuses a graph with an external port dummy that ELK cannot place, or that elk-layered
+/// cannot place yet.
+///
+/// A dummy on a north or south side of a horizontal layout, or on an east or west side of a
+/// vertical one, needs the steps for ports across the flow. Issue #5 adds them. Without them the
+/// routing of the edges at such a dummy does not match elkjs. A dummy without a side comes from a
+/// port without one on a node whose port sides are fixed, and a node of size zero has nothing to
+/// take the side from: ELK fails on it.
+fn check_external_port_sides(root: &LGraph) -> PipelineResult<()> {
+    let mut pending = vec![root];
+    while let Some(graph) = pending.pop() {
+        for node in &graph.layerless_nodes {
+            if node.kind != LNodeKind::ExternalPort {
+                continue;
+            }
+            if node.external_port_side == PortSide::Undefined {
+                return Err(PipelineError::UnsupportedCompoundGraph {
+                    reason: "a port of a node with children that has no side, on a node with fixed port sides",
+                });
+            }
+            if is_across_flow(graph.options.direction, node.external_port_side) {
+                return Err(PipelineError::UnsupportedCompoundGraph {
+                    reason: "ports of a node with children on a side across the layout direction, which wait for north and south ports (issue #5)",
+                });
+            }
+        }
+        pending.extend(
+            graph
+                .layerless_nodes
+                .iter()
+                .filter_map(|node| node.nested_graph.as_deref()),
+        );
+    }
+    Ok(())
+}
+
 fn review_and_correct_hierarchical_processors(root: &mut LGraph) -> PipelineResult<()> {
     let root_crossing = root.options.crossing_minimization_strategy;
     let root_greedy_switch = root.options.greedy_switch_hierarchical_type;
@@ -1016,8 +1054,16 @@ fn transfer_external_port_dummy_layout_to_parent_node(
             continue;
         }
 
-        let port_position = external_port_position(nested_graph, dummy_index);
         let external_side = nested_graph.layerless_nodes[dummy_index].external_port_side;
+        // The size of the port as the parent graph holds it now: the parent graph has turned
+        // to the internal direction already, and the dummy is still in that direction. The
+        // dummy moves even without its port, as `LGraphUtil.getExternalPortPosition` moves it
+        // for every dummy, so its edges leave from where it ends up.
+        let size = parent_ports.get(origin_port.port.port).map_or(
+            nested_graph.layerless_nodes[dummy_index].external_port_size,
+            |port| port.size,
+        );
+        let port_position = external_port_position(nested_graph, dummy_index, size);
         if let Some(parent_port) = parent_ports.get_mut(origin_port.port.port) {
             parent_port.position = port_position;
             parent_port.set_side(external_side);
@@ -1025,9 +1071,14 @@ fn transfer_external_port_dummy_layout_to_parent_node(
     }
 }
 
-fn external_port_position(graph: &mut LGraph, dummy_index: usize) -> LPoint {
+/// Ports `LGraphUtil.getExternalPortPosition`: the position of the port a dummy stands for,
+/// relative to the graph's node. It moves the dummy as well.
+pub(crate) fn external_port_position(
+    graph: &mut LGraph,
+    dummy_index: usize,
+    external_size: LSize,
+) -> LPoint {
     let dummy_size = graph.layerless_nodes[dummy_index].size;
-    let external_size = graph.layerless_nodes[dummy_index].external_port_size;
     let external_side = graph.layerless_nodes[dummy_index].external_port_side;
     let border_offset = graph.layerless_nodes[dummy_index]
         .ports
@@ -1714,6 +1765,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            ports: Vec::new(),
             parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
@@ -1737,6 +1789,8 @@ mod tests {
 
     fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
         ElkInputEdge {
+            source_port: None,
+            target_port: None,
             id: id.to_string(),
             source: source.to_string(),
             target: target.to_string(),
@@ -2383,6 +2437,8 @@ mod tests {
             nodes: vec![node("A"), node("B")],
             edges: vec![
                 ElkInputEdge {
+                    source_port: None,
+                    target_port: None,
                     labels: vec![ElkInputLabel::center("center", 28.0, 12.0)],
                     ..edge("A-A", "A", "A")
                 },
@@ -2495,6 +2551,7 @@ mod tests {
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![
                 ElkInputNode {
+                    ports: Vec::new(),
                     parent_settings: Default::default(),
                     id: "cluster".to_string(),
                     width: 0.0,
@@ -2515,6 +2572,7 @@ mod tests {
                     self_loop_ordering: Default::default(),
                 },
                 ElkInputNode {
+                    ports: Vec::new(),
                     parent_settings: Default::default(),
                     id: "A".to_string(),
                     width: 80.0,
@@ -2537,6 +2595,8 @@ mod tests {
             ],
             edges: vec![
                 ElkInputEdge {
+                    source_port: None,
+                    target_port: None,
                     id: "cluster-A".to_string(),
                     source: "cluster".to_string(),
                     target: "A".to_string(),
@@ -2550,6 +2610,8 @@ mod tests {
                     container: None,
                 },
                 ElkInputEdge {
+                    source_port: None,
+                    target_port: None,
                     id: "A-A".to_string(),
                     source: "A".to_string(),
                     target: "A".to_string(),
@@ -2587,6 +2649,7 @@ mod tests {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
             nodes: vec![ElkInputNode {
+                ports: Vec::new(),
                 parent_settings: Default::default(),
                 id: "A".to_string(),
                 width: 80.0,
@@ -2607,6 +2670,8 @@ mod tests {
                 self_loop_ordering: Default::default(),
             }],
             edges: vec![ElkInputEdge {
+                source_port: None,
+                target_port: None,
                 id: "A-A".to_string(),
                 source: "A".to_string(),
                 target: "A".to_string(),

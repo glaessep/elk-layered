@@ -40,6 +40,8 @@ struct HierarchyGraphInfo {
     currently_best_node_and_port_order: Option<SweepCopy>,
     best_node_and_port_order: Option<SweepCopy>,
     barycenter_heuristic: Option<BarycenterHeuristic>,
+    /// `GraphInfoHolder.crossingsCounter`, whose port positions outlive each count.
+    crossings_counter: CrossingsCounter,
     random: JavaRandom,
     child_paths: Vec<GraphPath>,
     parent_path: Option<GraphPath>,
@@ -70,6 +72,7 @@ impl HierarchyGraphInfo {
             currently_best_node_and_port_order: None,
             best_node_and_port_order: None,
             barycenter_heuristic,
+            crossings_counter: CrossingsCounter::default(),
             random,
             child_paths: Vec::new(),
             parent_path: None,
@@ -714,7 +717,7 @@ impl HierarchySweep {
         self.set_currently_best_node_orders(root);
     }
 
-    fn minimize_with_counter(&mut self, root: &mut LGraph, info_index: usize) -> usize {
+    fn minimize_with_counter(&mut self, root: &mut LGraph, info_index: usize) -> f64 {
         let mut is_forward_sweep = self.random.next_bool();
         {
             let graph = graph_at_path(root, &self.infos[info_index].path);
@@ -735,8 +738,8 @@ impl HierarchySweep {
         let mut crossings_in_graph = self.count_current_number_of_crossings(root, info_index);
         loop {
             self.set_currently_best_node_orders(root);
-            if crossings_in_graph == 0 {
-                return 0;
+            if crossings_in_graph == 0.0 {
+                return 0.0;
             }
 
             is_forward_sweep = !is_forward_sweep;
@@ -749,7 +752,7 @@ impl HierarchySweep {
                 is_forward_sweep,
             );
             crossings_in_graph = self.count_current_number_of_crossings(root, info_index);
-            if old_number_of_crossings <= crossings_in_graph {
+            if !sweep_improved_crossings(old_number_of_crossings, crossings_in_graph) {
                 return old_number_of_crossings;
             }
         }
@@ -848,7 +851,7 @@ impl HierarchySweep {
             );
             crossings_in_graph =
                 self.count_current_crossing_score(root, info_index, use_node_port_order_counter);
-            if old_number_of_crossings <= crossings_in_graph {
+            if !sweep_improved_crossings(old_number_of_crossings, crossings_in_graph) {
                 return old_number_of_crossings;
             }
         }
@@ -1217,15 +1220,17 @@ impl HierarchySweep {
         self.infos[info_index].random = random;
     }
 
-    fn count_current_number_of_crossings(&self, root: &LGraph, info_index: usize) -> usize {
-        let mut total = 0usize;
+    fn count_current_number_of_crossings(&mut self, root: &LGraph, info_index: usize) -> f64 {
+        let mut total = 0.0f64;
         let mut stack = vec![info_index];
         while let Some(current) = stack.pop() {
-            let info = &self.infos[current];
+            let info = &mut self.infos[current];
             let graph = graph_at_path(root, &info.path);
-            total += CrossingsCounter::new()
+            total += info
+                .crossings_counter
                 .count_all_crossings_in_order(graph, &info.current_node_order);
-            for child_path in &info.child_paths {
+            // `infos` and `index_by_path` are separate fields, so the paths need no copy.
+            for child_path in &self.infos[current].child_paths {
                 if let Some(child_index) = self.index_by_path.get(child_path).copied()
                     && !self.infos[child_index].use_bottom_up
                 {
@@ -1251,7 +1256,7 @@ impl HierarchySweep {
     }
 
     fn count_current_crossing_score(
-        &self,
+        &mut self,
         root: &LGraph,
         info_index: usize,
         use_node_port_order_counter: bool,
@@ -1259,16 +1264,16 @@ impl HierarchySweep {
         if use_node_port_order_counter {
             self.count_current_number_of_crossings_node_port_order(root, info_index)
         } else {
-            self.count_current_number_of_crossings(root, info_index) as f64
+            self.count_current_number_of_crossings(root, info_index)
         }
     }
 
     fn count_current_number_of_crossings_node_port_order(
-        &self,
+        &mut self,
         root: &LGraph,
         info_index: usize,
     ) -> f64 {
-        let info = &self.infos[info_index];
+        let info = &mut self.infos[info_index];
         let graph = graph_at_path(root, &info.path);
         let mut model_order_influence = 0.0;
         let model_order_strategy = graph.options.consider_model_order_strategy;
@@ -1287,16 +1292,18 @@ impl HierarchySweep {
                 * count_model_order_port_changes(graph, &info.current_node_order) as f64;
         }
 
-        let mut total = CrossingsCounter::new()
+        let mut total = info
+            .crossings_counter
             .count_all_crossings_in_order(graph, &info.current_node_order)
-            as f64
             + model_order_influence;
 
-        for child_path in &info.child_paths {
+        // The count below borrows `self` mutably, so each path is looked up again, not copied.
+        for position in 0..self.infos[info_index].child_paths.len() {
+            let child_path = &self.infos[info_index].child_paths[position];
             if let Some(child_index) = self.index_by_path.get(child_path).copied()
                 && !self.infos[child_index].use_bottom_up
             {
-                total += self.count_current_number_of_crossings(root, child_index) as f64;
+                total += self.count_current_number_of_crossings(root, child_index);
             }
         }
 
@@ -2609,7 +2616,7 @@ impl InLayerCrossingCounter {
                         continue;
                     };
                     if end_position > port_position {
-                        crossings += index_tree.rank(end_position);
+                        crossings += index_tree.rank(end_position).unwrap_or(0);
                         ends.push(end_position);
                     }
                 } else {
@@ -2990,31 +2997,33 @@ fn minimize_barycenter(graph: &mut LGraph) -> bool {
     };
     random.set_seed(random_seed);
 
-    let mut best_crossings = usize::MAX;
+    let mut best_crossings = f64::MAX;
     let thoroughness = graph.options.thoroughness.max(1);
     // Match the shared FIRST_TRY / SECOND_TRY Property ID, as in the hierarchy sweep:
     // only the first run preserves model order before randomized attempts begin.
     let first_try_with_initial_order =
         graph.options.consider_model_order_strategy != OrderingStrategy::None;
 
+    // One heuristic and one port distributor serve every run, as in GraphInfoHolder: the port
+    // ranks and barycenters of an earlier run stay in the arrays until a later run overwrites them.
+    let port_distributor =
+        BarycenterPortDistributor::new(distributor_kind, &graph_info.current_node_order);
+    let mut heuristic = BarycenterHeuristic::new(graph, random.clone(), port_distributor);
     for run_index in 0..thoroughness {
-        let port_distributor =
-            BarycenterPortDistributor::new(distributor_kind, &graph_info.current_node_order);
-        let mut heuristic = BarycenterHeuristic::new(graph, random.clone(), port_distributor);
         let crossings = minimize_crossings_with_counter(
             graph,
             &mut graph_info,
             &mut heuristic,
             first_try_with_initial_order && run_index == 0,
         );
-        random = heuristic.random;
+        random = heuristic.random.clone();
 
         if crossings < best_crossings {
             best_crossings = crossings;
             if let Some(copy) = graph_info.currently_best_node_and_port_order.clone() {
                 graph_info.set_best_node_and_port_order(copy);
             }
-            if best_crossings == 0 {
+            if best_crossings == 0.0 {
                 break;
             }
         }
@@ -3075,20 +3084,22 @@ fn minimize_one_sided_greedy_switch(graph: &mut LGraph) -> bool {
     heuristic.set_first_layer_order(graph, &mut graph_info.current_node_order, is_forward_sweep);
     sweep_reducing_crossings_greedy(graph, &mut graph_info, &mut heuristic, is_forward_sweep);
 
-    let mut crossings_in_graph =
-        CrossingsCounter::new().count_all_crossings_in_order(graph, &graph_info.current_node_order);
+    let mut crossings_in_graph = graph_info
+        .crossings_counter
+        .count_all_crossings_in_order(graph, &graph_info.current_node_order);
     loop {
         graph_info.set_currently_best_node_and_port_order(graph);
-        if crossings_in_graph == 0 {
+        if crossings_in_graph == 0.0 {
             break;
         }
 
         is_forward_sweep = !is_forward_sweep;
         let old_number_of_crossings = crossings_in_graph;
         sweep_reducing_crossings_greedy(graph, &mut graph_info, &mut heuristic, is_forward_sweep);
-        crossings_in_graph = CrossingsCounter::new()
+        crossings_in_graph = graph_info
+            .crossings_counter
             .count_all_crossings_in_order(graph, &graph_info.current_node_order);
-        if old_number_of_crossings <= crossings_in_graph {
+        if !sweep_improved_crossings(old_number_of_crossings, crossings_in_graph) {
             break;
         }
     }
@@ -3099,19 +3110,26 @@ fn minimize_one_sided_greedy_switch(graph: &mut LGraph) -> bool {
     best_sweep.transfer_node_and_port_orders_to_graph(graph, true)
 }
 
+/// The condition of `do { ... } while (oldNumberOfCrossings > crossingsInGraph)`. A count can be
+/// `NaN`, and then the loop ends: no comparison with `NaN` is true.
+fn sweep_improved_crossings(old_number_of_crossings: f64, crossings_in_graph: f64) -> bool {
+    old_number_of_crossings > crossings_in_graph
+}
+
 fn minimize_crossings_with_counter(
     graph: &mut LGraph,
     graph_info: &mut GraphInfoHolder,
     heuristic: &mut BarycenterHeuristic,
     first_try_with_initial_order: bool,
-) -> usize {
+) -> f64 {
     let mut is_forward_sweep = heuristic.random.next_bool();
 
-    let initial_crossings =
-        CrossingsCounter::new().count_all_crossings_in_order(graph, &graph_info.current_node_order);
-    if initial_crossings == 0 && first_try_with_initial_order {
+    let initial_crossings = graph_info
+        .crossings_counter
+        .count_all_crossings_in_order(graph, &graph_info.current_node_order);
+    if initial_crossings == 0.0 && first_try_with_initial_order {
         graph_info.set_currently_best_node_and_port_order(graph);
-        return 0;
+        return 0.0;
     }
 
     if !first_try_with_initial_order
@@ -3134,20 +3152,22 @@ fn minimize_crossings_with_counter(
         !first_try_with_initial_order,
     );
 
-    let mut crossings_in_graph =
-        CrossingsCounter::new().count_all_crossings_in_order(graph, &graph_info.current_node_order);
+    let mut crossings_in_graph = graph_info
+        .crossings_counter
+        .count_all_crossings_in_order(graph, &graph_info.current_node_order);
     loop {
         graph_info.set_currently_best_node_and_port_order(graph);
-        if crossings_in_graph == 0 {
-            return 0;
+        if crossings_in_graph == 0.0 {
+            return 0.0;
         }
 
         is_forward_sweep = !is_forward_sweep;
         let old_number_of_crossings = crossings_in_graph;
         sweep_reducing_crossings(graph, graph_info, heuristic, is_forward_sweep, false);
-        crossings_in_graph = CrossingsCounter::new()
+        crossings_in_graph = graph_info
+            .crossings_counter
             .count_all_crossings_in_order(graph, &graph_info.current_node_order);
-        if old_number_of_crossings <= crossings_in_graph {
+        if !sweep_improved_crossings(old_number_of_crossings, crossings_in_graph) {
             return old_number_of_crossings;
         }
     }
@@ -3761,13 +3781,9 @@ fn apply_parent_hierarchical_port_order_on_sweep_side(
     } else {
         PortSide::West
     };
-    let eligible_count = parent_graph.layerless_nodes[parent_node_index]
-        .ports
-        .iter()
-        .filter(|port| port.side == sweep_side && port.inside_connections)
-        .count();
-    debug_assert_eq!(eligible_count, ordered_ports.len());
-
+    // The ports on the sweep side and the dummies in the layer need not match: a dummy on a
+    // north or south side stands in the layer too, and a port beyond the dummies keeps its place.
+    // `LayerSweepCrossingMinimizer.sortPortsByDummyPositionsInLastLayer` sets the ports one by one.
     let mut new_order =
         Vec::with_capacity(parent_graph.layerless_nodes[parent_node_index].ports.len());
     let mut ordered_iter = ordered_ports.iter().copied();
@@ -3787,9 +3803,7 @@ fn apply_parent_hierarchical_port_order_on_sweep_side(
         new_order.push(index);
     }
 
-    debug_assert!(ordered_iter.next().is_none());
     let _changed = parent_graph.reorder_node_ports(parent_node_index, new_order);
-    debug_assert!(_changed);
 }
 
 fn first_index(forward: bool, length: usize) -> usize {
@@ -3837,6 +3851,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            ports: Vec::new(),
             parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
@@ -3860,6 +3875,8 @@ mod tests {
 
     fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
         ElkInputEdge {
+            source_port: None,
+            target_port: None,
             id: id.to_string(),
             source: source.to_string(),
             target: target.to_string(),
@@ -3876,6 +3893,7 @@ mod tests {
 
     fn nested_node(id: &str, parent: Option<&str>) -> ElkInputNode {
         ElkInputNode {
+            ports: Vec::new(),
             parent_settings: Default::default(),
             id: id.to_string(),
             width: 54.0,
@@ -3899,6 +3917,7 @@ mod tests {
 
     fn nested_group(id: &str, parent: Option<&str>) -> ElkInputNode {
         ElkInputNode {
+            ports: Vec::new(),
             parent_settings: Default::default(),
             id: id.to_string(),
             width: 0.0,
@@ -3979,7 +3998,7 @@ mod tests {
                 minimize_crossings_layer_sweep(&mut graph);
             }
 
-            assert_eq!(CrossingsCounter::new().count_all_crossings(&graph), 3);
+            assert_eq!(CrossingsCounter::default().count_all_crossings(&graph), 3.0);
             let layer_order = graph.layers[2]
                 .nodes
                 .iter()
@@ -4424,12 +4443,12 @@ mod tests {
         graph.layers[0].nodes = vec![top, bottom];
         graph.layers[1].nodes = vec![left, right];
 
-        let before = CrossingsCounter::new().count_all_crossings(&graph);
+        let before = CrossingsCounter::default().count_all_crossings(&graph);
         assert!(minimize_crossings_layer_sweep(&mut graph));
-        let after = CrossingsCounter::new().count_all_crossings(&graph);
+        let after = CrossingsCounter::default().count_all_crossings(&graph);
 
-        assert_eq!(before, 1);
-        assert_eq!(after, 0);
+        assert_eq!(before, 1.0);
+        assert_eq!(after, 0.0);
     }
 
     #[test]
@@ -4536,6 +4555,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: None,
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -4562,6 +4582,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: None,
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -4672,6 +4693,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: None,
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -4692,6 +4714,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: None,
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -4712,6 +4735,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: None,
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -4732,6 +4756,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: None,
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -5103,7 +5128,7 @@ mod tests {
             }
         }
 
-        let before = CrossingsCounter::new().count_all_crossings(&graph);
+        let before = CrossingsCounter::default().count_all_crossings(&graph);
         let mut order = graph
             .layers
             .iter()
@@ -5115,10 +5140,10 @@ mod tests {
         assert_eq!(order[1], vec![middle_bottom, middle_top]);
 
         graph.layers[1].nodes = order[1].clone();
-        let after = CrossingsCounter::new().count_all_crossings(&graph);
+        let after = CrossingsCounter::default().count_all_crossings(&graph);
 
-        assert_eq!(before, 2);
-        assert_eq!(after, 0);
+        assert_eq!(before, 2.0);
+        assert_eq!(after, 0.0);
     }
 
     #[test]
@@ -5158,11 +5183,11 @@ mod tests {
             }
         }
 
-        let before = CrossingsCounter::new().count_all_crossings(&graph);
+        let before = CrossingsCounter::default().count_all_crossings(&graph);
         minimize_crossings_layer_sweep_with_type(&mut graph, CrossMinType::OneSidedGreedySwitch);
-        let after = CrossingsCounter::new().count_all_crossings(&graph);
+        let after = CrossingsCounter::default().count_all_crossings(&graph);
 
-        assert_eq!(before, 1);
-        assert_eq!(after, 0);
+        assert_eq!(before, 1.0);
+        assert_eq!(after, 0.0);
     }
 }

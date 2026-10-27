@@ -1,0 +1,124 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "s",
+      "width": 40,
+      "height": 20,
+      "$H": 277,
+      "x": 12,
+      "y": 14
+    },
+    {
+      "id": "g",
+      "ports": [
+        {
+          "id": "gp",
+          "width": 8,
+          "height": 8,
+          "x": 113,
+          "y": 62
+        }
+      ],
+      "children": [
+        {
+          "id": "g2",
+          "children": [
+            {
+              "id": "x",
+              "width": 40,
+              "height": 20,
+              "$H": 285,
+              "x": 12,
+              "y": 12
+            }
+          ],
+          "$H": 283,
+          "x": 37,
+          "y": 12,
+          "width": 64,
+          "height": 44
+        }
+      ],
+      "edges": [
+        {
+          "id": "e",
+          "sources": [
+            "gp"
+          ],
+          "targets": [
+            "x"
+          ],
+          "sections": [
+            {
+              "id": "e_s0",
+              "startPoint": {
+                "x": 121,
+                "y": 66
+              },
+              "endPoint": {
+                "x": 49,
+                "y": 34
+              },
+              "bendPoints": [
+                {
+                  "x": 22,
+                  "y": 66
+                },
+                {
+                  "x": 22,
+                  "y": 34
+                }
+              ],
+              "incomingShape": "gp",
+              "outgoingShape": "x"
+            }
+          ],
+          "container": "g"
+        }
+      ],
+      "$H": 279,
+      "x": 72,
+      "y": 12,
+      "width": 113,
+      "height": 82
+    }
+  ],
+  "edges": [
+    {
+      "id": "se",
+      "sources": [
+        "s"
+      ],
+      "targets": [
+        "g"
+      ],
+      "sections": [
+        {
+          "id": "se_s0",
+          "startPoint": {
+            "x": 52,
+            "y": 24
+          },
+          "endPoint": {
+            "x": 72,
+            "y": 24
+          },
+          "incomingShape": "s",
+          "outgoingShape": "g"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 205,
+  "height": 106
+}

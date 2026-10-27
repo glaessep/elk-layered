@@ -17,12 +17,14 @@
 //! error here, where elkjs would quietly ignore `properties`.
 //!
 //! elkjs reads an edge in an old form too: a single `source` and `target` string, with an
-//! optional `sourcePort` and `targetPort`. `source` and `target` read as one-element `sources`
-//! and `targets`. The old port keys are not read: a port only exists as an entry in `ports`,
-//! and a graph with one is refused. elkjs itself ignores a port key that names no port. It
-//! picks the old form only when neither `sources` nor `targets` is present; here, a graph
-//! that gives both `source` and `sources` is a serde error, and `source` next to `targets`
-//! reads as one source.
+//! optional `sourcePort` and `targetPort`. elkjs picks the old form only when neither `sources`
+//! nor `targets` is present. Here, `source` and `target` read as one-element `sources` and
+//! `targets`, and the port keys go to [`ElkEdge::old_form`]. Layout then follows
+//! `transformPrimitiveEdge`: `source` and `target` must name nodes, a port key names a port of
+//! that node, and a port key that names no port leaves the edge at the node. The JSON writer
+//! writes such an edge in the old form again, as elkjs writes its layout into the input. In the new form,
+//! elkjs ignores both port keys, as this crate does. A graph that gives both `source` and
+//! `sources` is a serde error, and `source` next to `targets` reads as one source.
 //!
 //! Source: `org.eclipse.elk.graph.json/src/org/eclipse/elk/graph/json/JsonImporter.xtend`,
 //! which reads this JSON and writes the layout back into it.
@@ -39,7 +41,8 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct ElkNode {
-    /// Unique among all nodes and ports of the graph.
+    /// Unique among all nodes of the graph. A port may have the same id: an edge end that names
+    /// both means the node.
     pub id: String,
     /// Left side, relative to the parent node.
     #[cfg_attr(feature = "serde", serde(default))]
@@ -59,7 +62,7 @@ pub struct ElkNode {
         serde(default, skip_serializing_if = "Vec::is_empty")
     )]
     pub children: Vec<ElkNode>,
-    /// The node's ports. elk-layered does not support ports yet.
+    /// The node's ports.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Vec::is_empty")
@@ -91,12 +94,17 @@ pub struct ElkNode {
     pub layout_options: BTreeMap<String, String>,
 }
 
-/// A port on a node. elk-layered does not support ports yet; a graph with one is refused.
+/// A port on a node.
+///
+/// Layout writes the port's `x` and `y`, relative to its node. A port on a north or south
+/// side across the layout flow, a port with a label, and an edge between a port of the root
+/// and a node inside it are refused for now.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct ElkPort {
-    /// Unique among all nodes and ports of the graph.
+    /// Unique among all ports of the graph. A node may have the same id: an edge end that names
+    /// both means the node.
     pub id: String,
     /// Left side, relative to the port's node.
     #[cfg_attr(feature = "serde", serde(default))]
@@ -133,24 +141,25 @@ pub struct ElkPort {
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[cfg_attr(feature = "serde", serde(try_from = "EdgeWire", into = "EdgeOut"))]
 pub struct ElkEdge {
     /// Unique among all edges of the graph.
     pub id: String,
-    /// The ids of the edge's source nodes. elk-layered supports exactly one.
+    /// The ids of the edge's source nodes or ports. elk-layered supports exactly one.
     ///
-    /// The JSON may also give the old form: a single `source` string
+    /// The JSON may also give the old form: a single `source` string, or a `sourcePort`
     /// (`transformPrimitiveEdge` in the importer).
     #[cfg_attr(
         feature = "serde",
-        serde(default, alias = "source", deserialize_with = "ends::deserialize")
+        serde(default, deserialize_with = "ends::deserialize")
     )]
     pub sources: Vec<String>,
-    /// The ids of the edge's target nodes. elk-layered supports exactly one.
+    /// The ids of the edge's target nodes or ports. elk-layered supports exactly one.
     ///
-    /// The JSON may also give the old form: a single `target` string.
+    /// The JSON may also give the old form: a single `target` string, or a `targetPort`.
     #[cfg_attr(
         feature = "serde",
-        serde(default, alias = "target", deserialize_with = "ends::deserialize")
+        serde(default, deserialize_with = "ends::deserialize")
     )]
     pub targets: Vec<String>,
     /// The edge's labels. Their coordinates are relative to [`ElkEdge::container`].
@@ -189,6 +198,21 @@ pub struct ElkEdge {
         serde(default, skip_serializing_if = "Vec::is_empty")
     )]
     pub junction_points: Vec<ElkPoint>,
+    /// The port keys of an edge in elkjs's old JSON form, or `None` for the new form. When it is
+    /// set, `sources` and `targets` name nodes only, as `transformPrimitiveEdge` reads them. The
+    /// JSON reader sets it, and the JSON writer then writes the edge in the old form again.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub old_form: Option<OldFormPorts>,
+}
+
+/// The `sourcePort` and `targetPort` keys of an edge in elkjs's old JSON form.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OldFormPorts {
+    /// The port of the source node the edge starts at. `None`, or an id that is no port, leaves
+    /// the edge at the node.
+    pub source_port: Option<String>,
+    /// The port of the target node the edge ends at, read the same way.
+    pub target_port: Option<String>,
 }
 
 /// One piece of an edge's route.
@@ -275,12 +299,176 @@ pub struct ElkPoint {
     pub y: f64,
 }
 
+/// What `ElkEdge` reads from JSON. It tells `source` from `sources`, and has the two old port
+/// keys, because elkjs reads those keys only in the old form.
+#[cfg(feature = "serde")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EdgeWire {
+    id: String,
+    #[serde(default, deserialize_with = "ends::deserialize_some")]
+    sources: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "ends::deserialize_some")]
+    source: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "ends::deserialize_some")]
+    targets: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "ends::deserialize_some")]
+    target: Option<Vec<String>>,
+    #[serde(default)]
+    source_port: Option<String>,
+    #[serde(default)]
+    target_port: Option<String>,
+    #[serde(default)]
+    labels: Vec<ElkLabel>,
+    #[serde(
+        default,
+        alias = "properties",
+        deserialize_with = "options::deserialize"
+    )]
+    layout_options: BTreeMap<String, String>,
+    #[serde(default)]
+    sections: Vec<ElkEdgeSection>,
+    #[serde(default)]
+    container: Option<String>,
+    #[serde(default)]
+    junction_points: Vec<ElkPoint>,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<EdgeWire> for ElkEdge {
+    type Error = String;
+
+    /// Ports the old form of `JsonImporter.transformPrimitiveEdge`, which elkjs picks when neither
+    /// `sources` nor `targets` is present. The port keys stay apart from the node ids, so that
+    /// layout can check them as elkjs does.
+    fn try_from(wire: EdgeWire) -> Result<Self, Self::Error> {
+        let old_form = wire.sources.is_none() && wire.targets.is_none();
+        let id = wire.id;
+        let end = |plural: Option<Vec<String>>, single: Option<Vec<String>>, name: &str| match (
+            plural, single,
+        ) {
+            (Some(_), Some(_)) => Err(format!(
+                "edge \"{id}\": both \"{name}s\" and \"{name}\" are given"
+            )),
+            (Some(ids), None) => Ok(ids),
+            (None, single) => Ok(single.unwrap_or_default()),
+        };
+        let sources = end(wire.sources, wire.source, "source")?;
+        let targets = end(wire.targets, wire.target, "target")?;
+        Ok(Self {
+            id: id.clone(),
+            sources,
+            targets,
+            labels: wire.labels,
+            layout_options: wire.layout_options,
+            sections: wire.sections,
+            container: wire.container,
+            junction_points: wire.junction_points,
+            old_form: old_form.then_some(OldFormPorts {
+                source_port: wire.source_port,
+                target_port: wire.target_port,
+            }),
+        })
+    }
+}
+
+/// What `ElkEdge` writes to JSON. elkjs writes its layout into the input object, so an edge read
+/// in the old form comes back with the keys it was read with. Writing it in the new form would
+/// lose its port keys, and reading the result again would attach the edge elsewhere.
+#[cfg(feature = "serde")]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EdgeOut {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sources: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<OldEnd>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_port: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    targets: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<OldEnd>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_port: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    labels: Vec<ElkLabel>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    layout_options: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    sections: Vec<ElkEdgeSection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    container: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    junction_points: Vec<ElkPoint>,
+}
+
+/// An old-form `source` or `target`: the one id it was read as, or a list if it was one.
+#[cfg(feature = "serde")]
+#[derive(Serialize)]
+#[serde(untagged)]
+enum OldEnd {
+    One(String),
+    Many(Vec<String>),
+}
+
+#[cfg(feature = "serde")]
+impl From<ElkEdge> for EdgeOut {
+    fn from(edge: ElkEdge) -> Self {
+        let old_end = |mut ids: Vec<String>| match ids.len() {
+            0 => None,
+            1 => ids.pop().map(OldEnd::One),
+            _ => Some(OldEnd::Many(ids)),
+        };
+        let (sources, source, source_port, targets, target, target_port) = match edge.old_form {
+            None => (
+                Some(edge.sources),
+                None,
+                None,
+                Some(edge.targets),
+                None,
+                None,
+            ),
+            Some(ports) => (
+                None,
+                old_end(edge.sources),
+                ports.source_port,
+                None,
+                old_end(edge.targets),
+                ports.target_port,
+            ),
+        };
+        Self {
+            id: edge.id,
+            sources,
+            source,
+            source_port,
+            targets,
+            target,
+            target_port,
+            labels: edge.labels,
+            layout_options: edge.layout_options,
+            sections: edge.sections,
+            container: edge.container,
+            junction_points: edge.junction_points,
+        }
+    }
+}
+
 #[cfg(feature = "serde")]
 mod ends {
     use std::fmt;
 
     use serde::Deserializer;
     use serde::de::{SeqAccess, Visitor};
+
+    /// Like [`deserialize`], for a key that may be missing.
+    pub(super) fn deserialize_some<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Vec<String>>, D::Error> {
+        deserialize(deserializer).map(Some)
+    }
 
     /// A list of ids, or a single id string for the old `source` and `target` keys.
     pub(super) fn deserialize<'de, D: Deserializer<'de>>(

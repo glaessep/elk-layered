@@ -1,0 +1,105 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "DOWN"
+  },
+  "children": [
+    {
+      "id": "src",
+      "width": 50,
+      "height": 30
+    },
+    {
+      "id": "dst",
+      "width": 50,
+      "height": 30
+    },
+    {
+      "id": "g",
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.direction": "DOWN"
+      },
+      "ports": [
+        {
+          "id": "gin",
+          "width": 12,
+          "height": 4,
+          "layoutOptions": {
+            "elk.port.side": "NORTH"
+          }
+        },
+        {
+          "id": "gout",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "SOUTH"
+          }
+        }
+      ],
+      "children": [
+        {
+          "id": "x",
+          "width": 50,
+          "height": 24
+        },
+        {
+          "id": "y",
+          "width": 50,
+          "height": 24
+        }
+      ],
+      "edges": [
+        {
+          "id": "gi",
+          "sources": [
+            "gin"
+          ],
+          "targets": [
+            "x"
+          ]
+        },
+        {
+          "id": "gx",
+          "sources": [
+            "x"
+          ],
+          "targets": [
+            "y"
+          ]
+        },
+        {
+          "id": "go",
+          "sources": [
+            "y"
+          ],
+          "targets": [
+            "gout"
+          ]
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "o1",
+      "sources": [
+        "src"
+      ],
+      "targets": [
+        "gin"
+      ]
+    },
+    {
+      "id": "o2",
+      "sources": [
+        "gout"
+      ],
+      "targets": [
+        "dst"
+      ]
+    }
+  ]
+}

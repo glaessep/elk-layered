@@ -8,6 +8,19 @@
 // With `--group-ends`, an edge may also start or end at a group, not only at a leaf. elkjs
 // refuses some of those graphs; record.mjs then records the refusal.
 //
+//   node random.mjs ../tests/elkjs/random-ports --ports && node record.mjs ../tests/elkjs/random-ports
+//
+// With `--ports`, the graphs have no groups, and many leaves have ports, under the port
+// constraints FREE, FIXED_SIDE or FIXED_ORDER. A port of a fixed node sits on a side along the
+// layout flow: west or east for the directions none, RIGHT and LEFT, north or south for DOWN and
+// UP. An edge may start or end at a port.
+//
+//   node random.mjs ../tests/elkjs/random-group-ports --group-ports && node record.mjs ../tests/elkjs/random-group-ports --drop-crashes
+//
+// With `--group-ports`, groups have ports too, under SEPARATE_CHILDREN and INCLUDE_CHILDREN. The
+// side of a port follows the direction of the run that lays its node out. A group under
+// SEPARATE_CHILDREN sets no direction, so its children and its nested run use RIGHT.
+//
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
 // a feature, and then write and record the whole corpus again.
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -15,12 +28,15 @@ import { join } from "node:path";
 
 const dir = process.argv[2];
 if (!dir) {
-  console.error("usage: node random.mjs <directory> [--group-ends]");
+  console.error("usage: node random.mjs <directory> [--group-ends | --ports]");
   process.exit(2);
 }
-const groupEnds = process.argv[3] === "--group-ends";
-const COUNT = groupEnds ? 120 : 200;
-const SEED = groupEnds ? 0x6eed : 0x5eed;
+const mode = process.argv[3] ?? "";
+const groupEnds = mode === "--group-ends";
+const groupPorts = mode === "--group-ports";
+const withPorts = mode === "--ports" || groupPorts;
+const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150 }[mode] ?? 200;
+const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed }[mode] ?? 0x5eed;
 
 // mulberry32: a small generator with a fixed seed. Its numbers only pick the graphs, so any
 // generator with a fixed seed would do.
@@ -59,7 +75,11 @@ function graph() {
   const options = { "elk.algorithm": "layered" };
   const direction = rand.pick([null, "RIGHT", "LEFT", "DOWN", "UP"]);
   if (direction) options["elk.direction"] = direction;
-  const hierarchy = rand.pick(["flat", "flat", "include", "include", "separate"]);
+  const hierarchy = groupPorts
+    ? rand.pick(["include", "include", "separate"])
+    : withPorts
+      ? "flat"
+      : rand.pick(["flat", "flat", "include", "include", "separate"]);
   if (hierarchy === "include") options["elk.hierarchyHandling"] = "INCLUDE_CHILDREN";
   if (rand.chance(0.5)) options["elk.layered.considerModelOrder.strategy"] = "NODES_AND_EDGES";
   const seed = rand.pick([null, null, "1", String(rand.int(2, 1000000))]);
@@ -126,6 +146,31 @@ function graph() {
 
   const ends = leaves.map((n) => n.id);
   if (groupEnds) ends.push(...groups.map((g) => g.id));
+  if (withPorts) {
+    // Along the flow, so that no port needs the north and south port steps of layered. The flow
+    // is the direction of the run that lays the node out. That is the root's direction for the
+    // root's children and for everything under INCLUDE_CHILDREN. A group under
+    // SEPARATE_CHILDREN sets no direction, so the run of its children uses the default, RIGHT.
+    const sidesOf = (node) => {
+      const own = parent.get(node.id) === root || hierarchy === "include" ? direction : null;
+      return own === "DOWN" || own === "UP" ? ["NORTH", "SOUTH"] : ["WEST", "EAST"];
+    };
+    let p = 0;
+    for (const node of groupPorts ? [...leaves, ...groups] : leaves) {
+      const flowSides = sidesOf(node);
+      if (!rand.chance(0.6)) continue;
+      const constraint = rand.pick([null, "FIXED_SIDE", "FIXED_SIDE", "FIXED_ORDER"]);
+      if (constraint) (node.layoutOptions ??= {})["elk.portConstraints"] = constraint;
+      node.ports = [];
+      for (let i = 0, n = rand.int(1, 4); i < n; i++) {
+        const port = { id: `p${p++}`, width: rand.int(4, 10), height: rand.int(4, 10) };
+        if (constraint) port.layoutOptions = { "elk.port.side": rand.pick(flowSides) };
+        node.ports.push(port);
+        parent.set(port.id, parent.get(node.id));
+        ends.push(port.id);
+      }
+    }
+  }
   let e = 0;
   const addEdge = (source, target) => {
     const edge = { id: `e${e++}`, sources: [source], targets: [target] };
@@ -138,6 +183,10 @@ function graph() {
         edge.labels.push(lab);
       }
     }
+    // elkjs 0.9.3 crashes ("Cannot read properties of null (reading 'd')") on a node that has a
+    // loop at one port with a tail and a head label, and another edge with a head label at a
+    // second port. The labels are drawn and then dropped, so the random draws stay the same.
+    if (withPorts && source === target && source.startsWith("p")) delete edge.labels;
     // Most edges sit in the node that holds both ends; some sit in the root, as many callers
     // write them, and ELK moves them.
     const into = rand.chance(0.3) ? root : common(source, target);

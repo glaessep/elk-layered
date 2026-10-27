@@ -767,9 +767,11 @@ impl SimpleThresholdStrategy {
                     let other_root = layout.root[ni.node_id[other_node]];
                     layout.y[other_root].unwrap_or(0.0)
                         + layout.inner_shift[ni.node_id[other_node]]
-                        + port_y(graph, other_port)
+                        + port_position_y(graph, other_port)
+                        + port_anchor_y(graph, other_port)
                         - layout.inner_shift[ni.node_id[root_node]]
-                        - port_y(graph, root_port)
+                        - port_position_y(graph, root_port)
+                        - port_anchor_y(graph, root_port)
                 } else {
                     let root_port = if layout.hdir == HDirection::Left {
                         right
@@ -786,9 +788,11 @@ impl SimpleThresholdStrategy {
                     let other_root = layout.root[ni.node_id[other_node]];
                     layout.y[other_root].unwrap_or(0.0)
                         + layout.inner_shift[ni.node_id[other_node]]
-                        + port_y(graph, other_port)
+                        + port_position_y(graph, other_port)
+                        + port_anchor_y(graph, other_port)
                         - layout.inner_shift[ni.node_id[root_node]]
-                        - port_y(graph, root_port)
+                        - port_position_y(graph, root_port)
+                        - port_anchor_y(graph, root_port)
                 };
 
                 layout.straightened[layout.root[ni.node_id[left.node]]] = true;
@@ -1185,14 +1189,21 @@ fn edge_opposite_node(edge: &LayeredEdge, node: usize) -> Option<usize> {
     }
 }
 
+// Java: BKAligner.insideBlockShift. Java adds and subtracts left to right, as
+// `t.pos + t.anchor - s.pos - s.anchor`. Subtracting the sum `s.pos + s.anchor` instead can
+// round differently in the last bit, so the four terms stay separate here.
 fn edge_port_position_difference(graph: &LGraph, edge: usize, hdir: HDirection) -> f64 {
-    let source = graph.edges[edge].source;
-    let target = graph.edges[edge].target;
-    let source_pos = port_y(graph, source);
-    let target_pos = port_y(graph, target);
+    let source =
+        &graph.layerless_nodes[graph.edges[edge].source.node].ports[graph.edges[edge].source.port];
+    let target =
+        &graph.layerless_nodes[graph.edges[edge].target.node].ports[graph.edges[edge].target.port];
     match hdir {
-        HDirection::Left => target_pos - source_pos,
-        HDirection::Right => source_pos - target_pos,
+        HDirection::Left => {
+            target.position.y + target.anchor.y - source.position.y - source.anchor.y
+        }
+        HDirection::Right => {
+            source.position.y + source.anchor.y - target.position.y - target.anchor.y
+        }
     }
 }
 
@@ -1207,10 +1218,14 @@ fn calculate_delta(
     let tgt_id = ni.node_id[tgt.node];
     let src_root = layout.root[src_id];
     let tgt_root = layout.root[tgt_id];
-    let src_pos =
-        layout.y[src_root].unwrap_or(0.0) + layout.inner_shift[src_id] + port_y(graph, src);
-    let tgt_pos =
-        layout.y[tgt_root].unwrap_or(0.0) + layout.inner_shift[tgt_id] + port_y(graph, tgt);
+    let src_pos = layout.y[src_root].unwrap_or(0.0)
+        + layout.inner_shift[src_id]
+        + port_position_y(graph, src)
+        + port_anchor_y(graph, src);
+    let tgt_pos = layout.y[tgt_root].unwrap_or(0.0)
+        + layout.inner_shift[tgt_id]
+        + port_position_y(graph, tgt)
+        + port_anchor_y(graph, tgt);
     tgt_pos - src_pos
 }
 
@@ -1332,9 +1347,18 @@ fn upper_neighbor(graph: &LGraph, ni: &NeighborhoodInformation, node: usize) -> 
     }
 }
 
-fn port_y(graph: &LGraph, port_ref: PortRef) -> f64 {
-    let port = &graph.layerless_nodes[port_ref.node].ports[port_ref.port];
-    port.position.y + port.anchor.y
+// Java adds `getPosition().y` and `getAnchor().y` as two separate terms of a longer sum, so they
+// stay two functions. Adding them first changes the rounding in the last bit.
+fn port_position_y(graph: &LGraph, port_ref: PortRef) -> f64 {
+    graph.layerless_nodes[port_ref.node].ports[port_ref.port]
+        .position
+        .y
+}
+
+fn port_anchor_y(graph: &LGraph, port_ref: PortRef) -> f64 {
+    graph.layerless_nodes[port_ref.node].ports[port_ref.port]
+        .anchor
+        .y
 }
 
 fn is_self_loop_or_in_layer_edge(graph: &LGraph, edge: usize) -> bool {
@@ -1361,6 +1385,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            ports: Vec::new(),
             parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
@@ -1384,6 +1409,8 @@ mod tests {
 
     fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
         ElkInputEdge {
+            source_port: None,
+            target_port: None,
             id: id.to_string(),
             source: source.to_string(),
             target: target.to_string(),

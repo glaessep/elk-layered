@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::compound::compare_compound_segments;
 use crate::error::Error;
-use crate::graph::{LGraph, LLabel, LNodeKind, LPoint, LSize, PortRef};
+use crate::graph::{LGraph, LLabel, LNode, LNodeKind, LPoint, LSize, PortRef, PortSide};
 
 /// `OrthogonalRoutingGenerator.TOLERANCE`.
 const TOLERANCE: f64 = 1e-3;
@@ -38,6 +38,8 @@ pub(crate) struct NodeLayout {
     pub(crate) id: String,
     pub(crate) position: LPoint,
     pub(crate) size: Option<LSize>,
+    /// New positions by input port index, relative to the node.
+    pub(crate) ports: Vec<(usize, LPoint)>,
     /// New positions and sizes by label index.
     pub(crate) labels: Vec<(usize, LPoint, LSize)>,
 }
@@ -49,7 +51,21 @@ pub(crate) struct EdgeLayout {
     pub(crate) start: LPoint,
     pub(crate) bend_points: Vec<LPoint>,
     pub(crate) end: LPoint,
+    /// Empty when ELK sets no junction points on the edge.
+    pub(crate) junction_points: Vec<LPoint>,
     pub(crate) labels: Vec<(usize, LPoint, LSize)>,
+}
+
+/// Where a run put a port of the node it lays out, and what it decided about the port.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScopePortLayout {
+    /// The position of the port among the node's ports.
+    pub(crate) index: usize,
+    /// The port's new position, relative to the node.
+    pub(crate) position: LPoint,
+    pub(crate) side: PortSide,
+    /// The border offset the dummy of the port used.
+    pub(crate) border_offset: f64,
 }
 
 /// Everything one layered run computed.
@@ -57,6 +73,10 @@ pub(crate) struct EdgeLayout {
 pub(crate) struct LayoutResult {
     pub(crate) nodes: Vec<NodeLayout>,
     pub(crate) edges: Vec<EdgeLayout>,
+    /// The ports of the node the run lays out, when the graph has external ports.
+    pub(crate) scope_ports: Vec<ScopePortLayout>,
+    /// Whether the graph has external ports: `GraphProperties.EXTERNAL_PORTS`.
+    pub(crate) external_ports: bool,
     /// `lgraph.getActualSize()` of the top graph: its size plus padding.
     pub(crate) actual_size: LSize,
 }
@@ -219,6 +239,7 @@ struct JoinedEdge {
     source: PortAt,
     target: PortAt,
     bend_points: Vec<LPoint>,
+    junction_points: Vec<LPoint>,
     labels: Vec<LLabel>,
     target_offset: LPoint,
 }
@@ -226,7 +247,6 @@ struct JoinedEdge {
 /// Joins the pieces of each edge that crosses a hierarchy level.
 ///
 /// Ports `CompoundGraphPostprocessor.process`, with `CrossHierarchyEdgeComparator.compare`.
-/// Junction points are not ported, so there are none to copy.
 fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, JoinedEdge> {
     // Pieces by original edge id, in hierarchy order.
     let mut pieces: BTreeMap<&str, Vec<(usize, &crate::graph::CrossHierarchyEdge)>> =
@@ -267,6 +287,7 @@ fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, Joi
         };
 
         let mut bend_points = Vec::new();
+        let mut junction_points = Vec::new();
         let mut labels = Vec::new();
         let mut target_offset = LPoint::default();
         let mut last_point: Option<LPoint> = None;
@@ -309,6 +330,12 @@ fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, Joi
             bend_points.extend(piece_bends.iter().copied());
             last_point = Some(piece_bends.last().copied().unwrap_or(source_point));
 
+            // `copyJunctionPoints`: the junction points of each piece, moved to the reference graph.
+            junction_points.extend(edge.junction_points.iter().map(|p| LPoint {
+                x: p.x + offset.x,
+                y: p.y + offset.y,
+            }));
+
             if hierarchy.actual_end(graph, edge.target) == target {
                 let target_graph = target.graph;
                 if target_graph != graph {
@@ -336,6 +363,7 @@ fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, Joi
                 source,
                 target,
                 bend_points,
+                junction_points,
                 labels,
                 target_offset,
             },
@@ -350,15 +378,40 @@ struct EdgeToApply<'a> {
     source: PortAt,
     target: PortAt,
     bend_points: Vec<LPoint>,
+    junction_points: Vec<LPoint>,
     labels: Vec<LLabel>,
     target_offset: Option<LPoint>,
 }
 
 /// Ports `ElkGraphLayoutTransferrer.applyLayout`, for the whole hierarchy.
 pub(crate) fn apply_layout(
-    root: &LGraph,
+    root: &mut LGraph,
     input: &TransferInput<'_>,
 ) -> Result<LayoutResult, Error> {
+    // The external ports of the top graph are placed first. This moves their dummies, which
+    // the edges that end at them read.
+    let mut scope_ports = Vec::new();
+    for index in 0..root.layerless_nodes.len() {
+        let Some(port) = root.layerless_nodes[index].scope_port else {
+            continue;
+        };
+        // The port keeps its size, and every step of the run is over: no turn of the graph is left.
+        let size = root.layerless_nodes[index].external_port_size;
+        let position = crate::pipeline::external_port_position(root, index, size);
+        let dummy = &root.layerless_nodes[index];
+        scope_ports.push(ScopePortLayout {
+            index: port,
+            position,
+            side: dummy.external_port_side,
+            border_offset: dummy
+                .ports
+                .first()
+                .and_then(|port| port.border_offset)
+                .unwrap_or(0.0),
+        });
+    }
+    let external_ports = root.graph_properties.external_ports;
+    let root: &LGraph = root;
     let hierarchy = Hierarchy::new(root);
     let joined = join_cross_hierarchy_edges(&hierarchy);
 
@@ -383,6 +436,7 @@ pub(crate) fn apply_layout(
                     port: edge.target,
                 },
                 bend_points: edge.bend_points.clone(),
+                junction_points: edge.junction_points.clone(),
                 labels: edge.labels.clone(),
                 target_offset: None,
             });
@@ -404,6 +458,7 @@ pub(crate) fn apply_layout(
             source: edge.source,
             target: edge.target,
             bend_points: edge.bend_points.clone(),
+            junction_points: edge.junction_points.clone(),
             labels: edge.labels.clone(),
             target_offset: Some(edge.target_offset),
         });
@@ -412,6 +467,8 @@ pub(crate) fn apply_layout(
     let mut result = LayoutResult {
         nodes: Vec::new(),
         edges: Vec::new(),
+        scope_ports,
+        external_ports,
         actual_size: actual_size(root),
     };
     for (graph_index, edges) in by_graph.into_iter().enumerate() {
@@ -444,8 +501,14 @@ fn is_original_edge(graph: &LGraph, index: usize, input: &TransferInput<'_>) -> 
     };
     attached(edge.source, true)
         && attached(edge.target, false)
-        && graph.layerless_nodes[edge.source.node].kind == LNodeKind::Normal
-        && graph.layerless_nodes[edge.target.node].kind == LNodeKind::Normal
+        && is_input_end(&graph.layerless_nodes[edge.source.node])
+        && is_input_end(&graph.layerless_nodes[edge.target.node])
+}
+
+/// Whether a node stands for something the input has: a node, or a port of the graph's own node.
+fn is_input_end(node: &LNode) -> bool {
+    node.kind == LNodeKind::Normal
+        || (node.kind == LNodeKind::ExternalPort && node.scope_port.is_some())
 }
 
 /// `LGraph.getActualSize`.
@@ -511,6 +574,13 @@ fn node_layout(
                 .map(|index| (index, label.position, label.size))
         })
         .collect();
+    // `elkport.setLocation(lport.getPosition().x, lport.getPosition().y)` for each port that
+    // came from the input.
+    let ports = node
+        .ports
+        .iter()
+        .filter_map(|port| port.input_index.map(|index| (index, port.position)))
+        .collect();
     NodeLayout {
         id: node.id.clone(),
         position: LPoint {
@@ -518,6 +588,7 @@ fn node_layout(
             y: node.position.y + offset.y,
         },
         size,
+        ports,
         labels,
     }
 }
@@ -578,6 +649,8 @@ fn edge_layout(
         start: shift(source_point),
         bend_points: edge.bend_points.iter().copied().map(shift).collect(),
         end: shift(target_point),
+        // `junctionPoints.offset(edgeOffset)`.
+        junction_points: edge.junction_points.iter().copied().map(shift).collect(),
         labels,
     })
 }
@@ -661,6 +734,60 @@ mod tests {
             edge_containers: containers,
         };
         hierarchical_offset(&hierarchy, (1, 0), (2, 0), "e", &input).err()
+    }
+
+    // Mutation: leave out `copyJunctionPoints` in `join_cross_hierarchy_edges`. The joined edge
+    // then has no junction points.
+    #[test]
+    fn the_junction_points_of_an_edge_across_levels_are_joined_and_moved_to_one_graph() {
+        use crate::importer::{ElkInputGraph, import_graph};
+        use crate::options::{ElkDirection, HierarchyHandling};
+        use crate::snapshot_tests::{edge, node};
+
+        let mut group = node("group", 40.0, 30.0, None);
+        group.hierarchy_handling = Some(HierarchyHandling::IncludeChildren);
+        let input = ElkInputGraph {
+            id: "root".to_string(),
+            options: LayeredOptions::flowchart_test_defaults(ElkDirection::Right),
+            nodes: vec![
+                group,
+                node("a", 40.0, 30.0, Some("group")),
+                node("b", 40.0, 30.0, None),
+            ],
+            edges: vec![edge("e", "a", "b")],
+        };
+        let mut graph = import_graph(&input).expect("imports");
+        crate::pipeline::execute_ported_compound_processors(&mut graph).expect("lays out");
+        // Give every piece of the edge a junction point, as a router would.
+        fn mark(graph: &mut LGraph) {
+            for edge in &mut graph.edges {
+                edge.junction_points = vec![LPoint { x: 1.0, y: 2.0 }];
+            }
+            for node in &mut graph.layerless_nodes {
+                if let Some(nested) = node.nested_graph.as_deref_mut() {
+                    mark(nested);
+                }
+            }
+        }
+        mark(&mut graph);
+
+        let parents = HashMap::new();
+        let sized_nodes = HashSet::new();
+        let containers = HashMap::from([("e".to_string(), "root".to_string())]);
+        let input = TransferInput {
+            parents: &parents,
+            sized_nodes: &sized_nodes,
+            edge_containers: &containers,
+        };
+        let result = apply_layout(&mut graph, &input).expect("transfers");
+        let edge = result
+            .edges
+            .iter()
+            .find(|edge| edge.id == "e")
+            .expect("the edge");
+        // One junction point per piece. The pieces are in two graphs, so they land apart.
+        assert_eq!(edge.junction_points.len(), 2);
+        assert_ne!(edge.junction_points[0], edge.junction_points[1]);
     }
 
     // Mutation: return `Ok(LPoint::default())` when the edge has no container.

@@ -16,8 +16,36 @@ use serde_json::Value;
 /// Cases whose feature elk-layered does not have yet, each with the issue that adds it. A case
 /// leaves this list in the pull request that makes it pass.
 const NOT_YET: &[(&str, &str)] = &[
-    ("comp-we", "ports in the input, #4"),
     ("comp-ns", "north and south ports, #5"),
+    ("random-group-ports/r007", "north and south ports, #5"),
+    ("random-group-ports/r010", "north and south ports, #5"),
+    ("random-group-ports/r013", "north and south ports, #5"),
+    ("random-group-ports/r019", "north and south ports, #5"),
+    ("random-group-ports/r025", "north and south ports, #5"),
+    ("random-group-ports/r029", "north and south ports, #5"),
+    ("random-group-ports/r033", "north and south ports, #5"),
+    ("random-group-ports/r035", "north and south ports, #5"),
+    ("random-group-ports/r043", "north and south ports, #5"),
+    ("random-group-ports/r044", "north and south ports, #5"),
+    ("random-group-ports/r045", "north and south ports, #5"),
+    ("random-group-ports/r048", "north and south ports, #5"),
+    ("random-group-ports/r050", "north and south ports, #5"),
+    ("random-group-ports/r059", "north and south ports, #5"),
+    ("random-group-ports/r064", "north and south ports, #5"),
+    ("random-group-ports/r074", "north and south ports, #5"),
+    ("random-group-ports/r077", "north and south ports, #5"),
+    ("random-group-ports/r078", "north and south ports, #5"),
+    ("random-group-ports/r082", "north and south ports, #5"),
+    ("random-group-ports/r106", "north and south ports, #5"),
+    ("random-group-ports/r111", "north and south ports, #5"),
+    ("random-group-ports/r112", "north and south ports, #5"),
+    ("random-group-ports/r125", "north and south ports, #5"),
+    ("random-group-ports/r127", "north and south ports, #5"),
+    ("random-group-ports/r131", "north and south ports, #5"),
+    ("random-group-ports/r134", "north and south ports, #5"),
+    ("random-group-ports/r135", "north and south ports, #5"),
+    ("random-group-ports/r140", "north and south ports, #5"),
+    ("random-group-ports/r147", "north and south ports, #5"),
 ];
 
 fn cases_dir() -> PathBuf {
@@ -25,14 +53,17 @@ fn cases_dir() -> PathBuf {
 }
 
 /// Every input: the hand-written cases in `tests/elkjs/`, then the random ones that
-/// `oracle/random.mjs` writes: `tests/elkjs/random/`, and `tests/elkjs/random-group-ends/`, whose
-/// edges may also end at a group.
+/// `oracle/random.mjs` writes: `tests/elkjs/random/`, `tests/elkjs/random-group-ends/`, whose
+/// edges may also end at a group, `tests/elkjs/random-ports/`, whose nodes have ports, and
+/// `tests/elkjs/random-group-ports/`, whose groups have ports too.
 fn cases() -> Vec<PathBuf> {
     let mut inputs = Vec::new();
     for dir in [
         cases_dir(),
         cases_dir().join("random"),
         cases_dir().join("random-group-ends"),
+        cases_dir().join("random-ports"),
+        cases_dir().join("random-group-ports"),
     ] {
         let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|_| panic!("{} exists", dir.display()))
@@ -68,11 +99,15 @@ fn without_hash_ids(value: &mut Value) {
 
 /// The first place two JSON values differ, or `None` when they are equal. Numbers compare as
 /// `f64`, bit for bit, so `12` and `12.0` are equal and `12` and `12.000000000000002` are not.
+/// Only the sign of a zero does not count.
 fn first_difference(path: &str, want: &Value, got: &Value) -> Option<String> {
     match (want, got) {
         (Value::Number(a), Value::Number(b)) => {
             let (a, b) = (a.as_f64().unwrap(), b.as_f64().unwrap());
-            (a.to_bits() != b.to_bits()).then(|| format!("{path}: elkjs {a:?}, elk-layered {b:?}"))
+            // JavaScript writes a negative zero as `0`, so the recorded files cannot hold one.
+            // Zero with either sign is the same number.
+            let same = a.to_bits() == b.to_bits() || (a == 0.0 && b == 0.0);
+            (!same).then(|| format!("{path}: elkjs {a:?}, elk-layered {b:?}"))
         }
         (Value::Object(a), Value::Object(b)) => {
             for key in a.keys().chain(b.keys()) {
@@ -221,6 +256,103 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 11. In the `to_graph` refusal of src/layout.rs, change the `feature` text, for example to "an
 //    edge into a part of the graph laid out on its own". The same 26 cases then fail on the
 //    feature, not on the error kind.
+// 12. In `Tree::count_port_facts` (src/layout.rs), count only the edges to children and leave
+//    the edges to the outside out (`else { 0 }` for both directions): 7 cases, such as
+//    ports-group-include-netflow, ports-group-separate-zero-flow and random-group-ports/r018.
+// 13. In `ensure_segment_endpoint_port` (src/compound.rs), never reuse the dummy of a named port
+//    of the parent (`if false && let Some(&dummy) = parent_dummies.get(..)`): 33 cases, such as
+//    ports-group-include, ports-group-include-free and random-group-ports/r000.
+// 14. In `lookup_types` (src/compound.rs), find a named port by the output type only: 80 cases,
+//    such as comp-we, ports-across-levels and random-group-ports/r000.
+// 15. In `define_port_sides` (src/layout.rs), compare the net flow with `>= 0` instead of
+//    `> 0`: 1 case, ports-group-separate-zero-flow.
+// 16. In `apply_port_index_to_dummy` (src/graph.rs), ignore the port index: 1 case,
+//    ports-group-separate-port-index-order.
+// 17. In `import_external_ports` (src/importer.rs), give a port without a border offset the
+//    offset 0 instead of `calc_port_offset`: 3 cases, ports-group-separate-fixed-pos,
+//    ports-group-ratio-sized and ports-group-separate-zero-flow.
+// 18. In `apply_parent_node_layout` (src/layout.rs), never move the ports of a node whose graph
+//    has no external ports: 1 case, ports-root-idle.
+// 19. In `transfer_external_port_dummy_layout_to_parent_node` (src/pipeline.rs), take the size of
+//    the port from the dummy instead of from the port of the turned parent graph: 3 cases,
+//    ports-group-include-down-flat-ports, random-group-ports/r026 and r109.
+// 20. In `run_layered` (src/layout.rs), leave out `define_port_sides` for a node with children
+//    that has size constraints: 1 case, ports-group-include-defined-side.
+// 21. In `create_parent_boundary_port` (src/compound.rs), put the dummy of a node with fixed
+//    port sides on the side of the direction instead of west or east: 10 cases, such as
+//    hierarchy-edge-at-fixed-side-node-left, random-group-ports/r011 and r041.
+// 22. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), read the
+//    port constraints of the node after the dummies are linked instead of before: the case
+//    ports-group-include-idle-port differs.
+// 23. In `hierarchy_edge_end` (src/importer.rs), ignore the named port and make a port of the
+//    node's own: 84 cases, such as comp-we, ports-across-levels and random-group-ports/r000.
+// 24. In `InputIndex::child_position` (src/importer.rs), leave out the number of dummies of the
+//    external ports: 16 cases, such as ports-group-separate, ports-group-ratio-sized and
+//    ports-group-separate-fixed-pos.
+// 25. In `write_result` (src/layout.rs), leave out the write of the positions of the ports of
+//    the node whose layout it is: 15 cases, such as ports-group-separate and
+//    ports-group-separate-sized.
+// 26. In `is_input_end` (src/export.rs), accept only normal nodes: 16 cases, such as
+//    ports-group-separate and ports-group-separate-fixed-pos.
+// 27. In `input_node` (src/layout.rs), leave out `FIXED_POS` for a node whose ports a run has
+//    placed: 8 cases, such as ports-group-separate-two-ports and ports-group-separate-zero-flow.
+// 28. In `create_parent_boundary_port` (src/compound.rs), set `non_free_ports` on the nested
+//    graph again: 1 case, ports-leaf-in-group-with-crossing-edge.
+// 29. In `write_result` (src/layout.rs), do not keep the side the dummy chose on the port: 1
+//    case, ports-group-separate-zero-flow.
+// 30. In `Tree::count_port_facts` (src/layout.rs), never count an edge to a child: 16 cases,
+//    such as ports-group-separate, ports-group-ratio-sized and ports-group-separate-sized.
+// 31. In `ensure_hierarchy_endpoint_port` (src/importer.rs), leave the side of the port of a
+//    hierarchy edge undefined: 36 cases, such as hierarchy-edge-at-fixed-side-node,
+//    hierarchy-edge-at-fixed-side-node-left and random-group-ports/r002.
+// 32. In `Tree::count_port_facts` (src/layout.rs), count a grandchild as a child, in the net flow
+//    and in the count of child edges: 7 cases, such as ports-edge-to-grandchild,
+//    ports-free-port-edge-to-grandchild-include-children, random-group-ports/r060 and r067.
+//    `ElkGraphImporter.calculateNetFlow` tests the parent of the target, not every ancestor, so
+//    an edge to a grandchild votes for an output port.
+// 33. In `split` (src/components.rs), let every component join no side
+//    (`sides | group::SIDES_NONE`): 15 cases, such as ports-group-components,
+//    ports-group-components-rows and random-group-ports/r006.
+// 34. In `combine` (src/components.rs), place the components of a graph with external ports with
+//    the SimpleRow placer: 16 cases, such as ports-group-components-free, ports-group-components
+//    and random-group-ports/r022.
+// 35. In `combine`, leave out the move of the component's own offset after the group placer: 8
+//    cases, such as ports-group-components, random-group-ports/r040 and r113.
+// 36. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), take the net
+//    flow from the edges the port has by then, `-port.net_flow()`, instead of the edges the
+//    importer made: 2 cases, ports-group-include-flow-of-split-edges and random-group-ports/r037.
+// 37. In `original_net_flows`, count the source of a hierarchy edge as incoming (`+= 1`): 5 cases,
+//    such as ports-group-include-flow-of-split-edges-out and random-group-ports/r037.
+// 38. In `transform_edge` (src/importer.rs), leave the edges that cross a level out of the count
+//    at a port (`port.incoming_edges.len() > 1 || port.outgoing_edges.len() > 1`): 2 cases,
+//    random-group-ports/r020 and r042.
+// 39. In `transform_cross_hierarchy_edge`, leave the edges already attached to the port out of
+//    the count (`incoming > 1 || outgoing > 1`): 1 case, hierarchy-edge-and-edge-into-one-port.
+// 40. In `transform_cross_hierarchy_edge`, set the hyperedge flag on the root graph instead of
+//    the graph the edge belongs to: 4 cases, such as random-group-ports/r016, r018 and r047.
+// 41. In the segment code of src/compound.rs, set the flag when the source port already has an
+//    edge, as the compound preprocessor used to: 2 cases,
+//    hierarchy-edge-in-and-out-at-one-port and random-group-ports/r092.
+// 42. In `minimize_barycenter` (src/p3order/sweep.rs), make a new port distributor and heuristic
+//    for each run instead of one for all runs: 3 cases,
+//    free-port-in-and-out-between-separate-layers and its two seed variants.
+// 43. In `BinaryIndexedTree::rank` (src/p3order/counting.rs), clamp the index to the last one
+//    instead of giving `None`: 1 case, hierarchy-count-of-crossings-is-nan, and
+//    random-group-ports/r122.
+// 44. In `CrossingsCounter::count_crossings_on_ports`, add 0 for a rank past the end instead of
+//    `NaN`: the same 2 cases.
+// 45. In `minimize_barycenter_with_counter` (src/p3order/sweep.rs), end the loop with
+//    `old <= new` instead of `!sweep_improved_crossings(old, new)`: the same 2 cases differ, as a `NaN` count no longer
+//    ends the loop.
+// 46. In `original_net_flows` (src/compound.rs), key the source of a hierarchy edge as a made-up
+//    port (`false` for `edge.source_port_named`): 5 cases, such as
+//    ports-caller-id-like-made-up-id-include-children, ports-group-include-flow-of-split-edges-out
+//    and random-group-ports/r037. The first names the ports of G `G:1` and `G:2`, the id the
+//    importer gives to the made-up port of the edge into G, so the two ports must not share a flow.
+// 47. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), look the
+//    flow of a port up as a made-up port (`false` for `port.named`): 2 cases, ports-group-include-flow-of-split-edges and random-group-ports/r037.
+// The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
+// their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
 fn every_case_lays_out_exactly_as_elkjs_does() {
     let mut failures = Vec::new();
@@ -257,6 +389,18 @@ fn no_case_waits_for_a_feature_that_already_works() {
             "{case} now matches elkjs: take it off NOT_YET ({issue})"
         );
     }
+}
+
+/// A negative zero equals a zero: elkjs's JSON has no negative zero, and a one-bit change in a
+/// number that is not zero still counts.
+// Mutation: compare the numbers by their bits only. The zeros then differ.
+#[test]
+fn a_negative_zero_equals_a_zero() {
+    let want: Value = serde_json::json!({"x": 0});
+    let got: Value = serde_json::json!({"x": -0.0});
+    assert!(first_difference("", &want, &got).is_none());
+    let got: Value = serde_json::json!({"x": 5e-324});
+    assert!(first_difference("", &want, &got).is_some());
 }
 
 /// The differ itself must see a one-bit change, or the suite proves nothing.

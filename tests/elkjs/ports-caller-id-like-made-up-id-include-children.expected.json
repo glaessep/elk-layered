@@ -1,0 +1,143 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "s",
+      "width": 30,
+      "height": 20,
+      "$H": 277,
+      "x": 12,
+      "y": 37
+    },
+    {
+      "id": "G",
+      "ports": [
+        {
+          "id": "G:1",
+          "width": 6,
+          "height": 6,
+          "x": 54,
+          "y": 12
+        },
+        {
+          "id": "G:2",
+          "width": 6,
+          "height": 6,
+          "x": -6,
+          "y": 19
+        }
+      ],
+      "children": [
+        {
+          "id": "c",
+          "width": 30,
+          "height": 20,
+          "$H": 284,
+          "x": 12,
+          "y": 12
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "sources": [
+            "G:2"
+          ],
+          "targets": [
+            "c"
+          ],
+          "sections": [
+            {
+              "id": "e1_s0",
+              "startPoint": {
+                "x": -6,
+                "y": 22
+              },
+              "endPoint": {
+                "x": 12,
+                "y": 22
+              },
+              "incomingShape": "G:2",
+              "outgoingShape": "c"
+            }
+          ],
+          "container": "G"
+        }
+      ],
+      "$H": 279,
+      "x": 68,
+      "y": 12,
+      "width": 54,
+      "height": 47
+    },
+    {
+      "id": "t",
+      "width": 30,
+      "height": 20,
+      "$H": 286,
+      "x": 148,
+      "y": 30
+    }
+  ],
+  "edges": [
+    {
+      "id": "e2",
+      "sources": [
+        "s"
+      ],
+      "targets": [
+        "G"
+      ],
+      "sections": [
+        {
+          "id": "e2_s0",
+          "startPoint": {
+            "x": 42,
+            "y": 47
+          },
+          "endPoint": {
+            "x": 68,
+            "y": 47
+          },
+          "incomingShape": "s",
+          "outgoingShape": "G"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e3",
+      "sources": [
+        "G"
+      ],
+      "targets": [
+        "t"
+      ],
+      "sections": [
+        {
+          "id": "e3_s0",
+          "startPoint": {
+            "x": 122,
+            "y": 40
+          },
+          "endPoint": {
+            "x": 148,
+            "y": 40
+          },
+          "incomingShape": "G",
+          "outgoingShape": "t"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 190,
+  "height": 71
+}

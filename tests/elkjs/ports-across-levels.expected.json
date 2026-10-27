@@ -1,0 +1,203 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "y",
+      "width": 60,
+      "height": 30,
+      "ports": [
+        {
+          "id": "yin",
+          "width": 6,
+          "height": 6,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "x": -6,
+          "y": 12
+        },
+        {
+          "id": "yout",
+          "width": 6,
+          "height": 6,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          },
+          "x": 60,
+          "y": 12
+        }
+      ],
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE"
+      },
+      "$H": 277,
+      "x": 157,
+      "y": 24
+    },
+    {
+      "id": "g",
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE"
+      },
+      "ports": [
+        {
+          "id": "gin",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "x": -8,
+          "y": 23
+        }
+      ],
+      "children": [
+        {
+          "id": "x",
+          "width": 60,
+          "height": 30,
+          "ports": [
+            {
+              "id": "xin",
+              "width": 6,
+              "height": 6,
+              "layoutOptions": {
+                "elk.port.side": "WEST"
+              },
+              "x": -6,
+              "y": 12
+            },
+            {
+              "id": "xout",
+              "width": 6,
+              "height": 6,
+              "layoutOptions": {
+                "elk.port.side": "EAST"
+              },
+              "x": 60,
+              "y": 12
+            }
+          ],
+          "layoutOptions": {
+            "elk.portConstraints": "FIXED_SIDE"
+          },
+          "$H": 285,
+          "x": 18,
+          "y": 12
+        }
+      ],
+      "edges": [
+        {
+          "id": "gi",
+          "sources": [
+            "gin"
+          ],
+          "targets": [
+            "xin"
+          ],
+          "sections": [
+            {
+              "id": "gi_s0",
+              "startPoint": {
+                "x": -8,
+                "y": 27
+              },
+              "endPoint": {
+                "x": 12,
+                "y": 27
+              },
+              "incomingShape": "gin",
+              "outgoingShape": "xin"
+            }
+          ],
+          "container": "g"
+        }
+      ],
+      "$H": 282,
+      "x": 30,
+      "y": 12,
+      "width": 96,
+      "height": 54
+    }
+  ],
+  "edges": [
+    {
+      "id": "a1",
+      "sources": [
+        "xout"
+      ],
+      "targets": [
+        "yin"
+      ],
+      "sections": [
+        {
+          "id": "a1_s0",
+          "startPoint": {
+            "x": 114,
+            "y": 39
+          },
+          "endPoint": {
+            "x": 151,
+            "y": 39
+          },
+          "incomingShape": "xout",
+          "outgoingShape": "yin"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "a2",
+      "sources": [
+        "yout"
+      ],
+      "targets": [
+        "gin"
+      ],
+      "sections": [
+        {
+          "id": "a2_s0",
+          "startPoint": {
+            "x": 223,
+            "y": 39
+          },
+          "endPoint": {
+            "x": 22,
+            "y": 39
+          },
+          "bendPoints": [
+            {
+              "x": 233,
+              "y": 39
+            },
+            {
+              "x": 233,
+              "y": 76
+            },
+            {
+              "x": 12,
+              "y": 76
+            },
+            {
+              "x": 12,
+              "y": 39
+            }
+          ],
+          "incomingShape": "yout",
+          "outgoingShape": "gin"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 245,
+  "height": 88
+}

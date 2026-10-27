@@ -750,6 +750,7 @@ fn clone_inverted_dummy_edge(
         minlen: old_edge.minlen,
         reversed: old_edge.reversed,
         bend_points: Vec::new(),
+        junction_points: Vec::new(),
         model_order: old_edge.model_order,
         priority_direction: old_edge.priority_direction,
         priority_shortness: old_edge.priority_shortness,
@@ -910,18 +911,21 @@ fn ensure_no_outgoing_except_label_dummies(graph: &LGraph, node: usize) -> Inter
     Ok(())
 }
 
+// Java: LabelDummyInserter.process. It visits the layerless nodes in order, and each node's
+// outgoing edges in port order. The dummies are created in that order, so it fixes their node
+// order inside a layer before crossing minimisation. Walking the edge list by index gives another
+// order whenever a node has an edge on a declared port and one on the node itself.
 pub fn insert_label_dummies(graph: &mut LGraph) {
-    let edge_indices = graph
-        .edges
-        .iter()
-        .enumerate()
-        .filter(|(_, edge)| edge.source.node != edge.target.node)
-        .filter(|(_, edge)| {
-            edge.labels
-                .iter()
-                .any(|label| label.placement == EdgeLabelPlacement::Center)
+    let edge_indices = (0..graph.layerless_nodes.len())
+        .flat_map(|node| graph.node_outgoing_edges(node))
+        .filter(|&index| {
+            let edge = &graph.edges[index];
+            edge.source.node != edge.target.node
+                && edge
+                    .labels
+                    .iter()
+                    .any(|label| label.placement == EdgeLabelPlacement::Center)
         })
-        .map(|(index, _)| index)
         .collect::<Vec<_>>();
 
     for edge_index in edge_indices {
@@ -1362,7 +1366,10 @@ pub fn switch_label_dummies(graph: &mut LGraph) {
         if let Some(info) = LabelDummyInfo::new(graph, label_dummy) {
             let target_layer = find_median_layer_target_id(&info);
             assign_label_dummy_layer(graph, &info, target_layer);
-            update_long_edge_before_label_dummy_info(graph, info.label_dummy);
+            // Java: LabelDummySwitcher.updateLongEdgeSourceLabelDummyInfo sets
+            // LONG_EDGE_BEFORE_LABEL_DUMMY only. It leaves LONG_EDGE_HAS_LABEL_DUMMIES alone:
+            // that flag comes from LongEdgeSplitter. The merger reads "before the label dummy"
+            // from the graph in `is_before_label_dummy`.
         }
     }
 }
@@ -2127,9 +2134,17 @@ fn update_end_label_node_margin(graph: &mut LGraph, node: usize) {
     margin.bottom = height - margin.top - node_size.height;
 }
 
+/// Ports `EndLabelSorter.process`, `initialize` and the label group comparator at commit
+/// `62d5909`.
+///
+/// `initialize` gives every node and every port one ascending id, layer by layer, node by node
+/// and port by port. The comparator compares those ids, so the order of the layers and of the
+/// nodes in them decides, not the order in which the importer made the nodes or the index of a
+/// port inside its own node.
 pub fn sort_end_labels(graph: &mut LGraph) {
+    let (node_ids, port_ids) = end_label_sorter_ids(graph);
     let edge_sort_keys = (0..graph.edges.len())
-        .map(|edge| end_label_sort_key(graph, edge))
+        .map(|edge| end_label_sort_key(graph, edge, &node_ids, &port_ids))
         .collect::<Vec<_>>();
 
     for node in 0..graph.layerless_nodes.len() {
@@ -2155,11 +2170,40 @@ pub fn sort_end_labels(graph: &mut LGraph) {
     }
 }
 
-fn end_label_sort_key(graph: &LGraph, edge: usize) -> (usize, usize, usize) {
+/// `EndLabelSorter.initialize`: ascending ids over the layers, their nodes and those nodes' ports.
+/// A node outside every layer keeps `usize::MAX`.
+fn end_label_sorter_ids(graph: &LGraph) -> (Vec<usize>, Vec<Vec<usize>>) {
+    let mut node_ids = vec![usize::MAX; graph.layerless_nodes.len()];
+    let mut port_ids = graph
+        .layerless_nodes
+        .iter()
+        .map(|node| vec![usize::MAX; node.ports.len()])
+        .collect::<Vec<_>>();
+    let mut next_element_id = 0;
+    for layer in &graph.layers {
+        for &node in &layer.nodes {
+            node_ids[node] = next_element_id;
+            next_element_id += 1;
+            for port_id in &mut port_ids[node] {
+                *port_id = next_element_id;
+                next_element_id += 1;
+            }
+        }
+    }
+    (node_ids, port_ids)
+}
+
+fn end_label_sort_key(
+    graph: &LGraph,
+    edge: usize,
+    node_ids: &[usize],
+    port_ids: &[Vec<usize>],
+) -> (usize, usize, usize) {
     let edge = &graph.edges[edge];
-    let source_port = edge.source.port;
-    let target_node = edge.target.node;
-    let target_port = usize::MAX.saturating_sub(edge.target.port);
+    let source_port = port_ids[edge.source.node][edge.source.port];
+    let target_node = node_ids[edge.target.node];
+    // Java compares the target ports backwards: western ports run bottom to top.
+    let target_port = usize::MAX.saturating_sub(port_ids[edge.target.node][edge.target.port]);
     (source_port, target_node, target_port)
 }
 
@@ -2452,18 +2496,6 @@ fn swap_label_and_long_edge_dummies(
     }
     for edge in label_outgoing {
         graph.set_edge_source(edge, long_output_ref);
-    }
-}
-
-fn update_long_edge_before_label_dummy_info(graph: &mut LGraph, label_dummy: usize) {
-    let mut current = label_dummy;
-    while let Some(incoming) = graph.node_incoming_edges(current).into_iter().next() {
-        let source = graph.edges[incoming].source.node;
-        if graph.layerless_nodes[source].kind != LNodeKind::LongEdge {
-            break;
-        }
-        graph.layerless_nodes[source].long_edge_has_label_dummies = true;
-        current = source;
     }
 }
 
@@ -2807,6 +2839,7 @@ fn join_long_edge_pair(
     unnecessary_bendpoint: Option<LPoint>,
 ) {
     let dropped_bend_points = graph.edges[dropped_edge].bend_points.clone();
+    let dropped_junction_points = graph.edges[dropped_edge].junction_points.clone();
     let dropped_labels = std::mem::take(&mut graph.edges[dropped_edge].labels);
 
     graph.edges[surviving_edge].target = dropped_target;
@@ -2820,6 +2853,10 @@ fn join_long_edge_pair(
         .bend_points
         .extend(dropped_bend_points);
     graph.edges[surviving_edge].labels.extend(dropped_labels);
+    // `LongEdgeJoiner.joinAt` joins the junction points too.
+    graph.edges[surviving_edge]
+        .junction_points
+        .extend(dropped_junction_points);
 }
 
 fn long_edge_dummy_anchor(graph: &LGraph, node: usize) -> LPoint {
@@ -3097,6 +3134,7 @@ fn connect_replacement_dummy_to_original(graph: &mut LGraph, replacement: usize,
         minlen: 1,
         reversed: false,
         bend_points: Vec::new(),
+        junction_points: Vec::new(),
         model_order: None,
         priority_direction: 0,
         priority_shortness: 0,
@@ -3853,6 +3891,7 @@ pub fn split_edge(graph: &mut LGraph, edge_index: usize, dummy_node: usize) -> O
         minlen: old_segment.minlen,
         reversed: old_segment.reversed,
         bend_points: Vec::new(),
+        junction_points: Vec::new(),
         model_order: old_segment.model_order,
         priority_direction: old_segment.priority_direction,
         priority_shortness: old_segment.priority_shortness,
@@ -3931,6 +3970,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            ports: Vec::new(),
             parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
@@ -3954,6 +3994,8 @@ mod tests {
 
     fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
         ElkInputEdge {
+            source_port: None,
+            target_port: None,
             id: id.to_string(),
             source: source.to_string(),
             target: target.to_string(),
@@ -4717,6 +4759,24 @@ mod tests {
                         },
                     ]
                 );
+                // `LongEdgeJoiner` appends the junction points of the dropped edge, unchanged.
+                assert_eq!(
+                    fixture.graph.edges[surviving].junction_points,
+                    vec![
+                        LPoint {
+                            x: pair.surviving_index as f64,
+                            y: 11.0,
+                        },
+                        LPoint {
+                            x: pair.dropped_index as f64,
+                            y: 21.0,
+                        },
+                        LPoint {
+                            x: pair.dropped_index as f64,
+                            y: 31.0,
+                        },
+                    ]
+                );
                 assert_eq!(
                     fixture.graph.edges[surviving]
                         .labels
@@ -5460,6 +5520,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: None,
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -5559,6 +5620,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: None,
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -5677,6 +5739,7 @@ mod tests {
                 minlen: 1,
                 reversed: false,
                 bend_points: Vec::new(),
+                junction_points: Vec::new(),
                 model_order: None,
                 priority_direction: 0,
                 priority_shortness: 0,
@@ -5747,6 +5810,10 @@ mod tests {
                 x: pair_index as f64,
                 y: 10.0,
             });
+            graph.edges[surviving].junction_points.push(LPoint {
+                x: pair_index as f64,
+                y: 11.0,
+            });
             surviving_edges.push(surviving);
 
             let dropped = add_test_edge(
@@ -5765,6 +5832,16 @@ mod tests {
                 LPoint {
                     x: pair_index as f64,
                     y: 30.0,
+                },
+            ]);
+            graph.edges[dropped].junction_points.extend([
+                LPoint {
+                    x: pair_index as f64,
+                    y: 21.0,
+                },
+                LPoint {
+                    x: pair_index as f64,
+                    y: 31.0,
                 },
             ]);
             graph.edges[dropped].labels.push(LLabel::new(

@@ -1346,6 +1346,9 @@ fn determine_loop_routes(graph: &LGraph, holder: &mut SelfLoopHolder) {
     let port_penalties = compute_port_penalties(graph, holder.node);
 
     for hyper_loop in &mut holder.hyper_loops {
+        // Java's `slPortsBySide.keySet()` lists the sides in the order the loop's ports were
+        // added, so read it before the ports are sorted by id.
+        let sides_in_port_order = loop_sides_in_port_order(graph, holder.node, hyper_loop);
         hyper_loop.ports.sort_by_key(|port| port.port);
 
         let Some(loop_type) = hyper_loop.self_loop_type else {
@@ -1369,6 +1372,7 @@ fn determine_loop_routes(graph: &LGraph, holder: &mut SelfLoopHolder) {
                     graph,
                     holder.node,
                     hyper_loop,
+                    &sides_in_port_order,
                     &port_penalties,
                 );
             }
@@ -1387,13 +1391,17 @@ fn determine_loop_routes(graph: &LGraph, holder: &mut SelfLoopHolder) {
     }
 }
 
+// Java: RoutingDirector.determineTwoSideOpposingLoopRoutes. Java takes `sides` from
+// `slLoop.getSLPortsBySide().keySet().toArray(...)`, a multimap over a hash map. elkjs (GWT)
+// iterates that map in insertion order, so `sides` keeps the order of the loop's ports and is not
+// sorted. A tie between the two options goes to option 1, so this order picks the loop's route.
 fn determine_two_side_opposing_loop_route(
     graph: &LGraph,
     node: usize,
     hyper_loop: &mut SelfHyperLoop,
+    sides: &[PortSide],
     port_penalties: &[usize],
 ) {
-    let sides = loop_sides(graph, node, hyper_loop);
     if sides.len() != 2 {
         return;
     }
@@ -1517,6 +1525,23 @@ fn three_side_route_sides(
     } else {
         None
     }
+}
+
+/// The distinct sides of the loop's ports, each at its first port. Java: the key order of
+/// `SelfHyperLoop.slPortsBySide` as elkjs iterates it.
+fn loop_sides_in_port_order(
+    graph: &LGraph,
+    node: usize,
+    hyper_loop: &SelfHyperLoop,
+) -> Vec<PortSide> {
+    let mut sides = Vec::new();
+    for port in &hyper_loop.ports {
+        let side = graph.layerless_nodes[node].ports[port.port].side;
+        if side != PortSide::Undefined && !sides.contains(&side) {
+            sides.push(side);
+        }
+    }
+    sides
 }
 
 fn loop_sides(graph: &LGraph, node: usize, hyper_loop: &SelfHyperLoop) -> Vec<PortSide> {
@@ -2502,6 +2527,7 @@ mod tests {
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
+            ports: Vec::new(),
             parent_settings: Default::default(),
             id: id.to_string(),
             width: 80.0,
@@ -2525,6 +2551,8 @@ mod tests {
 
     fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
         ElkInputEdge {
+            source_port: None,
+            target_port: None,
             id: id.to_string(),
             source: source.to_string(),
             target: target.to_string(),
@@ -2560,6 +2588,7 @@ mod tests {
             minlen: 1,
             reversed: false,
             bend_points: Vec::new(),
+            junction_points: Vec::new(),
             model_order: None,
             priority_direction: 0,
             priority_shortness: 0,

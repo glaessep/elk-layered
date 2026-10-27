@@ -1,20 +1,21 @@
-//! Connected-component layout and SimpleRow packing from Eclipse ELK (EPL-2.0).
+//! Connected-component layout, SimpleRow packing and component-group packing from Eclipse ELK
+//! (EPL-2.0).
 //!
 //! Source references (62d5909f96fad541bc101ad52dabaece6b7eab7e):
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/components/ComponentsProcessor.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/components/SimpleRowGraphPlacer.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/components/AbstractGraphPlacer.java
+//!
+//! `group.rs` holds the placer that ELK uses when the graph has external ports.
 
-use crate::graph::{LGraph, LLabel, LPoint, LSize, PortRef};
+mod group;
+
+use crate::graph::{LGraph, LLabel, LNodeKind, LPoint, LSize, PortRef};
 use crate::options::{HierarchyHandling, PortConstraints};
 use crate::pipeline::PipelineResult;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ComponentError {
-    #[error(
-        "flat ELK components with free or side-fixed external ports require the unported component-group placer"
-    )]
-    ExternalPortGroups,
     #[error("flat ELK component processing cannot own cross-hierarchy edges")]
     HierarchyEdges,
     #[error("ELK component {kind} reference {index} is outside its component")]
@@ -28,6 +29,9 @@ pub(crate) struct Component {
     original_nodes: Vec<usize>,
     original_edges: Vec<usize>,
     priority: i32,
+    /// The sides of the external ports the component joins (ELK's `EXT_PORT_CONNECTIONS`), as
+    /// `group::side_bit` makes them.
+    ext_port_sides: u8,
 }
 
 /// The supplied graph has already passed GraphConfigurator. Component construction copies
@@ -100,9 +104,6 @@ pub(crate) fn split(graph: &LGraph) -> PipelineResult<Option<Vec<Component>>> {
         }
         groups.push(nodes);
     }
-    if graph.graph_properties.external_ports && groups.len() > 1 {
-        return Err(ComponentError::ExternalPortGroups.into());
-    }
     let mut components = groups
         .into_iter()
         .map(|original_nodes| {
@@ -115,11 +116,20 @@ pub(crate) fn split(graph: &LGraph) -> PipelineResult<Option<Vec<Component>>> {
                 .layerless_nodes
                 .iter()
                 .fold(0i32, |sum, node| sum.wrapping_add(node.component_priority));
+            // ComponentsProcessor.dfs: the side of every external port dummy of the component.
+            let ext_port_sides = component
+                .layerless_nodes
+                .iter()
+                .filter(|node| node.kind == LNodeKind::ExternalPort)
+                .fold(group::SIDES_NONE, |sides, node| {
+                    sides | group::side_bit(node.external_port_side)
+                });
             Component {
                 graph: component,
                 original_nodes,
                 original_edges: Vec::new(),
                 priority,
+                ext_port_sides,
             }
         })
         .collect::<Vec<_>>();
@@ -325,6 +335,10 @@ fn offset_graph(graph: &mut LGraph, delta: LPoint) {
                     point.x += delta.x;
                     point.y += delta.y;
                 }
+                for point in &mut edge.junction_points {
+                    point.x += delta.x;
+                    point.y += delta.y;
+                }
                 for label in &mut edge.labels {
                     label.position.x += delta.x;
                     label.position.y += delta.y;
@@ -334,12 +348,48 @@ fn offset_graph(graph: &mut LGraph, delta: LPoint) {
     }
 }
 
+/// Refuses a spacing, an aspect ratio or a component size that no placement can use.
+fn check_geometry(
+    components: &[Component],
+    spacing: f64,
+    aspect_ratio: f64,
+) -> Result<(), ComponentError> {
+    let bad_number = |value: f64| !value.is_finite() || value < 0.0;
+    if bad_number(spacing)
+        || bad_number(aspect_ratio)
+        || components.iter().any(|component| {
+            bad_number(component.graph.size.width) || bad_number(component.graph.size.height)
+        })
+    {
+        return Err(ComponentError::InvalidGeometry);
+    }
+    Ok(())
+}
+
 /// Places completed components, then restores the caller's original dense indices. Java
 /// retains object identity while moving nodes; stable original indices are its Rust equivalent.
 pub(crate) fn combine(target: &mut LGraph, mut components: Vec<Component>) -> PipelineResult<()> {
     let original_nodes = target.layerless_nodes.len();
     let original_edges = target.edges.len();
     let size = match components.len() {
+        // ComponentsProcessor.split picks the placer: with external ports, the component-group
+        // placer, even for one component. That placer sizes the graph from the spacing.
+        _ if target.graph_properties.external_ports => {
+            let spacing = target.options.spacing.component_component;
+            let aspect_ratio = target.options.aspect_ratio;
+            check_geometry(&components, spacing, aspect_ratio)?;
+            let size = group::place(&mut components, spacing, aspect_ratio);
+            // AbstractGraphPlacer.moveGraph adds the graph's own offset last.
+            for component in &mut components {
+                let offset = component.graph.offset;
+                offset_graph(&mut component.graph, offset);
+                component.graph.offset = LPoint::default();
+            }
+            if !size.width.is_finite() || !size.height.is_finite() {
+                return Err(ComponentError::InvalidGeometry.into());
+            }
+            size
+        }
         0 => LSize::default(),
         1 => {
             let component = &mut components[0].graph;
@@ -357,24 +407,11 @@ pub(crate) fn combine(target: &mut LGraph, mut components: Vec<Component>) -> Pi
             });
             let spacing = target.options.spacing.component_component;
             let aspect_ratio = target.options.aspect_ratio;
-            if !spacing.is_finite()
-                || spacing < 0.0
-                || !aspect_ratio.is_finite()
-                || aspect_ratio < 0.0
-            {
-                return Err(ComponentError::InvalidGeometry.into());
-            }
+            check_geometry(&components, spacing, aspect_ratio)?;
             let mut area = 0.0;
             let mut row_width = 0.0f64;
             for component in &components {
                 let size = component.graph.size;
-                if !size.width.is_finite()
-                    || !size.height.is_finite()
-                    || size.width < 0.0
-                    || size.height < 0.0
-                {
-                    return Err(ComponentError::InvalidGeometry.into());
-                }
                 area += size.width * size.height;
                 row_width = row_width.max(size.width);
             }

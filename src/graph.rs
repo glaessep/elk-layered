@@ -234,6 +234,9 @@ pub struct LNode {
     pub ports_surrounding: Option<super::options::SpacingMargin>,
     pub external_port_side: PortSide,
     pub external_port_size: LSize,
+    /// For the dummy of a port of the graph's own node: the position of that port among the
+    /// node's input ports. ELK keeps the port in `InternalProperties.ORIGIN`.
+    pub scope_port: Option<usize>,
     pub port_ratio_or_position: f64,
     pub replaced_external_port_dummy: Option<usize>,
     pub in_layer_successor_constraints: Vec<usize>,
@@ -282,6 +285,7 @@ impl LNode {
             ports_surrounding: None,
             external_port_side: PortSide::Undefined,
             external_port_size: LSize::default(),
+            scope_port: None,
             port_ratio_or_position: 0.0,
             replaced_external_port_dummy: None,
             in_layer_successor_constraints: Vec::new(),
@@ -338,6 +342,15 @@ pub struct LPort {
     pub labels: Vec<LLabel>,
     pub model_order: Option<usize>,
     pub long_edge_target_node: Option<usize>,
+    /// The position of the input port this port was made from, among its node's ports. `None` for
+    /// a port ELK makes up. ELK keeps the input port in `InternalProperties.ORIGIN`.
+    pub input_index: Option<usize>,
+    /// Whether the caller named this port, so an edge finds it by its id alone. A port that
+    /// ELK makes up is found by its id and type. An external port dummy's port counts as named.
+    pub named: bool,
+    /// `CompoundGraphPreprocessor.calculateNetFlow` for a port the caller named: the votes of
+    /// every edge at the port, those outside its node too. `None` for a port ELK makes up.
+    pub hierarchy_net_flow: Option<isize>,
     pub port_index: Option<isize>,
     pub border_offset: Option<f64>,
     pub ratio_or_position: f64,
@@ -365,6 +378,9 @@ impl LPort {
             labels: Vec::new(),
             model_order: None,
             long_edge_target_node: None,
+            input_index: None,
+            named: false,
+            hierarchy_net_flow: None,
             port_index: None,
             border_offset: None,
             ratio_or_position: 0.0,
@@ -417,6 +433,9 @@ pub struct LayeredEdge {
     pub minlen: usize,
     pub reversed: bool,
     pub bend_points: Vec<LPoint>,
+    /// `LayeredOptions.JUNCTION_POINTS` of the edge. ELK keeps `null` until a router adds one, so
+    /// an empty list stands for `null`.
+    pub junction_points: Vec<LPoint>,
     pub model_order: Option<usize>,
     pub priority_direction: i32,
     pub priority_shortness: i32,
@@ -433,6 +452,11 @@ pub struct HierarchyEdge {
     pub target_node_id: String,
     pub source_port_key: String,
     pub target_port_key: String,
+    /// Whether the caller named the source port. A made-up port can have the id of a named port
+    /// of the same node, so the key alone does not say which of the two an end sits at.
+    pub source_port_named: bool,
+    /// The same for the target port.
+    pub target_port_named: bool,
     pub source_path: Vec<String>,
     pub target_path: Vec<String>,
     pub labels: Vec<LLabel>,
@@ -1424,12 +1448,52 @@ pub fn create_external_port_dummy(
     dummy
 }
 
-fn port_side_from_direction(direction: ElkDirection) -> PortSide {
+/// The part of `LGraphUtil.createExternalPortDummy` that reads `PORT_INDEX`: with exactly
+/// `FIXED_ORDER` and an index on the port, the index replaces the position as the order
+/// information. Indices count the other way on the south and west sides.
+pub fn apply_port_index_to_dummy(
+    dummy: &mut LNode,
+    port_constraints: PortConstraints,
+    port_index: Option<isize>,
+) {
+    let Some(index) = port_index else {
+        return;
+    };
+    if port_constraints != PortConstraints::FixedOrder {
+        return;
+    }
+    dummy.port_ratio_or_position = match dummy.external_port_side {
+        PortSide::North | PortSide::East => index as f64,
+        PortSide::South | PortSide::West => -(index as f64),
+        PortSide::Undefined => 0.0,
+    };
+}
+
+/// Ports `PortSide.fromDirection`. An undefined direction counts as `Right`, as the configurator
+/// makes it.
+pub(crate) fn port_side_from_direction(direction: ElkDirection) -> PortSide {
     match direction {
         ElkDirection::Right | ElkDirection::Undefined => PortSide::East,
         ElkDirection::Left => PortSide::West,
         ElkDirection::Down => PortSide::South,
         ElkDirection::Up => PortSide::North,
+    }
+}
+
+/// Whether a port on `side` lies across the layout flow: on a north or south side of a horizontal
+/// layout, or on an east or west side of a vertical one.
+///
+/// An undefined direction has no flow, so no side lies across it. The importer resolves the
+/// direction of the root graph before any caller asks, as `LGraphUtil.getDirection` does.
+pub(crate) fn is_across_flow(direction: ElkDirection, side: PortSide) -> bool {
+    match direction {
+        ElkDirection::Left | ElkDirection::Right => {
+            matches!(side, PortSide::North | PortSide::South)
+        }
+        ElkDirection::Up | ElkDirection::Down => {
+            matches!(side, PortSide::East | PortSide::West)
+        }
+        ElkDirection::Undefined => false,
     }
 }
 
@@ -1461,6 +1525,35 @@ fn port_ratio_or_position(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Mutation: swap the two arms of `is_across_flow`, or give an undefined direction the
+    // horizontal arm. A case of the table then fails.
+    #[test]
+    fn a_side_across_the_flow_is_a_north_or_south_side_of_a_horizontal_layout() {
+        use ElkDirection::{Down, Left, Right, Undefined, Up};
+        use PortSide::{East, North, South, West};
+        for (direction, across) in [
+            (Left, [North, South]),
+            (Right, [North, South]),
+            (Up, [East, West]),
+            (Down, [East, West]),
+        ] {
+            for side in [North, East, South, West] {
+                assert_eq!(
+                    is_across_flow(direction, side),
+                    across.contains(&side),
+                    "{direction:?} {side:?}"
+                );
+            }
+        }
+        // No flow, so nothing lies across it. A port without a side lies across no flow either.
+        for side in [North, East, South, West, PortSide::Undefined] {
+            assert!(!is_across_flow(Undefined, side), "{side:?}");
+        }
+        for direction in [Left, Right, Up, Down] {
+            assert!(!is_across_flow(direction, PortSide::Undefined));
+        }
+    }
 
     #[test]
     fn external_port_dummy_uses_direction_and_net_flow_for_free_ports() {
