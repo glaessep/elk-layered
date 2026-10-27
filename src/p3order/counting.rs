@@ -88,11 +88,17 @@ impl BinaryIndexedTree {
 /// such as an output on the west side of its node, the read gives the number an earlier call left
 /// there, or 0 before any call. Keep one counter per graph, and never clear the positions.
 ///
+/// ELK indexes the array by `port.id`, which `AllCrossingsCounter.initAtPortLevel` sets once. The
+/// sweep reorders the ports of a node in place, so the index of a port in `node.ports` does not
+/// stay. This counter indexes by `LPort::crossing_minimization_id`, which
+/// `initialize_crossing_minimization_port_ids` sets once per graph and nothing changes after.
+///
 /// Counts are `f64`, as elkjs adds `NaN` for an index its trees do not have: see
 /// [`BinaryIndexedTree`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CrossingsCounter {
-    port_positions: HashMap<PortRef, usize>,
+    /// `portPos`, indexed by `crossing_minimization_id`. An id past the end reads as 0.
+    port_positions: Vec<usize>,
 }
 
 impl CrossingsCounter {
@@ -110,6 +116,10 @@ impl CrossingsCounter {
 
     #[cfg(test)]
     pub fn count_all_crossings(&mut self, graph: &LGraph) -> f64 {
+        // A graph built by hand has no port ids yet; the sweep sets them before any count.
+        let mut graph = graph.clone();
+        crate::p3order::initialize_crossing_minimization_port_ids(&mut graph);
+        let graph = &graph;
         let current_order = graph
             .layers
             .iter()
@@ -195,7 +205,7 @@ impl CrossingsCounter {
         for node in node_iter {
             for port in ports_for_side(graph, node, side, top_down) {
                 let position = ports.len();
-                self.port_positions.insert(port, position);
+                self.set_position(graph, port, position);
                 ports.push(port);
             }
         }
@@ -211,14 +221,14 @@ impl CrossingsCounter {
         let mut ends = Vec::new();
 
         for port in ports {
-            let port_position = self.position_of(*port);
+            let port_position = self.position_of(graph, *port);
             index_tree.remove_all(port_position);
 
             for edge in connected_edges(graph, *port) {
                 let Some(other_end) = other_end_of(graph, edge, *port) else {
                     continue;
                 };
-                let end_position = self.position_of(other_end);
+                let end_position = self.position_of(graph, other_end);
                 if end_position > port_position {
                     crossings += rank_or_nan(index_tree.rank(end_position));
                     ends.push(end_position);
@@ -243,7 +253,7 @@ impl CrossingsCounter {
         for node in nodes {
             for port in ports_in_north_south_east_west_order(graph, *node, side) {
                 let position = ports.len();
-                self.port_positions.insert(port, position);
+                self.set_position(graph, port, position);
                 ports.push(port);
             }
         }
@@ -260,7 +270,7 @@ impl CrossingsCounter {
         let mut ends = Vec::new();
 
         for port in ports {
-            let port_position = self.position_of(*port);
+            let port_position = self.position_of(graph, *port);
             index_tree.remove_all(port_position);
             let mut num_between_layer_edges = 0usize;
 
@@ -269,7 +279,7 @@ impl CrossingsCounter {
                     let Some(other_end) = other_end_of(graph, edge, *port) else {
                         continue;
                     };
-                    let end_position = self.position_of(other_end);
+                    let end_position = self.position_of(graph, other_end);
                     if end_position > port_position {
                         crossings += rank_or_nan(index_tree.rank(end_position));
                         ends.push(end_position);
@@ -289,8 +299,21 @@ impl CrossingsCounter {
     }
 
     /// `CrossingsCounter.positionOf`: a port nobody numbered yet is at 0.
-    fn position_of(&self, port: PortRef) -> usize {
-        self.port_positions.get(&port).copied().unwrap_or(0)
+    fn position_of(&self, graph: &LGraph, port: PortRef) -> usize {
+        port_id(graph, port)
+            .and_then(|id| self.port_positions.get(id).copied())
+            .unwrap_or(0)
+    }
+
+    /// `portPositions[port.id] = position`.
+    fn set_position(&mut self, graph: &LGraph, port: PortRef, position: usize) {
+        let Some(id) = port_id(graph, port) else {
+            return;
+        };
+        if self.port_positions.len() <= id {
+            self.port_positions.resize(id + 1, 0);
+        }
+        self.port_positions[id] = position;
     }
 
     /// `HyperedgeCrossingsCounter.countCrossings`. The number is exact for plain edges and an
@@ -321,7 +344,8 @@ impl CrossingsCounter {
                     .iter()
                     .any(|edge| layer_of(graph.edges[*edge].target.node) != layer_of(*node));
                 if has_edge {
-                    self.port_positions.insert(
+                    self.set_position(
+                        graph,
                         PortRef {
                             node: *node,
                             port: port_index,
@@ -358,11 +382,14 @@ impl CrossingsCounter {
                     port: port_index,
                 };
                 if port.side == PortSide::North {
-                    self.port_positions.insert(key, target_count);
+                    self.set_position(graph, key, target_count);
                     target_count += 1;
                 } else {
-                    self.port_positions
-                        .insert(key, target_count + north_input_ports + other_input_ports);
+                    self.set_position(
+                        graph,
+                        key,
+                        target_count + north_input_ports + other_input_ports,
+                    );
                     other_input_ports += 1;
                 }
             }
@@ -425,7 +452,7 @@ impl CrossingsCounter {
             hyperedge.upper_left = source_count;
             hyperedge.upper_right = target_count;
             for port in &hyperedge.ports {
-                let pos = self.position_of(*port);
+                let pos = self.position_of(graph, *port);
                 let port_layer = layer_of(port.node);
                 if port_layer == left_layer_ref {
                     hyperedge.upper_left = hyperedge.upper_left.min(pos);
@@ -499,6 +526,13 @@ impl CrossingsCounter {
         crossings += count_overlapping_areas(&right_corners);
         crossings
     }
+}
+
+/// `port.id`. Every port of a graph in the sweep has one, see `CrossingsCounter`.
+fn port_id(graph: &LGraph, port: PortRef) -> Option<usize> {
+    let id = graph.layerless_nodes[port.node].ports[port.port].crossing_minimization_id;
+    debug_assert!(id.is_some(), "a port in the sweep has no crossing id");
+    id
 }
 
 fn rank_or_nan(rank: Option<usize>) -> f64 {
@@ -698,6 +732,7 @@ mod tests {
         layer_network_simplex(&mut graph).unwrap();
         process_port_sides(&mut graph);
         sort_port_lists(&mut graph);
+        crate::p3order::initialize_crossing_minimization_port_ids(&mut graph);
         graph
     }
 
@@ -931,6 +966,14 @@ mod tests {
     /// last two layers numbers only the port of the last node, so the far end of that edge keeps the
     /// position the first pair gave it.
     fn graph_with_a_west_port_that_leaves() -> (LGraph, Vec<Vec<usize>>) {
+        graph_with_a_west_port_that_leaves_and_idle_ports_on_b(0)
+    }
+
+    /// The same graph, with `idle` more west ports on the last node. They have no edge. They make
+    /// the tree of the last pair as big as the number of its ports.
+    fn graph_with_a_west_port_that_leaves_and_idle_ports_on_b(
+        idle: usize,
+    ) -> (LGraph, Vec<Vec<usize>>) {
         let mut graph = LGraph::new("root", LayeredOptions::default());
         for id in ["a1", "a2", "n", "b"] {
             graph.layerless_nodes.push(LNode::new(id, 10.0, 10.0, None));
@@ -957,10 +1000,15 @@ mod tests {
             .add_port(2, PortType::Output, PortSide::West, LPoint::default())
             .unwrap();
         let b_in = into(&mut graph, 3, PortSide::West);
+        for _ in 0..idle {
+            into(&mut graph, 3, PortSide::West);
+        }
         graph.add_edge(layered_edge("a1-n", a1_out, n_in1));
         graph.add_edge(layered_edge("a2-n", a2_out, n_in2));
         graph.add_edge(layered_edge("n-b", n_leaves, b_in));
-        (graph, vec![vec![0, 1], vec![2], vec![3]])
+        let order = vec![vec![0, 1], vec![2], vec![3]];
+        crate::p3order::initialize_crossing_minimization_port_ids(&mut graph);
+        (graph, order)
     }
 
     // Mutation: clear the port positions at the start of `init_port_positions_counter_clockwise`,
@@ -998,6 +1046,26 @@ mod tests {
         let mut counter = CrossingsCounter::default();
         counter.count_all_crossings_in_order(&graph, &order);
         // The order of the layers is the same, so every count meets the same stale position.
+        assert!(
+            counter
+                .count_crossings_between_layers(&graph, &order[1], &order[2])
+                .is_nan()
+        );
+    }
+
+    // Mutation: index `port_positions` by the place of the port in `node.ports` instead of by its
+    // `crossing_minimization_id`. The reorder then hands the stale position of one port to another.
+    #[test]
+    fn a_stale_position_stays_with_its_port_when_the_sweep_reorders_the_ports() {
+        let (mut graph, order) = graph_with_a_west_port_that_leaves_and_idle_ports_on_b(2);
+        let mut counter = CrossingsCounter::default();
+        // The first pair numbers the three west ports of `n` as 2, 3 and 4. The port that leaves
+        // for `b` is the last one, at 4.
+        counter.count_crossings_between_layers(&graph, &order[0], &order[1]);
+        // The sweep moves that port to the front of `n`. It keeps its id and so its position 4.
+        assert!(graph.reorder_node_ports(2, [2, 0, 1]));
+        // The last pair holds three ports, so its tree has no place 4: the count is NaN. The port
+        // that now sits at the old place of the front port would read 2 and give 0.
         assert!(
             counter
                 .count_crossings_between_layers(&graph, &order[1], &order[2])
