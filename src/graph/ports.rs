@@ -6,7 +6,7 @@ use std::ops::{Index, IndexMut};
 /// Names one port of one node. Two ports of the same node never share an id, and the id of a
 /// port never changes: reordering the node's ports leaves every id as it was.
 ///
-/// An id is not a place in the node's list. `NodePorts::position` tells where the port stands.
+/// An id is not a place in the node's list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PortId(usize);
 
@@ -115,6 +115,7 @@ impl NodePorts {
     }
 
     /// The place of this port in the node's order, or `None` if the node does not list it.
+    #[cfg(test)]
     pub fn position(&self, id: PortId) -> Option<usize> {
         self.order.iter().position(|listed| *listed == id)
     }
@@ -150,6 +151,7 @@ impl NodePorts {
     }
 
     /// The last port of the node's order.
+    #[cfg(test)]
     pub fn last(&self) -> Option<&LPort> {
         self.order.last().map(|id| &self.slots[id.0])
     }
