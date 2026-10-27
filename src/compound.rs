@@ -1246,7 +1246,12 @@ fn parent_port_net_flows(segments: &[ScopedHierarchySegment]) -> ParentPortFlows
             // direct child of the parent.
             let far_end_is_child_of_parent = match far_end {
                 PendingSegmentEndpoint::LocalNode { node_id, .. } => node_id == far_original_end,
-                PendingSegmentEndpoint::ParentBoundary { .. } => true,
+                // Every segment has one `ParentBoundary` end and one `LocalNode` end, and `boundary`
+                // is the first. A second boundary end would need a vote this function does not
+                // define, so it is a bug in the code that builds segments, not input.
+                PendingSegmentEndpoint::ParentBoundary { .. } => unreachable!(
+                    "a compound segment has exactly one parent boundary end and one local end"
+                ),
             };
             // The dummy's port type is `Input` for an edge that leaves the parent's port.
             let leaves_port = *port_type == PortType::Input;
