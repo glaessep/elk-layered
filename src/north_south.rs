@@ -175,7 +175,7 @@ fn sort_port_list(graph: &mut LGraph, node: usize) {
         }
     });
     // A sort of the port indices is a permutation, so a refusal is a bug, never caller input. It
-    // stays loud in release builds, as `remap_port_index` does.
+    // stays loud in release builds.
     let order = order.into_iter().map(|position| port_ids[position]);
     assert!(
         graph.reorder_node_ports(node, order),
@@ -580,9 +580,10 @@ mod tests {
 
         preprocess_north_south_ports(&mut graph);
 
-        // The port on the right is listed first. The dummies run left to right.
-        let first = dummy_of(&graph, node, 1);
-        let second = dummy_of(&graph, node, 0);
+        // The list puts the port on the right first, and port 0 is the one on the left. The
+        // dummies run left to right.
+        let first = dummy_of(&graph, node, 0);
+        let second = dummy_of(&graph, node, 1);
         assert_eq!(layer(&graph, 1), vec![node, first, second]);
         assert_eq!(
             graph.layerless_nodes[node].in_layer_successor_constraints,

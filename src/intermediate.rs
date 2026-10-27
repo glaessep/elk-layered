@@ -1098,13 +1098,13 @@ fn check_hyperedge_merge_allowed(
         && current_node.long_edge_target == previous_node.long_edge_target;
 
     if !current_node.long_edge_has_label_dummies && !previous_node.long_edge_has_label_dummies {
-        let current_first_port = current_node.ports.first().map(|_| PortRef {
+        let current_first_port = current_node.ports.id_at(0).map(|port| PortRef {
             node: current,
-            port: PortId::new(0),
+            port,
         });
-        let previous_first_port = previous_node.ports.first().map(|_| PortRef {
+        let previous_first_port = previous_node.ports.id_at(0).map(|port| PortRef {
             node: previous,
-            port: PortId::new(0),
+            port,
         });
         let allow_merge = match (current_first_port, previous_first_port) {
             (Some(current_port), Some(previous_port)) => {
@@ -2966,7 +2966,10 @@ fn join_long_edge_pair(
 }
 
 fn long_edge_dummy_anchor(graph: &LGraph, node: usize) -> LPoint {
-    let port = &graph.layerless_nodes[node].ports[PortId::new(0)];
+    let port = graph.layerless_nodes[node]
+        .ports
+        .first()
+        .expect("a long edge dummy has ports");
     LPoint {
         x: graph.layerless_nodes[node].position.x + port.position.x + port.anchor.x,
         y: graph.layerless_nodes[node].position.y + port.position.y + port.anchor.y,

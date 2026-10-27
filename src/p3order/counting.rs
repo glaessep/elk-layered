@@ -459,7 +459,7 @@ impl CrossingsCounter {
         let mut ports = self.connected_ports_sorted_by_position(graph, upper_port, lower_port);
         // Java reads `indexTree` here and fails with a null pointer if the counter was not set up.
         // A missing tree is a bug in the caller, never caller input. It stays loud in release
-        // builds, as `remap_port_index` does. An empty tree would count wrong without a sign.
+        // builds: an empty tree would count wrong without a sign.
         let mut index_tree = self.index_tree.take().expect(
             "count_crossings_between_ports_in_both_orders needs init_for_counting_between or \
              init_port_positions_for_in_layer_crossings_with_tree first",
@@ -1827,8 +1827,9 @@ mod tests {
             ));
         }
         crate::north_south::preprocess_north_south_ports(&mut graph);
-        // The first port of the list is the eastern one, so its dummy is the last in the layer.
-        let (east, west) = (dummy_for(&graph, a, 0), dummy_for(&graph, a, 1));
+        // The first port of the list is the eastern one, which is port 1. Its dummy is the last in
+        // the layer.
+        let (east, west) = (dummy_for(&graph, a, 1), dummy_for(&graph, a, 0));
         assert_eq!(graph.layers[1].nodes, vec![a, west, east]);
         assert_eq!(ns_crossings(&graph), 0.0);
 

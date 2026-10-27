@@ -3211,9 +3211,9 @@ impl GreedyPortDistributor {
             }
             // The counter keys its positions by port id, which stays when a port moves. The order
             // is a permutation by construction, so a refusal is a bug in this function, never
-            // caller input. It stays loud in release builds, as `remap_port_index` does.
+            // caller input. It stays loud in release builds.
             assert!(
-                graph.reorder_node_ports_with_map(node, new_order).is_some(),
+                graph.reorder_node_ports(node, new_order),
                 "the switched port order of node {node} is not a permutation of its ports"
             );
         }
@@ -4954,8 +4954,9 @@ mod tests {
         );
     }
 
+    // Mutation: swap the ends of the edges when the ports change places, as the old index remap did.
     #[test]
-    fn parent_hierarchical_port_order_updates_edge_references() {
+    fn parent_hierarchical_port_order_leaves_edge_references_alone() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
         graph
             .layerless_nodes
@@ -5044,8 +5045,9 @@ mod tests {
 
         apply_parent_hierarchical_port_order_on_sweep_side(&mut graph, 0, true, &[east_b, east_a]);
 
-        assert_eq!(graph.edges[edge_a].source.port, east_b);
-        assert_eq!(graph.edges[edge_b].source.port, east_a);
+        // The ports moved in the list. The edges still start at the ports they started at.
+        assert_eq!(graph.edges[edge_a].source.port, east_a);
+        assert_eq!(graph.edges[edge_b].source.port, east_b);
         assert_eq!(
             graph.layerless_nodes[0]
                 .ports
@@ -6157,14 +6159,18 @@ mod greedy_port_distributor_tests {
         assert!(improved);
         // The list runs from bottom to top, so the upper edge now ends at the second port.
         assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
-        // The edges followed their ports.
+        // The ports moved in the list. The edges did not move: each still ends at its port.
         let top_edge = &graph.edges[0];
         let bottom_edge = &graph.edges[1];
-        assert_eq!(top_edge.target, port(a, 1));
-        assert_eq!(bottom_edge.target, port(a, 0));
+        assert_eq!(top_edge.target, port(a, 0));
+        assert_eq!(bottom_edge.target, port(a, 1));
         assert_eq!(
-            graph.layerless_nodes[a].ports[PortId::new(1)].incoming_edges,
+            graph.layerless_nodes[a].ports[PortId::new(0)].incoming_edges,
             vec![0]
+        );
+        assert_eq!(
+            graph.layerless_nodes[a].ports.position(PortId::new(0)),
+            Some(1)
         );
     }
 
@@ -6289,12 +6295,12 @@ mod greedy_port_distributor_tests {
         distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
 
         // The west ports of layer 1 are numbered after the east ports of layer 0, so they get 2
-        // and 3. The port that was `a.p0` (position 2 before the switch) is the second now, and
-        // the switch gave it the position of the other one.
+        // and 3. The port `a.p0` had position 2 before the switch. It is the second in the list
+        // now, and the switch gave it the position of the other one.
         let counter = &distributor.crossings_counter;
-        assert_eq!(graph.layerless_nodes[a].ports[PortId::new(0)].id, "a.p1");
-        assert_eq!(counter.position_of(&graph, port(a, 0)), 2);
-        assert_eq!(counter.position_of(&graph, port(a, 1)), 3);
+        assert_eq!(graph.layerless_nodes[a].ports[PortId::new(0)].id, "a.p0");
+        assert_eq!(counter.position_of(&graph, port(a, 1)), 2);
+        assert_eq!(counter.position_of(&graph, port(a, 0)), 3);
     }
 
     // Mutation: leave the positions of the counter at the slot of a port that moved, so that the
@@ -6306,15 +6312,15 @@ mod greedy_port_distributor_tests {
         let mut distributor = GreedyPortDistributor::default();
         distributor.distribute_ports_while_sweeping(&mut graph, &order, 1, true);
 
-        // The port that was first is second now. In the numbering of the west side of layer 1, a
-        // west port further down the list is further up, so the first port of the list is the
-        // lower one.
+        // The port that was first (port 0) is second now. In the numbering of the west side of
+        // layer 1, a west port further down the list is further up, so the first port of the list
+        // (port 1) is the lower one.
         distributor
             .crossings_counter
             .init_for_counting_between(&graph, &order[0], &order[1]);
         let counts = distributor
             .crossings_counter
-            .count_crossings_between_ports_in_both_orders(&graph, port(a, 0), port(a, 1));
+            .count_crossings_between_ports_in_both_orders(&graph, port(a, 1), port(a, 0));
         // The edges are parallel now. Switching the two ports makes them cross.
         assert_eq!(counts, (0.0, 1.0));
     }

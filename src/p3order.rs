@@ -211,7 +211,7 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
             .sort_by(|left, right| compare_combined_ports(graph, node, *left, *right, constraints));
         if order != before {
             // A sort of the port indices is a permutation, so a refusal is a bug, never caller
-            // input. It stays loud in release builds, as `remap_port_index` does.
+            // input. It stays loud in release builds.
             assert!(
                 graph.reorder_node_ports(node, order),
                 "the sorted port order of node {node} is not a permutation of its ports"
@@ -1665,6 +1665,7 @@ mod tests {
         );
     }
 
+    // Mutation: reverse the south and west ports one port short of the pinned range.
     #[test]
     fn port_list_sorter_matches_pinned_side_ranges_and_preserves_edge_endpoints() {
         use PortSide::{East, North, South, West};
@@ -1753,12 +1754,19 @@ mod tests {
                 } else {
                     (edge.target, edge.source)
                 };
+                // The sort moved the port in the list. The edge still ends at the same port.
                 assert_eq!(
                     local,
                     PortRef {
                         node: 0,
-                        port: PortId::new(position)
+                        port: PortId::new(original)
                     }
+                );
+                assert_eq!(
+                    graph.layerless_nodes[0]
+                        .ports
+                        .position(PortId::new(original)),
+                    Some(position)
                 );
                 assert_eq!(
                     remote,
@@ -1767,7 +1775,7 @@ mod tests {
                         port: PortId::new(original)
                     }
                 );
-                let port = &graph.layerless_nodes[0].ports[PortId::new(position)];
+                let port = &graph.layerless_nodes[0].ports[PortId::new(original)];
                 if original % 2 == 0 {
                     assert_eq!(port.outgoing_edges, vec![original]);
                     assert!(port.incoming_edges.is_empty());
@@ -2322,10 +2330,10 @@ mod tests {
             .iter()
             .map(|port| (port.id.clone(), port.side))
             .collect::<Vec<_>>();
-        // The port that was north is south now, and the other way round. The list is sorted by
-        // side again: north before south.
-        assert_eq!(side_of(&graph, a, 0), PortSide::North);
-        assert_eq!(side_of(&graph, a, 1), PortSide::South);
+        // The port that was north (port 0) is south now, and the other way round. The list is
+        // sorted by side again: north before south.
+        assert_eq!(side_of(&graph, a, 0), PortSide::South);
+        assert_eq!(side_of(&graph, a, 1), PortSide::North);
         assert_eq!(sides[0].0, "a:1");
         assert_eq!(sides[1].0, "a:0");
     }
@@ -2347,9 +2355,9 @@ mod tests {
 
         assert_eq!(graph.layers[1].nodes, vec![south, a, north]);
         // The northern port is below its dummy and became the southern one: it is last now.
-        assert_eq!(graph.layerless_nodes[a].ports[PortId::new(0)].id, "a:1");
-        assert_eq!(side_of(&graph, a, 0), PortSide::North);
-        assert_eq!(side_of(&graph, a, 1), PortSide::South);
+        assert_eq!(graph.layerless_nodes[a].ports.first().unwrap().id, "a:1");
+        assert_eq!(side_of(&graph, a, 0), PortSide::South);
+        assert_eq!(side_of(&graph, a, 1), PortSide::North);
         assert_eq!(
             graph.layerless_nodes[a].port_constraints,
             PortConstraints::FixedOrder
@@ -2472,18 +2480,19 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(after, [(PortSide::East, 0, 1), (PortSide::West, 1, 0)]);
+        // The edges name the same ports as before: the west port is port 0, the east port 1.
         assert_eq!(
             graph.edges[0].target,
             PortRef {
                 node: dummy,
-                port: PortId::new(1)
+                port: PortId::new(0)
             }
         );
         assert_eq!(
             graph.edges[1].source,
             PortRef {
                 node: dummy,
-                port: PortId::new(0)
+                port: PortId::new(1)
             }
         );
     }

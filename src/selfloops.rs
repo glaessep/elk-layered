@@ -284,56 +284,35 @@ fn hide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
     }
 
     // SelfLoopPreProcessor.hidePorts takes the port off its node (`lPort.setNode(null)`), so no
-    // later phase sees it. Here the hidden ports move to the end of the port list and then off
-    // it. Their indices stay valid for the hidden edges and for `restore_hidden_ports`, which
-    // puts them back at the same indices first.
-    let mut hidden_indices = holder
+    // later phase sees it. Here the hidden ports leave the node's list but keep their slots, so
+    // the holder's ports and edges still name them and `unhide_ports` can list them again.
+    let hidden = holder
         .hyper_loops
         .iter()
         .flat_map(|hyper_loop| hyper_loop.ports.iter())
         .filter(|port| port.hidden)
         .map(|port| port.port)
         .collect::<Vec<_>>();
-    hidden_indices.sort_unstable_by_key(|port| port.index());
-    hidden_indices.dedup();
-
-    let port_count = graph.layerless_nodes[holder.node].ports.len();
-    let mut new_order = graph.layerless_nodes[holder.node]
-        .ports
-        .ids()
-        .filter(|port| {
-            hidden_indices
-                .binary_search_by_key(&port.index(), |hidden| hidden.index())
-                .is_err()
-        })
-        .collect::<Vec<_>>();
-    new_order.extend(hidden_indices.iter().copied());
-
-    let Some(old_to_new) = graph.reorder_node_ports_with_map(holder.node, new_order) else {
-        return;
-    };
-    remap_holder_ports(holder, &old_to_new);
-
-    let visible_count = port_count - hidden_indices.len();
     let node = &mut graph.layerless_nodes[holder.node];
-    holder.hidden_ports = node.ports.split_off(visible_count);
-    node.hidden_port_count = holder.hidden_ports.len();
+    // In list order, so that coming back they keep the order they had.
+    holder.hidden_ports = node.ports.ids().filter(|id| hidden.contains(id)).collect();
+    node.ports.unlist(&holder.hidden_ports);
 }
 
-/// Puts the ports that `hide_ports` took off the node back at the end of its port list.
+/// Lists the ports that `hide_ports` took off the node again, at the end of its port list.
 ///
 /// Java has no such step. `PortRestorer.restorePorts` (called by `SelfLoopPortRestorer`) clears
 /// the node's port list and puts every port back with `lPort.setNode(lNode)`. It visits the
 /// hidden ports in the order of its target areas (north start, north middle, and so on), never
-/// by their old index. Here the hidden ports come back first, in ascending index order, because
-/// the indices `hide_ports` gave them are what the holder's ports and edges, and so the target
-/// areas, refer to. `restore_hidden_ports` then reorders the whole list by those indices, in
-/// Java's order. Its `restored_port_order` leaves the hidden ports out of the old ports it walks
-/// in bursts. So the order they come back in does not reach the result. Only their indices do.
+/// by the order they had. Here the hidden ports come back first, in the order they left, so that
+/// the holder's ports and edges, and so the target areas, can name them in the list again.
+/// `restore_hidden_ports` then reorders the whole list in Java's order. Its
+/// `restored_port_order` leaves the hidden ports out of the old ports it walks in bursts. So the
+/// order they come back in does not reach the result.
 fn unhide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
     let node = &mut graph.layerless_nodes[holder.node];
-    node.ports.append(&mut holder.hidden_ports);
-    node.hidden_port_count = 0;
+    node.ports.relist(&holder.hidden_ports);
+    holder.hidden_ports.clear();
 }
 
 fn assign_hidden_port_sides(graph: &mut LGraph, holder: &SelfLoopHolder) {
@@ -466,12 +445,11 @@ fn restore_hidden_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
     let mut target_areas = PortRestoreTargetAreas::new();
     collect_restore_target_areas(graph, holder, &mut target_areas);
 
-    let old_order = restored_port_order(graph, holder.node, &target_areas);
-    let Some(old_to_new) = graph.reorder_node_ports_with_map(holder.node, old_order) else {
+    let new_order = restored_port_order(graph, holder.node, &target_areas);
+    if !graph.reorder_node_ports(holder.node, new_order) {
         return;
-    };
+    }
 
-    remap_holder_ports(holder, &old_to_new);
     holder.ports_hidden = false;
     for hyper_loop in &mut holder.hyper_loops {
         for port in &mut hyper_loop.ports {
@@ -1069,18 +1047,6 @@ fn graph_by_id<'a>(graph: &'a LGraph, id: &str) -> Option<&'a LGraph> {
         .iter()
         .filter_map(|node| node.nested_graph.as_deref())
         .find_map(|nested| graph_by_id(nested, id))
-}
-
-fn remap_holder_ports(holder: &mut SelfLoopHolder, old_to_new: &[usize]) {
-    for hyper_loop in &mut holder.hyper_loops {
-        for port in &mut hyper_loop.ports {
-            port.port = PortId::new(old_to_new[port.port.index()]);
-        }
-        for edge in &mut hyper_loop.edges {
-            edge.source_port = PortId::new(old_to_new[edge.source_port.index()]);
-            edge.target_port = PortId::new(old_to_new[edge.target_port.index()]);
-        }
-    }
 }
 
 /// Where a port stands in its node's port list. A self-loop port is back in the list, restored,
