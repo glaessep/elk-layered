@@ -1411,7 +1411,7 @@ pub fn preprocess_end_labels(graph: &mut LGraph) {
         place_end_label_cells_for_node(
             graph,
             node,
-            &gathered.max_edge_thickness,
+            &gathered,
             label_label_spacing,
             edge_label_spacing,
             vertical_layout,
@@ -1420,10 +1420,11 @@ pub fn preprocess_end_labels(graph: &mut LGraph) {
             graph.layerless_nodes[node].kind,
             LNodeKind::Normal | LNodeKind::ExternalPort
         ) {
-            moved_labels.extend(gathered.labels);
+            copy_gathered_end_labels_into_ports(graph, node, &gathered);
+            moved_labels.extend(gathered.labels.into_iter().flatten());
         } else {
+            // The cell of a dummy only changed its margin. Its labels were never copied.
             for port in &mut graph.layerless_nodes[node].ports {
-                port.labels.clear();
                 port.end_label_cell = None;
             }
         }
@@ -1824,17 +1825,20 @@ fn gather_port_end_labels(
 struct NodeEndLabels {
     /// The greatest edge thickness per port. Only a port that has labels reads it.
     max_edge_thickness: Vec<f64>,
-    /// Every label that was copied into a port of the node.
-    labels: Vec<EndLabelRef>,
+    /// The end labels of each port, in the order Java gathers them. They stay on their edges.
+    labels: Vec<Vec<EndLabelRef>>,
 }
 
-/// Copies the end labels of each port of `node` into the port, in the order Java gathers them.
-/// The originals stay on their edges until `remove_gathered_end_labels` takes them off.
+/// Finds the end labels of each port of `node`, in the order Java gathers them, and clears what an
+/// earlier run left at the ports. The labels stay on their edges, so a node that only needs the
+/// size of its cells copies nothing. A real node copies them with
+/// `copy_gathered_end_labels_into_ports`, and `remove_gathered_end_labels` takes the originals
+/// off their edges once every node has gathered.
 fn gather_end_labels_for_node(graph: &mut LGraph, node: usize) -> NodeEndLabels {
     let port_count = graph.layerless_nodes[node].ports.len();
     let mut result = NodeEndLabels {
         max_edge_thickness: vec![NO_INCIDENT_EDGE_THICKNESS; port_count],
-        labels: Vec::new(),
+        labels: vec![Vec::new(); port_count],
     };
     for port_index in 0..port_count {
         graph.layerless_nodes[node].ports[port_index].labels.clear();
@@ -1843,15 +1847,20 @@ fn gather_end_labels_for_node(graph: &mut LGraph, node: usize) -> NodeEndLabels 
             continue;
         };
         result.max_edge_thickness[port_index] = gathered.max_edge_thickness;
-        let copies = gathered
-            .labels
+        result.labels[port_index] = gathered.labels;
+    }
+    result
+}
+
+/// Copies the gathered end labels of each port of `node` into the port.
+fn copy_gathered_end_labels_into_ports(graph: &mut LGraph, node: usize, gathered: &NodeEndLabels) {
+    for (port_index, labels) in gathered.labels.iter().enumerate() {
+        let copies = labels
             .iter()
             .map(|label| graph.edges[label.edge].labels[label.index].clone())
             .collect::<Vec<_>>();
         graph.layerless_nodes[node].ports[port_index].labels = copies;
-        result.labels.extend(gathered.labels);
     }
-    result
 }
 
 /// Takes the labels that ports now hold off their edges. The postprocessor puts them back.
@@ -1867,25 +1876,34 @@ fn remove_gathered_end_labels(graph: &mut LGraph, mut labels: Vec<EndLabelRef>) 
 fn place_end_label_cells_for_node(
     graph: &mut LGraph,
     node: usize,
-    max_edge_thickness: &[f64],
+    gathered: &NodeEndLabels,
     label_label_spacing: f64,
     edge_label_spacing: f64,
     vertical_layout: bool,
 ) {
-    for (port_index, &port_thickness) in max_edge_thickness.iter().enumerate() {
-        if graph.layerless_nodes[node].ports[port_index]
-            .labels
-            .is_empty()
-        {
+    for (port_index, labels) in gathered.labels.iter().enumerate() {
+        if labels.is_empty() {
             continue;
         }
-        let cell = create_end_label_cell(
-            &graph.layerless_nodes[node].ports[port_index].labels,
-            label_label_spacing,
-            vertical_layout,
-        );
+        let labels_on_edges = || {
+            labels
+                .iter()
+                .map(|label| &graph.edges[label.edge].labels[label.index])
+        };
+        let cell = create_end_label_cell(labels_on_edges(), label_label_spacing, vertical_layout);
+        let label_side = labels_on_edges()
+            .next()
+            .and_then(|label| label.label_side)
+            .unwrap_or(LabelSide::Below);
         graph.layerless_nodes[node].ports[port_index].end_label_cell = Some(cell);
-        place_end_label_cell_for_port(graph, node, port_index, port_thickness, edge_label_spacing);
+        place_end_label_cell_for_port(
+            graph,
+            node,
+            port_index,
+            gathered.max_edge_thickness[port_index],
+            label_side,
+            edge_label_spacing,
+        );
     }
 
     // `EndLabelPreprocessor.process`: east and west in a vertical layout, else north and south.
@@ -1907,8 +1925,8 @@ fn place_end_label_cells_for_node(
     update_end_label_node_margin(graph, node);
 }
 
-fn create_end_label_cell(
-    labels: &[LLabel],
+fn create_end_label_cell<'a>(
+    labels: impl Iterator<Item = &'a LLabel>,
     label_label_spacing: f64,
     vertical_layout: bool,
 ) -> LabelCellLayout {
@@ -1928,9 +1946,13 @@ fn create_end_label_cell(
 /// Ports `LabelCell.addLabel` at commit `62d5909`, label by label and in Java's order of
 /// additions, so the sum rounds the way Java's does. In horizontal layout mode a cell stacks its
 /// labels one below the other; in vertical mode it puts them side by side.
-fn label_cell_size(labels: &[LLabel], label_label_spacing: f64, horizontal_layout: bool) -> LSize {
+fn label_cell_size<'a>(
+    labels: impl Iterator<Item = &'a LLabel>,
+    label_label_spacing: f64,
+    horizontal_layout: bool,
+) -> LSize {
     let mut size = LSize::default();
-    for (index, label) in labels.iter().enumerate() {
+    for (index, label) in labels.enumerate() {
         grow_label_cell(
             &mut size,
             label.size,
@@ -1947,11 +1969,12 @@ fn place_end_label_cell_for_port(
     node: usize,
     port_index: usize,
     max_edge_thickness: f64,
+    label_side: LabelSide,
     edge_label_spacing: f64,
 ) {
     let node_size = graph.layerless_nodes[node].size;
     let node_margin = graph.layerless_nodes[node].margin;
-    let port = graph.layerless_nodes[node].ports[port_index].clone();
+    let port = &graph.layerless_nodes[node].ports[port_index];
     let Some(mut cell) = port.end_label_cell else {
         return;
     };
@@ -1959,13 +1982,9 @@ fn place_end_label_cell_for_port(
         x: port.position.x + port.anchor.x,
         y: port.position.y + port.anchor.y,
     };
-    let label_side = port
-        .labels
-        .first()
-        .and_then(|label| label.label_side)
-        .unwrap_or(LabelSide::Below);
+    let port_side = port.side;
 
-    match port.side {
+    match port_side {
         PortSide::North => {
             cell.vertical_alignment = VerticalLabelAlignment::Bottom;
             cell.position.y = -node_margin.top - edge_label_spacing - cell.size.height;
@@ -4585,7 +4604,8 @@ mod tests {
         let mut graph = graph(vec![node("A"), node("B")], vec![input]);
         let target = graph.edges[0].target;
         let gathered = gather_end_labels_for_node(&mut graph, target.node);
-        remove_gathered_end_labels(&mut graph, gathered.labels);
+        copy_gathered_end_labels_into_ports(&mut graph, target.node, &gathered);
+        remove_gathered_end_labels(&mut graph, gathered.labels.into_iter().flatten().collect());
         let port = &graph.layerless_nodes[target.node].ports[target.port];
         assert_eq!(
             port.labels
@@ -4606,6 +4626,35 @@ mod tests {
                 .map(|label| label.source_index.unwrap())
                 .collect::<Vec<_>>(),
             (0..4096).filter(|index| index % 3 == 0).collect::<Vec<_>>()
+        );
+    }
+
+    // Mutation: copy the gathered labels into the ports in `gather_end_labels_for_node` again. A
+    // dummy node then clones its labels for a margin and drops them.
+    #[test]
+    fn gathering_end_labels_copies_nothing_until_the_node_asks() {
+        let mut head = ElkInputLabel::center("head", 24.0, 10.0);
+        head.placement = EdgeLabelPlacement::Head;
+        let mut labelled = edge("A-B", "A", "B");
+        labelled.labels = vec![head];
+        let mut graph = graph(vec![node("A"), node("B")], vec![labelled]);
+        let target = graph.edges[0].target;
+
+        let gathered = gather_end_labels_for_node(&mut graph, target.node);
+
+        assert_eq!(gathered.labels[target.port].len(), 1);
+        assert!(
+            graph.layerless_nodes[target.node].ports[target.port]
+                .labels
+                .is_empty()
+        );
+        assert_eq!(graph.edges[0].labels.len(), 1);
+        copy_gathered_end_labels_into_ports(&mut graph, target.node, &gathered);
+        assert_eq!(
+            graph.layerless_nodes[target.node].ports[target.port]
+                .labels
+                .len(),
+            1
         );
     }
 
