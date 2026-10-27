@@ -463,10 +463,13 @@ impl CrossingsCounter {
         lower_port: PortRef,
     ) -> (f64, f64) {
         let mut ports = self.connected_ports_sorted_by_position(graph, upper_port, lower_port);
-        let mut index_tree = self
-            .index_tree
-            .take()
-            .unwrap_or_else(|| BinaryIndexedTree::new(0));
+        // Java reads `indexTree` here and fails with a null pointer if the counter was not set up.
+        // A missing tree is a bug in the caller, never caller input. It stays loud in release
+        // builds, as `remap_port_index` does. An empty tree would count wrong without a sign.
+        let mut index_tree = self.index_tree.take().expect(
+            "count_crossings_between_ports_in_both_orders needs init_for_counting_between or \
+             init_port_positions_for_in_layer_crossings_with_tree first",
+        );
         let upper_lower_crossings = self.count_crossings_on_ports(graph, &ports, &mut index_tree);
         // The count may add the end of an edge whose port is not in the list, so the tree must be
         // cleared explicitly.
@@ -2036,6 +2039,17 @@ mod tests {
             (0.0, 1.0)
         );
         let _ = (right_upper, right_lower);
+    }
+
+    // Mutation: make an empty tree when the counter has none (`unwrap_or_else(||
+    // BinaryIndexedTree::new(0))`), so a counter that was never set up counts without a word.
+    #[test]
+    #[should_panic(expected = "needs init_for_counting_between")]
+    fn counting_a_pair_of_ports_without_setting_the_counter_up_fails_loudly() {
+        let (graph, [left_upper, left_lower, ..]) = two_by_two([(0, 1), (1, 0)]);
+        let graph = numbered(&graph);
+        let mut counter = CrossingsCounter::default();
+        counter.count_crossings_between_ports_in_both_orders(&graph, left_upper, left_lower);
     }
 
     // Mutation: swap one position and leave the other.

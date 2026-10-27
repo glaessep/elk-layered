@@ -3196,8 +3196,13 @@ impl GreedyPortDistributor {
             for (slot, port) in slots.iter().zip(&ports) {
                 new_order[*slot] = *port;
             }
-            // The counter keys its positions by port id, which stays when a port moves.
-            graph.reorder_node_ports_with_map(node, new_order);
+            // The counter keys its positions by port id, which stays when a port moves. The order
+            // is a permutation by construction, so a refusal is a bug in this function, never
+            // caller input. It stays loud in release builds, as `remap_port_index` does.
+            assert!(
+                graph.reorder_node_ports_with_map(node, new_order).is_some(),
+                "the switched port order of node {node} is not a permutation of its ports"
+            );
         }
         improved
     }

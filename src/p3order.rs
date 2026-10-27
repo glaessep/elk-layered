@@ -208,7 +208,12 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
         order
             .sort_by(|left, right| compare_combined_ports(graph, node, *left, *right, constraints));
         if order.iter().enumerate().any(|(index, old)| index != *old) {
-            graph.reorder_node_ports(node, order);
+            // A sort of the port indices is a permutation, so a refusal is a bug, never caller
+            // input. It stays loud in release builds, as `remap_port_index` does.
+            assert!(
+                graph.reorder_node_ports(node, order),
+                "the sorted port order of node {node} is not a permutation of its ports"
+            );
         }
     }
 }

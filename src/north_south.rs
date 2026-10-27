@@ -183,7 +183,12 @@ fn sort_port_list(graph: &mut LGraph, node: usize) {
             ids[second].cmp(&ids[first])
         }
     });
-    graph.reorder_node_ports(node, order);
+    // A sort of the port indices is a permutation, so a refusal is a bug, never caller input. It
+    // stays loud in release builds, as `remap_port_index` does.
+    assert!(
+        graph.reorder_node_ports(node, order),
+        "the sorted port order of node {node} is not a permutation of its ports"
+    );
 }
 
 /// The position of a side in `PortSide`'s declaration, the order `PortSide.ordinal` gives.
