@@ -968,6 +968,7 @@ impl<'a, 't> Work<'a, 't> {
                 side: settings.side,
                 index: settings.index,
                 border_offset: settings.border_offset,
+                allow_non_flow_ports_to_switch_sides: settings.allow_non_flow_ports_to_switch_sides,
                 net_flow: facts.net_flow,
                 child_edges: facts.child_edges,
                 connected_to_external_nodes: facts.connected_to_external_nodes,

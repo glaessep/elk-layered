@@ -615,6 +615,8 @@ pub(crate) struct PortSettings {
     pub(crate) index: Option<i32>,
     /// `elk.port.borderOffset`, when set. `LGraphUtil.initializePort` tests whether it is set.
     pub(crate) border_offset: Option<f64>,
+    /// `layered.allowNonFlowPortsToSwitchSides`; false when the port does not set it.
+    pub(crate) allow_non_flow_ports_to_switch_sides: bool,
 }
 
 /// What a label's `layoutOptions` set.
@@ -709,6 +711,7 @@ pub(crate) fn port_settings(
         side: PortSide::Undefined,
         index: None,
         border_offset: None,
+        allow_non_flow_ports_to_switch_sides: false,
     };
     for (id, key, value) in resolve_all(options, ElementKind::Port)? {
         let result = match id {
@@ -726,6 +729,9 @@ pub(crate) fn port_settings(
             "org.eclipse.elk.port.index" => parse_int(value).map(|v| settings.index = Some(v)),
             "org.eclipse.elk.port.borderOffset" => {
                 parse_double(value).map(|v| settings.border_offset = Some(v))
+            }
+            "org.eclipse.elk.layered.allowNonFlowPortsToSwitchSides" => {
+                parse_bool(value).map(|v| settings.allow_non_flow_ports_to_switch_sides = v)
             }
             "org.eclipse.elk.port.anchor" => Err(OptionProblem::Unsupported(PORT_ANCHOR)),
             _ => Err(OptionProblem::Unsupported(NOT_PORTED)),
@@ -1771,6 +1777,38 @@ mod tests {
         let applied = settings.options.with_spacing_base_value_applied();
         assert_eq!(applied.spacing.node_node, 7.0);
         assert_eq!(applied.spacing.edge_edge, 20.0);
+    }
+
+    // Mutation: ignore `allowNonFlowPortsToSwitchSides` on a port, or read "false" as true.
+    #[test]
+    fn a_port_reads_allow_non_flow_ports_to_switch_sides() {
+        let key = "elk.layered.allowNonFlowPortsToSwitchSides";
+        assert!(
+            !port_settings(&map(&[]))
+                .unwrap()
+                .allow_non_flow_ports_to_switch_sides
+        );
+        assert!(
+            port_settings(&map(&[(key, "true")]))
+                .unwrap()
+                .allow_non_flow_ports_to_switch_sides
+        );
+        assert!(
+            !port_settings(&map(&[(key, "false")]))
+                .unwrap()
+                .allow_non_flow_ports_to_switch_sides
+        );
+        // A value that is no boolean is an error, and a node cannot set the option.
+        assert_eq!(
+            port_settings(&map(&[(key, "maybe")]))
+                .map_err(|e| e.problem)
+                .err(),
+            Some(OptionProblem::InvalidValue)
+        );
+        assert_eq!(
+            node(&[(key, "true")]).err(),
+            Some(OptionProblem::Unsupported(WRONG_TARGET))
+        );
     }
 
     // Mutation: drop the target check in `resolve_all`.

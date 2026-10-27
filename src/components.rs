@@ -264,6 +264,9 @@ fn remap_references(
         for port in &mut node.ports {
             port.node = map_index(nodes, port.node, "port owner")?;
             map_optional(&mut port.long_edge_target_node, nodes, "long edge target")?;
+            if let Some(origin) = &mut port.origin_port {
+                map_port(origin, nodes)?;
+            }
             map_list(&mut port.incoming_edges, edges, "incoming edge")?;
             map_list(&mut port.outgoing_edges, edges, "outgoing edge")?;
             map_labels(&mut port.labels, edges)?;

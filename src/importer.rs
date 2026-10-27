@@ -86,6 +86,9 @@ pub struct ElkInputPort {
     pub index: Option<i32>,
     /// `elk.port.borderOffset`, when set.
     pub border_offset: Option<f64>,
+    /// `layered.allowNonFlowPortsToSwitchSides`: the crossing minimization may move a port across
+    /// the flow to the other side of its node.
+    pub allow_non_flow_ports_to_switch_sides: bool,
     /// The net flow of the port: the votes of every edge at the port, those outside its node
     /// too. A positive number makes the port an output port of its node.
     ///
@@ -1387,6 +1390,7 @@ fn transform_port(
     // `lport.copyProperties(elkport)` copies the two options. `containsKey` asks whether one is set.
     lport.port_index = port.index.map(|index| index as isize);
     lport.border_offset = port.border_offset;
+    lport.allow_non_flow_ports_to_switch_sides = port.allow_non_flow_ports_to_switch_sides;
     // The input has no edge to or from a descendant of its node, because the node has no children.
     // Inside self loops are refused, so `INSIDE_CONNECTIONS` stays false.
     initialize_port(&mut lport, constraints, node_size, graph.options.direction);
@@ -3855,6 +3859,7 @@ mod tests {
             side,
             index: None,
             border_offset: None,
+            allow_non_flow_ports_to_switch_sides: false,
             net_flow: 0,
             child_edges: 0,
             connected_to_external_nodes: false,

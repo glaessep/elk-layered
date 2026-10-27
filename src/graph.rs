@@ -356,6 +356,11 @@ pub struct LPort {
     pub ratio_or_position: f64,
     pub connected_to_external_nodes: bool,
     pub port_dummy: Option<GraphNodeRef>,
+    /// `InternalProperties.ORIGIN` of a port on a north or south port dummy: the port of the
+    /// node whose edges `NorthSouthPortPreprocessor` moved here.
+    pub origin_port: Option<PortRef>,
+    /// `LayeredOptions.ALLOW_NON_FLOW_PORTS_TO_SWITCH_SIDES`, which only a port can set.
+    pub allow_non_flow_ports_to_switch_sides: bool,
     pub inside_connections: bool,
     pub collector_type: Option<PortType>,
     pub end_label_cell: Option<LabelCellLayout>,
@@ -386,6 +391,8 @@ impl LPort {
             ratio_or_position: 0.0,
             connected_to_external_nodes: true,
             port_dummy: None,
+            origin_port: None,
+            allow_non_flow_ports_to_switch_sides: false,
             inside_connections: false,
             collector_type: None,
             end_label_cell: None,
@@ -1132,6 +1139,17 @@ impl LGraph {
                 for edge in &mut hyper_loop.edges {
                     edge.source_port = remap_port_index(&old_to_new, hidden, edge.source_port);
                     edge.target_port = remap_port_index(&old_to_new, hidden, edge.target_port);
+                }
+            }
+        }
+
+        // The ports of north and south port dummies point at the ports that were reordered.
+        for node in &mut self.layerless_nodes {
+            for port in &mut node.ports {
+                if let Some(origin) = port.origin_port.as_mut()
+                    && origin.node == node_index
+                {
+                    origin.port = remap_port_index(&old_to_new, hidden, origin.port);
                 }
             }
         }
