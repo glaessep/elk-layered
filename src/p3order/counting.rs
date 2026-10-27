@@ -99,6 +99,10 @@ impl BinaryIndexedTree {
 pub struct CrossingsCounter {
     /// `portPos`, indexed by `crossing_minimization_id`. An id past the end reads as 0.
     port_positions: Vec<usize>,
+    /// `AllCrossingsCounter.hasHyperEdgesEastOfIndex`. ELK sets it once, in `initAtPortLevel`,
+    /// when it builds the counter. The first count sets it here, and no later count reads the
+    /// ports again: the edges at a port do not change during the sweep.
+    has_hyperedges_east_of_index: Option<Vec<bool>>,
 }
 
 impl CrossingsCounter {
@@ -137,7 +141,11 @@ impl CrossingsCounter {
             return 0.0;
         }
 
-        let has_hyperedges_east_of_index = has_hyperedges_east_of_index(graph, current_order);
+        // Taken out of `self` for the loop, which counts with `&mut self`, and put back after it.
+        let has_hyperedges_east_of_index = self
+            .has_hyperedges_east_of_index
+            .take()
+            .unwrap_or_else(|| has_hyperedges_east_of_index(graph, current_order));
         let mut crossings =
             self.count_in_layer_crossings_on_side(graph, &current_order[0], PortSide::West);
         if current_order.len() > 1 {
@@ -162,6 +170,7 @@ impl CrossingsCounter {
                 crossings += self.count_crossings_between_layers(graph, left_layer, right_layer);
             }
         }
+        self.has_hyperedges_east_of_index = Some(has_hyperedges_east_of_index);
         crossings
     }
 
@@ -1075,6 +1084,44 @@ mod tests {
                 .count_crossings_between_layers(&graph, &order[1], &order[2])
                 .is_nan()
         );
+    }
+
+    // Mutation: work out the hyperedge flags again at each count, instead of keeping the ones of
+    // the first count. The second count then sees the second edge at the port and sets the flag.
+    #[test]
+    fn the_hyperedge_flags_are_set_by_the_first_count_only() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        for id in ["source", "target"] {
+            graph.layerless_nodes.push(LNode::new(id, 10.0, 10.0, None));
+        }
+        graph.set_node_layer(0, 0);
+        graph.set_node_layer(1, 1);
+        let out = graph
+            .add_port(0, PortType::Output, PortSide::East, LPoint::default())
+            .unwrap();
+        let in_top = graph
+            .add_port(1, PortType::Input, PortSide::West, LPoint::default())
+            .unwrap();
+        let in_bottom = graph
+            .add_port(1, PortType::Input, PortSide::West, LPoint::default())
+            .unwrap();
+        graph.add_edge(layered_edge("first", out, in_top));
+        crate::p3order::initialize_crossing_minimization_port_ids(&mut graph);
+        let order = vec![vec![0], vec![1]];
+
+        let mut counter = CrossingsCounter::default();
+        assert_eq!(counter.has_hyperedges_east_of_index, None);
+        counter.count_all_crossings_in_order(&graph, &order);
+        assert_eq!(counter.has_hyperedges_east_of_index, Some(vec![false; 2]));
+
+        // A second edge at the east port makes a hyperedge, which a new counter sees at once.
+        graph.add_edge(layered_edge("second", out, in_bottom));
+        let mut fresh = CrossingsCounter::default();
+        fresh.count_all_crossings_in_order(&graph, &order);
+        assert_eq!(fresh.has_hyperedges_east_of_index, Some(vec![true, false]));
+        // The old counter keeps the flags it set, as ELK's counter keeps those of its construction.
+        counter.count_all_crossings_in_order(&graph, &order);
+        assert_eq!(counter.has_hyperedges_east_of_index, Some(vec![false; 2]));
     }
 
     // Mutation: clamp the sum of `count_overlapping_areas` at 0, as the port did. The span that

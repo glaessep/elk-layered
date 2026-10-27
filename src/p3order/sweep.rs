@@ -1229,8 +1229,8 @@ impl HierarchySweep {
             total += info
                 .crossings_counter
                 .count_all_crossings_in_order(graph, &info.current_node_order);
-            let child_paths = info.child_paths.clone();
-            for child_path in &child_paths {
+            // `infos` and `index_by_path` are separate fields, so the paths need no copy.
+            for child_path in &self.infos[current].child_paths {
                 if let Some(child_index) = self.index_by_path.get(child_path).copied()
                     && !self.infos[child_index].use_bottom_up
                 {
@@ -1297,8 +1297,9 @@ impl HierarchySweep {
             .count_all_crossings_in_order(graph, &info.current_node_order)
             + model_order_influence;
 
-        let child_paths = info.child_paths.clone();
-        for child_path in &child_paths {
+        // The count below borrows `self` mutably, so each path is looked up again, not copied.
+        for position in 0..self.infos[info_index].child_paths.len() {
+            let child_path = &self.infos[info_index].child_paths[position];
             if let Some(child_index) = self.index_by_path.get(child_path).copied()
                 && !self.infos[child_index].use_bottom_up
             {
