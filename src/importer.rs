@@ -685,7 +685,8 @@ struct ImportPortIndex {
     /// The edges that cross a level, as (incoming, outgoing) per port, keyed by the id of the node
     /// and the key of the port. ELK's importer attaches such an edge to its ports at once. This
     /// importer keeps it apart until the compound preprocessor splits it, so the count lives here.
-    crossing_edges: HashMap<(String, String), (usize, usize)>,
+    /// Two maps, so a lookup by `&str` needs no `String` for the key.
+    crossing_edges: HashMap<String, HashMap<String, (usize, usize)>>,
 }
 
 impl ImportPortIndex {
@@ -700,7 +701,8 @@ impl ImportPortIndex {
     /// The edges that cross a level and end at this port, as (incoming, outgoing).
     fn crossing_at(&self, node_id: &str, port_key: &str) -> (usize, usize) {
         self.crossing_edges
-            .get(&(node_id.to_string(), port_key.to_string()))
+            .get(node_id)
+            .and_then(|ports| ports.get(port_key))
             .copied()
             .unwrap_or_default()
     }
@@ -1684,7 +1686,9 @@ fn transform_cross_hierarchy_edge(
     let (source_incoming, source_outgoing) = {
         let entry = port_index
             .crossing_edges
-            .entry((source.node_id.clone(), source.port_key.clone()))
+            .entry(source.node_id.clone())
+            .or_default()
+            .entry(source.port_key.clone())
             .or_default();
         entry.1 += 1;
         *entry
@@ -1692,7 +1696,9 @@ fn transform_cross_hierarchy_edge(
     let (target_incoming, target_outgoing) = {
         let entry = port_index
             .crossing_edges
-            .entry((target.node_id.clone(), target.port_key.clone()))
+            .entry(target.node_id.clone())
+            .or_default()
+            .entry(target.port_key.clone())
             .or_default();
         entry.0 += 1;
         *entry
