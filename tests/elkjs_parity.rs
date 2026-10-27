@@ -482,6 +482,29 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    centre label whatever its placement is: 2 cases, labels-inline-on-end-labels and
 //    labels-inline-on-end-labels-down. Only these set the option on HEAD and TAIL labels. elkjs
 //    ignores it there: the label dummy inserter takes centre labels alone.
+// 66. In the inline arm of `apply_label_side`, leave out the `/ 2.0` of the port position
+//    (`.ceil()` alone): 98 cases, such as labels-inline-straight, the smallest, with one inline
+//    label on one edge, and the other five cases below.
+// 67. In `place_labels_for_horizontal_layout`, leave out the `/ 2.0` of the x position: 237 cases,
+//    such as labels-inline-two-labels and labels-inline-direction-right. Both have labels of
+//    different widths on one edge, so a label that is not the widest must be centred.
+// 68. In `size_label_dummy`, add the widths of the labels instead of taking the greatest (the
+//    horizontal branch): 138 cases, such as labels-inline-two-labels and
+//    labels-inline-include-children.
+// 69. In `insert_label_dummies`, take only an edge whose labels are all centre labels
+//    (`!labels.is_empty() && labels.all(centre)`): 538 cases, such as labels-inline-mixed. Its
+//    edges e2 and e3 each hold a centre label and an end label.
+// 70. In `move_center_labels_to_dummy`, move every label of the edge to the dummy, not only the
+//    centre labels: 342 cases, such as labels-inline-mixed.
+// 71. In `find_median_layer_target_id`, use `total / 2` instead of `(total - 1) / 2`: 431 cases,
+//    such as labels-inline-long-edge and labels-inline-direction-right. Both have an edge over
+//    several layers whose label dummy must land in the lower median layer.
+// 72. In `materialize_hierarchy_edge_segments` (src/compound.rs), set `inline: false` on each label
+//    it copies to a segment: 33 cases, such as labels-inline-include-children.
+// 73. In the direction table of `apply_node_option` (src/layout_options.rs), read "RIGHT" as
+//    `ElkDirection::Down`: 231 cases, such as labels-inline-direction-right. It is the one hand
+//    case with inline labels that sets `elk.direction` to RIGHT, which is also the default. Random
+//    cases set it too, so this case adds no other coverage; it stays as the small readable one.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
