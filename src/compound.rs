@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use crate::graph::{
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphNodeRef, GraphPortRef,
     HierarchyEdge, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize, LayeredEdge, PortRef, PortSide,
-    PortType, apply_port_index_to_dummy, create_external_port_dummy,
+    PortType, apply_port_index_to_dummy, create_external_port_dummy, port_side_from_direction,
 };
 use crate::options::{ElkDirection, PortConstraints};
 
@@ -2033,15 +2033,6 @@ fn create_parent_boundary_port(
     dummy.ports[0].node = node;
     graph.layerless_nodes.push(dummy);
     PortRef { node, port: 0 }
-}
-
-fn port_side_from_direction(direction: ElkDirection) -> PortSide {
-    match direction {
-        ElkDirection::Right | ElkDirection::Undefined => PortSide::East,
-        ElkDirection::Left => PortSide::West,
-        ElkDirection::Down => PortSide::South,
-        ElkDirection::Up => PortSide::North,
-    }
 }
 
 pub(crate) fn calc_port_side(port: &LPort, node_size: LSize, direction: ElkDirection) -> PortSide {

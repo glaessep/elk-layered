@@ -16,7 +16,7 @@ use crate::compound::{
 use crate::graph::{
     CompoundEdgeSegment, EdgeLabelPlacement, HierarchyEdge, LGraph, LLabel, LNode, LPoint, LPort,
     LSize, LayeredEdge, PortRef, PortSide, PortType, apply_port_index_to_dummy,
-    create_external_port_dummy, is_across_flow,
+    create_external_port_dummy, is_across_flow, port_side_from_direction,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
@@ -1922,15 +1922,6 @@ fn ensure_port_at_node(
 /// or more than one outgoing edge. One of each is not a hyperedge.
 fn has_parallel_port_edges(port: &LPort) -> bool {
     port.incoming_edges.len() > 1 || port.outgoing_edges.len() > 1
-}
-
-fn port_side_from_direction(direction: ElkDirection) -> PortSide {
-    match direction {
-        ElkDirection::Right | ElkDirection::Undefined => PortSide::East,
-        ElkDirection::Left => PortSide::West,
-        ElkDirection::Down => PortSide::South,
-        ElkDirection::Up => PortSide::North,
-    }
 }
 
 fn label_to_lgraph(label: &ElkInputLabel) -> LLabel {

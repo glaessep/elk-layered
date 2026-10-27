@@ -21,7 +21,7 @@ use crate::common::networksimplex::NetworkSimplexError;
 use crate::components::ComponentError;
 use crate::error::Error;
 use crate::export::{self, LayoutResult, TransferInput};
-use crate::graph::{LPoint, LPort, LSize, PortSide, PortType};
+use crate::graph::{LPoint, LPort, LSize, PortSide, PortType, port_side_from_direction};
 use crate::importer::{
     self, ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, ElkInputPort, ParentSettings,
 };
@@ -1003,9 +1003,9 @@ impl<'a, 't> Work<'a, 't> {
             let side = if !constraints.is_side_fixed() {
                 // Free to choose, so the net flow decides.
                 if port.net_flow > 0 {
-                    side_along(direction)
+                    port_side_from_direction(direction)
                 } else {
-                    side_along(direction).opposed()
+                    port_side_from_direction(direction).opposed()
                 }
             } else if port.side == PortSide::Undefined {
                 // The side follows from the position, or else from the direction.
@@ -1019,7 +1019,7 @@ impl<'a, 't> Work<'a, 't> {
                     height: port.height,
                 };
                 match crate::compound::calc_port_side(&lport, size, direction) {
-                    PortSide::Undefined => side_along(direction),
+                    PortSide::Undefined => port_side_from_direction(direction),
                     side => side,
                 }
             } else {
@@ -1275,16 +1275,6 @@ impl<'a, 't> Work<'a, 't> {
             }
         }
         self.out
-    }
-}
-
-/// Ports `PortSide.fromDirection`.
-fn side_along(direction: ElkDirection) -> PortSide {
-    match direction {
-        ElkDirection::Right | ElkDirection::Undefined => PortSide::East,
-        ElkDirection::Left => PortSide::West,
-        ElkDirection::Down => PortSide::South,
-        ElkDirection::Up => PortSide::North,
     }
 }
 

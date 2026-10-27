@@ -1464,7 +1464,9 @@ pub fn apply_port_index_to_dummy(
     };
 }
 
-fn port_side_from_direction(direction: ElkDirection) -> PortSide {
+/// Ports `PortSide.fromDirection`. An undefined direction counts as `Right`, as the configurator
+/// makes it.
+pub(crate) fn port_side_from_direction(direction: ElkDirection) -> PortSide {
     match direction {
         ElkDirection::Right | ElkDirection::Undefined => PortSide::East,
         ElkDirection::Left => PortSide::West,
