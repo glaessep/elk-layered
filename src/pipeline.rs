@@ -28,6 +28,7 @@ use crate::intermediate::{
     restore_reversed_edges, reverse_edges_for_edge_and_layer_constraints, select_label_sides,
     sort_end_labels, split_long_edges, switch_label_dummies,
 };
+use crate::north_south::{postprocess_north_south_ports, preprocess_north_south_ports};
 use crate::p1cycles::{
     break_cycles_depth_first, break_cycles_greedy, break_cycles_greedy_model_order,
     break_cycles_interactive, break_cycles_model_order,
@@ -510,6 +511,8 @@ fn is_source_ported_processor(kind: ProcessorKind) -> bool {
             | ProcessorKind::InvertedPortProcessor
             | ProcessorKind::PortListSorter
             | ProcessorKind::SortByInputModelProcessor
+            | ProcessorKind::NorthSouthPortPreprocessor
+            | ProcessorKind::NorthSouthPortPostprocessor
             | ProcessorKind::HierarchicalPortConstraintProcessor
             | ProcessorKind::LayerSweepCrossingMinimizerBarycenter
             | ProcessorKind::LayerSweepCrossingMinimizerOneSidedGreedySwitch
@@ -1172,6 +1175,8 @@ fn execute_processor(graph: &mut LGraph, kind: ProcessorKind) -> PipelineResult<
         ProcessorKind::InvertedPortProcessor => process_inverted_ports(graph),
         ProcessorKind::PortListSorter => sort_port_lists(graph),
         ProcessorKind::SortByInputModelProcessor => sort_by_input_model(graph),
+        ProcessorKind::NorthSouthPortPreprocessor => preprocess_north_south_ports(graph),
+        ProcessorKind::NorthSouthPortPostprocessor => postprocess_north_south_ports(graph),
         ProcessorKind::LayerSweepCrossingMinimizerBarycenter => {
             minimize_crossings_layer_sweep_with_type(graph, CrossMinType::Barycenter);
         }
