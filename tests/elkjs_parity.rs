@@ -284,6 +284,11 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    and random-group-ports/r022.
 // 35. In `combine`, leave out the move of the component's own offset after the group placer: 8
 //    cases, such as ports-group-components, random-group-ports/r040 and r113.
+// 36. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), take the net
+//    flow from the edges the port has by then, `-port.net_flow()`, instead of the edges the
+//    importer made: 2 cases, ports-group-include-flow-of-split-edges and random-group-ports/r037.
+// 37. In `original_net_flows`, count the source of a hierarchy edge as incoming (`+= 1`): 5 cases,
+//    such as ports-group-include-flow-of-split-edges-out and random-group-ports/r037.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

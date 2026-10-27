@@ -391,6 +391,7 @@ fn preprocess_source_ported_compound_graph_observed(
     graph: &mut LGraph,
     observer: &mut impl CompoundPreprocessObserver,
 ) {
+    let original_net_flows = original_net_flows(graph);
     introduce_source_ported_hierarchy_edge_segments(graph);
     if !hierarchy_has_external_ports(graph) {
         let result = graph.try_for_each_graph_mut(|graph| {
@@ -426,7 +427,12 @@ fn preprocess_source_ported_compound_graph_observed(
         &detached_endpoint_plans,
         observer,
     );
-    ensure_nested_external_dummies_for_parent_ports(graph, detached, original_constraints);
+    ensure_nested_external_dummies_for_parent_ports(
+        graph,
+        detached,
+        original_constraints,
+        &original_net_flows,
+    );
 }
 
 /// The port constraints of every node of the hierarchy before the compound preprocessor links
@@ -435,6 +441,32 @@ struct OriginalPortConstraints {
     root: Vec<PortConstraints>,
     /// In the order of the detached graphs.
     nested: Vec<Vec<PortConstraints>>,
+}
+
+/// The net flow of every port that the input names, as `LPort.getNetFlow` reads it while
+/// `transformHierarchyEdges` still sees the edges as the importer made them: incoming minus
+/// outgoing edges, the ones that cross a level included. It is keyed by the ids of the node and
+/// the port. Edges that are split into segments no longer show up at the port in the same way.
+fn original_net_flows(graph: &mut LGraph) -> HashMap<(String, String), isize> {
+    let mut flows = HashMap::<(String, String), isize>::new();
+    let result = graph.try_for_each_graph_mut(|graph| {
+        for node in &graph.layerless_nodes {
+            for port in &node.ports {
+                *flows.entry((node.id.clone(), port.id.clone())).or_default() += port.net_flow();
+            }
+        }
+        for edge in &graph.hierarchy_edges {
+            *flows
+                .entry((edge.source_node_id.clone(), edge.source_port_key.clone()))
+                .or_default() -= 1;
+            *flows
+                .entry((edge.target_node_id.clone(), edge.target_port_key.clone()))
+                .or_default() += 1;
+        }
+        Ok::<(), std::convert::Infallible>(())
+    });
+    result.expect("collecting net flows is infallible");
+    flows
 }
 
 fn port_constraints_of(graph: &LGraph) -> Vec<PortConstraints> {
@@ -1572,12 +1604,14 @@ fn ensure_nested_external_dummies_for_parent_ports(
     graph: &mut LGraph,
     mut detached: Vec<DetachedNestedGraph>,
     original: OriginalPortConstraints,
+    net_flows: &HashMap<(String, String), isize>,
 ) {
     while let Some(mut entry) = detached.pop() {
         // Popping from the end keeps the index of every entry that is left.
         ensure_direct_nested_external_dummies_for_parent_ports(
             &mut entry.graph,
             &original.nested[detached.len()],
+            net_flows,
         );
         if let Some(parent) = entry.parent {
             detached[parent].graph.layerless_nodes[entry.parent_node].nested_graph =
@@ -1586,12 +1620,13 @@ fn ensure_nested_external_dummies_for_parent_ports(
             graph.layerless_nodes[entry.parent_node].nested_graph = Some(entry.graph);
         }
     }
-    ensure_direct_nested_external_dummies_for_parent_ports(graph, &original.root);
+    ensure_direct_nested_external_dummies_for_parent_ports(graph, &original.root, net_flows);
 }
 
 fn ensure_direct_nested_external_dummies_for_parent_ports(
     graph: &mut LGraph,
     original_constraints: &[PortConstraints],
+    net_flows: &HashMap<(String, String), isize>,
 ) {
     let graph_id = graph.id.clone();
 
@@ -1633,7 +1668,10 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
                 port.port_type,
                 port_constraints,
                 port_side,
-                -port.net_flow(),
+                -net_flows
+                    .get(&(parent_node_id.clone(), port.id.clone()))
+                    .copied()
+                    .unwrap_or_else(|| port.net_flow()),
                 LPoint::default(),
                 port.size,
                 parent_size,
