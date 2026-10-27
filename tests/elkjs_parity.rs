@@ -160,11 +160,31 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
     }
 }
 
-// Mutation: make `layout` refuse an edge between a node and its own children laid out on their
-// own (src/layout.rs, `to_graph`) with `Error::Internal` instead of `Error::Unsupported`. All 26
-// cases that elkjs refuses, such as random-group-ends/r034, then fail.
-// Mutation: drop the first `graph.random.next_long()` of the greedy switch in
-// src/p3order/sweep.rs. random/r017, r063, r144, r145 and r169 then differ.
+// Mutations, each tried alone. A mutation undoes one fix, and these cases then differ from elkjs.
+// 1. In `label_cell_size` (src/intermediate.rs), pass `!horizontal_layout`, so a cell stacks its
+//    labels the wrong way: 47 cases, such as random/r000, random/r002, random-group-ends/r002.
+// 2. In `update_end_label_node_margin`, read the right and bottom margin from the far corner,
+//    `(min_x + width) - margin.left - node_size.width`: 174 cases, such as labels, random/r000,
+//    random/r008.
+// 3. In `remove_end_label_overlaps`, never drop a cell from the scanline
+//    (`if false && rects[first].x + ...`), so every cell overlaps every other and they all stack:
+//    7 cases, such as random/r030, random/r057, random-group-ends/r004.
+// 4. In `hide_ports` (src/selfloops.rs), split off no hidden ports
+//    (`node.ports.split_off(node.ports.len())`), so they stay on the node: 12 cases, such as
+//    random/r000, random/r038, random-group-ends/r029.
+// 5. In `create_east_port_side_dummy` and `create_west_port_side_dummy`, call
+//    `set_dummy_node_properties` instead of `set_inverted_port_dummy_long_edge_ports`: 1 case,
+//    random/r091.
+// 6. In `parent_port_net_flows` (src/compound.rs), vote by port type alone
+//    (`votes_output = !leaves_port`): 14 cases, such as random-group-ends/r004,
+//    random-group-ends/r025, random-group-ends/r033.
+// 7. In `minimize_two_sided_greedy_switch` (src/p3order/sweep.rs), drop the
+//    `graph.random.next_long()`: 6 cases, random/r017, random/r063, random/r144, random/r145,
+//    random/r169 and random-group-ends/r082. Dropping the `next_long()` of
+//    `minimize_one_sided_greedy_switch` fails no case: no input in tests/elkjs sets a greedy
+//    switch type.
+// 8. In the `to_graph` refusal of src/layout.rs, return `Error::Internal` instead of
+//    `Error::Unsupported`: all 26 cases that elkjs refuses, such as random-group-ends/r034.
 #[test]
 fn every_case_lays_out_exactly_as_elkjs_does() {
     let mut failures = Vec::new();
