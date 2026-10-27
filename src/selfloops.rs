@@ -1037,7 +1037,7 @@ fn north_south_port_connection_sides(
     sides
 }
 
-fn graph_by_id<'a>(graph: &'a LGraph, id: GraphId) -> Option<&'a LGraph> {
+fn graph_by_id(graph: &LGraph, id: GraphId) -> Option<&LGraph> {
     if graph.id == id {
         return Some(graph);
     }

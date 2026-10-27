@@ -1519,7 +1519,7 @@ mod tests {
                 port: PortId::new(1),
             },
         };
-        dummy.origin_port = Some(origin.clone());
+        dummy.origin_port = Some(origin);
         nested.layerless_nodes.push(dummy);
         compound.nested_graph = Some(Box::new(nested));
         parent.layerless_nodes.push(compound);

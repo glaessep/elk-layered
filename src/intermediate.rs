@@ -5647,7 +5647,7 @@ mod tests {
                 port: PortId::new(3),
             },
         };
-        graph.layerless_nodes[north].origin_port = Some(origin.clone());
+        graph.layerless_nodes[north].origin_port = Some(origin);
         graph.layerless_nodes[north].model_order = Some(17);
         graph.layerless_nodes[north].in_layer_constraint = InLayerConstraint::Top;
 

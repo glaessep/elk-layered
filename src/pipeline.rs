@@ -1047,10 +1047,7 @@ fn transfer_external_port_dummy_layout_to_parent_node(
         if nested_graph.layerless_nodes[dummy_index].kind != LNodeKind::ExternalPort {
             continue;
         }
-        let Some(origin_port) = nested_graph.layerless_nodes[dummy_index]
-            .origin_port
-            .clone()
-        else {
+        let Some(origin_port) = nested_graph.layerless_nodes[dummy_index].origin_port else {
             continue;
         };
         if origin_port.port.node != parent_node_index {

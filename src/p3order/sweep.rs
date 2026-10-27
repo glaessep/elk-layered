@@ -4586,7 +4586,7 @@ mod tests {
         external.kind = LNodeKind::ExternalPort;
         external.external_port_side = PortSide::West;
         external.origin_port = Some(crate::graph::GraphPortRef {
-            graph_id: parent_graph.id.clone(),
+            graph_id: parent_graph.id,
             port: origin,
         });
         child_graph.layerless_nodes.push(external);

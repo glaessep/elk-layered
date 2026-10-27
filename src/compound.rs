@@ -1884,7 +1884,7 @@ fn external_dummies_for_parent_node(
                 parent_port_type: node.parent_port_type.unwrap_or(port.port_type),
                 external_port_side: node.external_port_side,
                 border_offset: port.border_offset,
-                origin_port: node.origin_port.clone(),
+                origin_port: node.origin_port,
             })
         })
         .collect()

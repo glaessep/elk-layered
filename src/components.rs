@@ -302,7 +302,7 @@ fn remap_references(
             }
         }
     }
-    let graph_id = graph.id.clone();
+    let graph_id = graph.id;
     graph.try_for_each_graph_mut(|current| {
         for node in &mut current.layerless_nodes {
             if let Some(origin) = &mut node.origin_port
