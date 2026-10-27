@@ -20,7 +20,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::graph::{LGraph, LNode, LNodeKind, PortRef, PortSide, PortType};
 use crate::options::{OrderingStrategy, PortConstraints};
 use crate::p3order::counting::{
-    BinaryIndexedTree, CrossingsCounter, ports_in_north_south_east_west_order,
+    BinaryIndexedTree, CrossingsCounter, first_port_on_side, north_south_ports_with_incident_edges,
+    port_degree, ports_in_north_south_east_west_order,
 };
 use crate::random::JavaRandom;
 
@@ -2788,7 +2789,7 @@ impl NorthSouthEdgeNeighbouringNodeCrossingsCounter {
         closer_to_normal_node: usize,
     ) {
         let first_degree = |node: usize, side: PortSide| {
-            first_port_on_side_of(graph, node, side).map_or(0, |port| port_degree(graph, port))
+            first_port_on_side(graph, node, side).map_or(0, |port| port_degree(graph, port))
         };
         if self.origin_port_position_of(graph, further_from_normal_node)
             > self.origin_port_position_of(graph, closer_to_normal_node)
@@ -3672,17 +3673,6 @@ fn crossing_minimization_port_id(graph: &LGraph, port: PortRef) -> Option<usize>
         .and_then(|port_data| port_data.crossing_minimization_id)
 }
 
-fn port_degree(graph: &LGraph, port: PortRef) -> usize {
-    let Some(port) = graph
-        .layerless_nodes
-        .get(port.node)
-        .and_then(|node| node.ports.get(port.port))
-    else {
-        return 0;
-    };
-    port.incoming_edges.len() + port.outgoing_edges.len()
-}
-
 fn connected_ports(graph: &LGraph, port: PortRef) -> Vec<PortRef> {
     connected_edges(graph, port)
         .filter_map(|edge| other_end_of_edge(graph, edge, port))
@@ -4033,22 +4023,10 @@ fn have_different_origins(graph: &LGraph, upper_node: usize, lower_node: usize) 
         != origin_port_of(graph, lower_node).map(|origin| origin.node)
 }
 
-fn first_port_on_side_of(graph: &LGraph, node: usize, side: PortSide) -> Option<PortRef> {
-    graph.layerless_nodes[node]
-        .ports
-        .iter()
-        .position(|port| port.side == side)
-        .map(|port| PortRef { node, port })
-}
-
 /// `NorthSouthEdgeNeighbouringNodeCrossingsCounter.numberOfNorthSouthEdges`: the ports of the
 /// side that have a dummy.
 fn number_of_north_south_edges(graph: &LGraph, node: usize, side: PortSide) -> usize {
-    graph.layerless_nodes[node]
-        .ports
-        .iter()
-        .filter(|port| port.side == side && port.port_dummy.is_some())
-        .count()
+    north_south_ports_with_incident_edges(graph, node, side).count()
 }
 
 fn connected_ports_for_sweep(graph: &LGraph, port: PortRef, forward: bool) -> Vec<PortRef> {

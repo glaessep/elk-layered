@@ -223,10 +223,6 @@ impl CrossingsCounter {
         ports: &[PortRef],
         index_tree: &mut BinaryIndexedTree,
     ) -> f64 {
-        let degree = |port: PortRef| {
-            let data = &graph.layerless_nodes[port.node].ports[port.port];
-            data.incoming_edges.len() + data.outgoing_edges.len()
-        };
         let mut crossings = 0.0f64;
         let mut ends = Vec::new();
         // The ports an implicit edge of the current port ends at, with their degrees.
@@ -253,7 +249,7 @@ impl CrossingsCounter {
                                 node: dummy.node,
                                 port: index,
                             };
-                            targets_and_degrees.push((target, degree(target)));
+                            targets_and_degrees.push((target, port_degree(graph, target)));
                         }
                     }
                 }
@@ -264,12 +260,12 @@ impl CrossingsCounter {
                             node: port.node,
                             port: index,
                         };
-                        targets_and_degrees.push((target, degree(target)));
+                        targets_and_degrees.push((target, port_degree(graph, target)));
                     }
                 }
                 LNodeKind::NorthSouthPort => {
                     if let Some(origin) = node.ports[port.port].origin_port {
-                        targets_and_degrees.push((origin, degree(port)));
+                        targets_and_degrees.push((origin, port_degree(graph, port)));
                     }
                 }
                 _ => {}
@@ -870,26 +866,40 @@ impl CrossingsCounter {
 }
 
 /// `CrossingsCounter.getNorthSouthPortsWithIncidentEdges`: the ports of a side that have a dummy.
-fn north_south_ports_with_incident_edges(
+/// The sweep counts them too, as
+/// `NorthSouthEdgeNeighbouringNodeCrossingsCounter.numberOfNorthSouthEdges`.
+pub(crate) fn north_south_ports_with_incident_edges(
     graph: &LGraph,
     node: usize,
     side: PortSide,
-) -> Vec<PortRef> {
+) -> impl Iterator<Item = PortRef> + '_ {
     graph.layerless_nodes[node]
         .ports
         .iter()
         .enumerate()
-        .filter(|(_, port)| port.side == side && port.port_dummy.is_some())
-        .map(|(port, _)| PortRef { node, port })
-        .collect()
+        .filter(move |(_, port)| port.side == side && port.port_dummy.is_some())
+        .map(move |(port, _)| PortRef { node, port })
 }
 
-fn first_port_on_side(graph: &LGraph, node: usize, side: PortSide) -> Option<PortRef> {
+/// The first port of a node on a side, in the order of the node's port list.
+pub(crate) fn first_port_on_side(graph: &LGraph, node: usize, side: PortSide) -> Option<PortRef> {
     graph.layerless_nodes[node]
         .ports
         .iter()
         .position(|port| port.side == side)
         .map(|port| PortRef { node, port })
+}
+
+/// The number of edges at a port, in and out. A port that is not in the graph has none.
+pub(crate) fn port_degree(graph: &LGraph, port: PortRef) -> usize {
+    let Some(port) = graph
+        .layerless_nodes
+        .get(port.node)
+        .and_then(|node| node.ports.get(port.port))
+    else {
+        return 0;
+    };
+    port.incoming_edges.len() + port.outgoing_edges.len()
 }
 
 /// `CrossingsCounter.isLayoutUnitChanged`.
