@@ -15,7 +15,7 @@ pub enum Error {
         /// What it is.
         feature: String,
     },
-    /// Two nodes or ports, or two edges, share an id.
+    /// Two nodes, two ports or two edges share an id.
     #[error("the id \"{id}\" is used more than once")]
     DuplicateId {
         /// The id.

@@ -11,12 +11,16 @@
 //! error here, where elkjs would quietly ignore `properties`.
 //!
 //! elkjs reads an edge in an old form too: a single `source` and `target` string, with an
-//! optional `sourcePort` and `targetPort`. `source` and `target` read as one-element `sources`
-//! and `targets`. The old port keys are not read: a port only exists as an entry in `ports`,
-//! and a graph with one is refused. elkjs itself ignores a port key that names no port. It
-//! picks the old form only when neither `sources` nor `targets` is present; here, a graph
-//! that gives both `source` and `sources` is a serde error, and `source` next to `targets`
-//! reads as one source.
+//! optional `sourcePort` and `targetPort`. elkjs picks the old form only when neither `sources`
+//! nor `targets` is present. Then the edge starts at `sourcePort` if it is given, else at
+//! `source`, and ends at `targetPort` or `target` the same way. Here, `source` and `target` read
+//! as one-element `sources` and `targets`, and a port key replaces them, so the edge names the
+//! port alone. Two differences follow. elkjs checks that the port belongs to the named node, and
+//! this mapping drops that check: a port of another node attaches to that port's node. elkjs
+//! also ignores a port key that names no port and attaches the edge to the node; here the edge
+//! then names an id that is no node, and layout reports `UnknownId`. In the new form, elkjs
+//! ignores both port keys, as this crate does. A graph that gives both `source` and `sources`
+//! is a serde error, and `source` next to `targets` reads as one source.
 //!
 //! Source: `org.eclipse.elk.graph.json/src/org/eclipse/elk/graph/json/JsonImporter.xtend`,
 //! which reads this JSON and writes the layout back into it.
@@ -33,7 +37,8 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct ElkNode {
-    /// Unique among all nodes and ports of the graph.
+    /// Unique among all nodes of the graph. A port may have the same id: an edge end that names
+    /// both means the node.
     pub id: String,
     /// Left side, relative to the parent node.
     #[cfg_attr(feature = "serde", serde(default))]
@@ -94,7 +99,8 @@ pub struct ElkNode {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct ElkPort {
-    /// Unique among all nodes and ports of the graph.
+    /// Unique among all ports of the graph. A node may have the same id: an edge end that names
+    /// both means the node.
     pub id: String,
     /// Left side, relative to the port's node.
     #[cfg_attr(feature = "serde", serde(default))]
@@ -137,19 +143,19 @@ pub struct ElkEdge {
     pub id: String,
     /// The ids of the edge's source nodes or ports. elk-layered supports exactly one.
     ///
-    /// The JSON may also give the old form: a single `source` string
+    /// The JSON may also give the old form: a single `source` string, or a `sourcePort`
     /// (`transformPrimitiveEdge` in the importer).
     #[cfg_attr(
         feature = "serde",
-        serde(default, alias = "source", deserialize_with = "ends::deserialize")
+        serde(default, deserialize_with = "ends::deserialize")
     )]
     pub sources: Vec<String>,
     /// The ids of the edge's target nodes or ports. elk-layered supports exactly one.
     ///
-    /// The JSON may also give the old form: a single `target` string.
+    /// The JSON may also give the old form: a single `target` string, or a `targetPort`.
     #[cfg_attr(
         feature = "serde",
-        serde(default, alias = "target", deserialize_with = "ends::deserialize")
+        serde(default, deserialize_with = "ends::deserialize")
     )]
     pub targets: Vec<String>,
     /// The edge's labels. Their coordinates are relative to [`ElkEdge::container`].
@@ -274,17 +280,25 @@ pub struct ElkPoint {
     pub y: f64,
 }
 
-/// What `ElkEdge` reads from JSON. It has the fields of `ElkEdge` and the two old port keys,
-/// which only serve to refuse them.
+/// What `ElkEdge` reads from JSON. It tells `source` from `sources`, and has the two old port
+/// keys, because elkjs reads those keys only in the old form.
 #[cfg(feature = "serde")]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EdgeWire {
     id: String,
-    #[serde(default, alias = "source", deserialize_with = "ends::deserialize")]
-    sources: Vec<String>,
-    #[serde(default, alias = "target", deserialize_with = "ends::deserialize")]
-    targets: Vec<String>,
+    #[serde(default, deserialize_with = "ends::deserialize_some")]
+    sources: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "ends::deserialize_some")]
+    source: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "ends::deserialize_some")]
+    targets: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "ends::deserialize_some")]
+    target: Option<Vec<String>>,
+    #[serde(default)]
+    source_port: Option<String>,
+    #[serde(default)]
+    target_port: Option<String>,
     #[serde(default)]
     labels: Vec<ElkLabel>,
     #[serde(
@@ -299,34 +313,37 @@ struct EdgeWire {
     container: Option<String>,
     #[serde(default)]
     junction_points: Vec<ElkPoint>,
-    #[serde(default)]
-    source_port: Option<serde::de::IgnoredAny>,
-    #[serde(default)]
-    target_port: Option<serde::de::IgnoredAny>,
 }
 
 #[cfg(feature = "serde")]
 impl TryFrom<EdgeWire> for ElkEdge {
     type Error = String;
 
-    /// Refuses the old port keys, which elk-layered does not read. Reading a graph that has
-    /// them without a port would lay the edge out at the node instead.
+    /// Ports the old form of `JsonImporter.transformPrimitiveEdge`, which elkjs picks when neither
+    /// `sources` nor `targets` is present: the edge starts at `sourcePort` if it is given, else
+    /// at `source`, and ends at `targetPort` or `target` the same way.
     fn try_from(wire: EdgeWire) -> Result<Self, Self::Error> {
-        for (key, present) in [
-            ("sourcePort", wire.source_port.is_some()),
-            ("targetPort", wire.target_port.is_some()),
-        ] {
-            if present {
-                return Err(format!(
-                    "edge \"{}\": the old key \"{key}\" is not read; name the port in \"sources\" or \"targets\"",
-                    wire.id
-                ));
-            }
-        }
+        let old_form = wire.sources.is_none() && wire.targets.is_none();
+        let id = wire.id;
+        let end = |plural: Option<Vec<String>>,
+                   single: Option<Vec<String>>,
+                   port: Option<String>,
+                   name: &str| match (plural, single) {
+            (Some(_), Some(_)) => Err(format!(
+                "edge \"{id}\": both \"{name}s\" and \"{name}\" are given"
+            )),
+            (Some(ids), None) => Ok(ids),
+            (None, single) => Ok(match port {
+                Some(port) if old_form => vec![port],
+                _ => single.unwrap_or_default(),
+            }),
+        };
+        let sources = end(wire.sources, wire.source, wire.source_port, "source")?;
+        let targets = end(wire.targets, wire.target, wire.target_port, "target")?;
         Ok(Self {
-            id: wire.id,
-            sources: wire.sources,
-            targets: wire.targets,
+            id: id.clone(),
+            sources,
+            targets,
             labels: wire.labels,
             layout_options: wire.layout_options,
             sections: wire.sections,
@@ -342,6 +359,13 @@ mod ends {
 
     use serde::Deserializer;
     use serde::de::{SeqAccess, Visitor};
+
+    /// Like [`deserialize`], for a key that may be missing.
+    pub(super) fn deserialize_some<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Vec<String>>, D::Error> {
+        deserialize(deserializer).map(Some)
+    }
 
     /// A list of ids, or a single id string for the old `source` and `target` keys.
     pub(super) fn deserialize<'de, D: Deserializer<'de>>(

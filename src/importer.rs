@@ -183,7 +183,7 @@ pub enum ImportError {
     DuplicateNode { id: String },
     #[error("ELK graph has duplicate edge id: {id}")]
     DuplicateEdge { id: String },
-    #[error("ELK graph has duplicate node or port id: {id}")]
+    #[error("ELK graph has duplicate port id: {id}")]
     DuplicatePort { id: String },
     #[error("ELK edge `{edge_id}` references missing node `{node_id}`")]
     MissingEndpoint { edge_id: String, node_id: String },
@@ -1814,14 +1814,14 @@ impl<'a> InputIndex<'a> {
             node_order.insert(node.id.as_str(), index);
         }
 
-        // Ports and nodes share one id space: a port can stand where an edge names a node.
+        // elkjs keeps its node and port ids apart, so a port may have the id of a node. The
+        // edge's `source` names the node, and `source_port` the port.
         let mut ports: HashMap<&str, (&str, usize)> = HashMap::new();
         for node in &input.nodes {
             for (position, port) in node.ports.iter().enumerate() {
-                if nodes.contains_key(port.id.as_str())
-                    || ports
-                        .insert(port.id.as_str(), (node.id.as_str(), position))
-                        .is_some()
+                if ports
+                    .insert(port.id.as_str(), (node.id.as_str(), position))
+                    .is_some()
                 {
                     return Err(ImportError::DuplicatePort {
                         id: port.id.clone(),
@@ -3833,9 +3833,9 @@ mod tests {
         assert!(build(vec![into_port("e1", "B"), into_port("e2", "B")]));
     }
 
-    // Mutation: do not look at the ports when checking ids.
+    // Mutation: reject a port that has the id of a node, or let two ports share an id.
     #[test]
-    fn a_port_id_may_not_repeat_a_node_or_port_id() {
+    fn a_port_id_may_repeat_a_node_id_but_not_a_port_id() {
         let two_with = |first: &str, second: &str| {
             flat_graph(
                 ElkDirection::Right,
@@ -3850,10 +3850,8 @@ mod tests {
             import_graph(&two_with("p", "p")),
             Err(ImportError::DuplicatePort { id }) if id == "p"
         ));
-        assert!(matches!(
-            import_graph(&two_with("B", "q")),
-            Err(ImportError::DuplicatePort { id }) if id == "B"
-        ));
+        // elkjs keeps node and port ids apart.
+        assert!(import_graph(&two_with("B", "A")).is_ok());
         assert!(import_graph(&two_with("p", "q")).is_ok());
     }
 

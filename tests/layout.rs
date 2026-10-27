@@ -789,9 +789,10 @@ fn an_edge_at_a_port_across_a_level_of_an_included_graph_is_unsupported() {
     assert!(layout(&graph).is_ok());
 }
 
-// Mutation: leave the port ids out of the id check in `Tree::new`.
+// Mutation: leave the port ids out of the id check in `Tree::new`, or check them against the
+// node ids too.
 #[test]
-fn a_port_id_may_not_repeat_a_node_or_port_id() {
+fn a_port_id_may_repeat_a_node_id_but_not_a_port_id() {
     let two = |first: &str, second: &str, node_id: &str| {
         root(
             vec![
@@ -805,15 +806,41 @@ fn a_port_id_may_not_repeat_a_node_or_port_id() {
             vec![],
         )
     };
-    // Two ports with one id, a port with the id of an earlier node, and of a later node.
-    for graph in [two("p", "p", "b"), two("a", "q", "b"), two("b", "q", "b")] {
-        assert!(matches!(error_of(&graph), Error::DuplicateId { .. }));
-    }
-    assert!(layout(&two("p", "q", "b")).is_ok());
-    // A port may share an id with an edge: edges have their own ids, as in elkjs.
+    assert!(matches!(
+        error_of(&two("p", "p", "b")),
+        Error::DuplicateId { id } if id == "p"
+    ));
+    // elkjs keeps `nodeIdMap` and `portIdMap` apart: these lay out.
+    assert!(layout(&two("a", "q", "b")).is_ok());
+    assert!(layout(&two("b", "q", "b")).is_ok());
+    // A port may share an id with an edge, too.
     let mut graph = two("p", "q", "b");
     graph.edges = vec![edge("p", "a", "b")];
     assert!(layout(&graph).is_ok());
+}
+
+// Mutation: look up an edge end among the ports before the nodes. The edge then ends at the
+// port `b` of `a`, not at the node `b`.
+#[test]
+fn an_edge_end_that_names_a_node_and_a_port_means_the_node() {
+    let graph = root(
+        vec![
+            with_ports(
+                node("a", 40.0, 30.0),
+                "FIXED_SIDE",
+                vec![port("b", 6.0, 4.0, "WEST")],
+            ),
+            node("b", 40.0, 30.0),
+        ],
+        vec![edge("e", "a", "b")],
+    );
+    let laid = layout(&graph).unwrap();
+    // `a` is left of `b`, as for any edge from `a` to the node `b`.
+    assert!(at(&laid, "a").0 < at(&laid, "b").0);
+    assert_eq!(
+        route(find_edge(&laid, "e")).last().unwrap().0,
+        at(&laid, "b").0
+    );
 }
 
 // Mutation: look up an edge end among the nodes only.

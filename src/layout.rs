@@ -211,9 +211,9 @@ impl<'a> Tree<'a> {
                     feature: format!("a graph nested deeper than {MAX_NESTING_DEPTH} levels"),
                 });
             }
-            if by_id.insert(node.id.as_str(), nodes.len()).is_some()
-                || port_by_id.contains_key(node.id.as_str())
-            {
+            // elkjs keeps `nodeIdMap`, `portIdMap` and `edgeIdMap` apart, so a node and a port may
+            // share an id.
+            if by_id.insert(node.id.as_str(), nodes.len()).is_some() {
                 return Err(Error::DuplicateId {
                     id: node.id.clone(),
                 });
@@ -240,10 +240,9 @@ impl<'a> Tree<'a> {
             let node_index = nodes.len();
             let mut ports = Vec::with_capacity(node.ports.len());
             for (port_position, port) in node.ports.iter().enumerate() {
-                if by_id.contains_key(port.id.as_str())
-                    || port_by_id
-                        .insert(port.id.as_str(), (node_index, port_position))
-                        .is_some()
+                if port_by_id
+                    .insert(port.id.as_str(), (node_index, port_position))
+                    .is_some()
                 {
                     return Err(Error::DuplicateId {
                         id: port.id.clone(),
@@ -286,8 +285,8 @@ impl<'a> Tree<'a> {
                         edge: edge.id.clone(),
                     });
                 }
-                // An id names a node, or a port of a node: `ElkGraphUtil.connectableShapeToNode`
-                // gives the port's node.
+                // Ports `JsonImporter.shapeById`: an id names a node first, and a port if no node
+                // has it. `ElkGraphUtil.connectableShapeToNode` gives the port's node.
                 let find = |id: &String| {
                     by_id
                         .get(id.as_str())
