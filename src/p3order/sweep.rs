@@ -273,7 +273,7 @@ impl BarycenterPortDistributor {
         }
 
         for port_side in [side, PortSide::South, PortSide::North] {
-            let ports = ports_on_side(graph, node, port_side);
+            let ports = graph.ports_on_side(node, port_side);
             self.distribute_ports_on_side(graph, node, &ports, order);
         }
         self.sort_ports(graph, node);
@@ -3660,15 +3660,6 @@ fn actual_ports_of_type(graph: &LGraph, node: usize, port_type: PortType) -> Vec
             };
             matches.then_some(PortRef { node, port })
         })
-        .collect()
-}
-
-fn ports_on_side(graph: &LGraph, node: usize, side: PortSide) -> Vec<PortRef> {
-    graph.layerless_nodes[node]
-        .ports
-        .iter()
-        .enumerate()
-        .filter_map(|(port, port_data)| (port_data.side == side).then_some(PortRef { node, port }))
         .collect()
 }
 

@@ -56,7 +56,7 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
             let mut barycenter_associates = Vec::new();
 
             // The northern ports, left to right as the diagram shows them.
-            let north_ports = ports_on_side(graph, node, PortSide::North);
+            let north_ports = graph.ports_on_side(node, PortSide::North);
             let north_dummies = create_dummy_nodes(graph, &north_ports, &mut barycenter_associates);
 
             // Each northern dummy has the regular node as its successor. A dummy whose port may
@@ -79,7 +79,7 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
 
             // The ports on the southern side are listed from right to left, so the list is built
             // in reversed order.
-            let mut south_ports = ports_on_side(graph, node, PortSide::South);
+            let mut south_ports = graph.ports_on_side(node, PortSide::South);
             south_ports.reverse();
             let south_dummies = create_dummy_nodes(graph, &south_ports, &mut barycenter_associates);
 
@@ -119,16 +119,6 @@ fn origin_allows_side_switch(graph: &LGraph, dummy: usize) -> bool {
 fn insert_into_layer(graph: &mut LGraph, node: usize, layer_index: usize, index: usize) {
     graph.layers[layer_index].nodes.insert(index, node);
     graph.layerless_nodes[node].layer_index = Some(layer_index);
-}
-
-/// The ports of a node on one side, in the order of the node's port list.
-fn ports_on_side(graph: &LGraph, node: usize, side: PortSide) -> Vec<PortRef> {
-    graph.layerless_nodes[node]
-        .ports
-        .iter()
-        .enumerate()
-        .filter_map(|(port, data)| (data.side == side).then_some(PortRef { node, port }))
-        .collect()
 }
 
 /// Ports `NorthSouthPortPreprocessor.sortPortList`: ports with only incoming edges end up left,
@@ -172,7 +162,7 @@ fn sort_port_list(graph: &mut LGraph, node: usize) {
     order.sort_by(|&first, &second| {
         let (side1, side2) = (ports[first].side, ports[second].side);
         if side1 != side2 {
-            return side_ordinal(side1).cmp(&side_ordinal(side2));
+            return side1.ordinal().cmp(&side2.ordinal());
         }
         if ids[first] == ids[second] {
             // Eastern and western ports have the same id and keep their order.
@@ -189,17 +179,6 @@ fn sort_port_list(graph: &mut LGraph, node: usize) {
         graph.reorder_node_ports(node, order),
         "the sorted port order of node {node} is not a permutation of its ports"
     );
-}
-
-/// The position of a side in `PortSide`'s declaration, the order `PortSide.ordinal` gives.
-fn side_ordinal(side: PortSide) -> u8 {
-    match side {
-        PortSide::Undefined => 0,
-        PortSide::North => 1,
-        PortSide::East => 2,
-        PortSide::South => 3,
-        PortSide::West => 4,
-    }
 }
 
 /// Ports `NorthSouthPortPreprocessor.createDummyNodes`, for the new approach.

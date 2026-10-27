@@ -1069,6 +1069,17 @@ impl LGraph {
             .collect()
     }
 
+    /// The ports of a node on one side, in the order of the node's port list, as
+    /// `LNode#getPorts(PortSide)` gives them.
+    pub(crate) fn ports_on_side(&self, node: usize, side: PortSide) -> Vec<PortRef> {
+        self.layerless_nodes[node]
+            .ports
+            .iter()
+            .enumerate()
+            .filter_map(|(port, data)| (data.side == side).then_some(PortRef { node, port }))
+            .collect()
+    }
+
     /// ELK's `LNode#getPorts(PortType.OUTPUT)` is based on actual outgoing edge incidence.
     pub fn port_has_output_type(&self, port_ref: PortRef) -> bool {
         self.layerless_nodes
@@ -1681,6 +1692,35 @@ mod tests {
             nested.layerless_nodes[0].origin_port.as_ref().unwrap().port,
             PortRef { node: 0, port: 0 }
         );
+    }
+
+    // Mutation: keep the ports of every side, or list them in reverse.
+    #[test]
+    fn ports_on_side_lists_the_ports_of_one_side_in_list_order() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        graph
+            .layerless_nodes
+            .push(LNode::new("A", 10.0, 10.0, Some(0)));
+        for side in [
+            PortSide::North,
+            PortSide::East,
+            PortSide::North,
+            PortSide::South,
+        ] {
+            graph
+                .add_port(0, PortType::Output, side, LPoint::default())
+                .unwrap();
+        }
+
+        assert_eq!(
+            graph.ports_on_side(0, PortSide::North),
+            [PortRef { node: 0, port: 0 }, PortRef { node: 0, port: 2 }]
+        );
+        assert_eq!(
+            graph.ports_on_side(0, PortSide::South),
+            [PortRef { node: 0, port: 3 }]
+        );
+        assert!(graph.ports_on_side(0, PortSide::West).is_empty());
     }
 
     #[test]
