@@ -218,6 +218,10 @@ pub struct LNode {
     /// `layered.edgeRouting.selfLoopOrdering`, which ELK reads from each node.
     pub self_loop_ordering: super::options::SelfLoopOrderingStrategy,
     pub ports: Vec<LPort>,
+    /// How many self-loop ports the pre-processor holds off this node (`SelfLoopHolder::
+    /// hidden_ports`). They keep the indices `ports.len()..ports.len() + hidden_port_count`, so
+    /// a port added meanwhile would take the index of the first hidden one.
+    pub hidden_port_count: usize,
     pub nested_graph: Option<Box<LGraph>>,
     pub model_order: Option<usize>,
     pub component_priority: i32,
@@ -265,6 +269,7 @@ impl LNode {
             self_loop_distribution: Default::default(),
             self_loop_ordering: Default::default(),
             ports: Vec::new(),
+            hidden_port_count: 0,
             nested_graph: None,
             model_order,
             component_priority: 0,
@@ -815,6 +820,10 @@ impl LGraph {
         position: LPoint,
     ) -> Option<PortRef> {
         let node = self.layerless_nodes.get_mut(node_index)?;
+        debug_assert_eq!(
+            node.hidden_port_count, 0,
+            "a port added while self-loop ports are hidden takes the index of a hidden port"
+        );
         let port_index = node.ports.len();
         let mut port = LPort::new(format!("{}:{port_index}", node.id), node_index, port_type);
         port.set_side(side);
@@ -848,6 +857,10 @@ impl LGraph {
             });
         }
 
+        debug_assert_eq!(
+            node.hidden_port_count, 0,
+            "a collector port made while self-loop ports are hidden takes the index of a hidden port"
+        );
         let port_index = node.ports.len();
         let mut port = LPort::new(
             format!("{}{}", node.id, collector_port_id_suffix(port_type)),

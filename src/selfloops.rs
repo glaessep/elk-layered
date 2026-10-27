@@ -329,16 +329,16 @@ fn hide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
     remap_holder_ports(holder, &old_to_new);
 
     let visible_count = port_count - hidden_indices.len();
-    holder.hidden_ports = graph.layerless_nodes[holder.node]
-        .ports
-        .split_off(visible_count);
+    let node = &mut graph.layerless_nodes[holder.node];
+    holder.hidden_ports = node.ports.split_off(visible_count);
+    node.hidden_port_count = holder.hidden_ports.len();
 }
 
 /// Puts the ports that `hide_ports` took off the node back at the end of its port list.
 fn unhide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
-    graph.layerless_nodes[holder.node]
-        .ports
-        .append(&mut holder.hidden_ports);
+    let node = &mut graph.layerless_nodes[holder.node];
+    node.ports.append(&mut holder.hidden_ports);
+    node.hidden_port_count = 0;
 }
 
 fn assign_hidden_port_sides(graph: &mut LGraph, holder: &SelfLoopHolder) {
