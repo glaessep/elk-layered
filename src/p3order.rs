@@ -197,6 +197,8 @@ pub struct GraphInfoHolder {
     pub current_node_order: Vec<Vec<usize>>,
     pub currently_best_node_and_port_order: Option<SweepCopy>,
     pub best_node_and_port_order: Option<SweepCopy>,
+    /// `GraphInfoHolder.crossingsCounter`, whose port positions outlive each count.
+    pub crossings_counter: crate::p3order::counting::CrossingsCounter,
 }
 
 impl GraphInfoHolder {
@@ -209,6 +211,7 @@ impl GraphInfoHolder {
                 .collect(),
             currently_best_node_and_port_order: None,
             best_node_and_port_order: None,
+            crossings_counter: Default::default(),
         }
     }
 

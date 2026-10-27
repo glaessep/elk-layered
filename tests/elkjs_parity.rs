@@ -302,6 +302,14 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 42. In `minimize_barycenter` (src/p3order/sweep.rs), make a new port distributor and heuristic
 //    for each run instead of one for all runs: 3 cases,
 //    free-port-in-and-out-between-separate-layers and its two seed variants.
+// 43. In `BinaryIndexedTree::rank` (src/p3order/counting.rs), clamp the index to the last one
+//    instead of giving `None`: 1 case, hierarchy-count-of-crossings-is-nan, and
+//    random-group-ports/r122.
+// 44. In `CrossingsCounter::count_crossings_on_ports`, add 0 for a rank past the end instead of
+//    `NaN`: the same 2 cases.
+// 45. In `minimize_barycenter_with_counter` (src/p3order/sweep.rs), end the loop with
+//    `old <= new` instead of `!sweep_improved_crossings(old, new)`: the same 2 cases differ, as a `NaN` count no longer
+//    ends the loop.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
