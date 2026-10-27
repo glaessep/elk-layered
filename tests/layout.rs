@@ -648,15 +648,71 @@ fn a_port_on_a_north_side_is_laid_out_while_the_ports_are_free() {
     assert_eq!(port_at(&laid, "b", "q"), (40.0, 17.333_333_333_333_332));
 }
 
-// Mutation: drop the `NorthSouthPort` mapping in `run_layered`, which then reports an internal error.
+// Mutation: drop the `NorthSouthPort` mapping in `run_layered`, which then reports an internal
+// error, or let a node with children through.
 #[test]
-fn a_port_across_the_flow_is_unsupported() {
+fn a_port_across_the_flow_of_a_node_with_children_is_unsupported() {
     // Right: north and south are across. Down: east and west are across.
     for (direction, side) in [
         ("RIGHT", "NORTH"),
         ("LEFT", "SOUTH"),
         ("DOWN", "EAST"),
         ("UP", "WEST"),
+    ] {
+        let mut graph = include_children(root(
+            vec![with_ports(
+                group("a", vec![node("c", 40.0, 30.0)]),
+                "FIXED_SIDE",
+                vec![port("p", 6.0, 4.0, side)],
+            )],
+            vec![],
+        ));
+        graph
+            .layout_options
+            .insert("elk.direction".into(), direction.into());
+        assert!(
+            matches!(
+                error_of(&graph),
+                Error::Unsupported { element, feature }
+                    if element == "port \"p\""
+                        && feature == "north and south ports on a node with children"
+            ),
+            "{direction} {side}"
+        );
+    }
+}
+
+// Mutation: in `check_north_south_ports`, call the north and south sides across the flow in a
+// vertical layout too. The refusal then names `n`.
+#[test]
+fn the_refusal_names_the_port_across_the_flow() {
+    let mut graph = include_children(root(
+        vec![with_ports(
+            group("a", vec![node("c", 40.0, 30.0)]),
+            "FIXED_SIDE",
+            vec![port("n", 6.0, 4.0, "NORTH"), port("e", 6.0, 4.0, "EAST")],
+        )],
+        vec![],
+    ));
+    graph
+        .layout_options
+        .insert("elk.direction".into(), "DOWN".into());
+    assert!(matches!(
+        error_of(&graph),
+        Error::Unsupported { element, .. } if element == "port \"e\""
+    ));
+}
+
+// Mutation: leave the southern port at the top of the node, or put the ports of a vertical
+// layout on the sides of the horizontal one.
+#[test]
+fn a_port_across_the_flow_is_laid_out_in_every_direction() {
+    // (direction, side, where the port of a node of 40 by 30 ends up)
+    for (direction, side, expected) in [
+        ("RIGHT", "NORTH", (17.0, -4.0)),
+        ("LEFT", "SOUTH", (17.0, 30.0)),
+        ("DOWN", "EAST", (40.0, 13.0)),
+        ("UP", "WEST", (-6.0, 13.0)),
     ] {
         let mut graph = root(
             vec![with_ports(
@@ -669,36 +725,9 @@ fn a_port_across_the_flow_is_unsupported() {
         graph
             .layout_options
             .insert("elk.direction".into(), direction.into());
-        assert!(
-            matches!(
-                error_of(&graph),
-                Error::Unsupported { element, feature }
-                    if element == "port \"p\"" && feature == "north and south ports"
-            ),
-            "{direction} {side}"
-        );
+        let laid = layout(&graph).unwrap();
+        assert_eq!(port_at(&laid, "a", "p"), expected, "{direction} {side}");
     }
-}
-
-// Mutation: in `check_north_south_ports`, call the north and south sides across the flow in a
-// vertical layout too. The refusal then names `n`.
-#[test]
-fn the_refusal_names_the_port_across_the_flow() {
-    let mut graph = root(
-        vec![with_ports(
-            node("a", 40.0, 30.0),
-            "FIXED_SIDE",
-            vec![port("n", 6.0, 4.0, "NORTH"), port("e", 6.0, 4.0, "EAST")],
-        )],
-        vec![],
-    );
-    graph
-        .layout_options
-        .insert("elk.direction".into(), "DOWN".into());
-    assert!(matches!(
-        error_of(&graph),
-        Error::Unsupported { element, .. } if element == "port \"e\""
-    ));
 }
 
 // Mutation: treat the sides along the flow as across it for the vertical directions.

@@ -16,8 +16,6 @@ use serde_json::Value;
 /// Cases whose feature elk-layered does not have yet, each with the issue that adds it. A case
 /// leaves this list in the pull request that makes it pass.
 const NOT_YET: &[(&str, &str)] = &[
-    ("comp-ns", "north and south ports, #5"),
-    ("random-group-ports/r007", "north and south ports, #5"),
     ("random-group-ports/r010", "north and south ports, #5"),
     ("random-group-ports/r013", "north and south ports, #5"),
     ("random-group-ports/r019", "north and south ports, #5"),
@@ -29,8 +27,6 @@ const NOT_YET: &[(&str, &str)] = &[
     ("random-group-ports/r044", "north and south ports, #5"),
     ("random-group-ports/r045", "north and south ports, #5"),
     ("random-group-ports/r048", "north and south ports, #5"),
-    ("random-group-ports/r050", "north and south ports, #5"),
-    ("random-group-ports/r059", "north and south ports, #5"),
     ("random-group-ports/r064", "north and south ports, #5"),
     ("random-group-ports/r074", "north and south ports, #5"),
     ("random-group-ports/r077", "north and south ports, #5"),
