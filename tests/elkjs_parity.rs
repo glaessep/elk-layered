@@ -16,32 +16,110 @@ use serde_json::Value;
 /// Cases whose feature elk-layered does not have yet, each with the issue that adds it. A case
 /// leaves this list in the pull request that makes it pass.
 const NOT_YET: &[(&str, &str)] = &[
-    ("random-group-ports/r010", "north and south ports, #5"),
-    ("random-group-ports/r013", "north and south ports, #5"),
-    ("random-group-ports/r019", "north and south ports, #5"),
-    ("random-group-ports/r025", "north and south ports, #5"),
-    ("random-group-ports/r029", "north and south ports, #5"),
-    ("random-group-ports/r033", "north and south ports, #5"),
-    ("random-group-ports/r035", "north and south ports, #5"),
-    ("random-group-ports/r043", "north and south ports, #5"),
-    ("random-group-ports/r044", "north and south ports, #5"),
-    ("random-group-ports/r045", "north and south ports, #5"),
-    ("random-group-ports/r048", "north and south ports, #5"),
-    ("random-group-ports/r064", "north and south ports, #5"),
-    ("random-group-ports/r074", "north and south ports, #5"),
-    ("random-group-ports/r077", "north and south ports, #5"),
-    ("random-group-ports/r078", "north and south ports, #5"),
-    ("random-group-ports/r082", "north and south ports, #5"),
-    ("random-group-ports/r106", "north and south ports, #5"),
-    ("random-group-ports/r111", "north and south ports, #5"),
-    ("random-group-ports/r112", "north and south ports, #5"),
-    ("random-group-ports/r125", "north and south ports, #5"),
-    ("random-group-ports/r127", "north and south ports, #5"),
-    ("random-group-ports/r131", "north and south ports, #5"),
-    ("random-group-ports/r134", "north and south ports, #5"),
-    ("random-group-ports/r135", "north and south ports, #5"),
-    ("random-group-ports/r140", "north and south ports, #5"),
-    ("random-group-ports/r147", "north and south ports, #5"),
+    (
+        "random-group-ports/r010",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r013",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r019",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r025",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r029",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r033",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r035",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r043",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r044",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r045",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r048",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r064",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r074",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r077",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r078",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r082",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r106",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r111",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r112",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r125",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r127",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r131",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r134",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r135",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r140",
+        "ports across the flow on a group, #24",
+    ),
+    (
+        "random-group-ports/r147",
+        "ports across the flow on a group, #24",
+    ),
 ];
 
 fn cases_dir() -> PathBuf {
