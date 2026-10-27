@@ -9,6 +9,7 @@
 
 use std::collections::VecDeque;
 
+use crate::common::cells::grow_label_cell;
 use crate::graph::{
     LGraph, LMargin, LNodeKind, LPoint, LSize, PortRef, PortSide, SelfHyperLoop,
     SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder, SelfLoopLabelAlignment, SelfLoopLabelRef,
@@ -226,7 +227,8 @@ fn initialize_self_hyper_loop_labels(graph: &LGraph, hyper_loop: &mut SelfHyperL
                 edge: sl_edge.edge,
                 label: label_index,
             });
-            update_self_hyper_loop_label_size(
+            // `SelfHyperLoopLabels.updateSize`, which repeats the arithmetic of `LabelCell.addLabel`.
+            grow_label_cell(
                 &mut size,
                 label.size,
                 label_refs.len(),
@@ -246,28 +248,6 @@ fn initialize_self_hyper_loop_labels(graph: &LGraph, hyper_loop: &mut SelfHyperL
             alignment: None,
             alignment_reference_port: None,
         });
-    }
-}
-
-fn update_self_hyper_loop_label_size(
-    size: &mut LSize,
-    label_size: LSize,
-    label_count: usize,
-    label_spacing: f64,
-    horizontal_layout: bool,
-) {
-    if horizontal_layout {
-        size.width = size.width.max(label_size.width);
-        size.height += label_size.height;
-        if label_count > 1 {
-            size.height += label_spacing;
-        }
-    } else {
-        size.width += label_size.width;
-        size.height = size.height.max(label_size.height);
-        if label_count > 1 {
-            size.width += label_spacing;
-        }
     }
 }
 

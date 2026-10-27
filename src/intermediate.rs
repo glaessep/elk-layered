@@ -21,6 +21,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::common::cells::grow_label_cell;
 use crate::graph::{
     EdgeLabelPlacement, HorizontalLabelAlignment, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize,
     LabelCellLayout, LabelSide, LayeredEdge, PortRef, PortSide, PortType, VerticalLabelAlignment,
@@ -1846,24 +1847,17 @@ fn create_end_label_cell(
 /// additions, so the sum rounds the way Java's does. In horizontal layout mode a cell stacks its
 /// labels one below the other; in vertical mode it puts them side by side.
 fn label_cell_size(labels: &[LLabel], label_label_spacing: f64, horizontal_layout: bool) -> LSize {
-    let mut width: f64 = 0.0;
-    let mut height: f64 = 0.0;
-    for (count, label) in labels.iter().enumerate() {
-        if horizontal_layout {
-            width = width.max(label.size.width);
-            height += label.size.height;
-            if count > 0 {
-                height += label_label_spacing;
-            }
-        } else {
-            width += label.size.width;
-            height = height.max(label.size.height);
-            if count > 0 {
-                width += label_label_spacing;
-            }
-        }
+    let mut size = LSize::default();
+    for (index, label) in labels.iter().enumerate() {
+        grow_label_cell(
+            &mut size,
+            label.size,
+            index + 1,
+            label_label_spacing,
+            horizontal_layout,
+        );
     }
-    LSize { width, height }
+    size
 }
 
 fn place_end_label_cell_for_port(
