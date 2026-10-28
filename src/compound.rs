@@ -762,12 +762,16 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
     let mut local_port_publications = publications.local_ports;
     let mut segments_by_parent: HashMap<Option<GraphId>, Vec<ScopedHierarchySegment>> =
         HashMap::new();
-    let mut original_parent_offsets: HashMap<String, ParentNodeInfo> = HashMap::new();
+    // What the parent node of each graph with a parent boundary tells its segments, by the id of
+    // that graph. The parent node's own id cannot key this: two nodes in different graphs may
+    // share it.
+    let mut original_parent_offsets: HashMap<GraphId, ParentNodeInfo> = HashMap::new();
     for scoped in publications.segments {
-        for endpoint in [&scoped.pending.source, &scoped.pending.target] {
-            if let PendingSegmentEndpoint::ParentBoundary { node_id, .. } = endpoint {
-                original_parent_offsets.entry(node_id.clone()).or_default();
-            }
+        let has_parent_boundary = [&scoped.pending.source, &scoped.pending.target]
+            .into_iter()
+            .any(|endpoint| matches!(endpoint, PendingSegmentEndpoint::ParentBoundary { .. }));
+        if let (true, Some(lands_in)) = (has_parent_boundary, scoped.pending.graph_parent) {
+            original_parent_offsets.entry(lands_in).or_default();
         }
         segments_by_parent
             .entry(scoped.pending.graph_parent)
@@ -775,15 +779,16 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
             .push(scoped);
     }
     let mut first_graph = true;
-    for graph in graphs.preorder(scope) {
-        let parent_node_name = graphs[graph]
-            .parent
-            .map(|parent| graphs[parent.graph].layerless_nodes[parent.node].id.clone());
-        let graph = &mut graphs[graph];
-        // The traversal visits parents before children. Each requested parent's ports
-        // are copied once, preserving the same first-match identity as GraphPortIndex.
+    for graph_id in graphs.preorder(scope) {
+        let graph = &mut graphs[graph_id];
+        // The traversal visits parents before children. The ports of each requested parent node
+        // are copied once, before the segments of this graph add to them, preserving the same
+        // first-match identity as GraphPortIndex.
         for node in &graph.layerless_nodes {
-            if let Some(info) = original_parent_offsets.get_mut(&node.id) {
+            let Some(nested) = node.nested_graph else {
+                continue;
+            };
+            if let Some(info) = original_parent_offsets.get_mut(&nested) {
                 info.port_constraints = node.port_constraints;
                 for port in &node.ports {
                     let parent_port = ParentPortInfo {
@@ -806,14 +811,14 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
                 }
             }
         }
-        let parent_offsets = parent_node_name
-            .and_then(|id| original_parent_offsets.remove(&id))
+        let parent_offsets = original_parent_offsets
+            .remove(&graph_id)
             .unwrap_or_default();
         let parent = if first_graph {
             first_graph = false;
             None
         } else {
-            Some(graph.id)
+            Some(graph_id)
         };
         if let Some(segments) = segments_by_parent.remove(&parent) {
             let mut state = SegmentState::default();
@@ -3219,5 +3224,90 @@ mod tests {
         assert_eq!(graphs[lands[0]].edges.len(), 0);
         assert_eq!(graphs[lands[1]].edges.len(), 1);
         assert_eq!(graphs[lands[1]].cross_hierarchy_edges[0].graph_id, lands[1]);
+    }
+
+    // Mutation: key the parent ports by the parent node's id again (`HashMap<String,
+    // ParentNodeInfo>`). The graph inside the inner `p` then gets the default info, and its
+    // dummy takes the side of the layout direction, not the side of the inner `p`'s port.
+    //
+    // `layout()` and the importer refuse two nodes with one id, so this test builds the graphs by
+    // hand: the node `p` of the root holds a graph, and that graph holds another node `p`.
+    #[test]
+    fn two_parent_nodes_with_one_id_each_give_their_own_ports_to_their_graph() {
+        let options = LayeredOptions::default();
+        let mut graphs = GraphArena::new(crate::graph::LGraph::new("root", options.clone()));
+        let mut lands = Vec::new();
+        let mut holder = GraphId::ROOT;
+        // The root's `p` has its port `pp` on the north side, the inner `p` on the south side.
+        for side in [PortSide::North, PortSide::South] {
+            let mut parent = crate::graph::LNode::new("p", 10.0, 10.0, None);
+            parent.port_constraints = PortConstraints::FixedSide;
+            let mut port = LPort::new("pp", 0, PortType::Output);
+            port.named = true;
+            port.side = side;
+            parent.ports.push(port);
+            let mut nested = crate::graph::LGraph::new("nested", options.clone());
+            nested
+                .layerless_nodes
+                .push(crate::graph::LNode::new("child", 1.0, 1.0, None));
+            graphs[holder].layerless_nodes.push(parent);
+            let node = graphs[holder].layerless_nodes.len() - 1;
+            holder = graphs.nest(holder, node, nested);
+            lands.push(holder);
+        }
+        assert_eq!(graphs[lands[0]].layerless_nodes[1].id, "p");
+        assert_eq!(graphs[lands[1]].layerless_nodes[0].id, "child");
+        let segments = lands
+            .iter()
+            .map(|&lands_in| ScopedHierarchySegment {
+                edge: HierarchyEdge {
+                    id: format!("e{}", lands_in.index()),
+                    source_node_id: "child".to_string(),
+                    target_node_id: "p".to_string(),
+                    source_port_key: "child:out".to_string(),
+                    target_port_key: "pp".to_string(),
+                    source_port_named: false,
+                    target_port_named: true,
+                    source_path: Vec::new(),
+                    target_path: Vec::new(),
+                    labels: Vec::new(),
+                    minlen: 1,
+                    model_order: None,
+                    priority_direction: 0,
+                    priority_shortness: 0,
+                    priority_straightness: 0,
+                },
+                pending: PendingCompoundSegment {
+                    graph_parent: Some(lands_in),
+                    source: PendingSegmentEndpoint::LocalNode {
+                        node_id: "child".to_string(),
+                        port_key: "child:out".to_string(),
+                    },
+                    target: PendingSegmentEndpoint::ParentBoundary {
+                        node_id: "p".to_string(),
+                        port_key: "pp".to_string(),
+                        port_type: PortType::Output,
+                        parent_port_type: PortType::Output,
+                        connects_parent_node: true,
+                    },
+                    segment: CompoundEdgeSegment::Output { depth: 1 },
+                },
+                labels: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+
+        introduce_source_ported_scoped_edge_segments(&mut graphs, GraphId::ROOT, segments);
+
+        let dummy_side = |graph: GraphId| {
+            let dummies = graphs[graph]
+                .layerless_nodes
+                .iter()
+                .filter(|node| node.kind == LNodeKind::ExternalPort)
+                .collect::<Vec<_>>();
+            assert_eq!(dummies.len(), 1);
+            dummies[0].external_port_side
+        };
+        assert_eq!(dummy_side(lands[0]), PortSide::North);
+        assert_eq!(dummy_side(lands[1]), PortSide::South);
     }
 }
