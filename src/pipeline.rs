@@ -109,7 +109,7 @@ pub(super) fn validate_node_size_minima(graphs: &GraphArena) -> PipelineResult<(
     Ok(())
 }
 
-pub(super) fn actual_graph_size(graph: &LGraph) -> LSize {
+pub(crate) fn actual_graph_size(graph: &LGraph) -> LSize {
     LSize {
         width: graph.size.width + graph.padding.left + graph.padding.right,
         height: graph.size.height + graph.padding.top + graph.padding.bottom,

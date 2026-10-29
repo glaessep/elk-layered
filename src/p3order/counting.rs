@@ -1651,7 +1651,7 @@ mod tests {
                 },
             ));
         }
-        crate::north_south::preprocess_north_south_ports(&mut graph);
+        crate::intermediate::preprocess_north_south_ports(&mut graph);
         let dummies = [dummy_for(&graph, a, 0), dummy_for(&graph, b, 0)];
         (graph, [a, b], dummies)
     }
@@ -1735,7 +1735,7 @@ mod tests {
                 port: PortId::new(0),
             },
         ));
-        crate::north_south::preprocess_north_south_ports(&mut graph);
+        crate::intermediate::preprocess_north_south_ports(&mut graph);
         let da = dummy_for(&graph, a, 0);
         let long = add_long_edge_dummy(&mut graph, neighbour);
 
@@ -1765,7 +1765,7 @@ mod tests {
                 port: PortId::new(0),
             },
         ));
-        crate::north_south::preprocess_north_south_ports(&mut graph);
+        crate::intermediate::preprocess_north_south_ports(&mut graph);
         let da = dummy_for(&graph, a, 0);
         let long = add_long_edge_dummy(&mut graph, neighbour);
 
@@ -1794,7 +1794,7 @@ mod tests {
                 },
             ));
         }
-        crate::north_south::preprocess_north_south_ports(&mut graph);
+        crate::intermediate::preprocess_north_south_ports(&mut graph);
         // The first port of the list is the eastern one, which is port 1. Its dummy is the last in
         // the layer.
         let (east, west) = (dummy_for(&graph, a, 1), dummy_for(&graph, a, 0));
@@ -1836,7 +1836,7 @@ mod tests {
                 port: PortId::new(0),
             },
         ));
-        crate::north_south::preprocess_north_south_ports(&mut graph);
+        crate::intermediate::preprocess_north_south_ports(&mut graph);
         let da = dummy_for(&graph, a, 0);
         let db = dummy_for(&graph, b, 0);
         set_layer_order(&mut graph, &[a, da, db, b]);

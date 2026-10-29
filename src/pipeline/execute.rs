@@ -1,26 +1,27 @@
-//! Running one processor on one graph, and the resizing of the graph around its content.
-//!
-//! Source references:
-//! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/HierarchicalNodeResizingProcessor.java
+//! Running one processor on one graph, and the resizing of a node around its content.
 
+use super::PipelineResult;
 use super::assembler::{
     CrossingMinimizer, CycleBreaker, EdgeRouter, IntermediateProcessor, Layerer, NodePlacer,
     Processor,
 };
-use super::{PipelineResult, actual_graph_size};
 use crate::graph::{LGraph, LNode, LSize, OtherGraphs, PortSide};
+use crate::intermediate::graph_transformer::{GraphTransformMode, transform_graph_direction};
+use crate::intermediate::{
+    calculate_innermost_node_margins, calculate_label_and_node_sizes, process_in_layer_constraints,
+};
 use crate::intermediate::{
     calculate_layer_sizes_and_graph_height, insert_label_dummies, join_long_edges,
     merge_hyperedge_dummies, position_interactive_external_ports, postprocess_end_labels,
     postprocess_layer_constraints, preprocess_end_labels, preprocess_layer_constraints,
     process_hierarchical_port_constraints, process_hierarchical_port_dummy_sizes,
     process_hierarchical_port_orthogonal_edges, process_hierarchical_port_positions,
-    process_inverted_ports, remove_label_dummies, restore_reversed_edges,
-    reverse_edges_for_edge_and_layer_constraints, select_label_sides, sort_end_labels,
-    split_long_edges, switch_label_dummies,
+    process_inverted_ports, remove_label_dummies, resize_hierarchical_node_graph,
+    restore_reversed_edges, reverse_edges_for_edge_and_layer_constraints, select_label_sides,
+    sort_end_labels, split_long_edges, switch_label_dummies,
 };
-use crate::north_south::{postprocess_north_south_ports, preprocess_north_south_ports};
-use crate::options::{ContentAlignment, LayeringStrategy, PortConstraints};
+use crate::intermediate::{postprocess_north_south_ports, preprocess_north_south_ports};
+use crate::options::{LayeringStrategy, PortConstraints};
 use crate::p1cycles::{
     break_cycles_depth_first, break_cycles_greedy, break_cycles_greedy_model_order,
     break_cycles_interactive, break_cycles_model_order,
@@ -30,15 +31,11 @@ use crate::p3order::{
     process_port_sides, sort_by_input_model, sort_port_lists,
     sweep::{CrossMinType, minimize_crossings_layer_sweep_with_type},
 };
-use crate::p4nodes::{
-    calculate_innermost_node_margins, calculate_label_and_node_sizes, place_nodes_brandes_koepf,
-    place_nodes_network_simplex, place_nodes_simple, process_in_layer_constraints,
-};
+use crate::p4nodes::{place_nodes_brandes_koepf, place_nodes_network_simplex, place_nodes_simple};
 use crate::p5edges::route_edges_orthogonal;
 use crate::selfloop::{
     postprocess_self_loops, preprocess_self_loops, restore_self_loop_ports, route_self_loops,
 };
-use crate::transform::{GraphTransformMode, transform_graph_direction};
 
 /// Runs `processor` on `graph`. `others` are the graphs inside its nodes.
 pub(super) fn execute_processor(
@@ -147,71 +144,6 @@ fn execute_intermediate(
         P::HierarchicalNodeResizer => resize_hierarchical_node_graph(graph)?,
     }
     Ok(())
-}
-
-/// Ports `HierarchicalNodeResizingProcessor.process`.
-fn resize_hierarchical_node_graph(graph: &mut LGraph) -> PipelineResult<()> {
-    graph.clear_layers();
-    resize_graph_to_minimum(graph)
-}
-
-/// Ports `ElkLayered.resizeGraph`. `HierarchicalNodeResizingProcessor.resizeGraph` is the same.
-pub(super) fn resize_graph_to_minimum(graph: &mut LGraph) -> PipelineResult<()> {
-    graph.options.validate_node_size_minimum()?;
-    let old_size = actual_graph_size(graph);
-    let mut new_size = old_size;
-    if let Some(minimum) = graph.options.effective_node_size_minimum() {
-        new_size.width = new_size.width.max(minimum.width);
-        new_size.height = new_size.height.max(minimum.height);
-    }
-    resize_graph_no_really_i_mean_it(graph, old_size, new_size);
-    Ok(())
-}
-
-/// Ports `ElkLayered.resizeGraphNoReallyIMeanIt`. `HierarchicalNodeResizingProcessor` has the
-/// same method.
-pub(super) fn resize_graph_no_really_i_mean_it(
-    graph: &mut LGraph,
-    old_size: LSize,
-    new_size: LSize,
-) {
-    fn alignment_offset(alignment: ContentAlignment, old: f64, new: f64) -> f64 {
-        if new <= old {
-            return 0.0;
-        }
-        match alignment {
-            ContentAlignment::Start => 0.0,
-            ContentAlignment::Center => (new - old) / 2.0,
-            ContentAlignment::End => new - old,
-        }
-    }
-    graph.offset.x += alignment_offset(
-        graph.options.horizontal_content_alignment,
-        old_size.width,
-        new_size.width,
-    );
-    graph.offset.y += alignment_offset(
-        graph.options.vertical_content_alignment,
-        old_size.height,
-        new_size.height,
-    );
-    if graph.graph_properties.external_ports
-        && (new_size.width > old_size.width || new_size.height > old_size.height)
-    {
-        for node in &mut graph.layerless_nodes {
-            let Some(side) = node.external_port().map(|external| external.side) else {
-                continue;
-            };
-            match side {
-                PortSide::East => node.position.x += new_size.width - old_size.width,
-                PortSide::South => node.position.y += new_size.height - old_size.height,
-                PortSide::North | PortSide::West | PortSide::Undefined => {}
-            }
-        }
-    }
-
-    graph.size.width = new_size.width - graph.padding.left - graph.padding.right;
-    graph.size.height = new_size.height - graph.padding.top - graph.padding.bottom;
 }
 
 /// Ports `LGraphUtil.resizeNode`.

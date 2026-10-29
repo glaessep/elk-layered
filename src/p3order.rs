@@ -2163,7 +2163,7 @@ mod tests {
                 },
             ));
         }
-        crate::north_south::preprocess_north_south_ports(&mut graph);
+        crate::intermediate::preprocess_north_south_ports(&mut graph);
         let dummy = |port: usize| {
             graph.layerless_nodes[a].ports[PortId::new(port)]
                 .port_dummy
@@ -2314,7 +2314,7 @@ mod tests {
                 port: PortId::new(1),
             },
         ));
-        crate::north_south::preprocess_north_south_ports(&mut graph);
+        crate::intermediate::preprocess_north_south_ports(&mut graph);
         let dummy = graph.layerless_nodes[a].ports[PortId::new(0)]
             .port_dummy
             .as_ref()

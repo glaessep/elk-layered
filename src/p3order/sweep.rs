@@ -17,6 +17,11 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use super::{
+    GraphInfoHolder, SweepCopy, count_model_order_node_changes, count_model_order_port_changes,
+    initialize_crossing_minimization_port_ids, initialize_crossing_minimization_port_ids_hierarchy,
+    update_bigger_and_smaller_associations,
+};
 use crate::graph::{
     EdgeId, GraphArena, GraphId, GraphParent, LGraph, LNode, LNodeKind, NodeId, OtherGraphs,
     PortId, PortRef, PortSide, PortType,
@@ -27,12 +32,6 @@ use crate::p3order::counting::{
     port_degree, ports_in_north_south_east_west_order,
 };
 use crate::random::JavaRandom;
-
-use super::{
-    GraphInfoHolder, SweepCopy, count_model_order_node_changes, count_model_order_port_changes,
-    initialize_crossing_minimization_port_ids, initialize_crossing_minimization_port_ids_hierarchy,
-    update_bigger_and_smaller_associations,
-};
 
 #[derive(Debug, Clone)]
 struct HierarchyGraphInfo {
@@ -5632,7 +5631,7 @@ mod north_south_tests {
                 next += 1;
             }
         }
-        crate::north_south::preprocess_north_south_ports(&mut graph);
+        crate::intermediate::preprocess_north_south_ports(&mut graph);
         let dummies = [dummy_of(&graph, a, 0), dummy_of(&graph, b, 0)];
         (graph, [a, b], dummies)
     }
@@ -5665,7 +5664,7 @@ mod north_south_tests {
         let a = add_node(&mut graph, "a", 1, &[PortSide::North, PortSide::North]);
         add_edge(&mut graph, port(neighbour, 0), port(a, 0));
         add_edge(&mut graph, port(neighbour, 1), port(a, 1));
-        crate::north_south::preprocess_north_south_ports(&mut graph);
+        crate::intermediate::preprocess_north_south_ports(&mut graph);
         let (first, second) = (dummy_of(&graph, a, 0), dummy_of(&graph, a, 1));
 
         // Neither has an edge on a northern or southern side, and both are in the unit of `a`.
@@ -5775,7 +5774,7 @@ mod north_south_tests {
         add_edge(&mut graph, port(neighbour, 0), port(a, 0));
         add_edge(&mut graph, port(neighbour, 1), port(a, 1));
         add_edge(&mut graph, port(neighbour, 2), port(a, 1));
-        crate::north_south::preprocess_north_south_ports(&mut graph);
+        crate::intermediate::preprocess_north_south_ports(&mut graph);
         // The sweep numbers every port before it counts, and the counter reads the numbers.
         let ports = graph
             .layerless_nodes
@@ -5830,7 +5829,7 @@ mod north_south_tests {
         let a = add_node(&mut graph, "a", 1, &[PortSide::North, PortSide::South]);
         add_edge(&mut graph, port(neighbour, 0), port(a, 0));
         add_edge(&mut graph, port(neighbour, 1), port(a, 1));
-        crate::north_south::preprocess_north_south_ports(&mut graph);
+        crate::intermediate::preprocess_north_south_ports(&mut graph);
         let (north, south) = (dummy_of(&graph, a, 0), dummy_of(&graph, a, 1));
         let long = add_long_edge_dummy(&mut graph, 1);
         let mut counter = counter_for(&graph);
@@ -5862,7 +5861,7 @@ mod north_south_tests {
         add_edge(&mut graph, port(neighbour, 0), port(a, 0));
         add_edge(&mut graph, port(neighbour, 1), port(a, 1));
         add_edge(&mut graph, port(neighbour, 2), port(a, 2));
-        crate::north_south::preprocess_north_south_ports(&mut graph);
+        crate::intermediate::preprocess_north_south_ports(&mut graph);
         let long = add_long_edge_dummy(&mut graph, 1);
         let mut counter = counter_for(&graph);
 

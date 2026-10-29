@@ -1,4 +1,4 @@
-//! Layered graph coordinate transformations.
+//! Port of ELK's `GraphTransformer`, which turns the graph for the layout direction.
 //!
 //! Source references:
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/GraphTransformer.java

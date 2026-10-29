@@ -4,9 +4,11 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/ElkLayered.java
 
 use super::assembler::{Processor, Strategies, assemble_graph};
-use super::execute::{execute_processor, resize_graph_to_minimum};
+use super::execute::execute_processor;
 use super::{PipelineResult, check_external_port_sides, validate_node_size_minima};
 use crate::configurator::{check_random_seeds, configure_graph_properties};
+use crate::intermediate::hierarchical_node_resizing_processor::resize_graph_to_minimum;
+
 #[cfg(test)]
 use crate::graph::OtherGraphs;
 use crate::graph::{GraphArena, GraphId};

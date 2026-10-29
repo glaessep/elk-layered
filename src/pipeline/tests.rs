@@ -3,10 +3,7 @@ use super::assembler::{
     Strategies, assemble, assemble_graph,
 };
 use super::compound::{CompoundRun, check_strategies, execute_compound_graph_round};
-use super::execute::{
-    execute_processor, resize_graph_no_really_i_mean_it, resize_graph_to_minimum,
-    resize_layered_node,
-};
+use super::execute::{execute_processor, resize_layered_node};
 use super::*;
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::graph::EdgeId;
@@ -14,6 +11,9 @@ use crate::graph::PortId;
 use crate::graph::{GraphParent, GraphProperties, LPoint, NodeId, OtherGraphs};
 use crate::graph::{LNode, LNodeKind, PortSide, PortType};
 use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, import_graph};
+use crate::intermediate::hierarchical_node_resizing_processor::{
+    resize_graph_no_really_i_mean_it, resize_graph_to_minimum,
+};
 use crate::options::ContentAlignment;
 use crate::options::{
     CrossingMinimizationStrategy, CycleBreakingStrategy, EdgeRouting, ElkDirection, FixedAlignment,

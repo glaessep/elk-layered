@@ -856,8 +856,8 @@ fn end_label_preprocessor_moves_head_labels_to_port_cell_and_expands_margin() {
 
     layer_network_simplex(&mut graph).unwrap();
     crate::p3order::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
-    crate::p4nodes::calculate_label_and_node_sizes(&mut graph);
-    crate::p4nodes::calculate_innermost_node_margins(&mut graph);
+    crate::intermediate::calculate_label_and_node_sizes(&mut graph);
+    crate::intermediate::calculate_innermost_node_margins(&mut graph);
     select_label_sides(&mut graph);
     let target = graph.edges[EdgeId::new(0)].target().node;
     let target_port = graph.edges[EdgeId::new(0)].target().port;
