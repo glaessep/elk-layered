@@ -18,7 +18,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::graph::{
-    GraphArena, GraphId, LGraph, LNode, LNodeKind, OtherGraphs, PortId, PortRef, PortSide, PortType,
+    GraphArena, GraphId, GraphParent, LGraph, LNode, LNodeKind, OtherGraphs, PortId, PortRef,
+    PortSide, PortType,
 };
 use crate::options::{OrderingStrategy, PortConstraints};
 use crate::p3order::counting::{
@@ -46,8 +47,8 @@ struct HierarchyGraphInfo {
     port_distributor: PortDistributor,
     random: JavaRandom,
     child_graphs: Vec<GraphId>,
-    parent_graph: Option<GraphId>,
-    parent_node_index: Option<usize>,
+    /// The node this graph lies in, copied from the graph once. `None` for the root.
+    parent: Option<GraphParent>,
     has_external_ports: bool,
     use_bottom_up: bool,
 }
@@ -77,8 +78,7 @@ impl HierarchyGraphInfo {
             port_distributor,
             random,
             child_graphs: Vec::new(),
-            parent_graph: None,
-            parent_node_index: None,
+            parent: graph.parent,
             has_external_ports: graph.graph_properties.external_ports,
             use_bottom_up: true,
         }
@@ -579,33 +579,25 @@ impl HierarchySweep {
     }
 
     fn initialize_graphs(&mut self, graphs: &GraphArena) {
-        // Each graph with the graph and node it lies in. Parents come before their children.
-        let mut found: Vec<(GraphId, Option<(GraphId, usize)>)> = vec![(GraphId::ROOT, None)];
+        // Parents come before their children.
+        let mut found = vec![GraphId::ROOT];
         let mut index = 0usize;
         while index < found.len() {
-            let (id, parent) = found[index];
+            let id = found[index];
             let graph = &graphs[id];
             let info_index = self.infos.len();
             self.index_by_graph.insert(id, info_index);
             let mut info = HierarchyGraphInfo::new(graph, self.cross_min_type);
-            match parent {
-                Some((parent_graph, parent_node)) => {
-                    info.parent_graph = Some(parent_graph);
-                    info.parent_node_index = Some(parent_node);
-                }
-                None => self.random = info.random.clone(),
+            if info.parent.is_none() {
+                self.random = info.random.clone();
             }
             let children = graph
                 .layers
                 .iter()
                 .flat_map(|layer| layer.nodes.iter().copied())
-                .filter_map(|node_index| {
-                    graph.layerless_nodes[node_index]
-                        .nested_graph
-                        .map(|nested| (nested, Some((id, node_index))))
-                })
+                .filter_map(|node_index| graph.layerless_nodes[node_index].nested_graph)
                 .collect::<Vec<_>>();
-            info.child_graphs = children.iter().map(|(nested, _)| *nested).collect();
+            info.child_graphs = children.clone();
             self.infos.push(info);
             found.extend(children);
             index += 1;
@@ -619,13 +611,11 @@ impl HierarchySweep {
 
     fn decide_use_bottom_up(&self, graphs: &GraphArena, info_index: usize) -> bool {
         let info = &self.infos[info_index];
-        let Some(parent_graph) = info.parent_graph else {
+        let Some(parent) = info.parent else {
             return true;
         };
-        let parent_graph = &graphs[parent_graph];
-        let Some(parent_node_index) = info.parent_node_index else {
-            return true;
-        };
+        let parent_graph = &graphs[parent.graph];
+        let parent_node_index = parent.node;
         let parent_node = &parent_graph.layerless_nodes[parent_node_index];
         let boundary = graphs[info.graph].options.hierarchical_sweepiness;
 
@@ -668,7 +658,7 @@ impl HierarchySweep {
                 self.compare_different_randomized_layouts(graphs, info_index);
             }
 
-            if self.infos[info_index].parent_graph.is_some() {
+            if self.infos[info_index].parent.is_some() {
                 self.set_port_order_on_parent_graph(graphs, info_index);
             }
         }
@@ -751,7 +741,7 @@ impl HierarchySweep {
 
     fn compare_different_randomized_layouts(&mut self, graphs: &mut GraphArena, info_index: usize) {
         self.random.set_seed(self.random_seed);
-        if self.infos[info_index].parent_graph.is_none() {
+        if self.infos[info_index].parent.is_none() {
             self.infos[info_index].random = self.random.clone();
         }
         self.changed.clear();
@@ -1018,8 +1008,9 @@ impl HierarchySweep {
             let child_graph = &graphs[self.infos[child_info_index].graph];
             if child_graph.layerless_nodes[first_node].kind == LNodeKind::ExternalPort {
                 let parent_graph = &graphs[self.infos[child_info_index]
-                    .parent_graph
-                    .expect("child graph should have parent graph")];
+                    .parent
+                    .expect("child graph should have parent graph")
+                    .graph];
                 let sorted = sort_port_dummies_by_port_positions(
                     parent_graph,
                     child_graph,
@@ -1103,10 +1094,11 @@ impl HierarchySweep {
             return;
         }
 
-        let Some(parent_path) = self.infos[child_info_index].parent_graph else {
-            return;
-        };
-        let Some(parent_node_index) = self.infos[child_info_index].parent_node_index else {
+        let Some(GraphParent {
+            graph: parent_path,
+            node: parent_node_index,
+        }) = self.infos[child_info_index].parent
+        else {
             return;
         };
         let parent_graph = &graphs[parent_path];
@@ -1139,11 +1131,8 @@ impl HierarchySweep {
         for on_right_most_layer in [true, false] {
             self.sort_ports_by_sweep_copy(graphs, info_index, &best_sweep, on_right_most_layer);
         }
-        if let Some(parent_path) = self.infos[info_index].parent_graph
-            && let Some(parent_node_index) = self.infos[info_index].parent_node_index
-        {
-            let parent_graph = &mut graphs[parent_path];
-            parent_graph.layerless_nodes[parent_node_index].port_constraints =
+        if let Some(parent) = self.infos[info_index].parent {
+            graphs[parent.graph].layerless_nodes[parent.node].port_constraints =
                 PortConstraints::FixedOrder;
         }
     }
@@ -1172,10 +1161,11 @@ impl HierarchySweep {
         if child_graph.layerless_nodes[last_layer[first]].kind != LNodeKind::ExternalPort {
             return;
         }
-        let Some(parent_path) = self.infos[info_index].parent_graph else {
-            return;
-        };
-        let Some(parent_node_index) = self.infos[info_index].parent_node_index else {
+        let Some(GraphParent {
+            graph: parent_path,
+            node: parent_node_index,
+        }) = self.infos[info_index].parent
+        else {
             return;
         };
         let parent_graph = &graphs[parent_path];
@@ -1224,7 +1214,7 @@ impl HierarchySweep {
     }
 
     fn barycenter_random(&self, info_index: usize) -> JavaRandom {
-        if self.infos[info_index].parent_graph.is_none() {
+        if self.infos[info_index].parent.is_none() {
             self.random.clone()
         } else {
             self.infos[info_index].random.clone()
@@ -1232,7 +1222,7 @@ impl HierarchySweep {
     }
 
     fn set_barycenter_random(&mut self, info_index: usize, random: JavaRandom) {
-        if self.infos[info_index].parent_graph.is_none() {
+        if self.infos[info_index].parent.is_none() {
             self.random = random.clone();
         }
         self.infos[info_index].random = random;
