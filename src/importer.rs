@@ -3373,13 +3373,7 @@ mod tests {
         .unwrap();
         preprocess_source_ported_compound_graph(&mut lgraph);
 
-        let cluster_index = NodeId::new(
-            lgraph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "cluster")
-                .unwrap(),
-        );
+        let cluster_index = lgraph.node_named("cluster");
         let cluster = &lgraph.layerless_nodes[cluster_index];
         let parent_port = &cluster.ports[PortId::new(0)];
         let port_dummy = parent_port
@@ -3471,13 +3465,7 @@ mod tests {
         .unwrap();
         preprocess_source_ported_compound_graph(&mut lgraph);
 
-        let cluster_index = NodeId::new(
-            lgraph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "cluster")
-                .unwrap(),
-        );
+        let cluster_index = lgraph.node_named("cluster");
         let cluster = &lgraph.layerless_nodes[cluster_index];
         let parent_port = cluster
             .ports
@@ -3731,13 +3719,7 @@ mod tests {
 
         let lgraph = import_graph(&input).unwrap();
 
-        let a = NodeId::new(
-            lgraph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
+        let a = lgraph.node_named("A");
         assert_eq!(lgraph.layerless_nodes[a].ports.len(), 1);
         assert_eq!(
             lgraph.layerless_nodes[a].ports[PortId::new(0)].collector_type,
@@ -3759,13 +3741,7 @@ mod tests {
         ))
         .unwrap();
 
-        let a = NodeId::new(
-            lgraph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
+        let a = lgraph.node_named("A");
         assert_eq!(lgraph.layerless_nodes[a].ports.len(), 2);
         assert!(
             lgraph.layerless_nodes[a]
@@ -3867,13 +3843,7 @@ mod tests {
 
         let lgraph = import_graph(&input).unwrap();
 
-        let a = NodeId::new(
-            lgraph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
+        let a = lgraph.node_named("A");
         assert_eq!(lgraph.layerless_nodes[a].ports.len(), 2);
         assert!(
             lgraph.layerless_nodes[a]

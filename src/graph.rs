@@ -725,6 +725,17 @@ impl GraphProperties {
     }
 }
 
+#[cfg(test)]
+impl LGraph {
+    /// The id of the node named `id`. Panics with the name when no node has it.
+    pub(crate) fn node_named(&self, id: &str) -> NodeId {
+        self.nodes_with_ids()
+            .find(|(_, node)| node.id == id)
+            .map(|(node_id, _)| node_id)
+            .unwrap_or_else(|| panic!("no node is named {id:?}"))
+    }
+}
+
 impl LGraph {
     /// The ids of all nodes, in the order they stand in `layerless_nodes`. The iterator does not
     /// borrow the graph, so the loop body may change it.

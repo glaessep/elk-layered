@@ -218,6 +218,20 @@ mod tests {
         assert_eq!(graph.node_ids().len(), 4);
     }
 
+    // Mutation: return the id of the first node whatever the name.
+    #[test]
+    fn node_named_finds_the_node_with_that_name() {
+        let graph = three_nodes();
+        assert_eq!(graph.node_named("b"), NodeId::new(1));
+    }
+
+    // Mutation: return `NodeId::new(0)` instead of panicking for an unknown name.
+    #[test]
+    #[should_panic(expected = "no node is named \"z\"")]
+    fn node_named_panics_with_the_name_when_no_node_has_it() {
+        three_nodes().node_named("z");
+    }
+
     // Mutation: pair each node with the id of its neighbour.
     #[test]
     fn nodes_with_ids_pair_each_node_with_its_own_id() {

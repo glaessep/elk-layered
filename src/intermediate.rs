@@ -4201,13 +4201,7 @@ mod tests {
         let mut first = node("start");
         first.layer_constraint = Some(LayerConstraint::First);
         let mut graph = graph(vec![node("A"), first], vec![edge("A-start", "A", "start")]);
-        let start = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "start")
-                .unwrap(),
-        );
+        let start = graph.node_named("start");
 
         reverse_edges_for_edge_and_layer_constraints(&mut graph);
 
@@ -4222,13 +4216,7 @@ mod tests {
         let mut last = node("end");
         last.layer_constraint = Some(LayerConstraint::Last);
         let mut graph = graph(vec![last, node("A")], vec![edge("end-A", "end", "A")]);
-        let end = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "end")
-                .unwrap(),
-        );
+        let end = graph.node_named("end");
 
         reverse_edges_for_edge_and_layer_constraints(&mut graph);
 
@@ -4245,13 +4233,7 @@ mod tests {
             vec![edge("B-A", "B", "A"), edge("C-B", "C", "B")],
         );
         for node_id in ["A", "B"] {
-            let node_index = NodeId::new(
-                graph
-                    .layerless_nodes
-                    .iter()
-                    .position(|node| node.id == node_id)
-                    .unwrap(),
-            );
+            let node_index = graph.node_named(node_id);
             graph.layerless_nodes[node_index].port_constraints = PortConstraints::FixedSide;
             for port in graph.layerless_nodes[node_index].ports.slots_mut() {
                 port.set_side(PortSide::East);
@@ -4290,13 +4272,7 @@ mod tests {
             edges,
         })
         .unwrap();
-        let fixed = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "F")
-                .unwrap(),
-        );
+        let fixed = graph.node_named("F");
         graph.layerless_nodes[fixed].port_constraints = PortConstraints::FixedSide;
         for port in graph.layerless_nodes[fixed].ports.slots_mut() {
             port.set_side(PortSide::East);
@@ -5295,20 +5271,8 @@ mod tests {
 
         preprocess_layer_constraints(&mut graph).unwrap();
 
-        let hidden = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "start")
-                .unwrap(),
-        );
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
+        let hidden = graph.node_named("start");
+        let a = graph.node_named("A");
         assert!(graph.layerless_nodes[hidden].hidden);
         assert_eq!(graph.hidden_nodes, vec![hidden]);
         assert_eq!(
@@ -5330,13 +5294,7 @@ mod tests {
 
         preprocess_layer_constraints(&mut graph).unwrap();
 
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
+        let a = graph.node_named("A");
         assert_eq!(
             graph.layerless_nodes[a].layer_constraint,
             LayerConstraint::First
@@ -5353,13 +5311,7 @@ mod tests {
 
         preprocess_layer_constraints(&mut graph).unwrap();
 
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
+        let a = graph.node_named("A");
         assert!(graph.layerless_nodes[a].layer_constraint_explicit);
         assert_eq!(
             graph.layerless_nodes[a].layer_constraint,
@@ -5380,13 +5332,7 @@ mod tests {
 
         preprocess_layer_constraints(&mut graph).unwrap();
 
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
+        let a = graph.node_named("A");
         assert_eq!(
             graph.layerless_nodes[a].layer_constraint,
             LayerConstraint::None
@@ -5413,20 +5359,8 @@ mod tests {
         layer_network_simplex(&mut graph).unwrap();
         postprocess_layer_constraints(&mut graph).unwrap();
 
-        let start = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "start")
-                .unwrap(),
-        );
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
+        let start = graph.node_named("start");
+        let a = graph.node_named("A");
         assert!(!graph.layerless_nodes[start].hidden);
         assert!(graph.hidden_nodes.is_empty());
         assert_eq!(graph.layerless_nodes[start].layer_index, Some(0));
@@ -5458,13 +5392,7 @@ mod tests {
         layer_network_simplex(&mut graph).unwrap();
         postprocess_layer_constraints(&mut graph).unwrap();
 
-        let end = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "end")
-                .unwrap(),
-        );
+        let end = graph.node_named("end");
         assert_eq!(
             graph.layerless_nodes[end].layer_index,
             Some(graph.layers.len() - 1)

@@ -1505,20 +1505,8 @@ mod tests {
 
         process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
 
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
-        let b = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "B")
-                .unwrap(),
-        );
+        let a = graph.node_named("A");
+        let b = graph.node_named("B");
         assert_eq!(
             graph.layerless_nodes[a].port_constraints,
             PortConstraints::FixedSide
@@ -1573,13 +1561,7 @@ mod tests {
     #[test]
     fn port_list_sorter_uses_clockwise_order_and_rewrites_edge_refs() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("A-B", "A", "B")]);
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
+        let a = graph.node_named("A");
         graph.layerless_nodes[a].port_constraints = PortConstraints::FixedPos;
         let north = graph
             .add_port(
@@ -1789,13 +1771,7 @@ mod tests {
     #[test]
     fn fixed_order_ports_fall_back_to_position_without_both_indices() {
         let mut graph = graph(vec![node("A")], vec![]);
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
+        let a = graph.node_named("A");
         graph.layerless_nodes[a].port_constraints = PortConstraints::FixedOrder;
         let left = graph
             .add_port(
@@ -1843,20 +1819,8 @@ mod tests {
         process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
         sort_port_lists(&mut graph);
 
-        let left = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Left")
-                .unwrap(),
-        );
-        let right = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Right")
-                .unwrap(),
-        );
+        let left = graph.node_named("Left");
+        let right = graph.node_named("Right");
         let target_layer = graph.layerless_nodes[left].layer_index.unwrap();
         graph.layers[target_layer].nodes = vec![right, left];
 
@@ -2055,20 +2019,8 @@ mod tests {
         layer_network_simplex(&mut graph).unwrap();
         split_long_edges(&mut graph);
 
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
-        let d = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "D")
-                .unwrap(),
-        );
+        let a = graph.node_named("A");
+        let d = graph.node_named("D");
         let orders = long_edge_target_node_preprocessing(&mut graph, a);
 
         assert_eq!(orders.get(&d), Some(&3));
@@ -2163,13 +2115,7 @@ mod tests {
     #[test]
     fn sweep_copy_restores_the_port_order_by_port_id_when_id_strings_repeat() {
         let mut graph = graph(vec![node("A")], vec![]);
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
+        let a = graph.node_named("A");
         graph.layerless_nodes[a].ports.clear();
         let first = graph
             .add_port(

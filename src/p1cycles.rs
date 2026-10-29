@@ -559,27 +559,9 @@ mod tests {
                 edge("C-A", "C", "A"),
             ],
         );
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
-        let b = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "B")
-                .unwrap(),
-        );
-        let c = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "C")
-                .unwrap(),
-        );
+        let a = graph.node_named("A");
+        let b = graph.node_named("B");
+        let c = graph.node_named("C");
         graph.layerless_nodes[a].model_order = Some(3);
         graph.layerless_nodes[b].model_order = Some(1);
         graph.layerless_nodes[c].model_order = Some(2);
@@ -618,20 +600,8 @@ mod tests {
     #[test]
     fn interactive_cycle_breaker_reverses_edges_against_reference_x() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("B-A", "B", "A")]);
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
-        let b = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "B")
-                .unwrap(),
-        );
+        let a = graph.node_named("A");
+        let b = graph.node_named("B");
         graph.layerless_nodes[a].position.x = 0.0;
         graph.layerless_nodes[b].position.x = 100.0;
 
@@ -644,20 +614,8 @@ mod tests {
     #[test]
     fn model_order_cycle_breaker_respects_first_layer_constraint() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("B-A", "B", "A")]);
-        let a = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "A")
-                .unwrap(),
-        );
-        let b = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "B")
-                .unwrap(),
-        );
+        let a = graph.node_named("A");
+        let b = graph.node_named("B");
         graph.layerless_nodes[a].model_order = Some(1);
         graph.layerless_nodes[a].layer_constraint = crate::options::LayerConstraint::First;
         graph.layerless_nodes[b].model_order = Some(0);

@@ -1181,34 +1181,10 @@ mod tests {
                 edge("Bottom-Left", "Bottom", "Left"),
             ],
         );
-        let top = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Top")
-                .unwrap(),
-        );
-        let bottom = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Bottom")
-                .unwrap(),
-        );
-        let left = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Left")
-                .unwrap(),
-        );
-        let right = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Right")
-                .unwrap(),
-        );
+        let top = graph.node_named("Top");
+        let bottom = graph.node_named("Bottom");
+        let left = graph.node_named("Left");
+        let right = graph.node_named("Right");
         graph.layers[0].nodes = vec![top, bottom];
         graph.layers[1].nodes = vec![left, right];
 
@@ -1226,34 +1202,10 @@ mod tests {
                 edge("Bottom-Right", "Bottom", "Right"),
             ],
         );
-        let top = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Top")
-                .unwrap(),
-        );
-        let bottom = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Bottom")
-                .unwrap(),
-        );
-        let left = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Left")
-                .unwrap(),
-        );
-        let right = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Right")
-                .unwrap(),
-        );
+        let top = graph.node_named("Top");
+        let bottom = graph.node_named("Bottom");
+        let left = graph.node_named("Left");
+        let right = graph.node_named("Right");
         graph.layers[0].nodes = vec![top, bottom];
         graph.layers[1].nodes = vec![left, right];
 
@@ -1271,34 +1223,10 @@ mod tests {
                 edge("Bottom-Left", "Bottom", "Left"),
             ],
         );
-        let top = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Top")
-                .unwrap(),
-        );
-        let bottom = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Bottom")
-                .unwrap(),
-        );
-        let left = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Left")
-                .unwrap(),
-        );
-        let right = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Right")
-                .unwrap(),
-        );
+        let top = graph.node_named("Top");
+        let bottom = graph.node_named("Bottom");
+        let left = graph.node_named("Left");
+        let right = graph.node_named("Right");
         graph.layers[0].nodes = vec![top, bottom];
         graph.layers[1].nodes = vec![left, right];
 
@@ -1319,34 +1247,10 @@ mod tests {
                 edge("Bottom-Left", "Bottom", "Left"),
             ],
         );
-        let top = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Top")
-                .unwrap(),
-        );
-        let bottom = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Bottom")
-                .unwrap(),
-        );
-        let left = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Left")
-                .unwrap(),
-        );
-        let right = NodeId::new(
-            graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == "Right")
-                .unwrap(),
-        );
+        let top = graph.node_named("Top");
+        let bottom = graph.node_named("Bottom");
+        let left = graph.node_named("Left");
+        let right = graph.node_named("Right");
         let crossing_order = vec![vec![top, bottom], vec![left, right]];
         let non_crossing_order = vec![vec![top, bottom], vec![right, left]];
 
