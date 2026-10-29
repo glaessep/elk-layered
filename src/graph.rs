@@ -1211,8 +1211,9 @@ fn remove_node(nodes: &mut Vec<NodeId>, node_index: NodeId) {
 ///
 /// Source:
 /// https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/graph/LGraphUtil.java
-#[allow(clippy::too_many_arguments)]
+///
 /// `node` is the id the dummy will have in its graph. The dummy's one port names it as its owner.
+#[allow(clippy::too_many_arguments)]
 pub fn create_external_port_dummy(
     node: NodeId,
     id: impl Into<String>,
