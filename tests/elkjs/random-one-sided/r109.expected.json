@@ -14,7 +14,7 @@
       "width": 112,
       "height": 49,
       "layoutOptions": {
-        "elk.portConstraints": "FIXED_SIDE"
+        "elk.portConstraints": "FIXED_ORDER"
       },
       "ports": [
         {
@@ -40,7 +40,7 @@
       ],
       "$H": 277,
       "x": 42,
-      "y": 17.5
+      "y": 16
     },
     {
       "id": "n1",
@@ -62,8 +62,8 @@
         }
       ],
       "$H": 282,
-      "x": 368,
-      "y": 75
+      "x": 378,
+      "y": 31
     },
     {
       "id": "n2",
@@ -88,7 +88,7 @@
       ],
       "layoutOptions": {
         "elk.nodeLabels.placement": "[H_CENTER, V_CENTER, INSIDE]",
-        "elk.portConstraints": "FIXED_SIDE"
+        "elk.portConstraints": "FIXED_ORDER"
       },
       "ports": [
         {
@@ -109,12 +109,12 @@
             "elk.port.side": "EAST"
           },
           "x": 67.5,
-          "y": 11
+          "y": 5.5
         }
       ],
       "$H": 287,
       "x": 194,
-      "y": 37.5
+      "y": 28
     },
     {
       "id": "n4",
@@ -139,14 +139,30 @@
           "id": "e0_s0",
           "startPoint": {
             "x": 158,
-            "y": 42
+            "y": 40.5
           },
           "endPoint": {
             "x": 194,
-            "y": 42
+            "y": 32.5
           },
+          "bendPoints": [
+            {
+              "x": 168,
+              "y": 40.5
+            },
+            {
+              "x": 168,
+              "y": 32.5
+            }
+          ],
           "incomingShape": "p0",
           "outgoingShape": "n3"
+        }
+      ],
+      "junctionPoints": [
+        {
+          "x": 168,
+          "y": 40.5
         }
       ],
       "container": "root"
@@ -189,19 +205,9 @@
             "y": 43
           },
           "endPoint": {
-            "x": 368,
-            "y": 87
+            "x": 378,
+            "y": 43
           },
-          "bendPoints": [
-            {
-              "x": 350,
-              "y": 43
-            },
-            {
-              "x": 350,
-              "y": 87
-            }
-          ],
           "incomingShape": "n3",
           "outgoingShape": "n1"
         }
@@ -221,20 +227,20 @@
           "id": "e2_s0",
           "startPoint": {
             "x": 188,
-            "y": 50
+            "y": 40.5
           },
           "endPoint": {
             "x": 188,
-            "y": 50
+            "y": 40.5
           },
           "bendPoints": [
             {
               "x": 178,
-              "y": 50
+              "y": 40.5
             },
             {
               "x": 178,
-              "y": 50
+              "y": 40.5
             }
           ],
           "incomingShape": "p3",
@@ -256,28 +262,28 @@
           "id": "e3_s0",
           "startPoint": {
             "x": 188,
-            "y": 50
+            "y": 40.5
           },
           "endPoint": {
             "x": 271.5,
-            "y": 50.5
+            "y": 35.5
           },
           "bendPoints": [
             {
               "x": 178,
-              "y": 50
+              "y": 40.5
             },
             {
               "x": 178,
-              "y": 68
+              "y": 18
             },
             {
               "x": 281.5,
-              "y": 68
+              "y": 18
             },
             {
               "x": 281.5,
-              "y": 50.5
+              "y": 35.5
             }
           ],
           "incomingShape": "p3",
@@ -299,20 +305,20 @@
           "id": "e4_s0",
           "startPoint": {
             "x": 32,
-            "y": 42
+            "y": 40.5
           },
           "endPoint": {
             "x": 32,
-            "y": 42
+            "y": 40.5
           },
           "bendPoints": [
             {
               "x": 22,
-              "y": 42
+              "y": 40.5
             },
             {
               "x": 22,
-              "y": 42
+              "y": 40.5
             }
           ],
           "incomingShape": "p1",
@@ -337,9 +343,19 @@
             "y": 99
           },
           "endPoint": {
-            "x": 368,
-            "y": 99
+            "x": 378,
+            "y": 55
           },
+          "bendPoints": [
+            {
+              "x": 350,
+              "y": 99
+            },
+            {
+              "x": 350,
+              "y": 55
+            }
+          ],
           "incomingShape": "n4",
           "outgoingShape": "n1"
         }
@@ -370,8 +386,8 @@
         {
           "id": "e6_s0",
           "startPoint": {
-            "x": 360,
-            "y": 115
+            "x": 370,
+            "y": 71
           },
           "endPoint": {
             "x": 331.5,
@@ -379,11 +395,11 @@
           },
           "bendPoints": [
             {
-              "x": 350,
-              "y": 115
+              "x": 360,
+              "y": 71
             },
             {
-              "x": 350,
+              "x": 360,
               "y": 114
             }
           ],
@@ -393,8 +409,8 @@
       ],
       "junctionPoints": [
         {
-          "x": 350,
-          "y": 115
+          "x": 360,
+          "y": 114
         }
       ],
       "container": "root"
@@ -412,30 +428,14 @@
           "id": "e7_s0",
           "startPoint": {
             "x": 158,
-            "y": 42
+            "y": 40.5
           },
           "endPoint": {
             "x": 188,
-            "y": 50
+            "y": 40.5
           },
-          "bendPoints": [
-            {
-              "x": 168,
-              "y": 42
-            },
-            {
-              "x": 168,
-              "y": 50
-            }
-          ],
           "incomingShape": "p0",
           "outgoingShape": "p3"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 168,
-          "y": 42
         }
       ],
       "container": "root"
@@ -453,28 +453,28 @@
           "id": "e8_s0",
           "startPoint": {
             "x": 32,
-            "y": 42
+            "y": 40.5
           },
           "endPoint": {
-            "x": 360,
-            "y": 115
+            "x": 370,
+            "y": 71
           },
           "bendPoints": [
             {
               "x": 12,
-              "y": 42
+              "y": 40.5
             },
             {
               "x": 12,
               "y": 141
             },
             {
-              "x": 350,
+              "x": 360,
               "y": 141
             },
             {
-              "x": 350,
-              "y": 115
+              "x": 360,
+              "y": 71
             }
           ],
           "incomingShape": "p1",
@@ -496,28 +496,28 @@
           "id": "e9_s0",
           "startPoint": {
             "x": 188,
-            "y": 50
+            "y": 40.5
           },
           "endPoint": {
             "x": 271.5,
-            "y": 50.5
+            "y": 35.5
           },
           "bendPoints": [
             {
               "x": 178,
-              "y": 50
+              "y": 40.5
             },
             {
               "x": 178,
-              "y": 68
+              "y": 18
             },
             {
               "x": 281.5,
-              "y": 68
+              "y": 18
             },
             {
               "x": 281.5,
-              "y": 50.5
+              "y": 35.5
             }
           ],
           "incomingShape": "p3",
@@ -530,6 +530,6 @@
   "$H": 13,
   "x": 0,
   "y": 0,
-  "width": 476.5,
+  "width": 486.5,
   "height": 187
 }

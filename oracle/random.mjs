@@ -36,9 +36,10 @@
 //   node random.mjs ../tests/elkjs/random-one-sided --one-sided && node record.mjs ../tests/elkjs/random-one-sided --drop-crashes
 //
 // With `--one-sided`, the generator is that of `--ports`, with its own seed and count, but every
-// graph sets `elk.layered.crossingMinimization.greedySwitch.type` to ONE_SIDED, and a node with
-// ports has the port constraints FREE or FIXED_SIDE, never FIXED_ORDER. elkjs crashes on some of
-// these graphs; `--drop-crashes` lists them in `dropped.txt`.
+// graph sets `elk.layered.crossingMinimization.greedySwitch.type` to ONE_SIDED. A node with ports
+// draws its port constraints from none, FREE, FIXED_SIDE and FIXED_ORDER. FREE is written out
+// because #26 found its differences with FREE ports. elkjs crashes on some of these graphs;
+// `--drop-crashes` lists them in `dropped.txt`.
 //
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
 // a feature, and then write and record the whole corpus again.
@@ -195,7 +196,7 @@ function graph() {
       const flowSides = sidesOf(node);
       if (!rand.chance(0.6)) continue;
       const constraint = oneSided
-        ? rand.pick([null, "FREE", "FIXED_SIDE", "FIXED_SIDE"])
+        ? rand.pick([null, "FREE", "FIXED_SIDE", "FIXED_ORDER"])
         : rand.pick([null, "FIXED_SIDE", "FIXED_SIDE", "FIXED_ORDER"]);
       if (constraint) (node.layoutOptions ??= {})["elk.portConstraints"] = constraint;
       node.ports = [];
