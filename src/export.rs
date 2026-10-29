@@ -204,7 +204,17 @@ impl<'a> Hierarchy<'a> {
     /// Ports `CrossHierarchyEdge.getActualSource` and `getActualTarget`: the port of an external
     /// port dummy is the port on the compound node it stands for.
     fn actual_end(&self, graph: GraphId, port: PortRef) -> Result<PortAt, Error> {
-        let node = &self.graph(graph).layerless_nodes[port.node];
+        let node = self
+            .graph(graph)
+            .layerless_nodes
+            .get(port.node)
+            .ok_or_else(|| Error::Internal {
+                message: format!(
+                    "an edge in graph {} ends at node {}, which does not exist",
+                    graph.index(),
+                    port.node
+                ),
+            })?;
         if node.kind == LNodeKind::ExternalPort
             && let Some(origin) = &node.origin_port
         {
@@ -256,11 +266,23 @@ fn join_cross_hierarchy_edges(
     for (id, mut list) in pieces {
         // A stable sort, like `Collections.sort`.
         list.sort_by(|a, b| compare_compound_segments(a.1.segment, b.1.segment));
+        // The graph ids of the records were checked above. The edge index was not.
         let edge_of = |(graph, record): &(GraphId, &crate::graph::CrossHierarchyEdge)| {
-            (*graph, &hierarchy.graph(*graph).edges[record.edge])
+            hierarchy
+                .graph(*graph)
+                .edges
+                .get(record.edge)
+                .map(|edge| (*graph, edge))
+                .ok_or_else(|| Error::Internal {
+                    message: format!(
+                        "a record of edge \"{id}\" names edge {}, which graph {} does not have",
+                        record.edge,
+                        graph.index()
+                    ),
+                })
         };
-        let (first_graph, first_edge) = edge_of(&list[0]);
-        let (last_graph, last_edge) = edge_of(&list[list.len() - 1]);
+        let (first_graph, first_edge) = edge_of(&list[0])?;
+        let (last_graph, last_edge) = edge_of(&list[list.len() - 1])?;
         let source = hierarchy.actual_end(first_graph, first_edge.source)?;
         let target = hierarchy.actual_end(last_graph, last_edge.target)?;
 
@@ -278,7 +300,7 @@ fn join_cross_hierarchy_edges(
         let mut target_offset = LPoint::default();
         let mut last_point: Option<LPoint> = None;
         for piece in &list {
-            let (graph, edge) = edge_of(piece);
+            let (graph, edge) = edge_of(piece)?;
             let mut offset = LPoint::default();
             hierarchy.change_coord_system(&mut offset, graph, reference);
 
@@ -818,6 +840,39 @@ mod tests {
             .find_map(|node| node.origin_port.as_mut())
             .expect("the edge leaves group through an external port dummy");
         origin.graph_id = GraphId::new(99);
+
+        let error = apply_to_edge_e(&mut graph).expect_err("an error");
+
+        assert!(matches!(error, Error::Internal { ref message } if message.contains("99")));
+    }
+
+    // Mutation: index `edges[record.edge]` in `join_cross_hierarchy_edges` again, without `get`.
+    // A record that names an edge its graph lacks then panics.
+    #[test]
+    fn a_cross_hierarchy_record_of_a_missing_edge_is_an_internal_error() {
+        let mut graph = laid_out_edge_across_levels();
+        graph.root_mut().cross_hierarchy_edges[0].edge = 99;
+
+        let error = apply_to_edge_e(&mut graph).expect_err("an error");
+
+        assert!(matches!(error, Error::Internal { ref message } if message.contains("99")));
+    }
+
+    // Mutation: index `layerless_nodes[port.node]` in `actual_end` again, without `get`. An edge
+    // that ends at a node its graph lacks then panics.
+    #[test]
+    fn an_edge_end_at_a_missing_node_is_an_internal_error() {
+        let mut graph = laid_out_edge_across_levels();
+        let records: Vec<_> = graph
+            .iter()
+            .flat_map(|holder| holder.cross_hierarchy_edges.iter())
+            .map(|record| (record.graph_id, record.edge))
+            .collect();
+        for (graph_id, edge) in records {
+            let edge = &mut graph[graph_id].edges[edge];
+            edge.source.node = 99;
+            edge.target.node = 99;
+        }
 
         let error = apply_to_edge_e(&mut graph).expect_err("an error");
 
