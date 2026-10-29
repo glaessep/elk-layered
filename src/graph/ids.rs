@@ -103,6 +103,36 @@ impl IndexMut<NodeId> for Vec<LNode> {
     }
 }
 
+// A `&[LNode]` reads by `NodeId` too. The `Vec` impls above stay, because indexing a `Vec` picks
+// the `Vec` impl first and does not fall through to the slice.
+impl Index<NodeId> for [LNode] {
+    type Output = LNode;
+
+    fn index(&self, id: NodeId) -> &LNode {
+        &self[id.0]
+    }
+}
+
+impl IndexMut<NodeId> for [LNode] {
+    fn index_mut(&mut self, id: NodeId) -> &mut LNode {
+        &mut self[id.0]
+    }
+}
+
+impl Index<EdgeId> for [LayeredEdge] {
+    type Output = LayeredEdge;
+
+    fn index(&self, id: EdgeId) -> &LayeredEdge {
+        &self[id.0]
+    }
+}
+
+impl IndexMut<EdgeId> for [LayeredEdge] {
+    fn index_mut(&mut self, id: EdgeId) -> &mut LayeredEdge {
+        &mut self[id.0]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +161,17 @@ mod tests {
         let graph = three_nodes();
         assert_eq!(graph.layerless_nodes[NodeId::new(0)].id, "a");
         assert_eq!(graph.layerless_nodes[NodeId::new(2)].id, "c");
+    }
+
+    // Mutation: make `[LNode][NodeId]` and `[LayeredEdge][EdgeId]` read slot 0 whatever the id is.
+    #[test]
+    fn a_slice_reads_by_id_like_its_vec() {
+        let graph = three_nodes();
+        let nodes: &[LNode] = &graph.layerless_nodes;
+        assert_eq!(nodes[NodeId::new(2)].id, "c");
+        let graph = three_edges();
+        let edges: &[LayeredEdge] = &graph.edges;
+        assert_eq!(edges[EdgeId::new(2)].id, "z");
     }
 
     // Mutation: make `IndexMut<NodeId>` write slot `id + 1`.
