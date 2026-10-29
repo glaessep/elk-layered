@@ -1083,6 +1083,8 @@ fn north_south_hierarchical_ports_use_source_barycenter_keys() {
     );
 }
 
+// Mutation: drop the port distribution after each free layer in
+// `HierarchySweep::sweep_reducing_crossings_barycenter`.
 #[test]
 fn barycenter_sweep_distributes_free_and_fixed_layer_ports() {
     let mut graph = prepared_graph(
