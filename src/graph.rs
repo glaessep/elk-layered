@@ -28,30 +28,65 @@ pub use ports::{NodePorts, PortId};
 #[derive(Debug, Clone, PartialEq)]
 pub struct LGraph {
     /// Names this graph in its hierarchy.
-    pub id: GraphId,
+    ///
+    /// Crate-visible: The arena sets it once; every phase names the graph by it.
+    pub(crate) id: GraphId,
     /// The caller's id of the node this graph belongs to. It only labels errors and results;
     /// nothing looks a graph up by it.
-    pub name: String,
-    pub options: LayeredOptions,
-    pub size: LSize,
-    pub padding: LPadding,
-    pub offset: LPoint,
-    pub layerless_nodes: IdVec<NodeId, LNode>,
+    ///
+    /// Crate-visible: It only labels errors and results; no invariant ties it to another field.
+    pub(crate) name: String,
+    /// Crate-visible: Every phase reads the configured options, and the importer and configurator
+    /// fill them before the run.
+    pub(crate) options: LayeredOptions,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) size: LSize,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) padding: LPadding,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) offset: LPoint,
+    /// Crate-visible: Every phase indexes the nodes by `NodeId`. The `IdVec` keeps the ids typed,
+    /// and the private fields of `LNode` keep the node invariants.
+    pub(crate) layerless_nodes: IdVec<NodeId, LNode>,
     /// Private: only the methods below add, remove or reorder layers, so `LNode::layer_index`
     /// and each layer's list stay in step.
     layers: Vec<Layer>,
-    pub edges: IdVec<EdgeId, LayeredEdge>,
-    pub graph_properties: GraphProperties,
-    pub cyclic: bool,
+    /// Crate-visible: Every phase indexes the edges by `EdgeId`. The `IdVec` keeps the ids typed,
+    /// and the private fields of `LayeredEdge` keep the edge invariants.
+    pub(crate) edges: IdVec<EdgeId, LayeredEdge>,
+    /// Crate-visible: The importer and the configurator write it and later phases read it; no
+    /// invariant ties it to another field.
+    pub(crate) graph_properties: GraphProperties,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) cyclic: bool,
+    /// Crate-visible: The configurator seeds it, and the processors that draw random numbers
+    /// advance it in place. `JavaRandom` keeps its own state.
     pub(crate) random: JavaRandom,
     /// The node this graph lies in, set when the graph joins a [`GraphArena`] with `nest`.
-    pub parent: Option<GraphParent>,
-    pub hidden_nodes: Vec<NodeId>,
-    pub replaced_external_port_dummies: Vec<NodeId>,
-    pub hierarchy_edges: Vec<HierarchyEdge>,
-    pub cross_hierarchy_edges: Vec<CrossHierarchyEdge>,
-    pub self_loop_holders: Vec<SelfLoopHolder>,
-    pub in_layer_successor_constraints_between_non_dummies: bool,
+    ///
+    /// Crate-visible: `GraphArena::nest` sets it and the phases read it to reach the node the graph
+    /// lies in.
+    pub(crate) parent: Option<GraphParent>,
+    /// Crate-visible: The layer constraint processors fill and empty it, and a component split and
+    /// combine carry it; `hidden_mask` is the reader.
+    pub(crate) hidden_nodes: Vec<NodeId>,
+    /// Crate-visible: The hierarchical port processors fill it, and a component split and combine
+    /// carry it.
+    pub(crate) replaced_external_port_dummies: Vec<NodeId>,
+    /// Crate-visible: Records of the compound preprocessing; each record holds its own ids.
+    pub(crate) hierarchy_edges: Vec<HierarchyEdge>,
+    /// Crate-visible: A record list that the compound preprocessing writes and the export reads;
+    /// each record holds its own ids.
+    pub(crate) cross_hierarchy_edges: Vec<CrossHierarchyEdge>,
+    /// Crate-visible: The self loop processors install and read it, and a component split and
+    /// combine carry it.
+    pub(crate) self_loop_holders: Vec<SelfLoopHolder>,
+    /// Crate-visible: The crossing minimization reads it. Nothing sets it yet.
+    pub(crate) in_layer_successor_constraints_between_non_dummies: bool,
     /// What `NorthSouthPortPreprocessor` tells the crossing minimization about a node. Only the
     /// nodes with fixed port sides and their dummies have a row.
     pub(crate) in_layer: NodeTable<InLayerLayout>,
@@ -167,7 +202,9 @@ pub struct Layer {
     /// The layer's nodes in order. Private so a node cannot join or leave a layer without its
     /// `layer_index` following: `LGraph` owns every change, as `LNode#setLayer` does in ELK.
     nodes: Vec<NodeId>,
-    pub size: LSize,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) size: LSize,
 }
 
 impl AsRef<[NodeId]> for Layer {
@@ -210,27 +247,57 @@ impl Default for Layer {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LNode {
-    pub id: String,
+    /// Crate-visible: The caller's id of the node; it labels results and no invariant ties it to
+    /// another field.
+    pub(crate) id: String,
     /// What the node is, and the data only that kind of node has. `None` for a node of the
     /// input. Private so the data always fits the kind: see [`Self::kind`] and the accessors.
     dummy: Option<DummyData>,
-    pub size: LSize,
-    pub position: LPoint,
-    pub margin: LMargin,
-    pub padding: LPadding,
-    pub labels: Vec<LLabel>,
-    pub node_label_placement: NodeLabelPlacement,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) size: LSize,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) position: LPoint,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) margin: LMargin,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) padding: LPadding,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) labels: Vec<LLabel>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) node_label_placement: NodeLabelPlacement,
     /// The node's own size options. ELK's `LabelAndNodeSizeProcessor` sizes the node by them.
-    pub node_size: NodeSizing,
-    pub ports: NodePorts,
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) node_size: NodeSizing,
+    /// Crate-visible: `NodePorts` keeps the port order and the port ids in step; the node reaches
+    /// it directly.
+    pub(crate) ports: NodePorts,
     /// The graph inside this node, which the layout's [`GraphArena`] holds.
-    pub nested_graph: Option<GraphId>,
-    pub model_order: Option<usize>,
+    ///
+    /// Crate-visible: `GraphArena::nest` sets it, and the compound phases and the pipeline read it
+    /// to reach the inner graph.
+    pub(crate) nested_graph: Option<GraphId>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) model_order: Option<usize>,
     /// The layer the node sits in. Private: `LGraph` sets it together with the layer's list.
     layer_index: Option<usize>,
-    pub layer_constraint: super::options::LayerConstraint,
-    pub node_alignment: Alignment,
-    pub port_constraints: PortConstraints,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) layer_constraint: super::options::LayerConstraint,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) node_alignment: Alignment,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) port_constraints: PortConstraints,
 }
 
 /// The data that only one kind of dummy node has. ELK keeps these as properties that are set
@@ -504,41 +571,94 @@ pub enum InLayerConstraint {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LPort {
-    pub id: String,
-    pub crossing_minimization_id: Option<usize>,
+    /// Crate-visible: The caller's id of the port; it labels results and no invariant ties it to
+    /// another field.
+    pub(crate) id: String,
+    /// Crate-visible: The crossing minimization numbers the ports and is the only writer and
+    /// reader.
+    pub(crate) crossing_minimization_id: Option<usize>,
     /// The node that owns the port. Private: `LGraph::push_node_with` sets it.
     node: NodeId,
-    pub port_type: PortType,
-    pub side: PortSide,
-    pub size: LSize,
-    pub position: LPoint,
-    pub anchor: LPoint,
-    pub margin: LMargin,
-    pub labels: Vec<LLabel>,
-    pub model_order: Option<usize>,
-    pub long_edge_target_node: Option<NodeId>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) port_type: PortType,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) side: PortSide,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) size: LSize,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) position: LPoint,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) anchor: LPoint,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) margin: LMargin,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) labels: Vec<LLabel>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) model_order: Option<usize>,
+    /// Crate-visible: The crossing minimization sets and reads it, and a component split and combine
+    /// remap it.
+    pub(crate) long_edge_target_node: Option<NodeId>,
     /// The position of the input port this port was made from, among its node's ports. `None` for
     /// a port ELK makes up. ELK keeps the input port in `InternalProperties.ORIGIN`.
-    pub input_index: Option<usize>,
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) input_index: Option<usize>,
     /// Whether the caller named this port, so an edge finds it by its id alone. A port that
     /// ELK makes up is found by its id and type. An external port dummy's port counts as named.
-    pub named: bool,
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) named: bool,
     /// `CompoundGraphPreprocessor.calculateNetFlow` for a port the caller named: the votes of
     /// every edge at the port, those outside its node too. `None` for a port ELK makes up.
-    pub hierarchy_net_flow: Option<isize>,
-    pub port_index: Option<isize>,
-    pub border_offset: Option<f64>,
-    pub ratio_or_position: f64,
-    pub connected_to_external_nodes: bool,
-    pub port_dummy: Option<GraphNodeRef>,
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) hierarchy_net_flow: Option<isize>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) port_index: Option<isize>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) border_offset: Option<f64>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) ratio_or_position: f64,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) connected_to_external_nodes: bool,
+    /// Crate-visible: The hierarchical port processors set it, and a component split and combine
+    /// remap it.
+    pub(crate) port_dummy: Option<GraphNodeRef>,
     /// `InternalProperties.ORIGIN` of a port on a north or south port dummy: the port of the
     /// node whose edges `NorthSouthPortPreprocessor` moved here.
-    pub origin_port: Option<PortRef>,
+    ///
+    /// Crate-visible: The north/south port processors set it, and a component split and combine
+    /// remap it.
+    pub(crate) origin_port: Option<PortRef>,
     /// `LayeredOptions.ALLOW_NON_FLOW_PORTS_TO_SWITCH_SIDES`, which only a port can set.
-    pub allow_non_flow_ports_to_switch_sides: bool,
-    pub inside_connections: bool,
-    pub collector_type: Option<PortType>,
-    pub end_label_cell: Option<LabelCellLayout>,
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) allow_non_flow_ports_to_switch_sides: bool,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) inside_connections: bool,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) collector_type: Option<PortType>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) end_label_cell: Option<LabelCellLayout>,
     /// The edges that enter the port. Private: it must match each edge's `target`, so
     /// `LGraph` changes it together with the edge.
     incoming_edges: Vec<EdgeId>,
@@ -652,28 +772,59 @@ impl LPort {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayeredEdge {
-    pub id: String,
+    /// Crate-visible: The caller's id of the edge; it labels results and no invariant ties it to
+    /// another field.
+    pub(crate) id: String,
     /// The source port. Private: it must match the `outgoing_edges` of that port, so
     /// `LGraph::set_edge_source` is the only way to change it, as `LEdge#setSource` is in ELK.
     source: PortRef,
     /// The target port. Private for the same reason, against `incoming_edges`.
     target: PortRef,
-    pub source_node_id: String,
-    pub target_node_id: String,
-    pub labels: Vec<LLabel>,
-    pub minlen: usize,
-    pub reversed: bool,
-    pub bend_points: Vec<LPoint>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) source_node_id: String,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) target_node_id: String,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) labels: Vec<LLabel>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) minlen: usize,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) reversed: bool,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) bend_points: Vec<LPoint>,
     /// `LayeredOptions.JUNCTION_POINTS` of the edge. ELK keeps `null` until a router adds one, so
     /// an empty list stands for `null`.
-    pub junction_points: Vec<LPoint>,
-    pub model_order: Option<usize>,
-    pub priority_direction: i32,
-    pub priority_shortness: i32,
-    pub priority_straightness: i32,
-    pub thickness: f64,
-    pub original_opposite_port: Option<PortRef>,
-    pub compound_segment: Option<CompoundEdgeSegment>,
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) junction_points: Vec<LPoint>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) model_order: Option<usize>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) priority_direction: i32,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) priority_shortness: i32,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) priority_straightness: i32,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) thickness: f64,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) original_opposite_port: Option<PortRef>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) compound_segment: Option<CompoundEdgeSegment>,
 }
 
 impl LayeredEdge {
