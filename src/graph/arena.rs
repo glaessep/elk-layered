@@ -110,12 +110,6 @@ impl GraphArena {
         &mut self.graphs[GraphId::ROOT.0]
     }
 
-    /// Gives the root graph back and drops the rest.
-    #[cfg(test)]
-    pub fn into_root(mut self) -> LGraph {
-        self.graphs.swap_remove(GraphId::ROOT.0)
-    }
-
     /// Every graph in slot order. Use it only where the order cannot reach a result.
     pub fn iter(&self) -> impl Iterator<Item = &LGraph> {
         self.graphs.iter()
