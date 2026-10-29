@@ -408,6 +408,7 @@ fn absolute_anchor(graph: &LGraph, port: PortRef) -> LPoint {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::EdgeId;
     use crate::graph::LayeredEdge;
     use crate::graph::PortId;
     use crate::options::{ElkDirection, LayeredOptions};
@@ -447,7 +448,7 @@ mod tests {
         }
     }
 
-    fn connect(graph: &mut LGraph, source: PortRef, target: PortRef) -> usize {
+    fn connect(graph: &mut LGraph, source: PortRef, target: PortRef) -> EdgeId {
         let id = format!("e{}", graph.edges.len());
         graph
             .add_edge(LayeredEdge {
@@ -884,7 +885,7 @@ mod tests {
 
     /// Runs the pre-processor on a node with one north port and a neighbour on each side, places
     /// the dummy and the node, and returns the graph, the node and the dummy.
-    fn placed_graph(incoming: bool, outgoing: bool) -> (LGraph, NodeId, NodeId, Vec<usize>) {
+    fn placed_graph(incoming: bool, outgoing: bool) -> (LGraph, NodeId, NodeId, Vec<EdgeId>) {
         let mut graph = graph();
         let neighbour = neighbour(&mut graph, "n");
         let node = add_node(

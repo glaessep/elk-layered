@@ -10,9 +10,9 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::{EdgeSlice, 
-    GraphArena, GraphId, LGraph, LNodeKind, NodeId, NodeSlice, OtherGraphs, PortId, PortRef,
-    PortSide,
+use crate::graph::{
+    EdgeSlice, GraphArena, GraphId, LGraph, LNodeKind, NodeId, NodeSlice, OtherGraphs, PortId,
+    PortRef, PortSide,
 };
 use crate::options::{OrderingStrategy, PortConstraints, PortSortingStrategy};
 
@@ -1269,7 +1269,7 @@ fn update_bigger_and_smaller_associations<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{GraphNodeRef, LNode, LNodeKind, LPoint, LayeredEdge, PortType};
+    use crate::graph::{EdgeId, GraphNodeRef, LNode, LNodeKind, LPoint, LayeredEdge, PortType};
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::intermediate::split_long_edges;
     use crate::options::{ElkDirection, LayeredOptions};
@@ -1732,14 +1732,14 @@ mod tests {
                 );
                 let port = &graph.layerless_nodes[0].ports[PortId::new(original)];
                 if original % 2 == 0 {
-                    assert_eq!(port.outgoing_edges, vec![original]);
+                    assert_eq!(port.outgoing_edges, vec![EdgeId::new(original)]);
                     assert!(port.incoming_edges.is_empty());
                 } else {
-                    assert_eq!(port.incoming_edges, vec![original]);
+                    assert_eq!(port.incoming_edges, vec![EdgeId::new(original)]);
                     assert!(port.outgoing_edges.is_empty());
                 }
-                assert!(graph.edge_source_attached(original));
-                assert!(graph.edge_target_attached(original));
+                assert!(graph.edge_source_attached(EdgeId::new(original)));
+                assert!(graph.edge_target_attached(EdgeId::new(original)));
             }
         }
     }

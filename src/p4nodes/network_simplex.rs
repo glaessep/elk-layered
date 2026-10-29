@@ -403,7 +403,11 @@ fn make_connected(graph: &mut NGraph) {
     }
 }
 
-fn prefer_straight_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[NodeId]) -> Vec<[EdgeId; 2]> {
+fn prefer_straight_edges(
+    graph: &LGraph,
+    aux: &mut Auxiliary,
+    order: &[NodeId],
+) -> Vec<[EdgeId; 2]> {
     let crossing = mark_crossings(graph);
     // -1 visited, 0 path interior, 2 junction (including leaves).
     let mut state = vec![0i8; graph.layerless_nodes.len()];
@@ -442,7 +446,8 @@ fn prefer_straight_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[NodeId]) 
                 } else {
                     data.source.node
                 };
-                if state[other.index()] == -1 || state[other.index()] == 2 || crossing[edge.index()] {
+                if state[other.index()] == -1 || state[other.index()] == 2 || crossing[edge.index()]
+                {
                     break;
                 }
                 state[other.index()] = -1;

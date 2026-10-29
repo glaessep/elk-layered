@@ -775,7 +775,7 @@ mod tests {
         let old_source = graph.edges[0].source;
         let old_target = graph.edges[0].target;
 
-        assert!(crate::graph::reverse_edge(&mut graph, 0, true));
+        assert!(crate::graph::reverse_edge(&mut graph, EdgeId::new(0), true));
 
         assert_eq!(graph.edges[0].source, old_target);
         assert_eq!(graph.edges[0].target, old_source);
@@ -786,11 +786,11 @@ mod tests {
         );
         assert_eq!(
             graph.layerless_nodes[old_source.node].ports[old_source.port].incoming_edges,
-            vec![0]
+            vec![EdgeId::new(0)]
         );
         assert_eq!(
             graph.layerless_nodes[old_target.node].ports[old_target.port].outgoing_edges,
-            vec![0]
+            vec![EdgeId::new(0)]
         );
         assert_eq!(graph.edges[0].labels[0].placement, EdgeLabelPlacement::Tail);
         assert_eq!(
@@ -822,7 +822,7 @@ mod tests {
             Some(PortType::Input)
         );
 
-        assert!(crate::graph::reverse_edge(&mut graph, 0, true));
+        assert!(crate::graph::reverse_edge(&mut graph, EdgeId::new(0), true));
 
         let new_source = graph.edges[0].source;
         let new_target = graph.edges[0].target;
@@ -858,11 +858,11 @@ mod tests {
         );
         assert_eq!(
             graph.layerless_nodes[new_source.node].ports[new_source.port].outgoing_edges,
-            vec![0]
+            vec![EdgeId::new(0)]
         );
         assert_eq!(
             graph.layerless_nodes[new_target.node].ports[new_target.port].incoming_edges,
-            vec![0]
+            vec![EdgeId::new(0)]
         );
     }
 

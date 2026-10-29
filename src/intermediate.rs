@@ -22,10 +22,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::common::cells::grow_label_cell;
-use crate::graph::{EdgeId, EdgeSlice, 
-    EdgeLabelPlacement, GraphId, HorizontalLabelAlignment, LGraph, LLabel, LNode, LNodeKind,
-    LPoint, LSize, LabelCellLayout, LabelSide, LayeredEdge, NodeId, NodeSlice, PortId, PortRef,
-    PortSide, PortType, VerticalLabelAlignment, reverse_edge,
+use crate::graph::{
+    EdgeId, EdgeLabelPlacement, EdgeSlice, GraphId, HorizontalLabelAlignment, LGraph, LLabel,
+    LNode, LNodeKind, LPoint, LSize, LabelCellLayout, LabelSide, LayeredEdge, NodeId, NodeSlice,
+    PortId, PortRef, PortSide, PortType, VerticalLabelAlignment, reverse_edge,
 };
 use crate::options::{
     Alignment, EdgeLabelSideSelection, ElkDirection, LayerConstraint, PortConstraints,
@@ -721,7 +721,11 @@ fn set_inverted_port_dummy_long_edge_ports(
 fn create_inverted_port_dummy(graph: &mut LGraph, edge_index: EdgeId) -> NodeId {
     let dummy_index = graph.next_node_id();
     let mut dummy = LNode::new(
-        format!("invertedPort:{}:{}", edge_index.index(), dummy_index.index()),
+        format!(
+            "invertedPort:{}:{}",
+            edge_index.index(),
+            dummy_index.index()
+        ),
         0.0,
         0.0,
         None,
@@ -2272,7 +2276,8 @@ fn update_end_label_node_margin(graph: &mut LGraph, node: NodeId) {
 /// port inside its own node.
 pub fn sort_end_labels(graph: &mut LGraph) {
     let (node_ids, port_ids) = end_label_sorter_ids(graph);
-    let edge_sort_keys = graph.edge_ids()
+    let edge_sort_keys = graph
+        .edge_ids()
         .map(|edge| end_label_sort_key(graph, edge, &node_ids, &port_ids))
         .collect::<Vec<_>>();
 
@@ -4210,7 +4215,7 @@ mod tests {
         assert!(graph.edges[0].reversed);
         assert_eq!(graph.edges[0].source.node, start);
         assert!(graph.node_incoming_edges(start).is_empty());
-        assert_eq!(graph.node_outgoing_edges(start), vec![0]);
+        assert_eq!(graph.node_outgoing_edges(start), vec![EdgeId::new(0)]);
     }
 
     #[test]
@@ -4230,7 +4235,7 @@ mod tests {
 
         assert!(graph.edges[0].reversed);
         assert_eq!(graph.edges[0].target.node, end);
-        assert_eq!(graph.node_incoming_edges(end), vec![0]);
+        assert_eq!(graph.node_incoming_edges(end), vec![EdgeId::new(0)]);
         assert!(graph.node_outgoing_edges(end).is_empty());
     }
 
@@ -4406,11 +4411,13 @@ mod tests {
         );
 
         layer_network_simplex(&mut graph).unwrap();
-        let long_edge = graph
-            .edges
-            .iter()
-            .position(|edge| edge.id == "A-C")
-            .unwrap();
+        let long_edge = EdgeId::new(
+            graph
+                .edges
+                .iter()
+                .position(|edge| edge.id == "A-C")
+                .unwrap(),
+        );
         let original_source = graph.edges[long_edge].source;
         let original_target = graph.edges[long_edge].target;
 
@@ -4474,11 +4481,15 @@ mod tests {
         assert_eq!(graph.edges[edge].target.port, PortId::new(0));
         assert!(graph.edges[edge].labels.is_empty());
 
-        let dummy_edge = graph
-            .edges
-            .iter()
-            .position(|candidate| candidate.source.node == dummy && candidate.target.node == target)
-            .expect("dummy should reconnect to original target port");
+        let dummy_edge = EdgeId::new(
+            graph
+                .edges
+                .iter()
+                .position(|candidate| {
+                    candidate.source.node == dummy && candidate.target.node == target
+                })
+                .expect("dummy should reconnect to original target port"),
+        );
         assert_eq!(graph.edges[dummy_edge].source.port, PortId::new(1));
         assert_eq!(graph.edges[dummy_edge].target.port, PortId::new(0));
         assert_eq!(graph.edges[dummy_edge].labels[0].text, "head");
@@ -4523,11 +4534,15 @@ mod tests {
         assert_eq!(graph.edges[edge].target.port, PortId::new(0));
         assert!(graph.edges[edge].labels.is_empty());
 
-        let dummy_edge = graph
-            .edges
-            .iter()
-            .position(|candidate| candidate.source.node == dummy && candidate.target.node == target)
-            .expect("dummy should reconnect to original target port");
+        let dummy_edge = EdgeId::new(
+            graph
+                .edges
+                .iter()
+                .position(|candidate| {
+                    candidate.source.node == dummy && candidate.target.node == target
+                })
+                .expect("dummy should reconnect to original target port"),
+        );
         assert_eq!(graph.edges[dummy_edge].source.port, PortId::new(1));
         assert_eq!(graph.edges[dummy_edge].labels[0].text, "head");
         assert_eq!(graph.edges[dummy_edge].labels[0].end_label_edge, Some(edge));
@@ -4548,11 +4563,13 @@ mod tests {
         let mut labelled = edge("A-B", "A", "B");
         labelled.labels = vec![center];
         let mut graph = graph(vec![node("A"), node("B")], vec![labelled]);
-        let edge_index = graph
-            .edges
-            .iter()
-            .position(|edge| edge.id == "A-B")
-            .unwrap();
+        let edge_index = EdgeId::new(
+            graph
+                .edges
+                .iter()
+                .position(|edge| edge.id == "A-B")
+                .unwrap(),
+        );
         let original_source = graph.edges[edge_index].source;
         let original_target = graph.edges[edge_index].target;
 
@@ -4609,7 +4626,7 @@ mod tests {
         direction: ElkDirection,
         thickness: f64,
         labels: Vec<ElkInputLabel>,
-    ) -> (crate::graph::GraphArena, NodeId, usize) {
+    ) -> (crate::graph::GraphArena, NodeId, EdgeId) {
         let mut labelled = edge("A-B", "A", "B");
         labelled.labels = labels;
         let mut graph = graph(vec![node("A"), node("B")], vec![labelled]);
@@ -4706,9 +4723,9 @@ mod tests {
     fn split_edge_counts_a_negative_edge_thickness_as_zero() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("A-B", "A", "B")]);
         graph.edges[0].thickness = -3.0;
-        let dummy = create_label_dummy_node(&mut graph, 0, 0.0);
+        let dummy = create_label_dummy_node(&mut graph, EdgeId::new(0), 0.0);
 
-        let second_half = split_edge(&mut graph, 0, dummy).unwrap();
+        let second_half = split_edge(&mut graph, EdgeId::new(0), dummy).unwrap();
 
         assert_eq!(graph.edges[0].thickness, 0.0);
         assert_eq!(graph.edges[second_half].thickness, 0.0);
@@ -4812,11 +4829,13 @@ mod tests {
             vec![node("A"), node("B"), node("C")],
             vec![edge("A-B", "A", "B"), edge("B-C", "B", "C"), labelled],
         );
-        let edge_index = graph
-            .edges
-            .iter()
-            .position(|edge| edge.id == "A-C")
-            .unwrap();
+        let edge_index = EdgeId::new(
+            graph
+                .edges
+                .iter()
+                .position(|edge| edge.id == "A-C")
+                .unwrap(),
+        );
 
         insert_label_dummies(&mut graph);
         layer_network_simplex(&mut graph).unwrap();
@@ -4887,7 +4906,7 @@ mod tests {
         assert!(
             port.labels
                 .iter()
-                .all(|label| label.end_label_edge == Some(0))
+                .all(|label| label.end_label_edge == Some(EdgeId::new(0)))
         );
         assert_eq!(
             graph.edges[0]
@@ -4952,7 +4971,7 @@ mod tests {
         let port = &graph.layerless_nodes[target].ports[target_port];
         assert_eq!(port.labels.len(), 1);
         assert_eq!(port.labels[0].text, "head");
-        assert_eq!(port.labels[0].end_label_edge, Some(0));
+        assert_eq!(port.labels[0].end_label_edge, Some(EdgeId::new(0)));
         assert!(port.end_label_cell.is_some());
         assert!(graph.layerless_nodes[target].margin.left > old_left_margin);
     }
@@ -5005,11 +5024,13 @@ mod tests {
             vec![node("A"), node("B"), node("C")],
             vec![edge("A-B", "A", "B"), edge("B-C", "B", "C"), labelled],
         );
-        let edge_index = graph
-            .edges
-            .iter()
-            .position(|edge| edge.id == "A-C")
-            .unwrap();
+        let edge_index = EdgeId::new(
+            graph
+                .edges
+                .iter()
+                .position(|edge| edge.id == "A-C")
+                .unwrap(),
+        );
 
         insert_label_dummies(&mut graph);
         layer_network_simplex(&mut graph).unwrap();
@@ -5064,11 +5085,13 @@ mod tests {
         graph.options.unnecessary_bendpoints = true;
         layer_network_simplex(&mut graph).unwrap();
 
-        let long_edge = graph
-            .edges
-            .iter()
-            .position(|edge| edge.id == "A-C")
-            .unwrap();
+        let long_edge = EdgeId::new(
+            graph
+                .edges
+                .iter()
+                .position(|edge| edge.id == "A-C")
+                .unwrap(),
+        );
         split_long_edges(&mut graph);
 
         let dummy = NodeId::new(
@@ -5263,11 +5286,13 @@ mod tests {
             vec![first, node("A"), node("B")],
             vec![edge("start-A", "start", "A"), edge("A-B", "A", "B")],
         );
-        let edge_index = graph
-            .edges
-            .iter()
-            .position(|edge| edge.id == "start-A")
-            .unwrap();
+        let edge_index = EdgeId::new(
+            graph
+                .edges
+                .iter()
+                .position(|edge| edge.id == "start-A")
+                .unwrap(),
+        );
 
         preprocess_layer_constraints(&mut graph).unwrap();
 
@@ -5377,11 +5402,13 @@ mod tests {
             vec![first, node("A"), node("B")],
             vec![edge("start-A", "start", "A"), edge("A-B", "A", "B")],
         );
-        let edge_index = graph
-            .edges
-            .iter()
-            .position(|edge| edge.id == "start-A")
-            .unwrap();
+        let edge_index = EdgeId::new(
+            graph
+                .edges
+                .iter()
+                .position(|edge| edge.id == "start-A")
+                .unwrap(),
+        );
 
         preprocess_layer_constraints(&mut graph).unwrap();
         layer_network_simplex(&mut graph).unwrap();
@@ -5417,11 +5444,13 @@ mod tests {
         let mut last = node("end");
         last.layer_constraint = Some(LayerConstraint::LastSeparate);
         let mut graph = graph(vec![node("A"), last], vec![edge("A-end", "A", "end")]);
-        let edge_index = graph
-            .edges
-            .iter()
-            .position(|edge| edge.id == "A-end")
-            .unwrap();
+        let edge_index = EdgeId::new(
+            graph
+                .edges
+                .iter()
+                .position(|edge| edge.id == "A-end")
+                .unwrap(),
+        );
 
         preprocess_layer_constraints(&mut graph).unwrap();
         assert!(!graph.edge_source_attached(edge_index));
@@ -6020,11 +6049,13 @@ mod tests {
         assert_eq!(graph.edges[edge].target.port, PortId::new(0));
         assert!(graph.edge_source_attached(edge));
         assert!(graph.edge_target_attached(edge));
-        let detached_edge = graph
-            .edges
-            .iter()
-            .position(|edge| edge.id.ends_with(":hierarchical-origin"))
-            .unwrap();
+        let detached_edge = EdgeId::new(
+            graph
+                .edges
+                .iter()
+                .position(|edge| edge.id.ends_with(":hierarchical-origin"))
+                .unwrap(),
+        );
         assert!(!graph.edge_source_attached(detached_edge));
         assert!(!graph.edge_target_attached(detached_edge));
     }
@@ -6320,7 +6351,7 @@ mod tests {
         source_port: usize,
         target_node: NodeId,
         target_port: usize,
-    ) -> usize {
+    ) -> EdgeId {
         graph
             .add_edge(LayeredEdge {
                 id: id.to_string(),
@@ -6355,7 +6386,7 @@ mod tests {
         dummy: NodeId,
         target: PortRef,
         joined_pairs: Vec<ExpectedLongEdgeJoinPair>,
-        target_slot_survivors: Vec<usize>,
+        target_slot_survivors: Vec<EdgeId>,
         guard_edges: Vec<EdgeId>,
     }
 
@@ -6483,7 +6514,7 @@ mod tests {
         graph.layerless_nodes[dummy_output.node].ports[dummy_output.port].outgoing_edges =
             output_order.iter().map(|(_, edge)| *edge).collect();
 
-        let mut target_slot_survivors = vec![usize::MAX; pair_count];
+        let mut target_slot_survivors = vec![EdgeId::new(usize::MAX); pair_count];
         let joined_pairs = input_order
             .into_iter()
             .zip(output_order)

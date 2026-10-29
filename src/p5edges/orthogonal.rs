@@ -1666,7 +1666,14 @@ mod tests {
         created: &mut HashSet<(u64, u64)>,
         graph: &mut LGraph,
     ) {
-        add_junction_point_if_necessary(graph, 0, segment, position, vertical, created);
+        add_junction_point_if_necessary(
+            graph,
+            EdgeId::new(0),
+            segment,
+            position,
+            vertical,
+            created,
+        );
     }
 
     // Mutation: use the `x` coordinate for a vertical connecting segment, or drop the strict

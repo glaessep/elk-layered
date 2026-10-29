@@ -13,11 +13,11 @@ use crate::compound::{
     compound_label_segment_index, introduce_source_ported_scoped_edge_segments, port_at,
     source_ported_cross_hierarchy_segments,
 };
-use crate::graph::{EdgeId, 
-    CompoundEdgeSegment, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge, HierarchyStep,
-    LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, NodeSlice, PortId,
-    PortRef, PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
-    is_across_flow, port_side_from_direction,
+use crate::graph::{
+    CompoundEdgeSegment, EdgeId, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge,
+    HierarchyStep, LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId,
+    NodeSlice, PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy,
+    create_external_port_dummy, is_across_flow, port_side_from_direction,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
@@ -3489,7 +3489,7 @@ mod tests {
             nested
                 .cross_hierarchy_edges
                 .iter()
-                .all(|segment| segment.edge == 0)
+                .all(|segment| segment.edge == EdgeId::new(0))
         );
         assert_eq!(nested.edges[0].labels.len(), 2);
         assert_eq!(
@@ -3534,7 +3534,7 @@ mod tests {
                 .iter()
                 .map(|segment| segment.edge)
                 .collect::<Vec<_>>(),
-            vec![0, 0]
+            vec![EdgeId::new(0), EdgeId::new(0)]
         );
     }
 
@@ -3572,7 +3572,7 @@ mod tests {
                 .iter()
                 .map(|segment| segment.edge)
                 .collect::<Vec<_>>(),
-            vec![0, 1]
+            vec![EdgeId::new(0), EdgeId::new(1)]
         );
         assert!(
             nested.edges.iter().all(
@@ -3605,7 +3605,7 @@ mod tests {
         );
         assert_eq!(
             lgraph.layerless_nodes[a].ports[PortId::new(0)].outgoing_edges,
-            vec![0, 1]
+            vec![EdgeId::new(0), EdgeId::new(1)]
         );
         assert!(lgraph.graph_properties.hyperedges);
         assert!(lgraph.options.graph_has_hyperedges);
@@ -3709,8 +3709,8 @@ mod tests {
                 let port = PortId::new(index);
                 assert_eq!(source.ports[port].side, output_side, "{direction:?}");
                 assert_eq!(target.ports[port].side, input_side, "{direction:?}");
-                assert_eq!(source.ports[port].outgoing_edges, vec![index]);
-                assert_eq!(target.ports[port].incoming_edges, vec![index]);
+                assert_eq!(source.ports[port].outgoing_edges, vec![EdgeId::new(index)]);
+                assert_eq!(target.ports[port].incoming_edges, vec![EdgeId::new(index)]);
             }
         }
     }
@@ -4220,11 +4220,11 @@ mod tests {
         );
         assert_eq!(
             layered_node(&lgraph, "A").ports[PortId::new(1)].outgoing_edges,
-            vec![0]
+            vec![EdgeId::new(0)]
         );
         assert_eq!(
             layered_node(&lgraph, "B").ports[PortId::new(0)].incoming_edges,
-            vec![0]
+            vec![EdgeId::new(0)]
         );
     }
 

@@ -1554,6 +1554,7 @@ fn edge_routing_dependencies(options: &LayeredOptions, _processor: ProcessorKind
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::EdgeId;
     use crate::graph::PortId;
     use crate::graph::{LNode, LNodeKind, PortSide, PortType};
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, import_graph};
@@ -2668,8 +2669,8 @@ mod tests {
         assert!(executed.contains(&ProcessorKind::SelfLoopPortRestorer));
         assert!(executed.contains(&ProcessorKind::SelfLoopRouter));
         assert!(executed.contains(&ProcessorKind::SelfLoopPostProcessor));
-        assert!(graph.edge_source_attached(0));
-        assert!(graph.edge_target_attached(0));
+        assert!(graph.edge_source_attached(EdgeId::new(0)));
+        assert!(graph.edge_target_attached(EdgeId::new(0)));
         assert_eq!(graph.edges[0].source.node, graph.edges[0].target.node);
         assert!(graph.edges[0].bend_points.len() >= 2);
         assert!(
@@ -3000,7 +3001,7 @@ mod tests {
                 assert!(
                     label
                         .end_label_edge
-                        .is_none_or(|index| index < graph.edges.len())
+                        .is_none_or(|index| index.index() < graph.edges.len())
                 );
             }
         }
@@ -3566,7 +3567,7 @@ mod tests {
         assert_eq!(label.size.height, 10.0);
         assert!(label.position.x.is_finite());
         assert!(label.position.y.is_finite());
-        assert_eq!(label.end_label_edge, Some(0));
+        assert_eq!(label.end_label_edge, Some(EdgeId::new(0)));
         assert!(
             graph
                 .layerless_nodes

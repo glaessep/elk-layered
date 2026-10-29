@@ -17,9 +17,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::graph::{EdgeId, EdgeSlice, 
-    GraphArena, GraphId, LGraph, LNode, LNodeKind, NodeId, NodeSlice, OtherGraphs, PortId, PortRef,
-    PortSide, PortType,
+use crate::graph::{
+    EdgeId, EdgeSlice, GraphArena, GraphId, LGraph, LNode, LNodeKind, NodeId, NodeSlice,
+    OtherGraphs, PortId, PortRef, PortSide, PortType,
 };
 use crate::options::{OrderingStrategy, PortConstraints};
 use crate::p3order::counting::{
@@ -6384,7 +6384,7 @@ mod greedy_port_distributor_tests {
         assert_eq!(bottom_edge.target, port(a, 1));
         assert_eq!(
             graph.layerless_nodes[a].ports[PortId::new(0)].incoming_edges,
-            vec![0]
+            vec![EdgeId::new(0)]
         );
         assert_eq!(
             graph.layerless_nodes[a].ports.position(PortId::new(0)),

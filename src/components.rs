@@ -10,8 +10,9 @@
 
 mod group;
 
-use crate::graph::{EdgeId, EdgeSlice, 
-    GraphArena, GraphId, LGraph, LLabel, LNodeKind, LPoint, LSize, NodeId, NodeSlice, PortRef,
+use crate::graph::{
+    EdgeId, EdgeSlice, GraphArena, GraphId, LGraph, LLabel, LNodeKind, LPoint, LSize, NodeId,
+    NodeSlice, PortRef,
 };
 use crate::options::{HierarchyHandling, PortConstraints};
 use crate::pipeline::PipelineResult;
@@ -84,23 +85,25 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
             // pushes so this iterative traversal retains the source recursive DFS order.
             for port in node.ports.iter().rev() {
                 for &edge in port.outgoing_edges.iter().rev() {
-                    let edge = graph
-                        .edges
-                        .get_edge(edge)
-                        .ok_or(ComponentError::InvalidReference {
-                            kind: "edge",
-                            index: edge.index(),
-                        })?;
+                    let edge =
+                        graph
+                            .edges
+                            .get_edge(edge)
+                            .ok_or(ComponentError::InvalidReference {
+                                kind: "edge",
+                                index: edge.index(),
+                            })?;
                     stack.push(edge.target.node);
                 }
                 for &edge in port.incoming_edges.iter().rev() {
-                    let edge = graph
-                        .edges
-                        .get_edge(edge)
-                        .ok_or(ComponentError::InvalidReference {
-                            kind: "edge",
-                            index: edge.index(),
-                        })?;
+                    let edge =
+                        graph
+                            .edges
+                            .get_edge(edge)
+                            .ok_or(ComponentError::InvalidReference {
+                                kind: "edge",
+                                index: edge.index(),
+                            })?;
                     stack.push(edge.source.node);
                 }
             }

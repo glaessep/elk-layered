@@ -10,10 +10,11 @@
 use std::collections::VecDeque;
 
 use crate::common::cells::grow_label_cell;
-use crate::graph::{EdgeId, EdgeSlice, 
-    GraphId, LGraph, LMargin, LNodeKind, LPoint, LSize, NodeId, NodePorts, NodeSlice, OtherGraphs,
-    PortId, PortRef, PortSide, SelfHyperLoop, SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder,
-    SelfLoopLabelAlignment, SelfLoopLabelRef, SelfLoopPort, SelfLoopType,
+use crate::graph::{
+    EdgeId, EdgeSlice, GraphId, LGraph, LMargin, LNodeKind, LPoint, LSize, NodeId, NodePorts,
+    NodeSlice, OtherGraphs, PortId, PortRef, PortSide, SelfHyperLoop, SelfHyperLoopLabels,
+    SelfLoopEdge, SelfLoopHolder, SelfLoopLabelAlignment, SelfLoopLabelRef, SelfLoopPort,
+    SelfLoopType,
 };
 use crate::options::{SelfLoopDistributionStrategy, SelfLoopOrderingStrategy};
 use crate::p5edges::orthogonal::{HyperEdgeGraph, HyperEdgeSegment, break_non_critical_cycles};
@@ -2812,8 +2813,8 @@ mod tests {
         preprocess_self_loops(&mut graph, crate::graph::OtherGraphs::none());
 
         assert_eq!(graph.self_loop_holders.len(), 1);
-        assert!(!graph.edge_source_attached(0));
-        assert!(!graph.edge_target_attached(0));
+        assert!(!graph.edge_source_attached(EdgeId::new(0)));
+        assert!(!graph.edge_target_attached(EdgeId::new(0)));
         assert!(graph.self_loop_holders[0].ports_hidden);
     }
 

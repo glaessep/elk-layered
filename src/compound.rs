@@ -6,11 +6,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::{EdgeId, 
-    CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphArena, GraphId, GraphNodeRef,
-    GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep, LGraph, LLabel, LNodeKind, LPoint,
-    LPort, LSize, LayeredEdge, NodeId, NodeSlice, PortId, PortRef, PortSide, PortType,
-    apply_port_index_to_dummy, create_external_port_dummy, port_side_from_direction,
+use crate::graph::{
+    CompoundEdgeSegment, CrossHierarchyEdge, EdgeId, EdgeLabelPlacement, GraphArena, GraphId,
+    GraphNodeRef, GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep, LGraph, LLabel,
+    LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, NodeSlice, PortId, PortRef, PortSide,
+    PortType, apply_port_index_to_dummy, create_external_port_dummy, port_side_from_direction,
 };
 use crate::options::{ElkDirection, PortConstraints};
 
@@ -2415,14 +2415,16 @@ mod tests {
                 .position(|node| node.id == "group")
                 .expect("compound parent node"),
         );
-        let edge_index = graph
-            .edges
-            .iter()
-            .position(|edge| {
-                edge.compound_segment.is_some()
-                    && (edge.source.node == group || edge.target.node == group)
-            })
-            .expect("root compound segment");
+        let edge_index = EdgeId::new(
+            graph
+                .edges
+                .iter()
+                .position(|edge| {
+                    edge.compound_segment.is_some()
+                        && (edge.source.node == group || edge.target.node == group)
+                })
+                .expect("root compound segment"),
+        );
         let original_port = if graph.edges[edge_index].source.node == group {
             graph.edges[edge_index].source
         } else {
