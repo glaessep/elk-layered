@@ -2072,6 +2072,10 @@ fn remove_node(nodes: &mut Vec<NodeId>, node_index: NodeId) {
 /// https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/graph/LGraphUtil.java
 ///
 /// `node` is the id the dummy will have in its graph. The dummy's one port names it as its owner.
+///
+/// `data` holds what the caller knows about the dummy and ELK's method does not take: the scope
+/// port and the parent port key and type. The method sets the side, the size, the ratio or
+/// position and the in-layer constraint itself, so it replaces those four fields of `data`.
 #[allow(clippy::too_many_arguments)]
 pub fn create_external_port_dummy(
     node: NodeId,
@@ -2086,6 +2090,7 @@ pub fn create_external_port_dummy(
     port_node_size: LSize,
     border_offset: f64,
     layout_direction: ElkDirection,
+    data: ExternalPortData,
 ) -> LNode {
     let external_side = if port_constraints.is_side_fixed() {
         port_side
@@ -2099,7 +2104,9 @@ pub fn create_external_port_dummy(
     let mut external = ExternalPortData {
         side: external_side,
         size: port_size,
-        ..ExternalPortData::default()
+        ratio_or_position: 0.0,
+        in_layer_constraint: InLayerConstraint::None,
+        ..data
     };
     dummy.port_constraints = PortConstraints::FixedPos;
 
@@ -2850,7 +2857,41 @@ mod tests {
             LSize::default(),
             0.0,
             ElkDirection::Right,
+            ExternalPortData::default(),
         )
+    }
+
+    // Mutation: in `create_external_port_dummy`, leave out `..data`, or keep the side of `data`
+    // instead of the one the method works out.
+    #[test]
+    fn create_external_port_dummy_keeps_the_callers_data_and_sets_its_own() {
+        let dummy = create_external_port_dummy(
+            NodeId::new(0),
+            "dummy",
+            "port",
+            PortType::Output,
+            PortConstraints::FixedSide,
+            PortSide::West,
+            0,
+            LPoint::default(),
+            LSize::default(),
+            LSize::default(),
+            0.0,
+            ElkDirection::Right,
+            ExternalPortData {
+                side: PortSide::North,
+                scope_port: Some(3),
+                parent_port_key: Some("key".to_string()),
+                parent_port_type: Some(PortType::Input),
+                ..ExternalPortData::default()
+            },
+        );
+
+        let external = dummy.external_port().unwrap();
+        assert_eq!(external.side, PortSide::West);
+        assert_eq!(external.scope_port, Some(3));
+        assert_eq!(external.parent_port_key.as_deref(), Some("key"));
+        assert_eq!(external.parent_port_type, Some(PortType::Input));
     }
 
     // Mutation: in `push_external_port_dummy`, mark the layer constraint of every dummy explicit,
@@ -2951,6 +2992,7 @@ mod tests {
             LSize::default(),
             0.0,
             ElkDirection::Down,
+            ExternalPortData::default(),
         );
 
         assert_eq!(dummy.kind(), LNodeKind::ExternalPort);
@@ -2988,6 +3030,7 @@ mod tests {
                 LSize::default(),
                 0.0,
                 ElkDirection::Right,
+                ExternalPortData::default(),
             )
         });
         assert_eq!(id, NodeId::new(2));
@@ -3012,6 +3055,7 @@ mod tests {
             LSize::default(),
             0.0,
             ElkDirection::Right,
+            ExternalPortData::default(),
         );
 
         assert_eq!(dummy.ports[PortId::new(0)].node, NodeId::new(5));
@@ -3038,6 +3082,7 @@ mod tests {
             },
             -3.0,
             ElkDirection::Right,
+            ExternalPortData::default(),
         );
 
         assert_eq!(dummy.layer_constraint, LayerConstraint::FirstSeparate);

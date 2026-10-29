@@ -7,10 +7,11 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
-    CompoundEdgeSegment, CrossHierarchyEdge, EdgeId, EdgeLabelPlacement, GraphArena, GraphId,
-    GraphNodeRef, GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep, IdVec, LGraph, LLabel,
-    LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, PortId, PortRef, PortSide, PortType,
-    apply_port_index_to_dummy, create_external_port_dummy, port_side_from_direction,
+    CompoundEdgeSegment, CrossHierarchyEdge, EdgeId, EdgeLabelPlacement, ExternalPortData,
+    GraphArena, GraphId, GraphNodeRef, GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep,
+    IdVec, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, PortId, PortRef,
+    PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
+    port_side_from_direction,
 };
 use crate::options::{ElkDirection, PortConstraints};
 
@@ -1537,12 +1538,13 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
                     parent_size,
                     port.border_offset.unwrap_or(0.0),
                     nested_direction,
+                    ExternalPortData {
+                        parent_port_key: Some(port.id.clone()),
+                        parent_port_type: Some(port.port_type),
+                        ..ExternalPortData::default()
+                    },
                 );
                 apply_port_index_to_dummy(&mut dummy, port_constraints, port.port_index);
-                if let Some(external) = dummy.external_port_mut() {
-                    external.parent_port_key = Some(port.id.clone());
-                    external.parent_port_type = Some(port.port_type);
-                }
                 dummy
             });
             let dummy_side = nested_graph.layerless_nodes[dummy_node]
@@ -1865,21 +1867,21 @@ fn create_parent_boundary_port(
             LSize::default(),
             border_offset,
             direction,
+            ExternalPortData {
+                parent_port_key: (!parent_port_key.is_empty()).then(|| parent_port_key.to_string()),
+                parent_port_type: if connects_parent_node {
+                    Some(parent_port_type)
+                } else {
+                    Some(dummy_port_type)
+                },
+                ..ExternalPortData::default()
+            },
         );
         apply_port_index_to_dummy(
             &mut dummy,
             parent_constraints,
             named.and_then(|named| named.port_index),
         );
-        if let Some(external) = dummy.external_port_mut() {
-            external.parent_port_key =
-                (!parent_port_key.is_empty()).then(|| parent_port_key.to_string());
-            external.parent_port_type = if connects_parent_node {
-                Some(parent_port_type)
-            } else {
-                Some(dummy_port_type)
-            };
-        }
         dummy
     });
     PortRef {

@@ -14,9 +14,9 @@ use crate::compound::{
     source_ported_cross_hierarchy_segments,
 };
 use crate::graph::{
-    CompoundEdgeSegment, EdgeId, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge,
-    HierarchyStep, LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId,
-    PlacementOptions, PortId, PortRef, PortSide, PortType, SelfLoopOptions,
+    CompoundEdgeSegment, EdgeId, EdgeLabelPlacement, ExternalPortData, GraphArena, GraphId,
+    HierarchyEdge, HierarchyStep, LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize,
+    LayeredEdge, NodeId, PlacementOptions, PortId, PortRef, PortSide, PortType, SelfLoopOptions,
     apply_port_index_to_dummy, create_external_port_dummy, is_across_flow, port_box,
     port_side_from_direction,
 };
@@ -440,14 +440,15 @@ fn import_external_ports(
                 scope.node_size,
                 border_offset,
                 direction,
+                ExternalPortData {
+                    scope_port: Some(position),
+                    ..ExternalPortData::default()
+                },
             );
             apply_port_index_to_dummy(&mut dummy, constraints, port.index.map(|i| i as isize));
             let dummy_port = &mut dummy.ports[PortId::new(0)];
             dummy_port.named = true;
             dummy_port.connected_to_external_nodes = port.connected_to_external_nodes;
-            if let Some(external) = dummy.external_port_mut() {
-                external.scope_port = Some(position);
-            }
             dummy
         });
         dummies.insert(port.id.clone(), node);
@@ -1154,7 +1155,7 @@ fn ensure_inside_self_loop_dummy(
     let dummy_id = format!("external:{parent_node_id}");
     let direction = graph.options.direction;
     let node = graph.push_external_port_dummy(|node| {
-        let mut dummy = create_external_port_dummy(
+        create_external_port_dummy(
             node,
             dummy_id,
             parent_port_key.to_string(),
@@ -1170,12 +1171,12 @@ fn ensure_inside_self_loop_dummy(
             LSize::default(),
             0.0,
             direction,
-        );
-        if let Some(external) = dummy.external_port_mut() {
-            external.parent_port_key = Some(parent_port_key.to_string());
-            external.parent_port_type = Some(port_type);
-        }
-        dummy
+            ExternalPortData {
+                parent_port_key: Some(parent_port_key.to_string()),
+                parent_port_type: Some(port_type),
+                ..ExternalPortData::default()
+            },
+        )
     });
     let port = PortRef {
         node,
