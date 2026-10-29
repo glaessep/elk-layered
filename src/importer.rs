@@ -909,22 +909,6 @@ impl HierarchicalImportArena {
         }
     }
 
-    fn root(&self) -> &LGraph {
-        self.graphs.root()
-    }
-
-    fn root_mut(&mut self) -> &mut LGraph {
-        self.graphs.root_mut()
-    }
-
-    fn graph(&self, slot: GraphId) -> &LGraph {
-        &self.graphs[slot]
-    }
-
-    fn graph_mut(&mut self, slot: GraphId) -> &mut LGraph {
-        &mut self.graphs[slot]
-    }
-
     fn graph_slot_for_parent(&self, index: &InputIndex<'_>, parent: Option<&str>) -> GraphId {
         // Only IncludeChildren (plus the explicit inside-self-loop dummy case) creates a slot.
         // Unmaterialized SeparateChildren scopes retain the importer's historical root fallback.
@@ -979,7 +963,7 @@ fn import_hierarchical_graph(
             order
         });
         let nested = {
-            let parent_graph = arena.graph_mut(parent_slot);
+            let parent_graph = &mut arena.graphs[parent_slot];
             let node_index = transform_node(node, parent_graph, node_model_order);
             if node_needs_nested_graph(index, &parent_graph.options, node) {
                 let materializes_children =
@@ -1031,23 +1015,22 @@ fn import_hierarchical_graph(
     edge_graph_queue.push_back((None, GraphId::ROOT));
     while let Some((parent, owner_slot)) = edge_graph_queue.pop_front() {
         for edge in index.edges(parent).iter().copied() {
-            let edge_model_order = needs_model_order_based_on_parent(&arena.root().options)
+            let edge_model_order = needs_model_order_based_on_parent(&arena.graphs.root().options)
                 .then(|| edge.model_order.unwrap_or(edge_order));
             let source_parent = index.node_parent(edge.source.as_str());
             let target_parent = index.node_parent(edge.target.as_str());
             let source_container_slot = arena.graph_slot_for_parent(index, source_parent);
-            let inside_self_loops_activate = arena
-                .graph(source_container_slot)
+            let inside_self_loops_activate = arena.graphs[source_container_slot]
                 .options
                 .inside_self_loops_activate;
 
             if edge.inside_self_loops_yo && edge.source == edge.target && inside_self_loops_activate
             {
                 let graph_slot = arena.graph_slot_for_parent(index, Some(edge.source.as_str()));
-                let graph = arena.graph_mut(graph_slot);
+                let graph = &mut arena.graphs[graph_slot];
                 transform_inside_self_loop(edge, graph, edge_model_order, port_index);
             } else if source_parent == target_parent {
-                let graph = arena.graph_mut(owner_slot);
+                let graph = &mut arena.graphs[owner_slot];
                 transform_edge(
                     edge,
                     index,
@@ -1737,7 +1720,7 @@ fn transform_cross_hierarchy_edge(
     model_order: Option<usize>,
     port_index: &mut ImportPortIndex,
 ) -> ImportResult<()> {
-    let merge_edges = arena.root().options.merge_edges;
+    let merge_edges = arena.graphs.root().options.merge_edges;
     let source_parent = index.node_parent(edge.source.as_str());
     let target_parent = index.node_parent(edge.target.as_str());
 
@@ -1799,7 +1782,7 @@ fn transform_cross_hierarchy_edge(
     if parallel(source.attached, source_incoming, source_outgoing)
         || parallel(target.attached, target_incoming, target_outgoing)
     {
-        arena.graph_mut(owner_slot).graph_properties.hyperedges = true;
+        arena.graphs[owner_slot].graph_properties.hyperedges = true;
     }
 
     // The owned paths are part of ELK's compound-edge input, not graph locators. Build each once
@@ -1822,7 +1805,7 @@ fn transform_cross_hierarchy_edge(
             .hierarchy_edge_output_path(edge.target.as_str())
             .unwrap_or_default(),
     );
-    arena.root_mut().hierarchy_edges.push(HierarchyEdge {
+    arena.graphs.root_mut().hierarchy_edges.push(HierarchyEdge {
         id: edge.id.clone(),
         source_node_id: source.node_id,
         target_node_id: target.node_id,
@@ -1879,7 +1862,7 @@ fn hierarchy_edge_end(
     if node_id == index.scope_id && !index.nodes.contains_key(node_id) {
         // The dummy is a node of the root graph with the id of its port.
         let end = scope_port_end(edge, node_id, port_id, index)?;
-        let dummy = &arena.root().layerless_nodes[end.node];
+        let dummy = &arena.graphs.root().layerless_nodes[end.node];
         let port = &dummy.ports[end.port];
         return Ok(HierarchyEdgeEnd {
             node_id: dummy.id.clone(),
@@ -1890,7 +1873,7 @@ fn hierarchy_edge_end(
     }
     let slot = arena.graph_slot_for_parent(index, graph_parent);
     if let Some(port_id) = port_id {
-        let (_, attached) = named_port(edge, node_id, port_id, index, arena.graph(slot))?;
+        let (_, attached) = named_port(edge, node_id, port_id, index, &arena.graphs[slot])?;
         return Ok(HierarchyEdgeEnd {
             node_id: node_id.to_string(),
             port_key: port_id.to_string(),
@@ -1900,7 +1883,7 @@ fn hierarchy_edge_end(
     }
     let port_key = hierarchy_port_key(node_id, edge_order, role, merge_edges, port_type);
     let end = ensure_hierarchy_endpoint_port(
-        arena.graph_mut(slot),
+        &mut arena.graphs[slot],
         graph_parent,
         index.child_position(node_id),
         node_id,
@@ -1909,7 +1892,7 @@ fn hierarchy_edge_end(
         port_index,
     )
     .ok_or_else(missing_endpoint)?;
-    let port = &arena.graph(slot).layerless_nodes[end.node].ports[end.port];
+    let port = &arena.graphs[slot].layerless_nodes[end.node].ports[end.port];
     let attached = (port.incoming_edges.len(), port.outgoing_edges.len());
     Ok(HierarchyEdgeEnd {
         node_id: node_id.to_string(),
