@@ -46,17 +46,15 @@ struct LayeringInput<'a> {
 
 impl<'a> LayeringInput<'a> {
     fn new(graph: &'a LGraph) -> Self {
-        let nodes = graph
-            .node_ids()
-            .filter(|&node| !graph.layerless_nodes[node].hidden)
-            .collect();
+        let hidden = graph.hidden_mask();
+        let nodes = graph.node_ids().filter(|&node| !hidden[node]).collect();
         let incoming = graph
             .node_ids()
             .map(|node| {
                 graph
                     .node_incoming_edges(node)
                     .into_iter()
-                    .filter(|&edge| !graph.layerless_nodes[graph.edges[edge].source().node].hidden)
+                    .filter(|&edge| !hidden[graph.edges[edge].source().node])
                     .collect()
             })
             .collect();
@@ -66,7 +64,7 @@ impl<'a> LayeringInput<'a> {
                 graph
                     .node_outgoing_edges(node)
                     .into_iter()
-                    .filter(|&edge| !graph.layerless_nodes[graph.edges[edge].target().node].hidden)
+                    .filter(|&edge| !hidden[graph.edges[edge].target().node])
                     .collect()
             })
             .collect();
@@ -129,9 +127,10 @@ fn iteration_limit(thoroughness: usize, component_len: usize) -> usize {
 
 pub fn layer_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexError> {
     graph.clear_layers();
+    let hidden = graph.hidden_mask();
     let nodes = graph
         .node_ids()
-        .filter(|&node| !graph.layerless_nodes[node].hidden)
+        .filter(|&node| !hidden[node])
         .collect::<Vec<_>>();
     if nodes.is_empty() {
         return Ok(());

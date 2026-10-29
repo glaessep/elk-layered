@@ -434,7 +434,6 @@ pub fn preprocess_layer_constraints(graph: &mut LGraph) -> IntermediateResult<()
     for node in nodes {
         if is_relevant_layer_constraint_node(graph, node) {
             hide_layer_constraint_node(graph, node, &mut hidden_connections)?;
-            graph.layerless_nodes[node].hidden = true;
             graph.remove_node_from_layer(node);
             graph.hidden_nodes.push(node);
         }
@@ -863,7 +862,6 @@ fn restore_hidden_layer_constraint_nodes(graph: &mut LGraph) {
     let mut last_separate_nodes = Vec::new();
 
     for node in hidden_nodes {
-        graph.layerless_nodes[node].hidden = false;
         match graph.layerless_nodes[node].layer_constraint {
             LayerConstraint::FirstSeparate => first_separate_nodes.push(node),
             LayerConstraint::LastSeparate => last_separate_nodes.push(node),
@@ -5324,6 +5322,7 @@ mod tests {
         assert_eq!(target_incoming, &expected_incoming);
     }
 
+    // Mutation: in `preprocess_layer_constraints`, do not push the hidden node to `hidden_nodes`.
     #[test]
     fn layer_constraint_preprocessor_hides_separate_nodes_before_layering() {
         let mut first = node("start");
@@ -5344,7 +5343,7 @@ mod tests {
 
         let hidden = graph.node_named("start");
         let a = graph.node_named("A");
-        assert!(graph.layerless_nodes[hidden].hidden);
+        assert!(graph.hidden_mask()[hidden]);
         assert_eq!(graph.hidden_nodes, vec![hidden]);
         assert_eq!(
             graph.layerless_nodes[a].layer_constraint,
@@ -5410,6 +5409,7 @@ mod tests {
         );
     }
 
+    // Mutation: in `restore_hidden_layer_constraint_nodes`, keep `hidden_nodes` as it is.
     #[test]
     fn layer_constraint_postprocessor_restores_hidden_nodes_in_separate_layer() {
         let mut first = node("start");
@@ -5432,7 +5432,7 @@ mod tests {
 
         let start = graph.node_named("start");
         let a = graph.node_named("A");
-        assert!(!graph.layerless_nodes[start].hidden);
+        assert!(!graph.hidden_mask()[start]);
         assert!(graph.hidden_nodes.is_empty());
         assert_eq!(graph.layerless_nodes[start].layer_index(), Some(0));
         assert!(

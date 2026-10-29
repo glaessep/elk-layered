@@ -29,11 +29,12 @@ struct Auxiliary {
 }
 
 pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexError> {
+    let hidden = graph.hidden_mask();
     let order: Vec<_> = graph
         .layers()
         .iter()
         .flat_map(|layer| layer.nodes().iter().copied())
-        .filter(|node| !graph.layerless_nodes[*node].hidden)
+        .filter(|node| !hidden[*node])
         .collect();
     if order.is_empty() {
         return Ok(());
@@ -65,7 +66,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
     for layer in graph.layers() {
         let mut previous: Option<NodeId> = None;
         for &node in layer.nodes() {
-            if graph.layerless_nodes[node].hidden {
+            if hidden[node] {
                 continue;
             }
             let head = aux.graph.add_node(Some(node));

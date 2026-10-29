@@ -191,7 +191,6 @@ pub struct LNode {
     pub in_layer_layout_unit: Option<NodeId>,
     pub barycenter_associates: Vec<NodeId>,
     pub layer_constraint_explicit: bool,
-    pub hidden: bool,
     pub compound: bool,
 }
 
@@ -448,7 +447,6 @@ impl LNode {
             in_layer_layout_unit: None,
             barycenter_associates: Vec::new(),
             layer_constraint_explicit: false,
-            hidden: false,
             compound: false,
         }
     }
@@ -1103,6 +1101,16 @@ impl LGraph {
             port.node = id;
         }
         self.layerless_nodes.push(node)
+    }
+
+    /// Which nodes the layer constraint preprocessing has hidden from the layering. A node is
+    /// hidden while it is in [`Self::hidden_nodes`].
+    pub fn hidden_mask(&self) -> IdVec<NodeId, bool> {
+        let mut mask = IdVec::filled(self.layerless_nodes.len(), false);
+        for &node in &self.hidden_nodes {
+            mask[node] = true;
+        }
+        mask
     }
 
     /// The layers, left to right.
@@ -2401,6 +2409,22 @@ mod tests {
 
         assert_eq!(node.kind(), LNodeKind::Normal);
         assert!(node.external_port().is_none());
+    }
+
+    // Mutation: in `hidden_mask`, set the flag of the first node instead of the listed ones.
+    #[test]
+    fn hidden_mask_marks_the_listed_hidden_nodes() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        graph.hidden_nodes = vec![all[2]];
+
+        let mask = graph.hidden_mask();
+
+        assert_eq!(
+            [mask[all[0]], mask[all[1]], mask[all[2]]],
+            [false, false, true]
+        );
+        assert!(graph.layerless_nodes.iter().count() == mask.len());
     }
 
     // Mutation: swap `x` and `y`, or `width` and `height`, in `port_box`.
