@@ -17,6 +17,7 @@ use crate::graph::{
 use crate::options::PortConstraints;
 use crate::p3order::sweep::minimize_crossings_layer_sweep_hierarchical_with_type;
 
+/// What ran on one graph of a compound run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphExecution {
     /// The graph the processors run on.
@@ -25,6 +26,7 @@ pub struct GraphExecution {
     pub graph_name: String,
     /// The node the graph lies in. `None` for the root.
     pub parent: Option<GraphParent>,
+    /// The processors that ran on the graph, in the order they ran.
     pub processors: Vec<Processor>,
 }
 
@@ -43,14 +45,29 @@ pub(super) struct CompoundRun {
 
 impl CompoundRun {
     /// `selected` holds the strategies of every graph, in discovery order, from
-    /// [`select_strategies`]. The configurator has run since, so each list is built from the
-    /// graph as it is now.
-    pub(super) fn new(graphs: &GraphArena, selected: Vec<(GraphId, Strategies)>) -> Self {
+    /// [`select_strategies`]. The preprocessor and the configurator have run since, so each list
+    /// is built from the graph as it is now. ELK finds the graphs again after them, so this does
+    /// too, and refuses a hierarchy whose graphs are not the ones that were selected.
+    pub(super) fn new(
+        graphs: &GraphArena,
+        selected: Vec<(GraphId, Strategies)>,
+    ) -> PipelineResult<Self> {
+        let found = graphs.discovery_order(GraphId::ROOT);
+        if found.len() != selected.len()
+            || found
+                .iter()
+                .zip(&selected)
+                .any(|(id, (chosen, _))| id != chosen)
+        {
+            return Err(PipelineError::UnsupportedCompoundGraph {
+                reason: "the graphs of the hierarchy changed between the choice of the strategies and the run",
+            });
+        }
         let algorithms = selected
             .into_iter()
             .map(|(graph, strategies)| graph_algorithm(&graphs[graph], strategies))
             .collect();
-        Self { algorithms }
+        Ok(Self { algorithms })
     }
 
     fn into_executions(self) -> Vec<GraphExecution> {
@@ -126,7 +143,7 @@ pub fn execute_ported_compound_processors(
     configure_graph_properties(graphs)?;
     review_and_correct_hierarchical_processors(graphs)?;
 
-    let mut run = CompoundRun::new(graphs, selected);
+    let mut run = CompoundRun::new(graphs, selected)?;
     const ROOT_ALGORITHM: usize = 0;
 
     while run.algorithms[ROOT_ALGORITHM].next_processor

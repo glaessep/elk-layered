@@ -37,14 +37,9 @@ pub(crate) enum LayeredPhase {
 }
 
 impl LayeredPhase {
+    /// The slot in front of the phase: the variants stand in the order of the phases.
     fn ordinal(self) -> usize {
-        match self {
-            Self::P1CycleBreaking => 0,
-            Self::P2Layering => 1,
-            Self::P3NodeOrdering => 2,
-            Self::P4NodePlacement => 3,
-            Self::P5EdgeRouting => 4,
-        }
+        self as usize
     }
 }
 
@@ -145,15 +140,25 @@ pub(crate) enum EdgeRouter {
 /// ask for. The names are ELK's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnportedProcessor {
+    /// `LayeringStrategy::BreadthFirstModelOrder`.
     BreadthFirstModelOrderLayerer,
+    /// `LayeringStrategy::DepthFirstModelOrder`.
     DepthFirstModelOrderLayerer,
+    /// `CrossingMinimizationStrategy::Interactive`.
     InteractiveCrossingMinimizer,
+    /// `NodePlacementStrategy::Interactive`.
     InteractiveNodePlacer,
+    /// `NodePlacementStrategy::LinearSegments`.
     LinearSegmentsNodePlacer,
+    /// `EdgeRouting::Polyline`.
     PolylineEdgeRouter,
+    /// `EdgeRouting::Splines`.
     SplineEdgeRouter,
+    /// `WrappingStrategy::SingleEdge`.
     SingleEdgeGraphWrapper,
+    /// `WrappingStrategy::MultiEdge`: the first of its three breaking-point processors.
     BreakingPointInserter,
+    /// A graph with hypernodes.
     HypernodesProcessor,
 }
 
@@ -292,33 +297,35 @@ impl Strategies {
     /// Picks the processor of each phase, then refuses the options and graph properties that
     /// need a processor this crate has not ported.
     ///
-    /// The first refusal wins in this order: phases one to five, the wrapping strategy, then
-    /// hypernodes. ELK's own slot order decides which of two unported processors comes first in a
-    /// run, but the run does not start, so it does not matter which of them the error names.
+    /// The first refusal is the one a run would reach first. The checks stand in the order of
+    /// the schedule: the layerer (phase two), the multi-edge breaking points (in front of phase
+    /// three), the crossing minimizer, the single-edge wrapper (in front of phase four), the node
+    /// placer, the edge router and the hypernodes processor (after phase five).
     pub(crate) fn select(
         options: &LayeredOptions,
         properties: &GraphProperties,
     ) -> PipelineResult<Self> {
-        let strategies = Self {
-            cycle_breaker: CycleBreaker::select(options.cycle_breaking_strategy),
-            layerer: Layerer::select(options.layering_strategy)?,
-            crossing_minimizer: CrossingMinimizer::select(options.crossing_minimization_strategy)?,
-            node_placer: NodePlacer::select(options.node_placement_strategy)?,
-            edge_router: EdgeRouter::select(options.edge_routing)?,
-        };
-        match options.wrapping_strategy {
-            WrappingStrategy::Off => {}
-            WrappingStrategy::SingleEdge => {
-                return Err(unported(UnportedProcessor::SingleEdgeGraphWrapper));
-            }
-            WrappingStrategy::MultiEdge => {
-                return Err(unported(UnportedProcessor::BreakingPointInserter));
-            }
+        let cycle_breaker = CycleBreaker::select(options.cycle_breaking_strategy);
+        let layerer = Layerer::select(options.layering_strategy)?;
+        if options.wrapping_strategy == WrappingStrategy::MultiEdge {
+            return Err(unported(UnportedProcessor::BreakingPointInserter));
         }
+        let crossing_minimizer = CrossingMinimizer::select(options.crossing_minimization_strategy)?;
+        if options.wrapping_strategy == WrappingStrategy::SingleEdge {
+            return Err(unported(UnportedProcessor::SingleEdgeGraphWrapper));
+        }
+        let node_placer = NodePlacer::select(options.node_placement_strategy)?;
+        let edge_router = EdgeRouter::select(options.edge_routing)?;
         if properties.hypernodes {
             return Err(unported(UnportedProcessor::HypernodesProcessor));
         }
-        Ok(strategies)
+        Ok(Self {
+            cycle_breaker,
+            layerer,
+            crossing_minimizer,
+            node_placer,
+            edge_router,
+        })
     }
 
     fn phase_processors(self) -> [Processor; 5] {

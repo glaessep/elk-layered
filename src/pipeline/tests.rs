@@ -22,7 +22,7 @@ use crate::options::{
 };
 
 fn compound_run(graphs: &GraphArena) -> CompoundRun {
-    CompoundRun::new(graphs, select_strategies(graphs).unwrap())
+    CompoundRun::new(graphs, select_strategies(graphs).unwrap()).unwrap()
 }
 
 fn try_kinds(options: &LayeredOptions) -> PipelineResult<Vec<Processor>> {
@@ -99,7 +99,7 @@ fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
     }
 }
 
-// Mutation: move only the root into a new one-graph arena inside `run_processors_until_slot`,
+// Mutation: move only the root into a new one-graph arena inside `run_processors_until_processor`,
 // and put it back afterwards. The graph inside `group` is then dropped from the arena the
 // test passes in.
 #[test]
@@ -274,7 +274,7 @@ fn compound_round_reports_a_failing_child_processor_and_keeps_the_hierarchy() {
         height: 1.0,
     });
     let selected = select_strategies(&graphs).unwrap();
-    let mut run = CompoundRun::new(&graphs, selected);
+    let mut run = CompoundRun::new(&graphs, selected).unwrap();
     let child_index = run
         .algorithms
         .iter()
@@ -553,6 +553,7 @@ fn mermaid_wrapping_flags_do_not_enable_wrapping_processors_without_strategy() {
     assert!(try_kinds(&options).is_ok());
 }
 
+// Mutation: refuse `LayeringStrategy::NetworkSimplex` in `Layerer::select`.
 #[test]
 fn mermaid_reachable_flowchart_elk_processors_are_source_ported() {
     for direction in [
@@ -728,6 +729,8 @@ fn greedy_model_order_cycle_breaking_strategy_assembles_processor() {
     assert!(kinds(&options).contains(&Processor::CycleBreaker(CycleBreaker::GreedyModelOrder)));
 }
 
+// Mutation: map `NodePlacementStrategy::Simple` to `NodePlacer::BrandesKoepf` in
+// `NodePlacer::select`.
 #[test]
 fn documented_node_placement_strategies_assemble_public_processors() {
     let cases = [
@@ -2449,31 +2452,86 @@ fn a_graph_with_hypernodes_is_refused() {
 }
 
 #[test]
-fn the_first_unported_processor_is_named_by_phase_then_wrapping_then_hypernodes() {
-    let polyline_and_wrapper = options_with(|o| {
-        o.edge_routing = EdgeRouting::Polyline;
-        o.wrapping_strategy = WrappingStrategy::SingleEdge;
-    });
-    // Mutation: check the wrapping strategy before the phases in `Strategies::select`.
+fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
+    let cases = [
+        // Mutation: check the wrapping strategies before the layerer in `Strategies::select`.
+        (
+            options_with(|o| {
+                o.layering_strategy = LayeringStrategy::BreadthFirstModelOrder;
+                o.wrapping_strategy = WrappingStrategy::MultiEdge;
+            }),
+            UnportedProcessor::BreadthFirstModelOrderLayerer,
+        ),
+        // Mutation: check the crossing minimizer before the multi-edge breaking points in
+        // `Strategies::select`.
+        (
+            options_with(|o| {
+                o.crossing_minimization_strategy = CrossingMinimizationStrategy::Interactive;
+                o.wrapping_strategy = WrappingStrategy::MultiEdge;
+            }),
+            UnportedProcessor::BreakingPointInserter,
+        ),
+        // Mutation: check the single-edge wrapper before the crossing minimizer in
+        // `Strategies::select`.
+        (
+            options_with(|o| {
+                o.crossing_minimization_strategy = CrossingMinimizationStrategy::Interactive;
+                o.wrapping_strategy = WrappingStrategy::SingleEdge;
+            }),
+            UnportedProcessor::InteractiveCrossingMinimizer,
+        ),
+        // Mutation: check the node placer before the single-edge wrapper in
+        // `Strategies::select`.
+        (
+            options_with(|o| {
+                o.node_placement_strategy = NodePlacementStrategy::Interactive;
+                o.wrapping_strategy = WrappingStrategy::SingleEdge;
+            }),
+            UnportedProcessor::SingleEdgeGraphWrapper,
+        ),
+    ];
+    for (options, kind) in cases {
+        assert_eq!(
+            try_kinds(&options),
+            Err(PipelineError::UnsupportedProcessor { kind })
+        );
+    }
+
+    let mut graph = LGraph::new(
+        "root",
+        options_with(|o| o.edge_routing = EdgeRouting::Polyline),
+    );
+    graph.graph_properties.hypernodes = true;
+    // Mutation: check hypernodes before the edge router in `Strategies::select`.
     assert_eq!(
-        try_kinds(&polyline_and_wrapper),
+        try_graph_kinds(&graph),
         Err(PipelineError::UnsupportedProcessor {
             kind: UnportedProcessor::PolylineEdgeRouter,
         })
     );
+}
 
-    let mut graph = LGraph::new(
-        "root",
-        options_with(|o| o.wrapping_strategy = WrappingStrategy::MultiEdge),
+// Mutation: leave out the comparison with the graphs found again in `CompoundRun::new`. A graph
+// that joined the hierarchy after the selection then gets no list and does not run.
+#[test]
+fn a_hierarchy_that_changed_since_the_selection_is_refused() {
+    let mut graphs = deep_compound_chain(2);
+    let selected = select_strategies(&graphs).unwrap();
+    let holder = graphs.root_mut().layerless_nodes.len();
+    graphs
+        .root_mut()
+        .layerless_nodes
+        .push(LNode::new("late", 1.0, 1.0, None));
+    graphs.nest(
+        GraphId::ROOT,
+        NodeId::new(holder),
+        LGraph::new("late-child", LayeredOptions::default()),
     );
-    graph.graph_properties.hypernodes = true;
-    // Mutation: check hypernodes before the wrapping strategy in `Strategies::select`.
-    assert_eq!(
-        try_graph_kinds(&graph),
-        Err(PipelineError::UnsupportedProcessor {
-            kind: UnportedProcessor::BreakingPointInserter,
-        })
-    );
+
+    assert!(matches!(
+        CompoundRun::new(&graphs, selected),
+        Err(PipelineError::UnsupportedCompoundGraph { .. })
+    ));
 }
 
 // Mutation: in `select_strategies`, drop the `.rev()`, so the root is selected first. The root's

@@ -28,7 +28,7 @@ use crate::p1cycles::{
 use crate::p2layers::{layer_network_simplex, layer_with_strategy};
 use crate::p3order::{
     process_port_sides, sort_by_input_model, sort_port_lists,
-    sweep::minimize_crossings_layer_sweep_with_type,
+    sweep::{CrossMinType, minimize_crossings_layer_sweep_with_type},
 };
 use crate::p4nodes::{
     calculate_innermost_node_margins, calculate_label_and_node_sizes, place_nodes_brandes_koepf,
@@ -67,7 +67,7 @@ pub(super) fn execute_processor(
         },
         Processor::CrossingMinimizer(CrossingMinimizer::NoMinimizer) => {}
         Processor::CrossingMinimizer(CrossingMinimizer::LayerSweep) => {
-            run_layer_sweep(graph, others, processor);
+            minimize_crossings_layer_sweep_with_type(graph, others, CrossMinType::Barycenter);
         }
         Processor::NodePlacer(placer) => match placer {
             NodePlacer::Simple => place_nodes_simple(graph),
@@ -78,14 +78,6 @@ pub(super) fn execute_processor(
         Processor::Intermediate(intermediate) => execute_intermediate(graph, others, intermediate)?,
     }
     Ok(())
-}
-
-/// Runs a hierarchy-aware layer sweep on one graph, as a flat run or a leaf graph does.
-fn run_layer_sweep(graph: &mut LGraph, others: OtherGraphs<'_>, processor: Processor) {
-    // Every caller passes a processor for which `hierarchy_aware_sweep` is `Some`.
-    if let Some(sweep) = processor.hierarchy_aware_sweep() {
-        minimize_crossings_layer_sweep_with_type(graph, others, sweep);
-    }
 }
 
 fn execute_intermediate(
@@ -117,8 +109,19 @@ fn execute_intermediate(
         P::SortByInputModelProcessor => sort_by_input_model(graph),
         P::NorthSouthPortPreprocessor => preprocess_north_south_ports(graph),
         P::NorthSouthPortPostprocessor => postprocess_north_south_ports(graph),
-        P::OneSidedGreedySwitch | P::TwoSidedGreedySwitch => {
-            run_layer_sweep(graph, others, Processor::Intermediate(processor));
+        P::OneSidedGreedySwitch => {
+            minimize_crossings_layer_sweep_with_type(
+                graph,
+                others,
+                CrossMinType::OneSidedGreedySwitch,
+            );
+        }
+        P::TwoSidedGreedySwitch => {
+            minimize_crossings_layer_sweep_with_type(
+                graph,
+                others,
+                CrossMinType::TwoSidedGreedySwitch,
+            );
         }
         P::SelfLoopPortRestorer => restore_self_loop_ports(graph, others),
         P::InLayerConstraintProcessor => process_in_layer_constraints(graph),
