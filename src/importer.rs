@@ -760,10 +760,6 @@ fn replace_scoped_boundary_endpoint(
     };
 }
 
-/// Stands in the port index for the node a hierarchy edge's parent end sits at: the dummy of an
-/// inside self loop belongs to no node of the graph.
-const PARENT_BOUNDARY: NodeId = NodeId::new(usize::MAX);
-
 #[derive(Default)]
 struct ImportNodePortIndex {
     by_type: HashMap<PortType, HashMap<String, PortRef>>,
@@ -771,7 +767,9 @@ struct ImportNodePortIndex {
 
 #[derive(Default)]
 struct ImportGraphPortIndex {
-    nodes: HashMap<NodeId, ImportNodePortIndex>,
+    /// `None` is the parent boundary: the dummy of an inside self loop belongs to no node of the
+    /// graph.
+    nodes: HashMap<Option<NodeId>, ImportNodePortIndex>,
 }
 
 struct ImportPortIndex {
@@ -829,7 +827,7 @@ impl ImportPortIndex {
     fn get(
         &mut self,
         graph_parent: Option<&str>,
-        node: NodeId,
+        node: Option<NodeId>,
         port_key: &str,
         port_type: PortType,
     ) -> Option<PortRef> {
@@ -847,7 +845,7 @@ impl ImportPortIndex {
     fn insert(
         &mut self,
         graph_parent: Option<&str>,
-        node: NodeId,
+        node: Option<NodeId>,
         port_key: &str,
         port_type: PortType,
         port: PortRef,
@@ -1144,12 +1142,7 @@ fn ensure_inside_self_loop_dummy(
     parent_port_key: &str,
     port_index: &mut ImportPortIndex,
 ) -> PortRef {
-    if let Some(port) = port_index.get(
-        Some(parent_node_id),
-        PARENT_BOUNDARY,
-        parent_port_key,
-        port_type,
-    ) {
+    if let Some(port) = port_index.get(Some(parent_node_id), None, parent_port_key, port_type) {
         return port;
     }
     graph.graph_properties.external_ports = true;
@@ -1182,13 +1175,7 @@ fn ensure_inside_self_loop_dummy(
         node,
         port: PortId::new(0),
     };
-    port_index.insert(
-        Some(parent_node_id),
-        PARENT_BOUNDARY,
-        parent_port_key,
-        port_type,
-        port,
-    );
+    port_index.insert(Some(parent_node_id), None, parent_port_key, port_type, port);
     port
 }
 
@@ -1983,7 +1970,9 @@ fn ensure_port_at_node(
 
     if graph.options.merge_edges && !graph.layerless_nodes[node].port_constraints.is_side_fixed() {
         let collector_key = hierarchy_port_key(node_id, 0, "collector", true, port_type);
-        if let Some(port) = port_index.get(graph_parent, node, collector_key.as_str(), port_type) {
+        if let Some(port) =
+            port_index.get(graph_parent, Some(node), collector_key.as_str(), port_type)
+        {
             return Some(port);
         }
         let default_side = port_side_from_direction(graph.options.direction);
@@ -1993,7 +1982,13 @@ fn ensure_port_at_node(
         };
         let port = graph.provide_collector_port(node, port_type, side);
         if let Some(port) = port {
-            port_index.insert(graph_parent, node, collector_key.as_str(), port_type, port);
+            port_index.insert(
+                graph_parent,
+                Some(node),
+                collector_key.as_str(),
+                port_type,
+                port,
+            );
         }
         return port;
     }
