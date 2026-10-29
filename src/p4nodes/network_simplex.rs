@@ -5,7 +5,7 @@
 
 use super::vertical_spacing;
 use crate::common::networksimplex::{NGraph, NetworkSimplex, NetworkSimplexError, coordinate};
-use crate::graph::{LGraph, LNodeKind, NodeId, PortRef, PortSide};
+use crate::graph::{EdgeId, LGraph, LNodeKind, NodeId, PortRef, PortSide};
 use crate::options::{NodeFlexibility, NodeLabelLocation};
 
 #[derive(Clone, Copy)]
@@ -149,7 +149,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
             let left = aux
                 .graph
                 .add_edge(
-                    Some(edge),
+                    Some(edge.index()),
                     dummy,
                     source,
                     weight,
@@ -159,14 +159,14 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
             let right = aux
                 .graph
                 .add_edge(
-                    Some(edge),
+                    Some(edge.index()),
                     dummy,
                     target,
                     weight,
                     ceil_i32((source_offset - target_offset).max(0.0))?,
                 )
                 .unwrap();
-            aux.edges[edge] = Some(EdgeRep { left, right });
+            aux.edges[edge.index()] = Some(EdgeRep { left, right });
         }
     }
     insert_port_auxiliary_edges(graph, &mut aux, &order);
@@ -299,7 +299,7 @@ fn transform_ports(
     Ok(())
 }
 
-fn handled_edge(graph: &LGraph, edge: usize) -> bool {
+fn handled_edge(graph: &LGraph, edge: EdgeId) -> bool {
     let data = &graph.edges[edge];
     data.source.node != data.target.node
         && graph.layerless_nodes[data.source.node].layer_index
@@ -403,7 +403,7 @@ fn make_connected(graph: &mut NGraph) {
     }
 }
 
-fn prefer_straight_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[NodeId]) -> Vec<[usize; 2]> {
+fn prefer_straight_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[NodeId]) -> Vec<[EdgeId; 2]> {
     let crossing = mark_crossings(graph);
     // -1 visited, 0 path interior, 2 junction (including leaves).
     let mut state = vec![0i8; graph.layerless_nodes.len()];
@@ -442,7 +442,7 @@ fn prefer_straight_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[NodeId]) 
                 } else {
                     data.source.node
                 };
-                if state[other.index()] == -1 || state[other.index()] == 2 || crossing[edge] {
+                if state[other.index()] == -1 || state[other.index()] == 2 || crossing[edge.index()] {
                     break;
                 }
                 state[other.index()] = -1;
@@ -463,7 +463,7 @@ fn prefer_straight_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[NodeId]) 
     }
     let mut two_paths = Vec::new();
     for mut path in paths {
-        if path.iter().any(|edge| aux.edges[*edge].is_none()) {
+        if path.iter().any(|edge| aux.edges[(*edge).index()].is_none()) {
             continue;
         }
         if path.len() == 2 {
@@ -489,7 +489,7 @@ fn prefer_straight_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[NodeId]) 
                 } else {
                     64.0
                 };
-                let rep = aux.edges[edge].unwrap();
+                let rep = aux.edges[edge.index()].unwrap();
                 for edge in [rep.left, rep.right] {
                     aux.graph.edges[edge].weight = aux.graph.edges[edge].weight.max(weight);
                 }
@@ -532,8 +532,8 @@ fn mark_crossings(graph: &LGraph) -> Vec<bool> {
                     }
                     let mut index = open.len() - 1;
                     while open[index] != edge && index > 0 {
-                        crossing[open[index]] = true;
-                        crossing[edge] = true;
+                        crossing[open[index].index()] = true;
+                        crossing[edge.index()] = true;
                         index -= 1;
                     }
                     // Preserve the source ListIterator's first-entry retention.
@@ -550,11 +550,11 @@ fn mark_crossings(graph: &LGraph) -> Vec<bool> {
 fn improve_two_path(
     graph: &LGraph,
     aux: &mut Auxiliary,
-    path: [usize; 2],
+    path: [EdgeId; 2],
     probe: bool,
 ) -> Result<bool, NetworkSimplexError> {
-    let left = aux.edges[path[0]].unwrap();
-    let right = aux.edges[path[1]].unwrap();
+    let left = aux.edges[path[0].index()].unwrap();
+    let right = aux.edges[path[1].index()].unwrap();
     let not_straight = |rep: EdgeRep| {
         let l = &aux.graph.edges[rep.left];
         let r = &aux.graph.edges[rep.right];

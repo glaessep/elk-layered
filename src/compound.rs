@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::{
+use crate::graph::{EdgeId, 
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphArena, GraphId, GraphNodeRef,
     GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep, LGraph, LLabel, LNodeKind, LPoint,
     LPort, LSize, LayeredEdge, NodeId, NodeSlice, PortId, PortRef, PortSide, PortType,
@@ -302,7 +302,7 @@ pub(crate) fn record_cross_hierarchy_edge_segment(
     graph: &mut LGraph,
     original_edge_id: impl Into<String>,
     original_model_order: Option<usize>,
-    edge: usize,
+    edge: EdgeId,
     segment: CompoundEdgeSegment,
 ) {
     graph.cross_hierarchy_edges.push(CrossHierarchyEdge {
@@ -866,7 +866,7 @@ struct SegmentState {
 #[derive(Debug, Clone)]
 struct ExternalPort {
     original_edges: Vec<String>,
-    new_edge: usize,
+    new_edge: EdgeId,
     dummy_node: NodeId,
     dummy_port: PortRef,
     port_type: PortType,
@@ -1001,7 +1001,7 @@ struct NestedExternalDummyIndex {
 #[derive(Debug)]
 struct CompoundEndpoint {
     port: PortRef,
-    edge: usize,
+    edge: EdgeId,
 }
 
 struct CompoundEndpointPlan {
@@ -1011,7 +1011,7 @@ struct CompoundEndpointPlan {
 impl CompoundEndpointPlan {
     fn new(graph: &LGraph, observer: &mut impl CompoundPreprocessObserver) -> Self {
         let mut by_node = graph.node_ids().map(|_| Vec::new()).collect::<Vec<_>>();
-        for (edge_index, edge) in graph.edges.iter().enumerate() {
+        for (edge_index, edge) in graph.edges_with_ids() {
             observer.visit_graph_edge_for_endpoint_plan();
             let Some(segment) = edge.compound_segment else {
                 continue;
@@ -1103,7 +1103,7 @@ fn introduce_hierarchical_edge_segment(
     state: &mut SegmentState,
     local_ports: &mut GraphPortIndex,
     parent_ports: &ParentPorts,
-) -> usize {
+) -> EdgeId {
     let parent_boundary = match (&pending.source, &pending.target) {
         (
             PendingSegmentEndpoint::LocalNode { port_key, .. },
@@ -1422,12 +1422,13 @@ fn prepare_compound_endpoint_metadata(
     let mut recorded_edges = vec![false; graph.edges.len()];
     for record in &graph.cross_hierarchy_edges {
         observer.visit_existing_cross_hierarchy_edge();
-        if let Some(recorded) = recorded_edges.get_mut(record.edge) {
+        if let Some(recorded) = recorded_edges.get_mut(record.edge.index()) {
             *recorded = true;
         }
     }
 
-    for (edge_index, recorded_edge) in recorded_edges.iter_mut().enumerate() {
+    for (index, recorded_edge) in recorded_edges.iter_mut().enumerate() {
+        let edge_index = EdgeId::new(index);
         let Some(segment) = graph.edges[edge_index].compound_segment else {
             continue;
         };

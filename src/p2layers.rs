@@ -7,7 +7,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::common::networksimplex::{NGraph, NetworkSimplex, NetworkSimplexError};
-use crate::graph::{LGraph, LayeredEdge, NodeId};
+use crate::graph::{EdgeId, EdgeSlice, LGraph, LayeredEdge, NodeId};
 
 mod coffman_graham;
 #[cfg(test)]
@@ -40,8 +40,8 @@ type LayeringResult<T> = Result<T, LayeringError>;
 struct LayeringInput<'a> {
     graph: &'a LGraph,
     nodes: Vec<NodeId>,
-    incoming: Vec<Vec<usize>>,
-    outgoing: Vec<Vec<usize>>,
+    incoming: Vec<Vec<EdgeId>>,
+    outgoing: Vec<Vec<EdgeId>>,
 }
 
 impl<'a> LayeringInput<'a> {
@@ -78,10 +78,10 @@ impl<'a> LayeringInput<'a> {
         }
     }
 
-    fn source(&self, edge: usize) -> NodeId {
+    fn source(&self, edge: EdgeId) -> NodeId {
         self.graph.edges[edge].source.node
     }
-    fn target(&self, edge: usize) -> NodeId {
+    fn target(&self, edge: EdgeId) -> NodeId {
         self.graph.edges[edge].target.node
     }
     fn len(&self) -> usize {
@@ -237,7 +237,7 @@ fn initialize(graph: &LGraph, nodes: &[NodeId]) -> NGraph {
                 continue;
             };
             ngraph.add_edge(
-                Some(edge_index),
+                Some(edge_index.index()),
                 source,
                 target,
                 priority_shortness_weight(edge),
@@ -249,8 +249,8 @@ fn initialize(graph: &LGraph, nodes: &[NodeId]) -> NGraph {
     ngraph
 }
 
-fn opposite_node(graph: &LGraph, node: NodeId, edge_index: usize) -> Option<NodeId> {
-    let edge = graph.edges.get(edge_index)?;
+fn opposite_node(graph: &LGraph, node: NodeId, edge_index: EdgeId) -> Option<NodeId> {
+    let edge = graph.edges.get_edge(edge_index)?;
     if edge.source.node == node {
         Some(edge.target.node)
     } else if edge.target.node == node {

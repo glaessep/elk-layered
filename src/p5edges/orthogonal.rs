@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
-use crate::graph::{LGraph, LPoint, NodeId, NodeSlice, PortRef, PortSide};
+use crate::graph::{EdgeId, EdgeSlice, LGraph, LPoint, NodeId, NodeSlice, PortRef, PortSide};
 use crate::random::JavaRandom;
 
 pub const TOLERANCE: f64 = 1e-3;
@@ -1416,11 +1416,11 @@ fn connected_ports(graph: &LGraph, port_ref: PortRef) -> Vec<PortRef> {
 
     port.incoming_edges
         .iter()
-        .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.source))
+        .filter_map(|edge| graph.edges.get_edge(*edge).map(|edge| edge.source))
         .chain(
             port.outgoing_edges
                 .iter()
-                .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.target)),
+                .filter_map(|edge| graph.edges.get_edge(*edge).map(|edge| edge.target)),
         )
         .filter(|other| *other != port_ref)
         .collect()
@@ -1499,7 +1499,7 @@ fn target_bend_point(
     }
 }
 
-fn is_self_loop(graph: &LGraph, edge_index: usize) -> bool {
+fn is_self_loop(graph: &LGraph, edge_index: EdgeId) -> bool {
     graph.edges[edge_index].source.node == graph.edges[edge_index].target.node
 }
 
@@ -1507,7 +1507,7 @@ fn is_self_loop(graph: &LGraph, edge_index: usize) -> bool {
 /// point when it is not at one of the two ends of the hyperedge segment.
 fn add_junction_point_if_necessary(
     graph: &mut LGraph,
-    edge_index: usize,
+    edge_index: EdgeId,
     segment: &HyperEdgeSegment,
     position: LPoint,
     vertical: bool,
@@ -1558,7 +1558,7 @@ fn junction_key(position: LPoint) -> Option<(u64, u64)> {
     Some(((position.x + 0.0).to_bits(), (position.y + 0.0).to_bits()))
 }
 
-fn add_bend_point_if_needed(graph: &mut LGraph, edge_index: usize, point: LPoint) {
+fn add_bend_point_if_needed(graph: &mut LGraph, edge_index: EdgeId, point: LPoint) {
     if let Some(last) = graph.edges[edge_index].bend_points.last()
         && (last.x - point.x).abs() < TOLERANCE
         && (last.y - point.y).abs() < TOLERANCE

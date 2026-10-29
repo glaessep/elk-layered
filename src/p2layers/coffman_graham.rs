@@ -32,7 +32,7 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
                     let next = input.target(edge);
                     for &transitive in &input.incoming[next.index()] {
                         if input.source(transitive) == start {
-                            marked_edges[transitive] = true;
+                            marked_edges[transitive.index()] = true;
                         }
                     }
                     if active[next.index()] {
@@ -58,7 +58,7 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
     for &node in &input.nodes {
         incoming[node.index()] = input.incoming[node.index()]
             .iter()
-            .filter(|&&edge| !marked_edges[edge])
+            .filter(|&&edge| !marked_edges[edge.index()])
             .count();
         if incoming[node.index()] == 0 {
             push(&mut sources, node, |a, b| {
@@ -73,7 +73,7 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
         topological[node.index()] = count;
         count += 1;
         for &edge in &input.outgoing[node.index()] {
-            if marked_edges[edge] {
+            if marked_edges[edge.index()] {
                 continue;
             }
             let next = input.target(edge);
@@ -95,7 +95,7 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
     for &node in &input.nodes {
         outgoing[node.index()] = input.outgoing[node.index()]
             .iter()
-            .filter(|&&edge| !marked_edges[edge])
+            .filter(|&&edge| !marked_edges[edge.index()])
             .count();
         if outgoing[node.index()] == 0 {
             push(&mut sinks, node, |a, b| {
@@ -121,7 +121,7 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
         assigned[node.index()] = Some(layer);
         layers[layer].push(node);
         for &edge in &input.incoming[node.index()] {
-            if marked_edges[edge] {
+            if marked_edges[edge.index()] {
                 continue;
             }
             let source = input.source(edge);

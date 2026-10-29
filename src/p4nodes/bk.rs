@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::vertical_spacing;
-use crate::graph::{LGraph, LNodeKind, LayeredEdge, NodeId, PortRef};
+use crate::graph::{EdgeId, LGraph, LNodeKind, LayeredEdge, NodeId, PortRef};
 use crate::options::{EdgeStraighteningStrategy, FixedAlignment};
 
 const MIN_LAYERS_FOR_CONFLICTS: usize = 3;
@@ -117,7 +117,7 @@ impl BKAlignedLayout {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Neighbor {
     node: NodeId,
-    edge: usize,
+    edge: EdgeId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -261,7 +261,7 @@ fn layouts_for_fixed_alignment(
     }
 }
 
-fn mark_conflicts(graph: &LGraph, ni: &NeighborhoodInformation) -> HashSet<usize> {
+fn mark_conflicts(graph: &LGraph, ni: &NeighborhoodInformation) -> HashSet<EdgeId> {
     let number_of_layers = graph.layers.len();
     let mut marked_edges = HashSet::new();
     if number_of_layers < MIN_LAYERS_FOR_CONFLICTS {
@@ -341,7 +341,7 @@ fn vertical_alignment(
     graph: &LGraph,
     ni: &NeighborhoodInformation,
     layout: &mut BKAlignedLayout,
-    marked_edges: &HashSet<usize>,
+    marked_edges: &HashSet<EdgeId>,
 ) {
     for node in ni.iter_nodes() {
         let id = ni.node_id[node.index()];
@@ -923,7 +923,7 @@ struct Postprocessable {
     free: usize,
     is_root: bool,
     has_edges: bool,
-    edge: Option<usize>,
+    edge: Option<EdgeId>,
 }
 
 impl Postprocessable {
@@ -1172,7 +1172,7 @@ fn blocks(layout: &BKAlignedLayout) -> HashMap<usize, Vec<usize>> {
     blocks
 }
 
-fn get_edge(graph: &LGraph, source: NodeId, target: NodeId) -> Option<usize> {
+fn get_edge(graph: &LGraph, source: NodeId, target: NodeId) -> Option<EdgeId> {
     graph
         .node_connected_edges(source)
         .into_iter()
@@ -1192,7 +1192,7 @@ fn edge_opposite_node(edge: &LayeredEdge, node: NodeId) -> Option<NodeId> {
 // Java: BKAligner.insideBlockShift. Java adds and subtracts left to right, as
 // `t.pos + t.anchor - s.pos - s.anchor`. Subtracting the sum `s.pos + s.anchor` instead can
 // round differently in the last bit, so the four terms stay separate here.
-fn edge_port_position_difference(graph: &LGraph, edge: usize, hdir: HDirection) -> f64 {
+fn edge_port_position_difference(graph: &LGraph, edge: EdgeId, hdir: HDirection) -> f64 {
     let source =
         &graph.layerless_nodes[graph.edges[edge].source.node].ports[graph.edges[edge].source.port];
     let target =
@@ -1361,7 +1361,7 @@ fn port_anchor_y(graph: &LGraph, port_ref: PortRef) -> f64 {
         .y
 }
 
-fn is_self_loop_or_in_layer_edge(graph: &LGraph, edge: usize) -> bool {
+fn is_self_loop_or_in_layer_edge(graph: &LGraph, edge: EdgeId) -> bool {
     let edge = &graph.edges[edge];
     edge.source.node == edge.target.node || is_in_layer_edge(graph, edge)
 }
@@ -1371,7 +1371,7 @@ fn is_in_layer_edge(graph: &LGraph, edge: &LayeredEdge) -> bool {
         == graph.layerless_nodes[edge.target.node].layer_index
 }
 
-fn is_in_layer_edge_index(graph: &LGraph, edge: usize) -> bool {
+fn is_in_layer_edge_index(graph: &LGraph, edge: EdgeId) -> bool {
     let edge = &graph.edges[edge];
     is_in_layer_edge(graph, edge)
 }

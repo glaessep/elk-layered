@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::graph::{LGraph, LNodeKind, NodeId, NodeSlice, PortRef, PortSide};
+use crate::graph::{EdgeId, EdgeSlice, LGraph, LNodeKind, NodeId, NodeSlice, PortRef, PortSide};
 
 /// `BinaryIndexedTree`.
 ///
@@ -1035,15 +1035,15 @@ fn ports_for_side(graph: &LGraph, node: NodeId, side: PortSide, top_down: bool) 
     ports
 }
 
-fn is_in_layer_edge(graph: &LGraph, edge: usize) -> bool {
-    let Some(edge) = graph.edges.get(edge) else {
+fn is_in_layer_edge(graph: &LGraph, edge: EdgeId) -> bool {
+    let Some(edge) = graph.edges.get_edge(edge) else {
         return false;
     };
     graph.layerless_nodes[edge.source.node].layer_index
         == graph.layerless_nodes[edge.target.node].layer_index
 }
 
-fn connected_edges(graph: &LGraph, port: PortRef) -> impl Iterator<Item = usize> + '_ {
+fn connected_edges(graph: &LGraph, port: PortRef) -> impl Iterator<Item = EdgeId> + '_ {
     graph.layerless_nodes[port.node].ports[port.port]
         .incoming_edges
         .iter()
@@ -1055,8 +1055,8 @@ fn connected_edges(graph: &LGraph, port: PortRef) -> impl Iterator<Item = usize>
         .copied()
 }
 
-fn other_end_of(graph: &LGraph, edge: usize, port: PortRef) -> Option<PortRef> {
-    let edge = graph.edges.get(edge)?;
+fn other_end_of(graph: &LGraph, edge: EdgeId, port: PortRef) -> Option<PortRef> {
+    let edge = graph.edges.get_edge(edge)?;
     if edge.source == port {
         Some(edge.target)
     } else if edge.target == port {

@@ -10,7 +10,7 @@
 
 use std::collections::VecDeque;
 
-use crate::graph::{LGraph, NodeId, PortRef, reverse_edge};
+use crate::graph::{EdgeId, LGraph, NodeId, PortRef, reverse_edge};
 use crate::options::LayerConstraint;
 
 pub fn break_cycles_depth_first(graph: &mut LGraph) {
@@ -83,7 +83,7 @@ pub fn break_cycles_model_order(graph: &mut LGraph) {
     reverse_feedback_edges(graph, rev_edges, true);
 }
 
-fn model_order_feedback_edges(graph: &LGraph) -> Vec<usize> {
+fn model_order_feedback_edges(graph: &LGraph) -> Vec<EdgeId> {
     // Keep this aligned with Mermaid's pinned elkjs 0.9.3 worker: the runtime seeds the offset
     // from the node count, raises it for explicit model order, and consumes FIRST_SEPARATE and
     // LAST_SEPARATE counters in edge traversal order. Caching one score per node changes behavior.
@@ -270,7 +270,7 @@ fn collect_depth_first_back_edges(
     node: NodeId,
     visited: &mut [bool],
     active: &mut [bool],
-    edges_to_reverse: &mut Vec<usize>,
+    edges_to_reverse: &mut Vec<EdgeId>,
 ) {
     if visited[node.index()] {
         return;
@@ -303,7 +303,7 @@ fn collect_interactive_back_edges(
     graph: &LGraph,
     node: NodeId,
     state: &mut [InteractiveVisitState],
-    edges_to_reverse: &mut Vec<usize>,
+    edges_to_reverse: &mut Vec<EdgeId>,
 ) {
     state[node.index()] = InteractiveVisitState::Active;
 
@@ -365,7 +365,7 @@ impl ModelOrderContext {
     }
 }
 
-fn reverse_feedback_edges(graph: &mut LGraph, edges: Vec<usize>, mark_cyclic: bool) {
+fn reverse_feedback_edges(graph: &mut LGraph, edges: Vec<EdgeId>, mark_cyclic: bool) {
     for edge_index in edges {
         if reverse_edge(graph, edge_index, true) && mark_cyclic {
             graph.cyclic = true;

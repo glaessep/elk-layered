@@ -16,7 +16,7 @@ mod arena;
 mod ids;
 mod ports;
 pub use arena::{GraphArena, GraphId, GraphParent, OtherGraphs};
-pub use ids::{NodeId, NodeSlice};
+pub use ids::{EdgeId, EdgeSlice, NodeId, NodeSlice};
 #[cfg(test)]
 pub(crate) use ports::port_ids;
 pub use ports::{NodePorts, PortId};
@@ -174,7 +174,7 @@ pub struct LNode {
     pub in_layer_layout_unit: Option<NodeId>,
     pub barycenter_associates: Vec<NodeId>,
     pub origin_port: Option<GraphPortRef>,
-    pub origin_edge: Option<usize>,
+    pub origin_edge: Option<EdgeId>,
     pub parent_port_key: Option<String>,
     pub parent_port_type: Option<PortType>,
     pub long_edge_source: Option<PortRef>,
@@ -294,8 +294,8 @@ pub struct LPort {
     pub inside_connections: bool,
     pub collector_type: Option<PortType>,
     pub end_label_cell: Option<LabelCellLayout>,
-    pub incoming_edges: Vec<usize>,
-    pub outgoing_edges: Vec<usize>,
+    pub incoming_edges: Vec<EdgeId>,
+    pub outgoing_edges: Vec<EdgeId>,
 }
 
 impl LPort {
@@ -443,7 +443,7 @@ pub struct CrossHierarchyEdge {
     pub original_edge_id: String,
     pub original_model_order: Option<usize>,
     pub graph_id: GraphId,
-    pub edge: usize,
+    pub edge: EdgeId,
     pub segment: CompoundEdgeSegment,
 }
 
@@ -483,7 +483,7 @@ pub struct SelfHyperLoopLabels {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SelfLoopLabelRef {
-    pub edge: usize,
+    pub edge: EdgeId,
     pub label: usize,
 }
 
@@ -504,7 +504,7 @@ pub struct SelfLoopPort {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelfLoopEdge {
-    pub edge: usize,
+    pub edge: EdgeId,
     pub source_port: PortId,
     pub target_port: PortId,
 }
@@ -526,7 +526,7 @@ pub struct LLabel {
     pub placement: EdgeLabelPlacement,
     pub inline: bool,
     pub label_side: Option<LabelSide>,
-    pub end_label_edge: Option<usize>,
+    pub end_label_edge: Option<EdgeId>,
     pub original_label_edge: Option<String>,
     /// Opaque caller-owned label identity, preserved through layout transformations.
     pub source_index: Option<usize>,
@@ -738,6 +738,27 @@ impl LGraph {
             .map(|(index, node)| (NodeId::new(index), node))
     }
 
+    /// The ids of all edges, in the order they stand in `edges`. The iterator does not borrow the
+    /// graph, so the loop body may change it.
+    pub fn edge_ids(&self) -> impl DoubleEndedIterator<Item = EdgeId> + ExactSizeIterator + use<> {
+        (0..self.edges.len()).map(EdgeId::new)
+    }
+
+    /// Every edge with its id, in the order of `edges`.
+    pub fn edges_with_ids(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (EdgeId, &LayeredEdge)> + ExactSizeIterator {
+        self.edges
+            .iter()
+            .enumerate()
+            .map(|(index, edge)| (EdgeId::new(index), edge))
+    }
+
+    /// The id the next edge pushed onto `edges` gets.
+    pub fn next_edge_id(&self) -> EdgeId {
+        EdgeId::new(self.edges.len())
+    }
+
     /// The id the next node pushed onto `layerless_nodes` gets.
     pub fn next_node_id(&self) -> NodeId {
         NodeId::new(self.layerless_nodes.len())
@@ -863,8 +884,8 @@ impl LGraph {
         })
     }
 
-    pub fn set_edge_source(&mut self, edge_index: usize, source: PortRef) -> bool {
-        if self.edges.get(edge_index).is_none() || !port_exists(self, source) {
+    pub fn set_edge_source(&mut self, edge_index: EdgeId, source: PortRef) -> bool {
+        if self.edges.get_edge(edge_index).is_none() || !port_exists(self, source) {
             return false;
         }
 
@@ -883,17 +904,17 @@ impl LGraph {
         true
     }
 
-    pub fn set_edge_target(&mut self, edge_index: usize, target: PortRef) -> bool {
+    pub fn set_edge_target(&mut self, edge_index: EdgeId, target: PortRef) -> bool {
         self.set_edge_target_at(edge_index, target, None)
     }
 
     pub fn set_edge_target_at(
         &mut self,
-        edge_index: usize,
+        edge_index: EdgeId,
         target: PortRef,
         insert_at: Option<usize>,
     ) -> bool {
-        if self.edges.get(edge_index).is_none() || !port_exists(self, target) {
+        if self.edges.get_edge(edge_index).is_none() || !port_exists(self, target) {
             return false;
         }
 
@@ -916,8 +937,8 @@ impl LGraph {
         true
     }
 
-    pub fn detach_edge_source(&mut self, edge_index: usize) -> Option<PortRef> {
-        let source = self.edges.get(edge_index)?.source;
+    pub fn detach_edge_source(&mut self, edge_index: EdgeId) -> Option<PortRef> {
+        let source = self.edges.get_edge(edge_index)?.source;
         if port_exists(self, source) {
             remove_edge(
                 &mut self.layerless_nodes[source.node].ports[source.port].outgoing_edges,
@@ -927,8 +948,8 @@ impl LGraph {
         Some(source)
     }
 
-    pub fn detach_edge_target(&mut self, edge_index: usize) -> Option<PortRef> {
-        let target = self.edges.get(edge_index)?.target;
+    pub fn detach_edge_target(&mut self, edge_index: EdgeId) -> Option<PortRef> {
+        let target = self.edges.get_edge(edge_index)?.target;
         if port_exists(self, target) {
             remove_edge(
                 &mut self.layerless_nodes[target.node].ports[target.port].incoming_edges,
@@ -938,14 +959,14 @@ impl LGraph {
         Some(target)
     }
 
-    pub fn detach_edge(&mut self, edge_index: usize) -> Option<(PortRef, PortRef)> {
+    pub fn detach_edge(&mut self, edge_index: EdgeId) -> Option<(PortRef, PortRef)> {
         let source = self.detach_edge_source(edge_index)?;
         let target = self.detach_edge_target(edge_index)?;
         Some((source, target))
     }
 
-    pub fn edge_source_attached(&self, edge_index: usize) -> bool {
-        let Some(edge) = self.edges.get(edge_index) else {
+    pub fn edge_source_attached(&self, edge_index: EdgeId) -> bool {
+        let Some(edge) = self.edges.get_edge(edge_index) else {
             return false;
         };
         self.layerless_nodes
@@ -955,8 +976,8 @@ impl LGraph {
             .unwrap_or(false)
     }
 
-    pub fn edge_target_attached(&self, edge_index: usize) -> bool {
-        let Some(edge) = self.edges.get(edge_index) else {
+    pub fn edge_target_attached(&self, edge_index: EdgeId) -> bool {
+        let Some(edge) = self.edges.get_edge(edge_index) else {
             return false;
         };
         self.layerless_nodes
@@ -966,12 +987,12 @@ impl LGraph {
             .unwrap_or(false)
     }
 
-    pub fn add_edge(&mut self, edge: LayeredEdge) -> Option<usize> {
+    pub fn add_edge(&mut self, edge: LayeredEdge) -> Option<EdgeId> {
         if !port_exists(self, edge.source) || !port_exists(self, edge.target) {
             return None;
         }
 
-        let edge_index = self.edges.len();
+        let edge_index = self.next_edge_id();
         let source = edge.source;
         let target = edge.target;
         self.edges.push(edge);
@@ -984,7 +1005,7 @@ impl LGraph {
         Some(edge_index)
     }
 
-    pub fn node_incoming_edges(&self, node_index: NodeId) -> Vec<usize> {
+    pub fn node_incoming_edges(&self, node_index: NodeId) -> Vec<EdgeId> {
         self.layerless_nodes[node_index]
             .ports
             .iter()
@@ -992,7 +1013,7 @@ impl LGraph {
             .collect()
     }
 
-    pub fn node_outgoing_edges(&self, node_index: NodeId) -> Vec<usize> {
+    pub fn node_outgoing_edges(&self, node_index: NodeId) -> Vec<EdgeId> {
         self.layerless_nodes[node_index]
             .ports
             .iter()
@@ -1000,7 +1021,7 @@ impl LGraph {
             .collect()
     }
 
-    pub fn node_connected_edges(&self, node_index: NodeId) -> Vec<usize> {
+    pub fn node_connected_edges(&self, node_index: NodeId) -> Vec<EdgeId> {
         self.layerless_nodes[node_index]
             .ports
             .iter()
@@ -1057,8 +1078,8 @@ impl LGraph {
 /// `adapt_ports` follows ELK's collector-port handling: a reversed edge that previously targeted
 /// an input collector is moved to the same node's output collector, and a reversed edge that
 /// previously sourced an output collector is moved to the same node's input collector.
-pub fn reverse_edge(graph: &mut LGraph, edge_index: usize, adapt_ports: bool) -> bool {
-    let Some(edge) = graph.edges.get(edge_index) else {
+pub fn reverse_edge(graph: &mut LGraph, edge_index: EdgeId, adapt_ports: bool) -> bool {
+    let Some(edge) = graph.edges.get_edge(edge_index) else {
         return false;
     };
     let old_source = edge.source;
@@ -1153,7 +1174,7 @@ fn centered_port_position(node_size: LSize, side: PortSide) -> LPoint {
     }
 }
 
-fn remove_edge(edges: &mut Vec<usize>, edge_index: usize) {
+fn remove_edge(edges: &mut Vec<EdgeId>, edge_index: EdgeId) {
     if let Some(position) = edges.iter().position(|candidate| *candidate == edge_index) {
         edges.remove(position);
     }

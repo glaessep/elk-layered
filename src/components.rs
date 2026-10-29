@@ -10,7 +10,7 @@
 
 mod group;
 
-use crate::graph::{
+use crate::graph::{EdgeId, EdgeSlice, 
     GraphArena, GraphId, LGraph, LLabel, LNodeKind, LPoint, LSize, NodeId, NodeSlice, PortRef,
 };
 use crate::options::{HierarchyHandling, PortConstraints};
@@ -29,7 +29,7 @@ pub enum ComponentError {
 pub(crate) struct Component {
     pub(crate) graph: LGraph,
     original_nodes: Vec<NodeId>,
-    original_edges: Vec<usize>,
+    original_edges: Vec<EdgeId>,
     priority: i32,
     /// The sides of the external ports the component joins (ELK's `EXT_PORT_CONNECTIONS`), as
     /// `group::side_bit` makes them.
@@ -86,20 +86,20 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
                 for &edge in port.outgoing_edges.iter().rev() {
                     let edge = graph
                         .edges
-                        .get(edge)
+                        .get_edge(edge)
                         .ok_or(ComponentError::InvalidReference {
                             kind: "edge",
-                            index: edge,
+                            index: edge.index(),
                         })?;
                     stack.push(edge.target.node);
                 }
                 for &edge in port.incoming_edges.iter().rev() {
                     let edge = graph
                         .edges
-                        .get(edge)
+                        .get_edge(edge)
                         .ok_or(ComponentError::InvalidReference {
                             kind: "edge",
-                            index: edge,
+                            index: edge.index(),
                         })?;
                     stack.push(edge.source.node);
                 }
@@ -136,7 +136,7 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
             }
         })
         .collect::<Vec<_>>();
-    for (index, edge) in graph.edges.iter().enumerate() {
+    for (index, edge) in graph.edges_with_ids() {
         let owner =
             *owners
                 .get(edge.source.node.index())
@@ -175,13 +175,13 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
     // Reuse the global maps across components: clearing only each component's entries
     // keeps this O(V + E), including a graph made entirely of isolated nodes.
     let mut node_map = vec![None; node_count];
-    let mut edge_map = vec![usize::MAX; graph.edges.len()];
+    let mut edge_map = vec![None; graph.edges.len()];
     for component in &mut components {
         for (local, &original) in component.original_nodes.iter().enumerate() {
             node_map[original.index()] = Some(NodeId::new(local));
         }
         for (local, &original) in component.original_edges.iter().enumerate() {
-            edge_map[original] = local;
+            edge_map[original.index()] = Some(EdgeId::new(local));
         }
         remap_references(&mut component.graph, &node_map, &edge_map)?;
         remap_nested_references(graphs, &component.graph, &node_map, &edge_map)?;
@@ -190,7 +190,7 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
             node_map[original.index()] = None;
         }
         for &original in &component.original_edges {
-            edge_map[original] = usize::MAX;
+            edge_map[original.index()] = None;
         }
     }
     Ok(Some(components))
@@ -243,27 +243,38 @@ fn map_node_list(
     Ok(())
 }
 
-fn map_index(map: &[usize], index: usize, kind: &'static str) -> Result<usize, ComponentError> {
-    map.get(index)
+fn map_edge(
+    map: &[Option<EdgeId>],
+    id: EdgeId,
+    kind: &'static str,
+) -> Result<EdgeId, ComponentError> {
+    map.get(id.index())
         .copied()
-        .filter(|&mapped| mapped != usize::MAX)
-        .ok_or(ComponentError::InvalidReference { kind, index })
+        .flatten()
+        .ok_or(ComponentError::InvalidReference {
+            kind,
+            index: id.index(),
+        })
 }
 
-fn map_optional(
-    value: &mut Option<usize>,
-    map: &[usize],
+fn map_optional_edge(
+    value: &mut Option<EdgeId>,
+    map: &[Option<EdgeId>],
     kind: &'static str,
 ) -> Result<(), ComponentError> {
-    if let Some(index) = value {
-        *index = map_index(map, *index, kind)?;
+    if let Some(id) = value {
+        *id = map_edge(map, *id, kind)?;
     }
     Ok(())
 }
 
-fn map_list(values: &mut [usize], map: &[usize], kind: &'static str) -> Result<(), ComponentError> {
-    for index in values {
-        *index = map_index(map, *index, kind)?;
+fn map_edge_list(
+    values: &mut [EdgeId],
+    map: &[Option<EdgeId>],
+    kind: &'static str,
+) -> Result<(), ComponentError> {
+    for id in values {
+        *id = map_edge(map, *id, kind)?;
     }
     Ok(())
 }
@@ -273,9 +284,9 @@ fn map_port(port: &mut PortRef, nodes: &[Option<NodeId>]) -> Result<(), Componen
     Ok(())
 }
 
-fn map_labels(labels: &mut [LLabel], edges: &[usize]) -> Result<(), ComponentError> {
+fn map_labels(labels: &mut [LLabel], edges: &[Option<EdgeId>]) -> Result<(), ComponentError> {
     for label in labels {
-        map_optional(&mut label.end_label_edge, edges, "label edge")?;
+        map_optional_edge(&mut label.end_label_edge, edges, "label edge")?;
     }
     Ok(())
 }
@@ -285,7 +296,7 @@ fn map_labels(labels: &mut [LLabel], edges: &[usize]) -> Result<(), ComponentErr
 fn remap_references(
     graph: &mut LGraph,
     nodes: &[Option<NodeId>],
-    edges: &[usize],
+    edges: &[Option<EdgeId>],
 ) -> Result<(), ComponentError> {
     for node in &mut graph.layerless_nodes {
         map_optional_node(
@@ -300,7 +311,7 @@ fn remap_references(
             nodes,
             "barycenter associate",
         )?;
-        map_optional(&mut node.origin_edge, edges, "origin edge")?;
+        map_optional_edge(&mut node.origin_edge, edges, "origin edge")?;
         for port in [&mut node.long_edge_source, &mut node.long_edge_target]
             .into_iter()
             .flatten()
@@ -315,8 +326,8 @@ fn remap_references(
             if let Some(origin) = &mut port.origin_port {
                 map_port(origin, nodes)?;
             }
-            map_list(&mut port.incoming_edges, edges, "incoming edge")?;
-            map_list(&mut port.outgoing_edges, edges, "outgoing edge")?;
+            map_edge_list(&mut port.incoming_edges, edges, "incoming edge")?;
+            map_edge_list(&mut port.outgoing_edges, edges, "outgoing edge")?;
             map_labels(&mut port.labels, edges)?;
         }
     }
@@ -341,11 +352,11 @@ fn remap_references(
         holder.node = map_node(nodes, holder.node, "self loop owner")?;
         for hyper_loop in &mut holder.hyper_loops {
             for edge in &mut hyper_loop.edges {
-                edge.edge = map_index(edges, edge.edge, "self loop edge")?;
+                edge.edge = map_edge(edges, edge.edge, "self loop edge")?;
             }
             if let Some(labels) = &mut hyper_loop.labels {
                 for label in &mut labels.label_refs {
-                    label.edge = map_index(edges, label.edge, "self loop label")?;
+                    label.edge = map_edge(edges, label.edge, "self loop label")?;
                 }
             }
         }
@@ -360,7 +371,7 @@ fn remap_nested_references(
     graphs: &mut GraphArena,
     graph: &LGraph,
     nodes: &[Option<NodeId>],
-    edges: &[usize],
+    edges: &[Option<EdgeId>],
 ) -> Result<(), ComponentError> {
     let nested = graph
         .layerless_nodes
@@ -379,7 +390,7 @@ fn remap_graph_references(
     current: &mut LGraph,
     graph_id: GraphId,
     nodes: &[Option<NodeId>],
-    edges: &[usize],
+    edges: &[Option<EdgeId>],
 ) -> Result<(), ComponentError> {
     for node in &mut current.layerless_nodes {
         if let Some(origin) = &mut node.origin_port
@@ -397,7 +408,7 @@ fn remap_graph_references(
     }
     for edge in &mut current.cross_hierarchy_edges {
         if edge.graph_id == graph_id {
-            edge.edge = map_index(edges, edge.edge, "hierarchy edge")?;
+            edge.edge = map_edge(edges, edge.edge, "hierarchy edge")?;
         }
     }
     Ok(())
@@ -555,17 +566,18 @@ pub(crate) fn combine(
         next_node += added_nodes;
         let mut edge_map = component.original_edges;
         let added_edges = component.graph.edges.len() - edge_map.len();
-        edge_map.extend(next_edge..next_edge + added_edges);
+        edge_map.extend((next_edge..next_edge + added_edges).map(EdgeId::new));
         next_edge += added_edges;
         component.graph.clear_layers();
         let node_lookup = node_map.iter().copied().map(Some).collect::<Vec<_>>();
-        remap_references(&mut component.graph, &node_lookup, &edge_map)?;
-        remap_nested_references(graphs, &component.graph, &node_lookup, &edge_map)?;
+        let edge_lookup = edge_map.iter().copied().map(Some).collect::<Vec<_>>();
+        remap_references(&mut component.graph, &node_lookup, &edge_lookup)?;
+        remap_nested_references(graphs, &component.graph, &node_lookup, &edge_lookup)?;
         for (index, node) in node_map.into_iter().zip(component.graph.layerless_nodes) {
             nodes[index.index()] = Some(node);
         }
         for (index, edge) in edge_map.into_iter().zip(component.graph.edges) {
-            edges[index] = Some(edge);
+            edges[index.index()] = Some(edge);
         }
         hidden.extend(component.graph.hidden_nodes);
         replaced.extend(component.graph.replaced_external_port_dummies);

@@ -13,7 +13,7 @@ use crate::compound::{
     compound_label_segment_index, introduce_source_ported_scoped_edge_segments, port_at,
     source_ported_cross_hierarchy_segments,
 };
-use crate::graph::{
+use crate::graph::{EdgeId, 
     CompoundEdgeSegment, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge, HierarchyStep,
     LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, NodeSlice, PortId,
     PortRef, PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
@@ -1043,7 +1043,7 @@ fn transform_inside_self_loop(
     graph: &mut LGraph,
     model_order: Option<usize>,
     port_index: &mut ImportPortIndex,
-) -> usize {
+) -> EdgeId {
     let source_port_key = inside_self_loop_port_key(edge.source.as_str(), "source");
     let target_port_key = inside_self_loop_port_key(edge.target.as_str(), "target");
     let source = ensure_inside_self_loop_dummy(
@@ -1513,7 +1513,7 @@ fn transform_edge(
     graph_parent: Option<&str>,
     model_order: Option<usize>,
     port_index: &mut ImportPortIndex,
-) -> ImportResult<usize> {
+) -> ImportResult<EdgeId> {
     let source = edge_end_port(
         edge,
         &edge.source,

@@ -1,6 +1,6 @@
-//! The id that names a node inside one graph.
+//! The ids that name a node or an edge inside one graph.
 
-use super::LNode;
+use super::{LNode, LayeredEdge};
 use std::ops::{Index, IndexMut};
 
 /// Names one node of one graph: its place in `LGraph::layerless_nodes`. A node keeps its id while
@@ -15,6 +15,23 @@ impl NodeId {
     }
 
     /// The number behind the id. Use it to size or key a table, or to step through the nodes in
+    /// creation order.
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
+
+/// Names one edge of one graph: its place in `LGraph::edges`. An id is not a count.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct EdgeId(usize);
+
+impl EdgeId {
+    /// The id of the edge that stands `index`th in `LGraph::edges`.
+    pub const fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// The number behind the id. Use it to size or key a table, or to step through the edges in
     /// creation order.
     pub const fn index(self) -> usize {
         self.0
@@ -37,6 +54,38 @@ impl NodeSlice for [LNode] {
 
     fn get_node_mut(&mut self, id: NodeId) -> Option<&mut LNode> {
         self.get_mut(id.0)
+    }
+}
+
+/// Looks an edge up by id and says `None` for an id the graph does not hold.
+pub trait EdgeSlice {
+    /// The edge with this id, if the graph holds one.
+    fn get_edge(&self, id: EdgeId) -> Option<&LayeredEdge>;
+    /// The edge with this id, for changing, if the graph holds one.
+    fn get_edge_mut(&mut self, id: EdgeId) -> Option<&mut LayeredEdge>;
+}
+
+impl EdgeSlice for [LayeredEdge] {
+    fn get_edge(&self, id: EdgeId) -> Option<&LayeredEdge> {
+        self.get(id.0)
+    }
+
+    fn get_edge_mut(&mut self, id: EdgeId) -> Option<&mut LayeredEdge> {
+        self.get_mut(id.0)
+    }
+}
+
+impl Index<EdgeId> for Vec<LayeredEdge> {
+    type Output = LayeredEdge;
+
+    fn index(&self, id: EdgeId) -> &LayeredEdge {
+        &self[id.0]
+    }
+}
+
+impl IndexMut<EdgeId> for Vec<LayeredEdge> {
+    fn index_mut(&mut self, id: EdgeId) -> &mut LayeredEdge {
+        &mut self[id.0]
     }
 }
 

@@ -10,7 +10,7 @@
 use std::collections::VecDeque;
 
 use crate::common::cells::grow_label_cell;
-use crate::graph::{
+use crate::graph::{EdgeId, EdgeSlice, 
     GraphId, LGraph, LMargin, LNodeKind, LPoint, LSize, NodeId, NodePorts, NodeSlice, OtherGraphs,
     PortId, PortRef, PortSide, SelfHyperLoop, SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder,
     SelfLoopLabelAlignment, SelfLoopLabelRef, SelfLoopPort, SelfLoopType,
@@ -2465,7 +2465,7 @@ fn write_self_loop_label_positions_for_horizontal_layout(
     for label_ref in &labels.label_refs {
         let Some(label) = graph
             .edges
-            .get_mut(label_ref.edge)
+            .get_edge_mut(label_ref.edge)
             .and_then(|edge| edge.labels.get_mut(label_ref.label))
         else {
             continue;
@@ -2495,7 +2495,7 @@ fn write_self_loop_label_positions_for_vertical_layout(
     for label_ref in &labels.label_refs {
         let Some(label) = graph
             .edges
-            .get_mut(label_ref.edge)
+            .get_edge_mut(label_ref.edge)
             .and_then(|edge| edge.labels.get_mut(label_ref.label))
         else {
             continue;
@@ -2536,7 +2536,7 @@ fn reattach_self_loop_edge(graph: &mut LGraph, node: NodeId, sl_edge: &SelfLoopE
     graph.edges[sl_edge.edge].target = target;
 }
 
-fn offset_edge_bend_points(graph: &mut LGraph, edge: usize, offset: LPoint) {
+fn offset_edge_bend_points(graph: &mut LGraph, edge: EdgeId, offset: LPoint) {
     for point in &mut graph.edges[edge].bend_points {
         point.x += offset.x;
         point.y += offset.y;
@@ -2551,7 +2551,7 @@ fn offset_self_loop_label_positions(
     for label_ref in &labels.label_refs {
         if let Some(label) = graph
             .edges
-            .get_mut(label_ref.edge)
+            .get_edge_mut(label_ref.edge)
             .and_then(|edge| edge.labels.get_mut(label_ref.label))
         {
             label.position.x += offset.x;

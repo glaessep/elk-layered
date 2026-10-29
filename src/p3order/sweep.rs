@@ -17,7 +17,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::graph::{
+use crate::graph::{EdgeId, EdgeSlice, 
     GraphArena, GraphId, LGraph, LNode, LNodeKind, NodeId, NodeSlice, OtherGraphs, PortId, PortRef,
     PortSide, PortType,
 };
@@ -3853,7 +3853,7 @@ fn neighboring_layer_exists<L: AsRef<[NodeId]>>(
     }
 }
 
-fn edges_connected_to_side(graph: &LGraph, port: PortRef, side: PortSide) -> Vec<usize> {
+fn edges_connected_to_side(graph: &LGraph, port: PortRef, side: PortSide) -> Vec<EdgeId> {
     match side {
         PortSide::West => graph.layerless_nodes[port.node].ports[port.port]
             .incoming_edges
@@ -3865,7 +3865,7 @@ fn edges_connected_to_side(graph: &LGraph, port: PortRef, side: PortSide) -> Vec
     }
 }
 
-fn adjacent_port_of_side(graph: &LGraph, edge: usize, side: PortSide) -> PortRef {
+fn adjacent_port_of_side(graph: &LGraph, edge: EdgeId, side: PortSide) -> PortRef {
     if side == PortSide::West {
         graph.edges[edge].source
     } else {
@@ -3910,7 +3910,7 @@ fn ports_for_counter_side(
     ports
 }
 
-fn connected_edges(graph: &LGraph, port: PortRef) -> impl Iterator<Item = usize> + '_ {
+fn connected_edges(graph: &LGraph, port: PortRef) -> impl Iterator<Item = EdgeId> + '_ {
     graph.layerless_nodes[port.node].ports[port.port]
         .incoming_edges
         .iter()
@@ -3922,23 +3922,23 @@ fn connected_edges(graph: &LGraph, port: PortRef) -> impl Iterator<Item = usize>
         .copied()
 }
 
-fn is_edge_self_loop(graph: &LGraph, edge: usize) -> bool {
+fn is_edge_self_loop(graph: &LGraph, edge: EdgeId) -> bool {
     graph
         .edges
-        .get(edge)
+        .get_edge(edge)
         .is_some_and(|edge| edge.source.node == edge.target.node)
 }
 
-fn is_in_layer_edge(graph: &LGraph, edge: usize) -> bool {
-    let Some(edge) = graph.edges.get(edge) else {
+fn is_in_layer_edge(graph: &LGraph, edge: EdgeId) -> bool {
+    let Some(edge) = graph.edges.get_edge(edge) else {
         return false;
     };
     graph.layerless_nodes[edge.source.node].layer_index
         == graph.layerless_nodes[edge.target.node].layer_index
 }
 
-fn other_end_of_edge(graph: &LGraph, edge: usize, port: PortRef) -> Option<PortRef> {
-    let edge = graph.edges.get(edge)?;
+fn other_end_of_edge(graph: &LGraph, edge: EdgeId, port: PortRef) -> Option<PortRef> {
+    let edge = graph.edges.get_edge(edge)?;
     if edge.source == port {
         Some(edge.target)
     } else if edge.target == port {
@@ -4062,9 +4062,9 @@ fn connected_ports_for_sweep(graph: &LGraph, port: PortRef, forward: bool) -> Ve
         .iter()
         .filter_map(|edge| {
             if forward {
-                graph.edges.get(*edge).map(|edge| edge.source)
+                graph.edges.get_edge(*edge).map(|edge| edge.source)
             } else {
-                graph.edges.get(*edge).map(|edge| edge.target)
+                graph.edges.get_edge(*edge).map(|edge| edge.target)
             }
         })
         .collect()

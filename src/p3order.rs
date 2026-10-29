@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::{
+use crate::graph::{EdgeSlice, 
     GraphArena, GraphId, LGraph, LNodeKind, NodeId, NodeSlice, OtherGraphs, PortId, PortRef,
     PortSide,
 };
@@ -690,7 +690,7 @@ pub fn target_node(graph: &LGraph, port: PortRef) -> Option<NodeId> {
     let mut remaining_hops = graph.edges.len().saturating_add(1);
     while remaining_hops > 0 {
         remaining_hops -= 1;
-        let edge_data = graph.edges.get(edge)?;
+        let edge_data = graph.edges.get_edge(edge)?;
         let node = edge_data.target.node;
         if let Some(target) = graph.layerless_nodes[node]
             .long_edge_target

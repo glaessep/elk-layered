@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::compound::compare_compound_segments;
 use crate::error::Error;
 use crate::graph::{
-    GraphArena, GraphId, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize, NodeId, NodeSlice,
+    EdgeId, GraphArena, GraphId, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize, NodeId, NodeSlice,
     PortRef, PortSide,
 };
 
@@ -403,7 +403,7 @@ pub(crate) fn apply_layout(
     let mut by_graph: Vec<Vec<EdgeToApply<'_>>> = (0..graphs.len()).map(|_| Vec::new()).collect();
     for &graph_id in &hierarchy.order {
         let graph = hierarchy.graph(graph_id);
-        for (edge_index, edge) in graph.edges.iter().enumerate() {
+        for (edge_index, edge) in graph.edges_with_ids() {
             if !is_original_edge(graph, edge_index, input) {
                 continue;
             }
@@ -465,7 +465,7 @@ pub(crate) fn apply_layout(
 /// Whether a layered edge is an input edge as the layout left it, not a dummy edge.
 ///
 /// Ports `ElkGraphLayoutTransferrer.applyEdgeLayout`'s `ORIGIN` check: only input edges are written.
-fn is_original_edge(graph: &LGraph, index: usize, input: &TransferInput<'_>) -> bool {
+fn is_original_edge(graph: &LGraph, index: EdgeId, input: &TransferInput<'_>) -> bool {
     let edge = &graph.edges[index];
     if edge.compound_segment.is_some() || !input.edge_containers.contains_key(&edge.id) {
         return false;
