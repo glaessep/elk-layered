@@ -24,7 +24,7 @@ block of another project. Until 1.0, a change to the public API raises the minor
 - Ports in the input, including ports across the flow (north and south).
 - A model with typed ids and private fields.
 - One file per ELK class, with one crossing sweep for flat and nested graphs.
-- Every place where elkjs differs from Java on a JVM sits in `gwt.rs`, each with a test.
+- Every place where elkjs differs from Java on a JVM is listed in `gwt.rs`, each with a test.
 - A deep graph no longer overflows the stack.
 - The unit tests sit in `tests.rs` files next to the code they test, not inside the source files.
 - A parity suite holds `layout()` to what elkjs 0.9.3 returns, number for number.

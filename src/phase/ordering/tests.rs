@@ -1429,9 +1429,7 @@ fn barycenters_that_differ_only_beyond_float_precision_are_not_equal() {
 }
 
 /// Tests of the parts of the greedy switch that deal with north and south port dummies.
-#[cfg(test)]
 mod north_south_tests;
 
 /// Tests of `GreedyPortDistributor`.
-#[cfg(test)]
 mod greedy_port_distributor_tests;
