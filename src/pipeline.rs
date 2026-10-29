@@ -215,6 +215,7 @@ impl ProcessorKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphExecution {
+    /// The graph the processors run on.
     pub graph: GraphId,
     /// The caller's id of the graph, as `LGraph::name` keeps it.
     pub graph_name: String,
