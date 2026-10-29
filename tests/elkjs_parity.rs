@@ -130,8 +130,9 @@ fn cases_dir() -> PathBuf {
 /// `oracle/random.mjs` writes: `tests/elkjs/random/`, `tests/elkjs/random-group-ends/`, whose
 /// edges may also end at a group, `tests/elkjs/random-ports/`, whose nodes have ports, and
 /// `tests/elkjs/random-group-ports/`, whose groups have ports too, and
-/// `tests/elkjs/random-cross-ports/`, whose ports sit on all four sides, and
-/// `tests/elkjs/random-inline-labels/`, whose centre labels are often inline.
+/// `tests/elkjs/random-cross-ports/`, whose ports sit on all four sides,
+/// `tests/elkjs/random-inline-labels/`, whose centre labels are often inline, and
+/// `tests/elkjs/random-one-sided/`, which use the one-sided greedy switch.
 fn cases() -> Vec<PathBuf> {
     let mut inputs = Vec::new();
     for dir in [
@@ -142,6 +143,7 @@ fn cases() -> Vec<PathBuf> {
         cases_dir().join("random-group-ports"),
         cases_dir().join("random-cross-ports"),
         cases_dir().join("random-inline-labels"),
+        cases_dir().join("random-one-sided"),
     ] {
         let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|_| panic!("{} exists", dir.display()))
@@ -505,6 +507,20 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    `ElkDirection::Down`: 231 cases, such as labels-inline-direction-right. It is the one hand
 //    case with inline labels that sets `elk.direction` to RIGHT, which is also the default. Random
 //    cases set it too, so this case adds no other coverage; it stays as the small readable one.
+// 74. In `rate_area` (src/p5edges/orthogonal.rs), call `split_segment.recompute_extent()` after
+//    the area centre joins its connections: 1 case, greedy-switch-one-sided-split-segment. Its
+//    router splits a segment and must rate the free areas with the extent of the simulated split.
+// 75. In `add_adjacency` (src/p3order/sweep.rs), merge with any entry at the same position, not
+//    only the last one: 1 case, greedy-switch-one-sided-adjacency. Its free ports send edges to
+//    one port of the next layer from places that are not one after another.
+// 76. In `CrossingMatrixFiller::new` (src/p3order/sweep.rs), never count one side only
+//    (`one_sided: false`): 150 cases, 148 of random-one-sided, such as random-one-sided/r000,
+//    and the two cases above.
+// 77. In `AdjacencyList::new` (src/p3order/sweep.rs), walk the ports of the side in reverse
+//    (`ports_in_north_south_east_west_order(..).into_iter().rev()`): 1 case,
+//    greedy-switch-one-sided-port-order. Its node n1 has two free ports with edges to one port of
+//    the next layer, so the order of collection decides which entries merge.
+// 78. In the same function, walk the edges of each port in reverse: the same 1 case.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
