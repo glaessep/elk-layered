@@ -243,7 +243,7 @@ fn create_dummy_node(
     dummy.port_constraints = PortConstraints::FixedPos;
     graph.layerless_nodes.push(dummy);
     let dummy_ref = GraphNodeRef {
-        graph_id: graph.id.clone(),
+        graph_id: graph.id,
         node: dummy_index,
     };
 
@@ -257,8 +257,7 @@ fn create_dummy_node(
         for edge in edges {
             graph.set_edge_target(edge, dummy_port);
         }
-        graph.layerless_nodes[in_port.node].ports[in_port.port].port_dummy =
-            Some(dummy_ref.clone());
+        graph.layerless_nodes[in_port.node].ports[in_port.port].port_dummy = Some(dummy_ref);
     }
 
     if let Some(out_port) = out_port {

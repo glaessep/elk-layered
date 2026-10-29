@@ -14,7 +14,7 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use crate::graph::{EdgeLabelPlacement, LGraph, LNode, LPoint};
+use crate::graph::{EdgeLabelPlacement, GraphArena, GraphId, LNode, LPoint};
 use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, import_graph};
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, FixedAlignment, HierarchyHandling, LayeredOptions,
@@ -307,7 +307,7 @@ fn cases() -> Vec<(&'static str, ElkInputGraph)> {
 
 /// Lays a case out with the pipeline its graph needs: the compound pipeline when a node holds
 /// others or the graph lays out its children with it, the flat pipeline otherwise.
-fn lay_out(input: &ElkInputGraph) -> LGraph {
+fn lay_out(input: &ElkInputGraph) -> GraphArena {
     let mut graph = import_graph(input).expect("every case is a valid graph");
     let compound = graph.options.hierarchy_handling == HierarchyHandling::IncludeChildren
         || graph.graph_properties.external_ports
@@ -337,12 +337,13 @@ fn add(a: LPoint, b: LPoint) -> LPoint {
 }
 
 /// Writes one graph level, then recurses into the graphs its nodes hold.
-fn dump(graph: &LGraph, origin: LPoint, depth: usize, out: &mut String) {
+fn dump(graphs: &GraphArena, id: GraphId, origin: LPoint, depth: usize, out: &mut String) {
+    let graph = &graphs[id];
     let pad = "  ".repeat(depth);
     let _ = writeln!(
         out,
         "{pad}graph {} size {:?}x{:?} padding {:?} {:?} {:?} {:?}",
-        graph.id,
+        graph.name,
         graph.size.width,
         graph.size.height,
         graph.padding.top,
@@ -411,7 +412,8 @@ fn dump(graph: &LGraph, origin: LPoint, depth: usize, out: &mut String) {
         }
     }
     for node in &graph.layerless_nodes {
-        if let Some(nested) = &node.nested_graph {
+        if let Some(nested_id) = node.nested_graph {
+            let nested = &graphs[nested_id];
             let inner = add(
                 add(add(origin, node.position), nested.offset),
                 LPoint {
@@ -419,7 +421,7 @@ fn dump(graph: &LGraph, origin: LPoint, depth: usize, out: &mut String) {
                     y: nested.padding.top,
                 },
             );
-            dump(nested, inner, depth + 1, out);
+            dump(graphs, nested_id, inner, depth + 1, out);
         }
     }
 }
@@ -431,7 +433,13 @@ fn every_layout_matches_its_committed_snapshot() {
     let mut failures = Vec::new();
     for (name, input) in cases() {
         let mut got = String::new();
-        dump(&lay_out(&input), LPoint { x: 0.0, y: 0.0 }, 0, &mut got);
+        dump(
+            &lay_out(&input),
+            GraphId::ROOT,
+            LPoint { x: 0.0, y: 0.0 },
+            0,
+            &mut got,
+        );
         let path = dir.join(format!("{name}.txt"));
         if update {
             std::fs::create_dir_all(&dir).unwrap();
@@ -455,8 +463,20 @@ fn every_layout_matches_its_committed_snapshot() {
 fn the_same_graph_gives_the_same_layout_twice() {
     for (name, input) in cases() {
         let (mut first, mut second) = (String::new(), String::new());
-        dump(&lay_out(&input), LPoint { x: 0.0, y: 0.0 }, 0, &mut first);
-        dump(&lay_out(&input), LPoint { x: 0.0, y: 0.0 }, 0, &mut second);
+        dump(
+            &lay_out(&input),
+            GraphId::ROOT,
+            LPoint { x: 0.0, y: 0.0 },
+            0,
+            &mut first,
+        );
+        dump(
+            &lay_out(&input),
+            GraphId::ROOT,
+            LPoint { x: 0.0, y: 0.0 },
+            0,
+            &mut second,
+        );
         assert_eq!(first, second, "{name} laid out differently the second time");
     }
 }

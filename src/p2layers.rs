@@ -326,7 +326,10 @@ mod tests {
         }
     }
 
-    pub(super) fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
+    pub(super) fn graph(
+        nodes: Vec<ElkInputNode>,
+        edges: Vec<ElkInputEdge>,
+    ) -> crate::graph::GraphArena {
         import_graph(&ElkInputGraph {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),

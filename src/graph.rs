@@ -12,14 +12,20 @@ use super::options::{
 };
 use crate::random::JavaRandom;
 
+mod arena;
 mod ports;
+pub use arena::{GraphArena, GraphId, GraphParent, OtherGraphs};
 #[cfg(test)]
 pub(crate) use ports::port_ids;
 pub use ports::{NodePorts, PortId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LGraph {
-    pub id: String,
+    /// Names this graph in its hierarchy.
+    pub id: GraphId,
+    /// The caller's id of the node this graph belongs to. It only labels errors and results;
+    /// nothing looks a graph up by it.
+    pub name: String,
     pub options: LayeredOptions,
     pub size: LSize,
     pub padding: LPadding,
@@ -30,7 +36,8 @@ pub struct LGraph {
     pub graph_properties: GraphProperties,
     pub cyclic: bool,
     pub(crate) random: JavaRandom,
-    pub parent_node_id: Option<String>,
+    /// The node this graph lies in, set when the graph joins a [`GraphArena`] with `nest`.
+    pub parent: Option<GraphParent>,
     pub hidden_nodes: Vec<usize>,
     pub replaced_external_port_dummies: Vec<usize>,
     pub hierarchy_edges: Vec<HierarchyEdge>,
@@ -56,9 +63,10 @@ impl LGraph {
         size
     }
 
-    pub fn new(id: impl Into<String>, options: LayeredOptions) -> Self {
+    pub fn new(name: impl Into<String>, options: LayeredOptions) -> Self {
         Self {
-            id: id.into(),
+            id: GraphId::ROOT,
+            name: name.into(),
             options,
             size: LSize::default(),
             padding: LPadding::default(),
@@ -71,7 +79,7 @@ impl LGraph {
             // `configure_graph_properties` replaces this with the stream seeded from
             // `options.random_seed`. Every public pipeline entry configures first.
             random: JavaRandom::default(),
-            parent_node_id: None,
+            parent: None,
             hidden_nodes: Vec::new(),
             replaced_external_port_dummies: Vec::new(),
             hierarchy_edges: Vec::new(),
@@ -84,103 +92,16 @@ impl LGraph {
     /// Copies configured properties without copying the graph's dense arenas.
     /// Components use the already-resolved random stream through their serial executor.
     pub(crate) fn component_shell(&self) -> Self {
-        let mut graph = Self::new(self.id.clone(), self.options.clone());
+        let mut graph = Self::new(self.name.clone(), self.options.clone());
+        graph.id = self.id;
         graph.options.node_size.constraints = crate::options::SizeConstraints::FIXED;
         graph.padding = self.padding;
         graph.graph_properties = self.graph_properties.clone();
-        graph.parent_node_id = self.parent_node_id.clone();
+        graph.parent = self.parent;
         graph.random = self.random.clone();
         graph.in_layer_successor_constraints_between_non_dummies =
             self.in_layer_successor_constraints_between_non_dummies;
         graph
-    }
-
-    pub fn sync_graph_properties_to_options(&mut self) {
-        let result = self.try_for_each_graph_mut(|graph| {
-            graph.graph_properties.apply_to_options(&mut graph.options);
-            Ok::<(), std::convert::Infallible>(())
-        });
-        result.expect("infallible graph property synchronization");
-    }
-
-    pub(crate) fn try_for_each_graph_mut<E>(
-        &mut self,
-        mut visit: impl FnMut(&mut LGraph) -> Result<(), E>,
-    ) -> Result<(), E> {
-        struct DetachedGraph {
-            graph: Box<LGraph>,
-            parent: Option<usize>,
-            parent_node: usize,
-        }
-
-        fn take_nested_graphs(graph: &mut LGraph) -> Vec<(usize, Box<LGraph>)> {
-            graph
-                .layerless_nodes
-                .iter_mut()
-                .enumerate()
-                .filter_map(|(node, data)| data.nested_graph.take().map(|graph| (node, graph)))
-                .collect()
-        }
-
-        let mut detached = take_nested_graphs(self)
-            .into_iter()
-            .map(|(parent_node, graph)| DetachedGraph {
-                graph,
-                parent: None,
-                parent_node,
-            })
-            .collect::<Vec<_>>();
-        let mut cursor = 0usize;
-        while cursor < detached.len() {
-            let children = take_nested_graphs(&mut detached[cursor].graph);
-            detached.extend(
-                children
-                    .into_iter()
-                    .map(|(parent_node, graph)| DetachedGraph {
-                        graph,
-                        parent: Some(cursor),
-                        parent_node,
-                    }),
-            );
-            cursor += 1;
-        }
-
-        let mut root_children = Vec::new();
-        let mut children_by_parent = vec![Vec::new(); detached.len()];
-        for (index, detached_graph) in detached.iter().enumerate() {
-            if let Some(parent) = detached_graph.parent {
-                children_by_parent[parent].push(index);
-            } else {
-                root_children.push(index);
-            }
-        }
-        let mut traversal = Vec::with_capacity(detached.len());
-        let mut stack = root_children.into_iter().rev().collect::<Vec<_>>();
-        while let Some(index) = stack.pop() {
-            traversal.push(index);
-            stack.extend(children_by_parent[index].iter().rev().copied());
-        }
-
-        let mut result = visit(self);
-        if result.is_ok() {
-            for index in traversal {
-                if let Err(error) = visit(&mut detached[index].graph) {
-                    result = Err(error);
-                    break;
-                }
-            }
-        }
-
-        while let Some(detached_graph) = detached.pop() {
-            let parent_node = detached_graph.parent_node;
-            if let Some(parent) = detached_graph.parent {
-                detached[parent].graph.layerless_nodes[parent_node].nested_graph =
-                    Some(detached_graph.graph);
-            } else {
-                self.layerless_nodes[parent_node].nested_graph = Some(detached_graph.graph);
-            }
-        }
-        result
     }
 }
 
@@ -229,7 +150,8 @@ pub struct LNode {
     /// `layered.edgeRouting.selfLoopOrdering`, which ELK reads from each node.
     pub self_loop_ordering: super::options::SelfLoopOrderingStrategy,
     pub ports: NodePorts,
-    pub nested_graph: Option<Box<LGraph>>,
+    /// The graph inside this node, which the layout's [`GraphArena`] holds.
+    pub nested_graph: Option<GraphId>,
     pub model_order: Option<usize>,
     pub component_priority: i32,
     pub layer_index: Option<usize>,
@@ -470,8 +392,10 @@ pub struct HierarchyEdge {
     pub source_port_named: bool,
     /// The same for the target port.
     pub target_port_named: bool,
-    pub source_path: Vec<String>,
-    pub target_path: Vec<String>,
+    /// The nodes above the source, from the hierarchy edge's own graph down.
+    pub source_path: Vec<HierarchyStep>,
+    /// The nodes above the target, from the hierarchy edge's own graph down.
+    pub target_path: Vec<HierarchyStep>,
     pub labels: Vec<LLabel>,
     pub minlen: usize,
     pub model_order: Option<usize>,
@@ -480,21 +404,32 @@ pub struct HierarchyEdge {
     pub priority_straightness: i32,
 }
 
+/// One node above the end of a hierarchy edge, and the graph inside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HierarchyStep {
+    /// The caller's id of the node.
+    pub node_id: String,
+    /// The graph inside the node.
+    pub graph: GraphId,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PortRef {
     pub node: usize,
     pub port: PortId,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphNodeRef {
-    pub graph_id: String,
+    /// The graph that holds the node.
+    pub graph_id: GraphId,
     pub node: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphPortRef {
-    pub graph_id: String,
+    /// The graph that holds the port's node.
+    pub graph_id: GraphId,
     pub port: PortRef,
 }
 
@@ -508,7 +443,8 @@ pub enum CompoundEdgeSegment {
 pub struct CrossHierarchyEdge {
     pub original_edge_id: String,
     pub original_model_order: Option<usize>,
-    pub graph_id: String,
+    /// The graph that holds the edge `edge` names.
+    pub graph_id: GraphId,
     pub edge: usize,
     pub segment: CompoundEdgeSegment,
 }
@@ -1505,20 +1441,22 @@ mod tests {
         let mut dummy = LNode::new("external:cluster", 0.0, 0.0, None);
         dummy.kind = LNodeKind::ExternalPort;
         let origin = GraphPortRef {
-            graph_id: "root".to_string(),
+            graph_id: GraphId::ROOT,
             port: PortRef {
                 node: 0,
                 port: PortId::new(1),
             },
         };
-        dummy.origin_port = Some(origin.clone());
+        dummy.origin_port = Some(origin);
         nested.layerless_nodes.push(dummy);
-        compound.nested_graph = Some(Box::new(nested));
         parent.layerless_nodes.push(compound);
+        let mut graphs = GraphArena::new(parent);
+        let nested_id = graphs.nest(GraphId::ROOT, 0, nested);
 
-        assert!(parent.reorder_node_ports(0, port_ids([1, 0])));
+        assert!(graphs.root_mut().reorder_node_ports(0, port_ids([1, 0])));
 
-        let nested = parent.layerless_nodes[0].nested_graph.as_ref().unwrap();
+        let nested = &graphs[nested_id];
+        let parent = graphs.root();
         assert_eq!(nested.layerless_nodes[0].origin_port, Some(origin));
         // The origin still names the port "p1", which now comes first.
         let compound = &parent.layerless_nodes[0];
@@ -1654,7 +1592,7 @@ mod tests {
         graph.layerless_nodes[1].long_edge_source = Some(a[0]);
         graph.layerless_nodes[1].long_edge_target = Some(a[2]);
         graph.layerless_nodes[1].origin_port = Some(GraphPortRef {
-            graph_id: "root".to_string(),
+            graph_id: GraphId::ROOT,
             port: a[1],
         });
         let edges_before = graph.edges.clone();

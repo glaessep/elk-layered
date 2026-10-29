@@ -17,7 +17,10 @@ use super::options::{
 };
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::configurator::{check_random_seeds, configure_graph_properties, configured_options};
-use crate::graph::{LGraph, LNode, LNodeKind, LPoint, LSize, PortSide, is_across_flow};
+use crate::graph::{
+    GraphArena, GraphId, GraphParent, LGraph, LNode, LNodeKind, LPoint, LSize, OtherGraphs,
+    PortSide, is_across_flow,
+};
 use crate::intermediate::{
     IntermediateError, calculate_layer_sizes_and_graph_height, insert_label_dummies,
     join_long_edges, merge_hyperedge_dummies, position_interactive_external_ports,
@@ -212,8 +215,12 @@ impl ProcessorKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphExecution {
-    pub graph_id: String,
-    pub parent_node_id: Option<String>,
+    /// The graph the processors run on.
+    pub graph: GraphId,
+    /// The caller's id of the graph, as `LGraph::name` keeps it.
+    pub graph_name: String,
+    /// The node the graph lies in. `None` for the root.
+    pub parent: Option<GraphParent>,
     pub processors: Vec<ProcessorKind>,
 }
 
@@ -224,58 +231,22 @@ struct GraphAlgorithm {
     execution: GraphExecution,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct GraphArenaParent {
-    graph: usize,
-    node: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct GraphArenaEntry {
-    parent: Option<GraphArenaParent>,
-}
-
+/// The algorithms of a compound run, one per graph, in the order ELK finds the graphs.
 #[derive(Debug)]
-struct CompoundGraphArena {
-    entries: Vec<GraphArenaEntry>,
+struct CompoundRun {
     algorithms: Vec<GraphAlgorithm>,
-    graph_slots: Vec<Option<Box<LGraph>>>,
 }
 
-impl CompoundGraphArena {
-    fn new(root: &LGraph) -> Self {
-        let mut entries = vec![GraphArenaEntry { parent: None }];
-        let mut algorithms = vec![graph_algorithm(root)];
-        let mut search = vec![(0usize, root)];
-
-        while let Some((graph_index, graph)) = search.pop() {
-            for (node_index, node) in graph.layerless_nodes.iter().enumerate() {
-                let Some(nested) = node.nested_graph.as_deref() else {
-                    continue;
-                };
-                let child_index = entries.len();
-                entries.push(GraphArenaEntry {
-                    parent: Some(GraphArenaParent {
-                        graph: graph_index,
-                        node: node_index,
-                    }),
-                });
-                algorithms.push(graph_algorithm(nested));
-                // Match ELK's `ArrayDeque.push` discovery order. The last sibling is searched
-                // first, while the collected graph list is later executed in reverse discovery
-                // order.
-                search.push((child_index, nested));
-            }
-        }
-
-        let mut graph_slots = Vec::with_capacity(entries.len());
-        graph_slots.resize_with(entries.len(), || None);
-
-        Self {
-            entries,
-            algorithms,
-            graph_slots,
-        }
+impl CompoundRun {
+    fn new(graphs: &GraphArena) -> Self {
+        // ELK finds the graphs with `ArrayDeque.push`: the last sibling is searched first, and the
+        // collected list is later executed in reverse discovery order.
+        let algorithms = graphs
+            .discovery_order(GraphId::ROOT)
+            .into_iter()
+            .map(|graph| graph_algorithm(&graphs[graph]))
+            .collect();
+        Self { algorithms }
     }
 
     fn into_executions(self) -> Vec<GraphExecution> {
@@ -295,8 +266,9 @@ fn graph_algorithm(graph: &LGraph) -> GraphAlgorithm {
         next_processor: 0,
         processors: assemble_processors_for_graph(graph),
         execution: GraphExecution {
-            graph_id: graph.id.clone(),
-            parent_node_id: graph.parent_node_id.clone(),
+            graph: graph.id,
+            graph_name: graph.name.clone(),
+            parent: graph.parent,
             processors: Vec::new(),
         },
     }
@@ -480,7 +452,7 @@ pub fn assemble_processors_for_graph(graph: &LGraph) -> Vec<ProcessorSlot> {
     assemble_processors_with_graph_size(
         &options,
         graph.layerless_nodes.len(),
-        graph.parent_node_id.is_none(),
+        graph.parent.is_none(),
     )
 }
 
@@ -556,50 +528,42 @@ fn validate_ported_processors(processors: &[ProcessorSlot]) -> PipelineResult<()
     Ok(())
 }
 
-fn validate_ported_graph_processors(graph: &LGraph) -> PipelineResult<()> {
-    let mut collected = vec![graph];
-    let mut search = vec![graph];
-    while let Some(current) = search.pop() {
-        for nested in current
-            .layerless_nodes
-            .iter()
-            .filter_map(|node| node.nested_graph.as_deref())
-        {
-            collected.push(nested);
-            search.push(nested);
-        }
-    }
-    for current in collected.into_iter().rev() {
-        validate_ported_processors(&assemble_processors_for_graph(current))?;
+fn validate_ported_graph_processors(graphs: &GraphArena) -> PipelineResult<()> {
+    for graph in graphs.discovery_order(GraphId::ROOT).into_iter().rev() {
+        validate_ported_processors(&assemble_processors_for_graph(&graphs[graph]))?;
     }
     Ok(())
 }
 
-/// Run the assembled processors of a flat graph up to and including the first one `is_last`
+/// Run the assembled processors of the root graph up to and including the first one `is_last`
 /// accepts.
 ///
 /// Tests use this to stop at a phase boundary with exactly the state the full runner has there:
 /// the configurator, the edge and layer constraint steps and every other scheduled processor.
+/// The graphs inside nodes stay as they are, in `graphs`.
 #[cfg(test)]
 fn run_processors_until_slot(
-    graph: &mut LGraph,
+    graphs: &mut GraphArena,
     is_last: impl Fn(&ProcessorSlot) -> bool,
 ) -> PipelineResult<Vec<ProcessorKind>> {
     let mut executed = Vec::new();
-    for slot in prepare_single_graph_processors(graph)? {
-        execute_processor(graph, slot.kind)?;
-        executed.push(slot.kind);
-        if is_last(&slot) {
-            break;
+    prepare_single_graph_processors(graphs).and_then(|processors| {
+        for slot in processors {
+            execute_processor(graphs.root_mut(), OtherGraphs::none(), slot.kind)?;
+            executed.push(slot.kind);
+            if is_last(&slot) {
+                break;
+            }
         }
-    }
+        Ok(())
+    })?;
     Ok(executed)
 }
 
 /// Run the assembled processors up to and including `target`.
 #[cfg(test)]
 pub(crate) fn run_processors_until(
-    graph: &mut LGraph,
+    graph: &mut GraphArena,
     target: ProcessorKind,
 ) -> PipelineResult<Vec<ProcessorKind>> {
     run_processors_until_slot(graph, |slot| slot.kind == target)
@@ -608,7 +572,7 @@ pub(crate) fn run_processors_until(
 /// Run the assembled processors up to and including the one that carries `phase`.
 #[cfg(test)]
 pub(crate) fn run_processors_until_phase(
-    graph: &mut LGraph,
+    graph: &mut GraphArena,
     phase: LayeredPhase,
 ) -> PipelineResult<Vec<ProcessorKind>> {
     run_processors_until_slot(graph, |slot| slot.phase == Some(phase))
@@ -619,33 +583,40 @@ pub(crate) fn run_processors_until_phase(
 /// This is the library equivalent of `ElkLayered.layout(...)`: it uses the same assembled
 /// processor list as the compound runner and rejects unsupported processors before mutating
 /// the graph.
-pub fn execute_ported_processors(graph: &mut LGraph) -> PipelineResult<Vec<ProcessorKind>> {
+///
+/// A zero seed and an unsupported processor fail before anything changes. After an error from a
+/// later step, `graphs` may be half changed, so drop it. An error between the component split
+/// and its combine, for one, leaves the references of the nested graphs half renumbered.
+pub fn execute_ported_processors(graphs: &mut GraphArena) -> PipelineResult<Vec<ProcessorKind>> {
     let mut executed = Vec::new();
     // The full runner promises to reject a zero seed and unsupported processors without mutating
     // the caller's graph. Both checks only read it. `assemble_processors_for_graph` applies the
     // same option rewrites as the configurator, on a copy of the options.
-    check_random_seeds(graph)?;
-    check_external_port_sides(graph)?;
-    validate_ported_processors(&assemble_processors_for_graph(graph))?;
-    let processors = prepare_single_graph_processors(graph)?;
+    check_random_seeds(graphs)?;
+    check_external_port_sides(graphs)?;
+    validate_ported_processors(&assemble_processors_for_graph(graphs.root()))?;
+    let processors = prepare_single_graph_processors(graphs)?;
 
-    if let Some(mut components) = crate::components::split(graph)? {
+    if let Some(mut components) = crate::components::split(graphs)? {
         // ComponentsProcessor copies the configured properties shallowly. Its Java Random
         // is one shared object, so later components continue the previous component's stream.
-        let mut random = graph.random.clone();
+        let mut random = graphs.root().random.clone();
+        // The components stand in for the root, so only the graphs below it are left to read.
+        let others = graphs.others(GraphId::ROOT);
         for component in &mut components {
             component.graph.random = random;
             for slot in &processors {
-                execute_processor(&mut component.graph, slot.kind)?;
+                execute_processor(&mut component.graph, others, slot.kind)?;
             }
             random = component.graph.random.clone();
         }
-        crate::components::combine(graph, components)?;
-        graph.random = random;
+        crate::components::combine(graphs, components)?;
+        graphs.root_mut().random = random;
         executed.extend(processors.iter().map(|slot| slot.kind));
     } else {
+        let (graph, others) = graphs.split_mut(GraphId::ROOT);
         for slot in processors {
-            execute_processor(graph, slot.kind)?;
+            execute_processor(graph, others, slot.kind)?;
             executed.push(slot.kind);
         }
     }
@@ -653,6 +624,7 @@ pub fn execute_ported_processors(graph: &mut LGraph) -> PipelineResult<Vec<Proce
     // Compound layout resizes through its scheduled HierarchicalNodeResizer. Flat layout
     // applies ElkLayered.resizeGraph after direction postprocessing and component combination,
     // whether or not a minimum size is set: it recomputes the size from the padding either way.
+    let graph = graphs.root_mut();
     if graph.options.hierarchy_handling != super::options::HierarchyHandling::IncludeChildren {
         resize_graph_to_minimum(graph)?;
     }
@@ -660,24 +632,19 @@ pub fn execute_ported_processors(graph: &mut LGraph) -> PipelineResult<Vec<Proce
     Ok(executed)
 }
 
-fn prepare_single_graph_processors(graph: &mut LGraph) -> PipelineResult<Vec<ProcessorSlot>> {
+fn prepare_single_graph_processors(graphs: &mut GraphArena) -> PipelineResult<Vec<ProcessorSlot>> {
     // Processor execution below is root-local, but the source-backed GraphConfigurator walks every
     // nested graph to resolve options and random seeds.
-    validate_node_size_minima(graph)?;
-    configure_graph_properties(graph)?;
-    Ok(assemble_processors_for_graph(graph))
+    validate_node_size_minima(graphs)?;
+    configure_graph_properties(graphs)?;
+    Ok(assemble_processors_for_graph(graphs.root()))
 }
 
-fn validate_node_size_minima(graph: &LGraph) -> PipelineResult<()> {
-    let mut pending = vec![graph];
+fn validate_node_size_minima(graphs: &GraphArena) -> PipelineResult<()> {
+    let mut pending = vec![GraphId::ROOT];
     while let Some(graph) = pending.pop() {
-        graph.options.validate_node_size_minimum()?;
-        pending.extend(
-            graph
-                .layerless_nodes
-                .iter()
-                .filter_map(|node| node.nested_graph.as_deref()),
-        );
+        graphs[graph].options.validate_node_size_minimum()?;
+        pending.extend(graphs.children(graph));
     }
     Ok(())
 }
@@ -691,45 +658,51 @@ fn validate_node_size_minima(graph: &LGraph) -> PipelineResult<()> {
 /// hierarchical external port dummies by the importer and routed by the hierarchical port processors
 /// in the same schedule.
 pub fn execute_ported_compound_processors(
-    graph: &mut LGraph,
+    graphs: &mut GraphArena,
 ) -> PipelineResult<Vec<GraphExecution>> {
-    validate_ported_graph_processors(graph)?;
-    validate_node_size_minima(graph)?;
+    validate_ported_graph_processors(graphs)?;
+    validate_node_size_minima(graphs)?;
     // Check every seed before the preprocessor and the configurator change the caller's graph.
-    check_random_seeds(graph)?;
-    preprocess_source_ported_compound_graph(graph);
-    check_external_port_sides(graph)?;
-    configure_graph_properties(graph)?;
-    review_and_correct_hierarchical_processors(graph)?;
+    check_random_seeds(graphs)?;
+    preprocess_source_ported_compound_graph(graphs);
+    check_external_port_sides(graphs)?;
+    configure_graph_properties(graphs)?;
+    review_and_correct_hierarchical_processors(graphs)?;
 
-    let mut arena = CompoundGraphArena::new(graph);
-    const ROOT_GRAPH: usize = 0;
+    let mut run = CompoundRun::new(graphs);
+    const ROOT_ALGORITHM: usize = 0;
     // Configuration can change the assembled processor list. Validate in the same official
     // bottom-up order used for execution and public result emission.
-    for algorithm in arena.algorithms.iter().rev() {
+    for algorithm in run.algorithms.iter().rev() {
         validate_ported_processors(&algorithm.processors)?;
     }
 
-    while arena.algorithms[ROOT_GRAPH].next_processor
-        < arena.algorithms[ROOT_GRAPH].processors.len()
+    while run.algorithms[ROOT_ALGORITHM].next_processor
+        < run.algorithms[ROOT_ALGORITHM].processors.len()
     {
-        execute_compound_graph_round(
-            graph,
-            &arena.entries,
-            &mut arena.graph_slots,
-            &mut arena.algorithms,
-        )?;
+        execute_compound_graph_round(graphs, &mut run.algorithms)?;
     }
 
-    Ok(arena.into_executions())
+    Ok(run.into_executions())
+}
+
+/// One round: every nested graph, deepest first, runs until it reaches a hierarchy-aware
+/// processor or the end of its list. Then the root does the same.
+fn execute_compound_graph_round(
+    graphs: &mut GraphArena,
+    algorithms: &mut [GraphAlgorithm],
+) -> PipelineResult<()> {
+    for index in (1..algorithms.len()).rev() {
+        execute_compound_algorithm_until_pause(graphs, &mut algorithms[index])?;
+    }
+    execute_compound_algorithm_until_pause(graphs, &mut algorithms[0])
 }
 
 fn execute_compound_algorithm_until_pause(
-    graph: &mut LGraph,
+    graphs: &mut GraphArena,
     algorithm: &mut GraphAlgorithm,
-    is_root: bool,
-    mut parent: Option<ParentGraph<'_>>,
 ) -> PipelineResult<()> {
+    let is_root = algorithm.execution.parent.is_none();
     while algorithm.next_processor < algorithm.processors.len() {
         let kind = algorithm.processors[algorithm.next_processor].kind;
         algorithm.next_processor += 1;
@@ -740,15 +713,17 @@ fn execute_compound_algorithm_until_pause(
         }
 
         if hierarchy_aware {
-            execute_hierarchy_aware_processor(graph, kind)?;
+            execute_hierarchy_aware_processor(graphs, kind)?;
         } else {
-            execute_processor(graph, kind)?;
+            let (graph, others) = graphs.split_mut(algorithm.execution.graph);
+            execute_processor(graph, others, kind)?;
         }
-        let size = actual_graph_size(graph);
+        let size = actual_graph_size(&graphs[algorithm.execution.graph]);
         if kind == ProcessorKind::HierarchicalNodeResizer
-            && let Some(parent) = parent.as_mut()
+            && let Some(parent) = algorithm.execution.parent
         {
-            transfer_nested_graph_layout_to_parent_node(graph, parent.graph, parent.node, size);
+            let (nested, parent_graph) = graphs.pair_mut(algorithm.execution.graph, parent.graph);
+            transfer_nested_graph_layout_to_parent_node(nested, parent_graph, parent.node, size);
         }
         algorithm.execution.processors.push(kind);
 
@@ -760,188 +735,23 @@ fn execute_compound_algorithm_until_pause(
     Ok(())
 }
 
-struct ParentGraph<'a> {
-    graph: &'a mut LGraph,
-    node: usize,
-}
-
-/// Owns one round's Rust-only detachment of the compound hierarchy.
-///
-/// Eclipse ELK keeps nested graph objects attached throughout execution. Rust needs disjoint
-/// mutable owners to execute a child and update its parent at the same time, so the round stores
-/// every nested graph in an arena slot. Completed children are immediately reattached before their
-/// parent executes. Dropping the guard restores every still-detached graph in child-before-parent
-/// order after an error or unwind.
-struct DetachedCompoundGraphs<'a> {
-    root: &'a mut LGraph,
-    entries: &'a [GraphArenaEntry],
-    slots: &'a mut [Option<Box<LGraph>>],
-}
-
-impl<'a> DetachedCompoundGraphs<'a> {
-    fn new(
-        root: &'a mut LGraph,
-        entries: &'a [GraphArenaEntry],
-        slots: &'a mut [Option<Box<LGraph>>],
-    ) -> Self {
-        assert_eq!(
-            slots.len(),
-            entries.len(),
-            "the reusable graph slots must match the arena topology"
-        );
-        assert!(
-            slots.iter().all(Option::is_none),
-            "all compound graph slots must be empty between rounds"
-        );
-
-        Self {
-            root,
-            entries,
-            slots,
-        }
-    }
-
-    fn detach_all(&mut self) {
-        // Arena discovery always assigns a parent before its children. Detach in that order so a
-        // nested graph is still reachable from either the root or its parent's occupied slot.
-        for graph_index in 1..self.entries.len() {
-            let parent = self.entries[graph_index]
-                .parent
-                .expect("every non-root graph must have an arena parent");
-            let graph = if parent.graph == 0 {
-                self.root.layerless_nodes[parent.node].nested_graph.take()
-            } else {
-                self.slots[parent.graph]
-                    .as_deref_mut()
-                    .expect("a parent graph must remain detached until its children complete")
-                    .layerless_nodes[parent.node]
-                    .nested_graph
-                    .take()
-            }
-            .expect("the compound graph topology must remain stable during layered execution");
-            self.slots[graph_index] = Some(graph);
-        }
-    }
-
-    fn execute_and_reattach(
-        &mut self,
-        graph_index: usize,
-        algorithm: &mut GraphAlgorithm,
-    ) -> PipelineResult<()> {
-        let parent = self.entries[graph_index]
-            .parent
-            .expect("only nested graphs use detached execution");
-        if parent.graph == 0 {
-            let result = {
-                let graph = self.slots[graph_index]
-                    .as_deref_mut()
-                    .expect("the nested graph must occupy its arena slot");
-                execute_compound_algorithm_until_pause(
-                    graph,
-                    algorithm,
-                    false,
-                    Some(ParentGraph {
-                        graph: self.root,
-                        node: parent.node,
-                    }),
-                )
-            };
-            let graph = self.slots[graph_index]
-                .take()
-                .expect("the completed graph must still occupy its arena slot");
-            self.root.layerless_nodes[parent.node].nested_graph = Some(graph);
-            return result;
-        }
-
-        debug_assert!(parent.graph < graph_index);
-        let result = {
-            let (parents, current_and_later) = self.slots.split_at_mut(graph_index);
-            let parent_graph = parents[parent.graph]
-                .as_deref_mut()
-                .expect("the parent graph must remain detached until its turn");
-            let graph = current_and_later[0]
-                .as_deref_mut()
-                .expect("the nested graph must occupy its arena slot");
-            execute_compound_algorithm_until_pause(
-                graph,
-                algorithm,
-                false,
-                Some(ParentGraph {
-                    graph: parent_graph,
-                    node: parent.node,
-                }),
-            )
-        };
-
-        let graph = self.slots[graph_index]
-            .take()
-            .expect("the completed graph must still occupy its arena slot");
-        self.slots[parent.graph]
-            .as_deref_mut()
-            .expect("the parent graph must remain detached until its turn")
-            .layerless_nodes[parent.node]
-            .nested_graph = Some(graph);
-        result
-    }
-
-    fn restore_slot(&mut self, graph_index: usize) {
-        let Some(graph) = self.slots[graph_index].take() else {
-            return;
-        };
-        let parent = self.entries[graph_index]
-            .parent
-            .expect("every non-root graph must have an arena parent");
-        if parent.graph == 0 {
-            self.root.layerless_nodes[parent.node].nested_graph = Some(graph);
-        } else {
-            self.slots[parent.graph]
-                .as_deref_mut()
-                .expect("a detached child must still have a detached parent during restoration")
-                .layerless_nodes[parent.node]
-                .nested_graph = Some(graph);
-        }
-    }
-}
-
-impl Drop for DetachedCompoundGraphs<'_> {
-    fn drop(&mut self) {
-        for graph_index in (1..self.entries.len()).rev() {
-            self.restore_slot(graph_index);
-        }
-    }
-}
-
-fn execute_compound_graph_round(
-    root: &mut LGraph,
-    entries: &[GraphArenaEntry],
-    graph_slots: &mut [Option<Box<LGraph>>],
-    algorithms: &mut [GraphAlgorithm],
-) -> PipelineResult<()> {
-    let mut detached = DetachedCompoundGraphs::new(root, entries, graph_slots);
-    detached.detach_all();
-    for graph_index in (1..algorithms.len()).rev() {
-        detached.execute_and_reattach(graph_index, &mut algorithms[graph_index])?;
-    }
-    execute_compound_algorithm_until_pause(detached.root, &mut algorithms[0], true, None)
-}
-
 fn execute_hierarchy_aware_processor(
-    graph: &mut LGraph,
+    graphs: &mut GraphArena,
     kind: ProcessorKind,
 ) -> PipelineResult<()> {
     match kind {
         ProcessorKind::LayerSweepCrossingMinimizerBarycenter => {
-            minimize_crossings_layer_sweep_hierarchical_with_type(graph, CrossMinType::Barycenter);
+            minimize_crossings_layer_sweep_hierarchical_with_type(graphs, CrossMinType::Barycenter);
         }
         ProcessorKind::LayerSweepCrossingMinimizerOneSidedGreedySwitch => {
             minimize_crossings_layer_sweep_hierarchical_with_type(
-                graph,
+                graphs,
                 CrossMinType::OneSidedGreedySwitch,
             );
         }
         ProcessorKind::LayerSweepCrossingMinimizerTwoSidedGreedySwitch => {
             minimize_crossings_layer_sweep_hierarchical_with_type(
-                graph,
+                graphs,
                 CrossMinType::TwoSidedGreedySwitch,
             );
         }
@@ -958,9 +768,10 @@ fn execute_hierarchy_aware_processor(
 /// routing of the edges at such a dummy does not match elkjs. A dummy without a side comes from a
 /// port without one on a node whose port sides are fixed, and a node of size zero has nothing to
 /// take the side from: ELK fails on it.
-fn check_external_port_sides(root: &LGraph) -> PipelineResult<()> {
-    let mut pending = vec![root];
-    while let Some(graph) = pending.pop() {
+fn check_external_port_sides(graphs: &GraphArena) -> PipelineResult<()> {
+    let mut pending = vec![GraphId::ROOT];
+    while let Some(id) = pending.pop() {
+        let graph = &graphs[id];
         for node in &graph.layerless_nodes {
             if node.kind != LNodeKind::ExternalPort {
                 continue;
@@ -976,20 +787,15 @@ fn check_external_port_sides(root: &LGraph) -> PipelineResult<()> {
                 });
             }
         }
-        pending.extend(
-            graph
-                .layerless_nodes
-                .iter()
-                .filter_map(|node| node.nested_graph.as_deref()),
-        );
+        pending.extend(graphs.children(id));
     }
     Ok(())
 }
 
-fn review_and_correct_hierarchical_processors(root: &mut LGraph) -> PipelineResult<()> {
-    let root_crossing = root.options.crossing_minimization_strategy;
-    let root_greedy_switch = root.options.greedy_switch_hierarchical_type;
-    root.try_for_each_graph_mut(|graph| {
+fn review_and_correct_hierarchical_processors(graphs: &mut GraphArena) -> PipelineResult<()> {
+    let root_crossing = graphs.root().options.crossing_minimization_strategy;
+    let root_greedy_switch = graphs.root().options.greedy_switch_hierarchical_type;
+    graphs.try_for_each_graph_mut(|graph| {
         if graph.options.crossing_minimization_strategy != root_crossing {
             return Err(PipelineError::UnsupportedCompoundGraph {
                 reason: "child graphs must use the root hierarchy-aware crossing minimizer",
@@ -1047,10 +853,7 @@ fn transfer_external_port_dummy_layout_to_parent_node(
         if nested_graph.layerless_nodes[dummy_index].kind != LNodeKind::ExternalPort {
             continue;
         }
-        let Some(origin_port) = nested_graph.layerless_nodes[dummy_index]
-            .origin_port
-            .clone()
-        else {
+        let Some(origin_port) = nested_graph.layerless_nodes[dummy_index].origin_port else {
             continue;
         };
         if origin_port.port.node != parent_node_index {
@@ -1127,7 +930,11 @@ pub(crate) fn external_port_position(
     port_position
 }
 
-fn execute_processor(graph: &mut LGraph, kind: ProcessorKind) -> PipelineResult<()> {
+fn execute_processor(
+    graph: &mut LGraph,
+    others: OtherGraphs<'_>,
+    kind: ProcessorKind,
+) -> PipelineResult<()> {
     match kind {
         ProcessorKind::DirectionPreprocessor => {
             transform_graph_direction(graph, GraphTransformMode::ToInputDirection);
@@ -1141,7 +948,7 @@ fn execute_processor(graph: &mut LGraph, kind: ProcessorKind) -> PipelineResult<
         ProcessorKind::InteractiveExternalPortPositioner => {
             position_interactive_external_ports(graph);
         }
-        ProcessorKind::SelfLoopPreProcessor => preprocess_self_loops(graph),
+        ProcessorKind::SelfLoopPreProcessor => preprocess_self_loops(graph, others),
         ProcessorKind::GreedyCycleBreaker => break_cycles_greedy(graph),
         ProcessorKind::DepthFirstCycleBreaker => break_cycles_depth_first(graph),
         ProcessorKind::InteractiveCycleBreaker => break_cycles_interactive(graph),
@@ -1171,22 +978,30 @@ fn execute_processor(graph: &mut LGraph, kind: ProcessorKind) -> PipelineResult<
             process_hierarchical_port_constraints(graph);
         }
         ProcessorKind::LongEdgeSplitter => split_long_edges(graph),
-        ProcessorKind::PortSideProcessor => process_port_sides(graph),
+        ProcessorKind::PortSideProcessor => process_port_sides(graph, others),
         ProcessorKind::InvertedPortProcessor => process_inverted_ports(graph),
         ProcessorKind::PortListSorter => sort_port_lists(graph),
         ProcessorKind::SortByInputModelProcessor => sort_by_input_model(graph),
         ProcessorKind::NorthSouthPortPreprocessor => preprocess_north_south_ports(graph),
         ProcessorKind::NorthSouthPortPostprocessor => postprocess_north_south_ports(graph),
         ProcessorKind::LayerSweepCrossingMinimizerBarycenter => {
-            minimize_crossings_layer_sweep_with_type(graph, CrossMinType::Barycenter);
+            minimize_crossings_layer_sweep_with_type(graph, others, CrossMinType::Barycenter);
         }
         ProcessorKind::LayerSweepCrossingMinimizerOneSidedGreedySwitch => {
-            minimize_crossings_layer_sweep_with_type(graph, CrossMinType::OneSidedGreedySwitch);
+            minimize_crossings_layer_sweep_with_type(
+                graph,
+                others,
+                CrossMinType::OneSidedGreedySwitch,
+            );
         }
         ProcessorKind::LayerSweepCrossingMinimizerTwoSidedGreedySwitch => {
-            minimize_crossings_layer_sweep_with_type(graph, CrossMinType::TwoSidedGreedySwitch);
+            minimize_crossings_layer_sweep_with_type(
+                graph,
+                others,
+                CrossMinType::TwoSidedGreedySwitch,
+            );
         }
-        ProcessorKind::SelfLoopPortRestorer => restore_self_loop_ports(graph),
+        ProcessorKind::SelfLoopPortRestorer => restore_self_loop_ports(graph, others),
         ProcessorKind::InLayerConstraintProcessor => process_in_layer_constraints(graph),
         ProcessorKind::LabelAndNodeSizeProcessor => calculate_label_and_node_sizes(graph),
         ProcessorKind::InnermostNodeMarginCalculator => calculate_innermost_node_margins(graph),
@@ -1811,6 +1626,36 @@ mod tests {
         }
     }
 
+    // Mutation: move only the root into a new one-graph arena inside `run_processors_until_slot`,
+    // and put it back afterwards. The graph inside `group` is then dropped from the arena the
+    // test passes in.
+    #[test]
+    fn running_processors_until_a_phase_keeps_the_graphs_inside_nodes() {
+        let mut group = node("group");
+        group.hierarchy_handling = Some(crate::options::HierarchyHandling::IncludeChildren);
+        let mut child = node("child");
+        child.parent = Some("group".to_string());
+        let input = ElkInputGraph {
+            id: "root".to_string(),
+            options: LayeredOptions {
+                hierarchy_handling: crate::options::HierarchyHandling::IncludeChildren,
+                ..p3_options()
+            },
+            nodes: vec![group, child],
+            edges: Vec::new(),
+        };
+        let mut graphs = import_graph(&input).unwrap();
+        assert_eq!(graphs.len(), 2);
+
+        run_processors_until_phase(&mut graphs, LayeredPhase::P1CycleBreaking).unwrap();
+
+        assert_eq!(graphs.len(), 2);
+        let nested = graphs.root().layerless_nodes[0]
+            .nested_graph
+            .expect("group still holds its graph");
+        assert_eq!(graphs[nested].layerless_nodes.len(), 1);
+    }
+
     fn p3_options() -> LayeredOptions {
         LayeredOptions {
             direction: ElkDirection::Right,
@@ -1829,7 +1674,7 @@ mod tests {
         slots[..=end].iter().map(|slot| slot.kind).collect()
     }
 
-    fn deep_compound_chain(graph_count: usize) -> LGraph {
+    fn deep_compound_chain(graph_count: usize) -> GraphArena {
         assert!(graph_count > 0);
         let options = LayeredOptions {
             hierarchy_handling: crate::options::HierarchyHandling::IncludeChildren,
@@ -1837,92 +1682,79 @@ mod tests {
             greedy_switch_hierarchical_type: GreedySwitchType::Off,
             ..LayeredOptions::default()
         };
-        let mut nested = None;
-        for depth in (0..graph_count).rev() {
-            let mut graph = LGraph::new(format!("graph-{depth}"), options.clone());
-            if depth > 0 {
-                graph.parent_node_id = Some(format!("node-{}", depth - 1));
-            }
-            if let Some(child) = nested.take() {
-                let mut holder = LNode::new(format!("node-{depth}"), 1.0, 1.0, None);
-                holder.compound = true;
-                holder.nested_graph = Some(child);
-                graph.layerless_nodes.push(holder);
-            }
-            nested = Some(Box::new(graph));
+        let mut graphs = GraphArena::new(LGraph::new("graph-0", options.clone()));
+        let mut parent = GraphId::ROOT;
+        for depth in 1..graph_count {
+            let mut holder = LNode::new(format!("node-{}", depth - 1), 1.0, 1.0, None);
+            holder.compound = true;
+            graphs[parent].layerless_nodes.push(holder);
+            let graph = LGraph::new(format!("graph-{depth}"), options.clone());
+            parent = graphs.nest(parent, 0, graph);
         }
-        *nested.expect("a positive graph count creates the root graph")
+        graphs
     }
 
-    fn branched_compound_graph() -> LGraph {
+    fn branched_compound_graph() -> GraphArena {
         let options = LayeredOptions {
             hierarchy_handling: crate::options::HierarchyHandling::IncludeChildren,
             greedy_switch_type: GreedySwitchType::Off,
             greedy_switch_hierarchical_type: GreedySwitchType::Off,
             ..LayeredOptions::default()
         };
+        let mut graphs = GraphArena::new(LGraph::new("root", options.clone()));
+        for branch in ["first", "second"] {
+            let mut holder = LNode::new(format!("{branch}-holder"), 1.0, 1.0, None);
+            holder.compound = true;
+            let position = graphs.root().layerless_nodes.len();
+            graphs.root_mut().layerless_nodes.push(holder);
 
-        let mut first_grandchild = LGraph::new("first-grandchild", options.clone());
-        first_grandchild.parent_node_id = Some("first-grandchild-holder".to_string());
-        let mut first_child = LGraph::new("first-child", options.clone());
-        first_child.parent_node_id = Some("first-holder".to_string());
-        let mut first_grandchild_holder = LNode::new("first-grandchild-holder", 1.0, 1.0, None);
-        first_grandchild_holder.compound = true;
-        first_grandchild_holder.nested_graph = Some(Box::new(first_grandchild));
-        first_child.layerless_nodes.push(first_grandchild_holder);
+            let mut child = LGraph::new(format!("{branch}-child"), options.clone());
+            let mut grandchild_holder =
+                LNode::new(format!("{branch}-grandchild-holder"), 1.0, 1.0, None);
+            grandchild_holder.compound = true;
+            child.layerless_nodes.push(grandchild_holder);
+            let child = graphs.nest(GraphId::ROOT, position, child);
 
-        let mut second_grandchild = LGraph::new("second-grandchild", options.clone());
-        second_grandchild.parent_node_id = Some("second-grandchild-holder".to_string());
-        let mut second_child = LGraph::new("second-child", options.clone());
-        second_child.parent_node_id = Some("second-holder".to_string());
-        let mut second_grandchild_holder = LNode::new("second-grandchild-holder", 1.0, 1.0, None);
-        second_grandchild_holder.compound = true;
-        second_grandchild_holder.nested_graph = Some(Box::new(second_grandchild));
-        second_child.layerless_nodes.push(second_grandchild_holder);
-
-        let mut root = LGraph::new("root", options);
-        let mut first_holder = LNode::new("first-holder", 1.0, 1.0, None);
-        first_holder.compound = true;
-        first_holder.nested_graph = Some(Box::new(first_child));
-        let mut second_holder = LNode::new("second-holder", 1.0, 1.0, None);
-        second_holder.compound = true;
-        second_holder.nested_graph = Some(Box::new(second_child));
-        root.layerless_nodes.extend([first_holder, second_holder]);
-        root
+            let grandchild = LGraph::new(format!("{branch}-grandchild"), options.clone());
+            graphs.nest(child, 0, grandchild);
+        }
+        graphs
     }
 
+    // Mutation: give each `GraphExecution` a `parent` of `None` in `graph_algorithm`. The nested graphs
+    // then have no parent link.
     #[test]
-    fn compound_arena_stores_one_parent_and_reusable_slot_per_graph() {
+    fn compound_run_holds_one_algorithm_per_graph_and_a_parent_for_each_nested_one() {
         for graph_count in [8usize, 16, 32, 64, 128] {
-            let graph = deep_compound_chain(graph_count);
-            let arena = CompoundGraphArena::new(&graph);
-            let parent_links = arena
-                .entries
+            let graphs = deep_compound_chain(graph_count);
+            let run = CompoundRun::new(&graphs);
+            let parent_links = run
+                .algorithms
                 .iter()
-                .filter(|entry| entry.parent.is_some())
+                .filter(|algorithm| algorithm.execution.parent.is_some())
                 .count();
 
-            assert_eq!(arena.entries.len(), graph_count);
-            assert_eq!(arena.algorithms.len(), graph_count);
-            assert_eq!(arena.graph_slots.len(), graph_count);
-            assert!(arena.graph_slots.iter().all(Option::is_none));
+            assert_eq!(run.algorithms.len(), graph_count);
             assert_eq!(parent_links, graph_count - 1);
+            assert!(run.algorithms[0].execution.parent.is_none());
         }
     }
 
+    // Mutation: build the run in pre-order (`GraphArena::preorder`) instead of ELK's discovery
+    // order. The grandchildren then come in another place.
     #[test]
-    fn compound_arena_preserves_official_reverse_discovery_order() {
-        let root = branched_compound_graph();
-        let arena = CompoundGraphArena::new(&root);
-        let graph_ids = arena
+    fn compound_run_preserves_official_reverse_discovery_order() {
+        let graphs = branched_compound_graph();
+        let run = CompoundRun::new(&graphs);
+        let names = run
             .algorithms
             .iter()
             .rev()
-            .map(|algorithm| algorithm.execution.graph_id.as_str())
+            .map(|algorithm| algorithm.execution.graph_name.as_str())
             .collect::<Vec<_>>();
 
         assert_eq!(
-            graph_ids,
+            names,
             [
                 "first-grandchild",
                 "second-grandchild",
@@ -1933,17 +1765,19 @@ mod tests {
         );
     }
 
+    // Mutation: drop the `.rev()` in `CompoundRun::into_executions`. The results then come in
+    // discovery order, root first.
     #[test]
     fn public_compound_execution_reports_official_reverse_discovery_order() {
         let mut root = branched_compound_graph();
         let executions = execute_ported_compound_processors(&mut root).unwrap();
-        let graph_ids = executions
+        let names = executions
             .iter()
-            .map(|execution| execution.graph_id.as_str())
+            .map(|execution| execution.graph_name.as_str())
             .collect::<Vec<_>>();
 
         assert_eq!(
-            graph_ids,
+            names,
             [
                 "first-grandchild",
                 "second-grandchild",
@@ -1954,108 +1788,36 @@ mod tests {
         );
     }
 
+    // Mutation: drop the `?` after a nested graph's run in `execute_compound_graph_round`, so a
+    // failing child processor no longer fails the round.
     #[test]
-    fn compound_round_reattaches_the_hierarchy_when_a_child_processor_fails() {
+    fn compound_round_reports_a_failing_child_processor_and_keeps_the_hierarchy() {
         let options = LayeredOptions::default();
-        let child = LGraph::new("child", options.clone());
-        let mut holder = LNode::new("holder", 1.0, 1.0, None);
-        holder.nested_graph = Some(Box::new(child));
-        let mut root = LGraph::new("root", options);
-        root.layerless_nodes.push(holder);
-        let mut arena = CompoundGraphArena::new(&root);
-        let child_index = arena
+        let mut graphs = GraphArena::new(LGraph::new("root", options.clone()));
+        graphs
+            .root_mut()
+            .layerless_nodes
+            .push(LNode::new("holder", 1.0, 1.0, None));
+        let child = graphs.nest(GraphId::ROOT, 0, LGraph::new("child", options));
+        let mut run = CompoundRun::new(&graphs);
+        let child_index = run
             .algorithms
             .iter()
-            .position(|algorithm| algorithm.execution.graph_id == "child")
+            .position(|algorithm| algorithm.execution.graph_name == "child")
             .unwrap();
-        arena.algorithms[child_index].processors = vec![ProcessorSlot {
+        run.algorithms[child_index].processors = vec![ProcessorSlot {
             phase: None,
             kind: ProcessorKind::CommentPreprocessor,
         }];
 
         assert_eq!(
-            execute_compound_graph_round(
-                &mut root,
-                &arena.entries,
-                &mut arena.graph_slots,
-                &mut arena.algorithms,
-            ),
+            execute_compound_graph_round(&mut graphs, &mut run.algorithms),
             Err(PipelineError::UnsupportedProcessor {
                 kind: ProcessorKind::CommentPreprocessor,
             })
         );
-        assert_eq!(
-            root.layerless_nodes[0]
-                .nested_graph
-                .as_deref()
-                .map(|graph| graph.id.as_str()),
-            Some("child")
-        );
-        assert!(arena.graph_slots.iter().all(Option::is_none));
-    }
-
-    #[test]
-    fn compound_round_restores_already_detached_graphs_when_detachment_panics() {
-        let mut root = deep_compound_chain(3);
-        let mut arena = CompoundGraphArena::new(&root);
-        let grandchild_index = arena
-            .algorithms
-            .iter()
-            .position(|algorithm| algorithm.execution.graph_id == "graph-2")
-            .unwrap();
-        arena.entries[grandchild_index]
-            .parent
-            .as_mut()
-            .expect("the grandchild must have an arena parent")
-            .node = usize::MAX;
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = execute_compound_graph_round(
-                &mut root,
-                &arena.entries,
-                &mut arena.graph_slots,
-                &mut arena.algorithms,
-            );
-        }));
-
-        assert!(result.is_err());
-        let child = root.layerless_nodes[0]
-            .nested_graph
-            .as_deref()
-            .expect("the graph detached before the panic must be restored");
-        assert_eq!(child.id, "graph-1");
-        assert_eq!(
-            child.layerless_nodes[0]
-                .nested_graph
-                .as_deref()
-                .map(|graph| graph.id.as_str()),
-            Some("graph-2")
-        );
-        assert!(arena.graph_slots.iter().all(Option::is_none));
-    }
-
-    #[test]
-    fn compound_round_reuses_the_arena_graph_slots() {
-        let mut root = deep_compound_chain(8);
-        let mut arena = CompoundGraphArena::new(&root);
-        for algorithm in &mut arena.algorithms {
-            algorithm.processors.clear();
-        }
-        let slots_ptr = arena.graph_slots.as_ptr();
-        let slots_capacity = arena.graph_slots.capacity();
-
-        for _ in 0..2 {
-            execute_compound_graph_round(
-                &mut root,
-                &arena.entries,
-                &mut arena.graph_slots,
-                &mut arena.algorithms,
-            )
-            .unwrap();
-            assert!(arena.graph_slots.iter().all(Option::is_none));
-            assert_eq!(arena.graph_slots.as_ptr(), slots_ptr);
-            assert_eq!(arena.graph_slots.capacity(), slots_capacity);
-        }
+        assert_eq!(graphs.root().layerless_nodes[0].nested_graph, Some(child));
+        assert_eq!(graphs[child].name, "child");
     }
 
     #[test]
@@ -2128,15 +1890,15 @@ mod tests {
         }
     }
 
+    // Mutation: check only the root in `validate_ported_graph_processors`. The child's processor
+    // is then found after the configurator has changed the graph.
     #[test]
     fn compound_full_runner_rejects_child_unported_processor_before_mutation() {
         let mut graph = deep_compound_chain(2);
-        graph.layerless_nodes[0]
+        let child = graph.layerless_nodes[0]
             .nested_graph
-            .as_deref_mut()
-            .expect("the fixture should contain one child graph")
-            .options
-            .layering_strategy = LayeringStrategy::BreadthFirstModelOrder;
+            .expect("the fixture should contain one child graph");
+        graph[child].options.layering_strategy = LayeringStrategy::BreadthFirstModelOrder;
         let before = graph.clone();
 
         assert_eq!(
@@ -2151,19 +1913,19 @@ mod tests {
     /// A root that the configurator would rewrite (undefined direction, edge spacing below the
     /// minimum) and a child with seed 0, so a runner that configures before it checks the seed
     /// leaves a visible trace on the root.
-    fn root_to_rewrite_with_zero_seed_child() -> LGraph {
+    fn root_to_rewrite_with_zero_seed_child() -> GraphArena {
         let mut graph = deep_compound_chain(2);
         graph.options.direction = ElkDirection::Undefined;
         graph.options.spacing.edge_edge = 0.0;
-        graph.layerless_nodes[0]
+        let child = graph.layerless_nodes[0]
             .nested_graph
-            .as_deref_mut()
-            .expect("the fixture should contain one child graph")
-            .options
-            .random_seed = 0;
+            .expect("the fixture should contain one child graph");
+        graph[child].options.random_seed = 0;
         graph
     }
 
+    // Mutation: leave out `check_random_seeds` in `execute_ported_processors`. The configurator then
+    // rewrites the root before it reaches the child with seed 0.
     #[test]
     fn full_runner_rejects_nested_zero_seed_without_changing_the_graph() {
         let mut graph = root_to_rewrite_with_zero_seed_child();
@@ -2178,6 +1940,8 @@ mod tests {
         assert_eq!(graph, before);
     }
 
+    // Mutation: leave out `check_random_seeds` in `execute_ported_compound_processors`. The
+    // configurator then rewrites the root before it reaches the child with seed 0.
     #[test]
     fn compound_full_runner_rejects_nested_zero_seed_without_changing_the_graph() {
         let mut graph = root_to_rewrite_with_zero_seed_child();
@@ -2216,6 +1980,8 @@ mod tests {
         );
     }
 
+    // Mutation: check only the root in `validate_ported_graph_processors`. The processor of the
+    // deepest graph is then never found.
     #[test]
     fn compound_ported_processor_preflight_is_small_stack_safe() {
         const GRAPH_COUNT: usize = 4_096;
@@ -2225,14 +1991,9 @@ mod tests {
             .stack_size(64 * 1024)
             .spawn(|| {
                 let mut graph = deep_compound_chain(GRAPH_COUNT);
-                let mut leaf = &mut graph;
-                for _ in 1..GRAPH_COUNT {
-                    leaf = leaf.layerless_nodes[0]
-                        .nested_graph
-                        .as_deref_mut()
-                        .expect("the deep compound fixture should retain every child graph");
-                }
-                leaf.options.layering_strategy = LayeringStrategy::BreadthFirstModelOrder;
+                // The chain's graphs joined the arena one below the other, so the last is the leaf.
+                let leaf = GraphId::new(GRAPH_COUNT - 1);
+                graph[leaf].options.layering_strategy = LayeringStrategy::BreadthFirstModelOrder;
 
                 let graph = std::mem::ManuallyDrop::new(graph);
                 assert_eq!(
@@ -2473,10 +2234,9 @@ mod tests {
             "Mermaid flowchart compound root graph",
             graph_kinds(&compound_graph),
         );
-        let nested_graph = compound_graph.layerless_nodes[0]
+        let nested_graph = &compound_graph[compound_graph.layerless_nodes[0]
             .nested_graph
-            .as_ref()
-            .expect("compound fixture should create a nested graph");
+            .expect("compound fixture should create a nested graph")];
         assert_processors_are_source_ported(
             "Mermaid flowchart compound child graph",
             graph_kinds(nested_graph),
@@ -2635,7 +2395,7 @@ mod tests {
         .unwrap();
         preprocess_source_ported_compound_graph(&mut graph);
 
-        let nested = graph.layerless_nodes[0].nested_graph.as_ref().unwrap();
+        let nested = &graph[graph.layerless_nodes[0].nested_graph.unwrap()];
         let processors = graph_kinds(nested);
         assert!(processors.contains(&ProcessorKind::HierarchicalPortConstraintProcessor));
         assert!(processors.contains(&ProcessorKind::HierarchicalPortDummySizeProcessor));
@@ -2697,10 +2457,9 @@ mod tests {
 
         preprocess_source_ported_compound_graph(&mut graph);
 
-        let nested = graph.layerless_nodes[0]
+        let nested = &graph[graph.layerless_nodes[0]
             .nested_graph
-            .as_ref()
-            .expect("inside self-loop should create a nested graph");
+            .expect("inside self-loop should create a nested graph")];
         let processors = graph_kinds(nested);
 
         assert!(processors.contains(&ProcessorKind::SelfLoopPreProcessor));
@@ -2724,6 +2483,7 @@ mod tests {
 
         execute_processor(
             &mut graph,
+            OtherGraphs::none(),
             ProcessorKind::HierarchicalPortOrthogonalEdgeRouter,
         )
         .unwrap();
@@ -2739,6 +2499,7 @@ mod tests {
 
         execute_processor(
             &mut graph,
+            OtherGraphs::none(),
             ProcessorKind::HierarchicalPortOrthogonalEdgeRouter,
         )
         .unwrap();
@@ -3392,8 +3153,8 @@ mod tests {
         let executed = execute_ported_compound_processors(&mut graph).unwrap();
 
         assert_eq!(executed.len(), 2);
-        assert_eq!(executed[0].graph_id, "cluster");
-        assert_eq!(executed[1].graph_id, "root");
+        assert_eq!(executed[0].graph_name, "cluster");
+        assert_eq!(executed[1].graph_name, "root");
         assert!(
             executed[0]
                 .processors
@@ -3416,7 +3177,7 @@ mod tests {
             .iter()
             .find(|node| node.id == "cluster")
             .unwrap();
-        let nested = cluster.nested_graph.as_ref().unwrap();
+        let nested = &graph[cluster.nested_graph.unwrap()];
         assert!(cluster.size.width >= nested.size.width);
         assert!(cluster.size.height >= nested.size.height);
         assert!(nested.layers.is_empty());
@@ -3465,7 +3226,7 @@ mod tests {
             .unwrap();
         assert!(cluster.size.width > 1.0);
         assert!(cluster.size.height > 1.0);
-        assert!(cluster.nested_graph.as_ref().unwrap().layers.is_empty());
+        assert!(graph[cluster.nested_graph.unwrap()].layers.is_empty());
     }
 
     #[test]
@@ -3608,7 +3369,7 @@ mod tests {
         .unwrap();
         execute_ported_compound_processors(&mut graph).unwrap();
         let group = &graph.layerless_nodes[0];
-        let nested = group.nested_graph.as_ref().unwrap();
+        let nested = &graph[group.nested_graph.unwrap()];
         assert_eq!(
             group.size,
             LSize {
@@ -3854,6 +3615,8 @@ mod tests {
         );
     }
 
+    // Mutation: replace `graph.parent.is_none()` with `true` in the rule for the hierarchical greedy
+    // switch. A graph inside a node then follows the root's rule.
     #[test]
     fn graph_aware_greedy_switch_matches_graph_configurator_activation_rules() {
         let mut options = LayeredOptions {
@@ -3889,7 +3652,10 @@ mod tests {
                 ..LayeredOptions::default()
             },
         );
-        nested.parent_node_id = Some("cluster".to_string());
+        nested.parent = Some(GraphParent {
+            graph: GraphId::ROOT,
+            node: 0,
+        });
         assert!(
             !graph_kinds(&nested)
                 .contains(&ProcessorKind::LayerSweepCrossingMinimizerTwoSidedGreedySwitch)

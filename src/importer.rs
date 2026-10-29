@@ -14,9 +14,9 @@ use crate::compound::{
     source_ported_cross_hierarchy_segments,
 };
 use crate::graph::{
-    CompoundEdgeSegment, EdgeLabelPlacement, HierarchyEdge, LGraph, LLabel, LNode, LNodeKind,
-    LPoint, LPort, LSize, LayeredEdge, PortId, PortRef, PortSide, PortType,
-    apply_port_index_to_dummy, create_external_port_dummy, is_across_flow,
+    CompoundEdgeSegment, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge, HierarchyStep,
+    LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, PortId, PortRef, PortSide,
+    PortType, apply_port_index_to_dummy, create_external_port_dummy, is_across_flow,
     port_side_from_direction,
 };
 use crate::options::{
@@ -207,6 +207,9 @@ pub enum ImportError {
     /// An edge ends at a port of the node the run lays out, but no child connects to a port of it.
     #[error("ELK edge `{edge_id}` ends at a port of its graph, which has no external ports")]
     ScopePortWithoutDummy { edge_id: String },
+    /// An edge names a container node that holds no graph, so the edge has no graph to belong to.
+    #[error("ELK edge `{edge_id}` is contained by node `{container}`, which holds no graph")]
+    ContainerWithoutGraph { edge_id: String, container: String },
     #[error("ELK edge `{edge_id}` names port `{port_id}`, which is no port of node `{node_id}`")]
     MissingPort {
         edge_id: String,
@@ -242,7 +245,7 @@ pub type ImportResult<T> = Result<T, ImportError>;
 /// transform nodes into `layerless_nodes`, create nested graphs for hierarchy-enabled compound
 /// nodes, transform edges with synthetic ports, and mark graph properties discovered during import.
 #[cfg(test)]
-pub fn import_graph(input: &ElkInputGraph) -> ImportResult<LGraph> {
+pub fn import_graph(input: &ElkInputGraph) -> ImportResult<GraphArena> {
     import_graph_with_segments(input, &[])
 }
 
@@ -254,8 +257,25 @@ pub fn import_graph(input: &ElkInputGraph) -> ImportResult<LGraph> {
 pub fn import_graph_with_segments(
     input: &ElkInputGraph,
     segments: &[ElkInputEdgeSegment],
-) -> ImportResult<LGraph> {
-    import_scope(input, segments, ElkPadding::uniform(0.0), ScopePorts::NONE)
+) -> ImportResult<GraphArena> {
+    import_scope_with(
+        input,
+        segments,
+        ElkPadding::uniform(0.0),
+        ScopePorts::NONE,
+        false,
+    )
+    .map(|imported| imported.graphs)
+}
+
+/// What importing a scope makes.
+pub(crate) struct ImportedScope {
+    /// Every graph of the scope.
+    pub(crate) graphs: GraphArena,
+    /// The graph each input edge belongs to, by the edge's id: the root, or the graph inside the
+    /// node that contains the edge. A later step never has to look a graph up by its name.
+    /// Empty when the caller did not ask for it.
+    pub(crate) edge_containers: HashMap<String, GraphId>,
 }
 
 /// The ports of the node a run lays out, which ELK sees as the external ports of the graph.
@@ -286,11 +306,21 @@ pub(crate) fn import_scope(
     segments: &[ElkInputEdgeSegment],
     root_label_padding: ElkPadding,
     scope: ScopePorts<'_>,
-) -> ImportResult<LGraph> {
+) -> ImportResult<ImportedScope> {
+    import_scope_with(input, segments, root_label_padding, scope, true)
+}
+
+/// [`import_scope`], with a choice about the edge containers. Only `layout` reads them, so the
+/// other callers pass `false` and skip building the map.
+fn import_scope_with(
+    input: &ElkInputGraph,
+    segments: &[ElkInputEdgeSegment],
+    root_label_padding: ElkPadding,
+    scope: ScopePorts<'_>,
+    with_edge_containers: bool,
+) -> ImportResult<ImportedScope> {
     let mut index = InputIndex::new(input, scope.ports)?;
     validate_scoped_edge_segments(&index, segments)?;
-    let prepared_segments =
-        materialize_scoped_edge_segments(&index, segments, input.options.merge_edges);
     let mut root = LGraph::new(input.id.clone(), input.options.clone());
     root.options.direction = resolve_direction(root.options.direction, root.options.aspect_ratio);
     root.options.hierarchy_handling =
@@ -303,17 +333,51 @@ pub(crate) fn import_scope(
     index.scope_dummies = import_external_ports(&mut root, &scope, input.id.as_str());
     let mut port_index = ImportPortIndex::new();
 
-    if root.options.hierarchy_handling == HierarchyHandling::IncludeChildren {
-        root = import_hierarchical_graph(&index, root, &mut port_index)?;
-    } else {
-        import_flat_graph(input, &index, &mut root, None, &mut port_index)?;
+    let (mut graphs, nested_graphs) =
+        if root.options.hierarchy_handling == HierarchyHandling::IncludeChildren {
+            import_hierarchical_graph(&index, root, &mut port_index)?
+        } else {
+            import_flat_graph(input, &index, &mut root, None, &mut port_index)?;
+            (GraphArena::new(root), vec![None; index.node_ids.len()])
+        };
+
+    check_north_south_ports(&graphs)?;
+    // The graph inside a node, if it has one.
+    let nested_of = |node: &str| index.node_index(node).and_then(|node| nested_graphs[node]);
+    // A node without a graph reads as the root, as `graph_slot_for_parent` does.
+    let graph_of = |node: &str| nested_of(node).unwrap_or(GraphId::ROOT);
+    let prepared_segments =
+        materialize_scoped_edge_segments(&index, segments, input.options.merge_edges, &graph_of);
+    introduce_source_ported_scoped_edge_segments(
+        &mut graphs,
+        GraphId::ROOT,
+        prepared_segments.segments,
+    );
+
+    graphs.sync_graph_properties_to_options();
+    // The same container the edges were grouped by above, now as the graph that holds it.
+    let mut edge_containers = HashMap::new();
+    if with_edge_containers {
+        for edge in &input.edges {
+            let graph = match input_edge_containing_parent(&index, edge) {
+                // The scope itself holds the edge.
+                None => GraphId::ROOT,
+                // A named container without a graph is not the root. Reading it as the root would
+                // give the edge the wrong coordinates.
+                Some(container) => {
+                    nested_of(container).ok_or_else(|| ImportError::ContainerWithoutGraph {
+                        edge_id: edge.id.clone(),
+                        container: container.to_string(),
+                    })?
+                }
+            };
+            edge_containers.insert(edge.id.clone(), graph);
+        }
     }
-
-    check_north_south_ports(&root)?;
-    introduce_source_ported_scoped_edge_segments(&mut root, prepared_segments.segments);
-
-    root.sync_graph_properties_to_options();
-    Ok(root)
+    Ok(ImportedScope {
+        graphs,
+        edge_containers,
+    })
 }
 
 /// Makes the external port dummy of each port of the graph's node, if the graph has external
@@ -390,15 +454,16 @@ fn import_external_ports(
 /// `OrthogonalEdgeRouter.getLayoutProcessorConfiguration`, which adds the step when a graph has
 /// ports that are not free and a port across the layout flow. A graph with only free ports needs
 /// no step: `PortSideProcessor` puts every port on a side along the flow.
-fn check_north_south_ports(root: &LGraph) -> ImportResult<()> {
-    let mut pending = vec![root];
-    while let Some(graph) = pending.pop() {
+fn check_north_south_ports(graphs: &GraphArena) -> ImportResult<()> {
+    let mut pending = vec![GraphId::ROOT];
+    while let Some(id) = pending.pop() {
+        let graph = &graphs[id];
         let properties = &graph.graph_properties;
         if properties.north_south_ports && properties.non_free_ports {
             let offender = graph
                 .layerless_nodes
                 .iter()
-                .filter(|node| has_children(node))
+                .filter(|node| has_children(graphs, node))
                 .flat_map(|node| node.ports.iter().map(move |port| (node, port)))
                 .find(|(_, port)| {
                     port.input_index.is_some() && is_across_flow(graph.options.direction, port.side)
@@ -410,13 +475,7 @@ fn check_north_south_ports(root: &LGraph) -> ImportResult<()> {
                 });
             }
         }
-        pending.extend(
-            graph
-                .layerless_nodes
-                .iter()
-                .rev()
-                .filter_map(|node| node.nested_graph.as_deref()),
-        );
+        pending.extend(graphs.children(id).into_iter().rev());
     }
     Ok(())
 }
@@ -425,9 +484,9 @@ fn check_north_south_ports(root: &LGraph) -> ImportResult<()> {
 /// nested graph of dummies only, for an inside self loop: it has no children, as
 /// `node_materializes_children` says, and every node the importer makes for a child is a normal
 /// node.
-fn has_children(node: &LNode) -> bool {
-    node.nested_graph.as_deref().is_some_and(|nested| {
-        nested
+fn has_children(graphs: &GraphArena, node: &LNode) -> bool {
+    node.nested_graph.is_some_and(|nested| {
+        graphs[nested]
             .layerless_nodes
             .iter()
             .any(|child| child.kind == LNodeKind::Normal)
@@ -460,7 +519,16 @@ fn materialize_scoped_edge_segments(
     index: &InputIndex<'_>,
     segments: &[ElkInputEdgeSegment],
     merge_edges: bool,
+    graph_of: &dyn Fn(&str) -> GraphId,
 ) -> PreparedScopedSegments {
+    let steps = |path: Vec<&str>| {
+        path.into_iter()
+            .map(|node| HierarchyStep {
+                node_id: node.to_string(),
+                graph: graph_of(node),
+            })
+            .collect::<Vec<_>>()
+    };
     let mut pending_segments = Vec::new();
 
     for scoped in segments {
@@ -482,15 +550,19 @@ fn materialize_scoped_edge_segments(
         let source_placeholder = scoped_segment_endpoint_id(&scoped.source);
         let target_placeholder = scoped_segment_endpoint_id(&scoped.target);
         let source_path = match &scoped.source {
-            ElkInputEdgeSegmentEndpoint::Node { id } => index
-                .materialized_graph_path(id)
-                .expect("scoped endpoint reachability was validated before materialization"),
+            ElkInputEdgeSegmentEndpoint::Node { id } => steps(
+                index
+                    .materialized_graph_path(id)
+                    .expect("scoped endpoint reachability was validated before materialization"),
+            ),
             ElkInputEdgeSegmentEndpoint::ParentBoundary { .. } => Vec::new(),
         };
         let target_path = match &scoped.target {
-            ElkInputEdgeSegmentEndpoint::Node { id } => index
-                .materialized_graph_path(id)
-                .expect("scoped endpoint reachability was validated before materialization"),
+            ElkInputEdgeSegmentEndpoint::Node { id } => steps(
+                index
+                    .materialized_graph_path(id)
+                    .expect("scoped endpoint reachability was validated before materialization"),
+            ),
             ElkInputEdgeSegmentEndpoint::ParentBoundary { .. } => Vec::new(),
         };
         let mut local = source_ported_cross_hierarchy_segments(
@@ -503,7 +575,7 @@ fn materialize_scoped_edge_segments(
         );
         if local.is_empty() {
             local.push(PendingCompoundSegment {
-                graph_parent: None,
+                lands_in: None,
                 source: PendingSegmentEndpoint::LocalNode {
                     node_id: source_placeholder.to_string(),
                     port_key: source_port_key.clone(),
@@ -821,85 +893,39 @@ fn import_flat_graph(
     Ok(())
 }
 
-const ROOT_IMPORT_GRAPH_SLOT: usize = 0;
-
-#[derive(Debug, Clone, Copy)]
-struct ImportGraphAttachment {
-    parent_slot: usize,
-    parent_node: usize,
-}
-
-struct ImportGraphSlot {
-    graph: Option<LGraph>,
-    attachment: Option<ImportGraphAttachment>,
-}
-
+/// The graphs of a hierarchical import while it is under way.
 struct HierarchicalImportArena {
-    slots: Vec<ImportGraphSlot>,
+    graphs: GraphArena,
     // Use unique input-node positions, not graph ids: Mermaid may name a compound node exactly
     // like the adapter root, while the root and nested port namespaces must remain distinct.
-    nested_graph_slots: Vec<Option<usize>>,
+    nested_graph_slots: Vec<Option<GraphId>>,
 }
 
 impl HierarchicalImportArena {
     fn new(root: LGraph, input_node_count: usize) -> Self {
-        let mut slots = Vec::with_capacity(input_node_count.saturating_add(1));
-        slots.push(ImportGraphSlot {
-            graph: Some(root),
-            attachment: None,
-        });
         Self {
-            slots,
+            graphs: GraphArena::new(root),
             nested_graph_slots: vec![None; input_node_count],
         }
     }
 
-    fn root(&self) -> &LGraph {
-        self.graph(ROOT_IMPORT_GRAPH_SLOT)
-    }
-
-    fn root_mut(&mut self) -> &mut LGraph {
-        self.graph_mut(ROOT_IMPORT_GRAPH_SLOT)
-    }
-
-    fn graph(&self, slot: usize) -> &LGraph {
-        self.slots[slot]
-            .graph
-            .as_ref()
-            .expect("import graph slots remain live until arena assembly")
-    }
-
-    fn graph_mut(&mut self, slot: usize) -> &mut LGraph {
-        self.slots[slot]
-            .graph
-            .as_mut()
-            .expect("import graph slots remain live until arena assembly")
-    }
-
-    fn graph_slot_for_parent(&self, index: &InputIndex<'_>, parent: Option<&str>) -> usize {
+    fn graph_slot_for_parent(&self, index: &InputIndex<'_>, parent: Option<&str>) -> GraphId {
         // Only IncludeChildren (plus the explicit inside-self-loop dummy case) creates a slot.
         // Unmaterialized SeparateChildren scopes retain the importer's historical root fallback.
         parent
             .and_then(|parent| index.node_index(parent))
             .and_then(|parent| self.nested_graph_slots[parent])
-            .unwrap_or(ROOT_IMPORT_GRAPH_SLOT)
+            .unwrap_or(GraphId::ROOT)
     }
 
     fn add_nested_graph(
         &mut self,
         input_node: usize,
-        parent_slot: usize,
+        parent_slot: GraphId,
         parent_node: usize,
         graph: LGraph,
-    ) -> usize {
-        let slot = self.slots.len();
-        self.slots.push(ImportGraphSlot {
-            graph: Some(graph),
-            attachment: Some(ImportGraphAttachment {
-                parent_slot,
-                parent_node,
-            }),
-        });
+    ) -> GraphId {
+        let slot = self.graphs.nest(parent_slot, parent_node, graph);
         let previous = self.nested_graph_slots[input_node].replace(slot);
         debug_assert!(
             previous.is_none(),
@@ -908,31 +934,9 @@ impl HierarchicalImportArena {
         slot
     }
 
-    fn into_root(mut self) -> LGraph {
-        // Parents are always allocated before descendants. Reverse assembly therefore attaches
-        // complete child graphs without recursion or root-to-child path reconstruction.
-        for slot in (1..self.slots.len()).rev() {
-            let attachment = self.slots[slot]
-                .attachment
-                .expect("every non-root import graph has an attachment");
-            let graph = self.slots[slot]
-                .graph
-                .take()
-                .expect("nested import graph is assembled exactly once");
-            let parent = self.slots[attachment.parent_slot]
-                .graph
-                .as_mut()
-                .expect("parent import graph is assembled after its descendants");
-            let previous = parent.layerless_nodes[attachment.parent_node]
-                .nested_graph
-                .replace(Box::new(graph));
-            debug_assert!(previous.is_none(), "nested graph attachment is unique");
-        }
-
-        self.slots[ROOT_IMPORT_GRAPH_SLOT]
-            .graph
-            .take()
-            .expect("root import graph is assembled exactly once")
+    /// The graphs, and the graph inside each input node by the node's position in the input.
+    fn into_graphs(self) -> (GraphArena, Vec<Option<GraphId>>) {
+        (self.graphs, self.nested_graph_slots)
     }
 }
 
@@ -940,7 +944,7 @@ fn import_hierarchical_graph(
     index: &InputIndex<'_>,
     root: LGraph,
     port_index: &mut ImportPortIndex,
-) -> ImportResult<LGraph> {
+) -> ImportResult<(GraphArena, Vec<Option<GraphId>>)> {
     let mut arena = HierarchicalImportArena::new(root, index.node_ids.len());
     let mut queue = VecDeque::new();
     queue.extend(
@@ -948,7 +952,7 @@ fn import_hierarchical_graph(
             .children(None)
             .iter()
             .copied()
-            .map(|node| (node, ROOT_IMPORT_GRAPH_SLOT)),
+            .map(|node| (node, GraphId::ROOT)),
     );
 
     let mut model_order = 0usize;
@@ -959,14 +963,13 @@ fn import_hierarchical_graph(
             order
         });
         let nested = {
-            let parent_graph = arena.graph_mut(parent_slot);
+            let parent_graph = &mut arena.graphs[parent_slot];
             let node_index = transform_node(node, parent_graph, node_model_order);
             if node_needs_nested_graph(index, &parent_graph.options, node) {
                 let materializes_children =
                     node_materializes_children(index, &parent_graph.options, node);
                 let nested_options = nested_graph_options(&parent_graph.options, node);
                 let mut nested_graph = LGraph::new(node.id.clone(), nested_options);
-                nested_graph.parent_node_id = Some(node.id.clone());
                 // ELK reads the spacings for a node's labels from the node's parent, as the
                 // user set them: `IndividualSpacings.getIndividualOrInherited`.
                 let cell_node = cell_node(node);
@@ -1009,26 +1012,25 @@ fn import_hierarchical_graph(
 
     let mut edge_order = 0usize;
     let mut edge_graph_queue = VecDeque::new();
-    edge_graph_queue.push_back((None, ROOT_IMPORT_GRAPH_SLOT));
+    edge_graph_queue.push_back((None, GraphId::ROOT));
     while let Some((parent, owner_slot)) = edge_graph_queue.pop_front() {
         for edge in index.edges(parent).iter().copied() {
-            let edge_model_order = needs_model_order_based_on_parent(&arena.root().options)
+            let edge_model_order = needs_model_order_based_on_parent(&arena.graphs.root().options)
                 .then(|| edge.model_order.unwrap_or(edge_order));
             let source_parent = index.node_parent(edge.source.as_str());
             let target_parent = index.node_parent(edge.target.as_str());
             let source_container_slot = arena.graph_slot_for_parent(index, source_parent);
-            let inside_self_loops_activate = arena
-                .graph(source_container_slot)
+            let inside_self_loops_activate = arena.graphs[source_container_slot]
                 .options
                 .inside_self_loops_activate;
 
             if edge.inside_self_loops_yo && edge.source == edge.target && inside_self_loops_activate
             {
                 let graph_slot = arena.graph_slot_for_parent(index, Some(edge.source.as_str()));
-                let graph = arena.graph_mut(graph_slot);
+                let graph = &mut arena.graphs[graph_slot];
                 transform_inside_self_loop(edge, graph, edge_model_order, port_index);
             } else if source_parent == target_parent {
-                let graph = arena.graph_mut(owner_slot);
+                let graph = &mut arena.graphs[owner_slot];
                 transform_edge(
                     edge,
                     index,
@@ -1062,7 +1064,7 @@ fn import_hierarchical_graph(
         }
     }
 
-    Ok(arena.into_root())
+    Ok(arena.into_graphs())
 }
 
 fn transform_inside_self_loop(
@@ -1712,13 +1714,13 @@ fn scope_port_end(
 fn transform_cross_hierarchy_edge(
     edge: &ElkInputEdge,
     arena: &mut HierarchicalImportArena,
-    owner_slot: usize,
+    owner_slot: GraphId,
     index: &InputIndex<'_>,
     edge_order: usize,
     model_order: Option<usize>,
     port_index: &mut ImportPortIndex,
 ) -> ImportResult<()> {
-    let merge_edges = arena.root().options.merge_edges;
+    let merge_edges = arena.graphs.root().options.merge_edges;
     let source_parent = index.node_parent(edge.source.as_str());
     let target_parent = index.node_parent(edge.target.as_str());
 
@@ -1780,18 +1782,30 @@ fn transform_cross_hierarchy_edge(
     if parallel(source.attached, source_incoming, source_outgoing)
         || parallel(target.attached, target_incoming, target_outgoing)
     {
-        arena.graph_mut(owner_slot).graph_properties.hyperedges = true;
+        arena.graphs[owner_slot].graph_properties.hyperedges = true;
     }
 
     // The owned paths are part of ELK's compound-edge input, not graph locators. Build each once
     // and move it into the retained hierarchy edge so deep-chain cost tracks emitted path data.
-    let source_path = index
-        .hierarchy_edge_output_path(edge.source.as_str())
-        .unwrap_or_default();
-    let target_path = index
-        .hierarchy_edge_output_path(edge.target.as_str())
-        .unwrap_or_default();
-    arena.root_mut().hierarchy_edges.push(HierarchyEdge {
+    let steps = |path: Vec<String>| {
+        path.into_iter()
+            .map(|node| HierarchyStep {
+                graph: arena.graph_slot_for_parent(index, Some(node.as_str())),
+                node_id: node,
+            })
+            .collect::<Vec<_>>()
+    };
+    let source_path = steps(
+        index
+            .hierarchy_edge_output_path(edge.source.as_str())
+            .unwrap_or_default(),
+    );
+    let target_path = steps(
+        index
+            .hierarchy_edge_output_path(edge.target.as_str())
+            .unwrap_or_default(),
+    );
+    arena.graphs.root_mut().hierarchy_edges.push(HierarchyEdge {
         id: edge.id.clone(),
         source_node_id: source.node_id,
         target_node_id: target.node_id,
@@ -1848,7 +1862,7 @@ fn hierarchy_edge_end(
     if node_id == index.scope_id && !index.nodes.contains_key(node_id) {
         // The dummy is a node of the root graph with the id of its port.
         let end = scope_port_end(edge, node_id, port_id, index)?;
-        let dummy = &arena.root().layerless_nodes[end.node];
+        let dummy = &arena.graphs.root().layerless_nodes[end.node];
         let port = &dummy.ports[end.port];
         return Ok(HierarchyEdgeEnd {
             node_id: dummy.id.clone(),
@@ -1859,7 +1873,7 @@ fn hierarchy_edge_end(
     }
     let slot = arena.graph_slot_for_parent(index, graph_parent);
     if let Some(port_id) = port_id {
-        let (_, attached) = named_port(edge, node_id, port_id, index, arena.graph(slot))?;
+        let (_, attached) = named_port(edge, node_id, port_id, index, &arena.graphs[slot])?;
         return Ok(HierarchyEdgeEnd {
             node_id: node_id.to_string(),
             port_key: port_id.to_string(),
@@ -1869,7 +1883,7 @@ fn hierarchy_edge_end(
     }
     let port_key = hierarchy_port_key(node_id, edge_order, role, merge_edges, port_type);
     let end = ensure_hierarchy_endpoint_port(
-        arena.graph_mut(slot),
+        &mut arena.graphs[slot],
         graph_parent,
         index.child_position(node_id),
         node_id,
@@ -1878,7 +1892,7 @@ fn hierarchy_edge_end(
         port_index,
     )
     .ok_or_else(missing_endpoint)?;
-    let port = &arena.graph(slot).layerless_nodes[end.node].ports[end.port];
+    let port = &arena.graphs[slot].layerless_nodes[end.node].ports[end.port];
     let attached = (port.incoming_edges.len(), port.outgoing_edges.len());
     Ok(HierarchyEdgeEnd {
         node_id: node_id.to_string(),
@@ -2602,6 +2616,9 @@ mod tests {
         );
     }
 
+    // Mutation: in `import_hierarchical_graph`, queue the children of a node with the graph slot of
+    // the node itself (`parent_slot`), not the slot of its nested graph. The chain then stays in
+    // one graph.
     #[test]
     fn hierarchical_import_uses_linear_graph_slots_for_deep_chains() {
         for node_count in [1usize, 4, 16, 64, 256] {
@@ -2616,14 +2633,14 @@ mod tests {
             input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
             let imported = import_graph(&input).unwrap();
 
-            let mut graph = &imported;
+            let mut graph: &LGraph = &imported;
             for index in 0..node_count {
                 assert_eq!(graph.layerless_nodes.len(), 1);
                 assert_eq!(graph.layerless_nodes[0].id, format!("node-{index}"));
                 if index + 1 < node_count {
                     graph = graph.layerless_nodes[0]
                         .nested_graph
-                        .as_deref()
+                        .map(|id| &imported[id])
                         .expect("every non-leaf chain node owns the next graph slot");
                 } else {
                     assert!(graph.layerless_nodes[0].nested_graph.is_none());
@@ -2712,6 +2729,8 @@ mod tests {
         assert!(!queries.is_ancestor(root_b, left_leaf));
     }
 
+    // Mutation: in `import_hierarchical_graph`, queue the children of every node that gets a nested
+    // graph (`if true`). The dummy-only graph of `group` then holds `child`.
     #[test]
     fn separate_children_self_loop_graph_does_not_materialize_regular_children() {
         let mut group = node("group");
@@ -2731,9 +2750,76 @@ mod tests {
         let imported = import_graph(&input).unwrap();
         let nested = imported.layerless_nodes[0]
             .nested_graph
-            .as_deref()
+            .map(|id| &imported[id])
             .expect("inside self-loop creates a nested graph");
         assert!(nested.layerless_nodes.iter().all(|node| node.id != "child"));
+    }
+
+    // Mutation: build the map whatever `with_edge_containers` says. The import for a caller that
+    // does not read the map then still pays for it.
+    #[test]
+    fn the_edge_containers_are_built_only_when_asked_for() {
+        let input = graph(vec![node("a"), node("b")], vec![edge("e", "a", "b")]);
+        let scope = || (ElkPadding::uniform(0.0), ScopePorts::NONE);
+
+        let (padding, ports) = scope();
+        let without = import_scope_with(&input, &[], padding, ports, false).unwrap();
+        let (padding, ports) = scope();
+        let with = import_scope_with(&input, &[], padding, ports, true).unwrap();
+
+        assert!(without.edge_containers.is_empty());
+        assert_eq!(with.edge_containers["e"], GraphId::ROOT);
+    }
+
+    // Mutation: put every edge in `GraphId::ROOT`, or look the container up by the scope's id
+    // first. The edge between the children of `group` then maps to the root, not to the graph
+    // inside `group`. The scope is named "group" too, as a Mermaid adapter root may be.
+    #[test]
+    fn an_edge_maps_to_the_graph_of_its_container_even_when_the_scope_has_that_name() {
+        let mut group = node("group");
+        group.hierarchy_handling = Some(HierarchyHandling::IncludeChildren);
+        let mut a = node("a");
+        a.parent = Some("group".to_string());
+        let mut b = node("b");
+        b.parent = Some("group".to_string());
+        let mut input = graph(
+            vec![group, a, b, node("outside")],
+            vec![edge("inner", "a", "b"), edge("top", "group", "outside")],
+        );
+        input.id = "group".to_string();
+        input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
+
+        let imported =
+            import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::NONE).unwrap();
+
+        let group_graph = imported.graphs.root().layerless_nodes[0]
+            .nested_graph
+            .expect("group holds a graph");
+        assert_ne!(group_graph, GraphId::ROOT);
+        assert_eq!(imported.edge_containers["inner"], group_graph);
+        assert_eq!(imported.edge_containers["top"], GraphId::ROOT);
+    }
+
+    // Mutation: read a named container without a graph as `GraphId::ROOT` again, as
+    // `graph_of` does. The import then succeeds and the edge gets the root's coordinates.
+    #[test]
+    fn an_edge_whose_container_holds_no_graph_is_refused() {
+        let mut contained = edge("e", "a", "b");
+        contained.container = Some("a".to_string());
+        // Flat hierarchy handling: no node gets a graph.
+        let input = graph(vec![node("a"), node("b")], vec![contained]);
+
+        let error = import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::NONE)
+            .err()
+            .expect("an error");
+
+        assert_eq!(
+            error,
+            ImportError::ContainerWithoutGraph {
+                edge_id: "e".to_string(),
+                container: "a".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -2781,6 +2867,8 @@ mod tests {
         input
     }
 
+    // Mutation: in `ensure_hierarchy_endpoint_port`, skip the shared-port branch (`if false && …`).
+    // Each of the 32 edges then gets its own port.
     #[test]
     fn merged_cross_edges_share_one_port_per_endpoint() {
         let edge_count = 32usize;
@@ -2793,7 +2881,7 @@ mod tests {
             .find(|node| node.id == "outer")
             .unwrap();
         assert_eq!(outer.ports.len(), 1);
-        let nested = imported.layerless_nodes[0].nested_graph.as_deref().unwrap();
+        let nested = &imported[imported.layerless_nodes[0].nested_graph.unwrap()];
         let child = nested
             .layerless_nodes
             .iter()
@@ -2818,6 +2906,8 @@ mod tests {
         assert_eq!(imported.hierarchy_edges.len(), edge_count);
     }
 
+    // Mutation: in `ensure_inside_self_loop_dummy`, ignore the dummy found in the port index. Each
+    // loop then makes two new dummies, not one pair for all.
     #[test]
     fn inside_self_loops_share_one_dummy_per_node_and_role() {
         let edge_count = 32usize;
@@ -2835,7 +2925,7 @@ mod tests {
 
         let imported = import_graph(&input).unwrap();
 
-        let nested = imported.layerless_nodes[0].nested_graph.as_deref().unwrap();
+        let nested = &imported[imported.layerless_nodes[0].nested_graph.unwrap()];
         assert_eq!(nested.layerless_nodes.len(), 2);
         assert_eq!(nested.edges.len(), edge_count);
     }
@@ -2925,6 +3015,8 @@ mod tests {
         assert!(node.nested_graph.is_some());
     }
 
+    // Mutation: in `ensure_inside_self_loop_dummy`, ignore the dummy found in the port index. Each
+    // loop then makes two new dummies, not one pair for all.
     #[test]
     fn importer_reuses_inside_self_loop_dummies_per_node_role() {
         let mut graph = graph(
@@ -2952,7 +3044,7 @@ mod tests {
             .iter()
             .find(|node| node.id == "A")
             .unwrap();
-        let nested = node.nested_graph.as_ref().unwrap();
+        let nested = &lgraph[node.nested_graph.unwrap()];
         let external_dummies = nested
             .layerless_nodes
             .iter()
@@ -2972,6 +3064,7 @@ mod tests {
         assert_eq!(output_dummy.ports[PortId::new(0)].outgoing_edges.len(), 2);
     }
 
+    // Mutation: in `transform_inside_self_loop`, drop `graph_properties.self_loops = true`.
     #[test]
     fn importer_marks_inside_self_loops_as_graph_self_loops() {
         let mut graph = graph(
@@ -2990,7 +3083,7 @@ mod tests {
             .layerless_nodes
             .iter()
             .find(|node| node.id == "A")
-            .and_then(|node| node.nested_graph.as_ref())
+            .and_then(|node| node.nested_graph.map(|id| &lgraph[id]))
             .expect("inside self-loop should create a nested graph");
 
         assert!(nested.graph_properties.self_loops);
@@ -3015,6 +3108,8 @@ mod tests {
         assert_eq!(lgraph.padding.left, 10.0);
     }
 
+    // Mutation: in `import_hierarchical_graph`, drop the `apply_graph_padding_from_options` call
+    // for the nested graph.
     #[test]
     fn importer_applies_layered_padding_option_to_nested_graphs() {
         let mut cluster = node("cluster");
@@ -3023,7 +3118,7 @@ mod tests {
         child.parent = Some("cluster".to_string());
 
         let lgraph = import_graph(&graph(vec![cluster, child], vec![])).unwrap();
-        let nested = lgraph.layerless_nodes[0].nested_graph.as_ref().unwrap();
+        let nested = &lgraph[lgraph.layerless_nodes[0].nested_graph.unwrap()];
 
         assert_eq!(lgraph.padding.top, 12.0);
         assert_eq!(lgraph.padding.left, 12.0);
@@ -3031,6 +3126,8 @@ mod tests {
         assert_eq!(nested.padding.left, 12.0);
     }
 
+    // Mutation: in `import_hierarchical_graph`, drop the `add_padding` call with
+    // `inside_node_label_padding`.
     #[test]
     fn importer_adds_inside_top_node_label_padding_to_nested_graphs() {
         let mut cluster = node("cluster");
@@ -3046,7 +3143,7 @@ mod tests {
         child.parent = Some("cluster".to_string());
 
         let lgraph = import_graph(&graph(vec![cluster, child], vec![])).unwrap();
-        let nested = lgraph.layerless_nodes[0].nested_graph.as_ref().unwrap();
+        let nested = &lgraph[lgraph.layerless_nodes[0].nested_graph.unwrap()];
 
         assert_eq!(nested.options.spacing.node_node, 30.0);
         assert_eq!(nested.padding.top, 39.0);
@@ -3055,6 +3152,8 @@ mod tests {
         assert_eq!(nested.padding.left, 12.0);
     }
 
+    // Mutation: in `nested_graph_options`, ignore `node.nested_options` and start from the default
+    // options.
     #[test]
     fn importer_applies_nested_hierarchy_merge_without_cloning_root_options() {
         let mut cluster = node("cluster");
@@ -3075,7 +3174,7 @@ mod tests {
         input.options.random_seed = 42;
 
         let lgraph = import_graph(&input).unwrap();
-        let nested = lgraph.layerless_nodes[0].nested_graph.as_ref().unwrap();
+        let nested = &lgraph[lgraph.layerless_nodes[0].nested_graph.unwrap()];
 
         assert_eq!(lgraph.layerless_nodes[0].model_order, Some(0));
         assert_eq!(nested.layerless_nodes[0].model_order, None);
@@ -3092,6 +3191,8 @@ mod tests {
         assert_eq!(nested.options.random_seed, 17);
     }
 
+    // Mutation: in `nested_graph_options`, set `port_constraints` to `Free` whatever the node says.
+    // The nested options then lose `FixedSide`.
     #[test]
     fn importer_copies_node_port_constraints_to_nested_graph_options() {
         let mut cluster = node("cluster");
@@ -3101,11 +3202,13 @@ mod tests {
         child.parent = Some("cluster".to_string());
 
         let lgraph = import_graph(&graph(vec![cluster, child], vec![])).unwrap();
-        let nested = lgraph.layerless_nodes[0].nested_graph.as_ref().unwrap();
+        let nested = &lgraph[lgraph.layerless_nodes[0].nested_graph.unwrap()];
 
         assert_eq!(nested.options.port_constraints, PortConstraints::FixedSide);
     }
 
+    // Mutation: in `nested_graph_options`, drop the line that sets `options.direction` from the
+    // parent.
     #[test]
     fn importer_forces_nested_direction_to_parent_direction() {
         let mut cluster = node("cluster");
@@ -3117,11 +3220,12 @@ mod tests {
         input.options.direction = ElkDirection::Down;
 
         let lgraph = import_graph(&input).unwrap();
-        let nested = lgraph.layerless_nodes[0].nested_graph.as_ref().unwrap();
+        let nested = &lgraph[lgraph.layerless_nodes[0].nested_graph.unwrap()];
 
         assert_eq!(nested.options.direction, ElkDirection::Down);
     }
 
+    // Mutation: in `resolve_root_hierarchy_handling`, resolve `Inherit` to `IncludeChildren`.
     #[test]
     fn importer_resolves_root_hierarchy_inherit_to_separate_children() {
         let mut input = graph(vec![node("cluster"), node("A")], vec![]);
@@ -3137,6 +3241,8 @@ mod tests {
         assert!(lgraph.layerless_nodes.iter().all(|node| !node.compound));
     }
 
+    // Mutation: let `GraphArena::nest` record the node after the holder (`node + 1`) as the parent.
+    // `nested.parent` then no longer names the cluster.
     #[test]
     fn imports_include_children_hierarchy_into_nested_graphs() {
         let mut cluster = node("cluster");
@@ -3150,11 +3256,23 @@ mod tests {
             .iter()
             .find(|node| node.id == "cluster")
             .unwrap();
-        let nested = cluster.nested_graph.as_ref().unwrap();
-        assert_eq!(nested.parent_node_id.as_deref(), Some("cluster"));
+        let nested = &lgraph[cluster.nested_graph.unwrap()];
+        assert_eq!(
+            nested.parent,
+            Some(crate::graph::GraphParent {
+                graph: GraphId::ROOT,
+                node: lgraph
+                    .layerless_nodes
+                    .iter()
+                    .position(|n| n.id == "cluster")
+                    .unwrap(),
+            })
+        );
         assert_eq!(nested.layerless_nodes[0].id, "A");
     }
 
+    // Mutation: give every `HierarchyStep` the root as its graph in `transform_cross_hierarchy_edge`.
+    // The step then does not name the graph inside the cluster.
     #[test]
     fn importer_preserves_descendant_edge_for_compound_preprocessor() {
         let mut cluster = node("cluster");
@@ -3172,16 +3290,24 @@ mod tests {
             .iter()
             .find(|node| node.id == "cluster")
             .unwrap();
-        let nested = cluster.nested_graph.as_ref().unwrap();
+        let nested = &lgraph[cluster.nested_graph.unwrap()];
         assert!(nested.edges.is_empty());
         assert_eq!(lgraph.hierarchy_edges.len(), 1);
         assert_eq!(lgraph.hierarchy_edges[0].id, "cluster-A");
         assert_eq!(lgraph.hierarchy_edges[0].source_node_id, "cluster");
         assert_eq!(lgraph.hierarchy_edges[0].target_node_id, "A");
-        assert_eq!(lgraph.hierarchy_edges[0].source_path, Vec::<String>::new());
-        assert_eq!(lgraph.hierarchy_edges[0].target_path, vec!["cluster"]);
+        assert_eq!(lgraph.hierarchy_edges[0].source_path, Vec::new());
+        assert_eq!(
+            lgraph.hierarchy_edges[0].target_path,
+            vec![HierarchyStep {
+                node_id: "cluster".to_string(),
+                graph: nested.id,
+            }]
+        );
     }
 
+    // Mutation: in `hierarchy_port_key`, write the key as `node:role:order` instead of
+    // `node:order:role`. The port then reads `A:source:0`, not `A:0:source`.
     #[test]
     fn cross_hierarchy_import_creates_endpoint_ports_in_input_order() {
         let mut cluster = node("cluster");
@@ -3203,7 +3329,7 @@ mod tests {
             .find(|node| node.id == "cluster")
             .unwrap()
             .nested_graph
-            .as_ref()
+            .map(|id| &lgraph[id])
             .unwrap();
         let child = nested
             .layerless_nodes
@@ -3223,6 +3349,8 @@ mod tests {
         assert_eq!(lgraph.hierarchy_edges[0].source_port_key, "A:0:source");
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, set `connects_parent_node` to `true`
+    // for the output steps.
     #[test]
     fn source_ported_compound_metadata_links_parent_port_and_external_dummy() {
         let mut cluster = node("cluster");
@@ -3249,9 +3377,8 @@ mod tests {
             .as_ref()
             .expect("compound port should point to nested external dummy");
         assert!(parent_port.inside_connections);
-        assert_eq!(port_dummy.graph_id, "cluster");
-
-        let nested = cluster.nested_graph.as_ref().unwrap();
+        let nested = &lgraph[cluster.nested_graph.unwrap()];
+        assert_eq!(port_dummy.graph_id, nested.id);
         let external = &nested.layerless_nodes[port_dummy.node];
         assert_eq!(external.external_port_side, PortSide::South);
         assert_eq!(
@@ -3266,11 +3393,13 @@ mod tests {
             .origin_port
             .as_ref()
             .expect("external dummy should point back to parent port");
-        assert_eq!(origin.graph_id, "root");
+        assert_eq!(origin.graph_id, GraphId::ROOT);
         assert_eq!(origin.port.node, cluster_index);
         assert_eq!(origin.port.port, PortId::new(0));
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the input segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn source_ported_compound_does_not_duplicate_existing_parent_dummy() {
         let mut cluster = node("cluster");
@@ -3290,7 +3419,7 @@ mod tests {
             .iter()
             .find(|node| node.id == "cluster")
             .unwrap();
-        let nested = cluster.nested_graph.as_ref().unwrap();
+        let nested = &lgraph[cluster.nested_graph.unwrap()];
         let external_dummies = nested
             .layerless_nodes
             .iter()
@@ -3318,6 +3447,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the input segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn source_ported_compound_metadata_links_parent_to_child_external_dummy() {
         let mut cluster = node("cluster");
@@ -3348,19 +3479,20 @@ mod tests {
         assert_eq!(parent_port.port_type, PortType::Output);
         let port_dummy = parent_port.port_dummy.as_ref().unwrap();
         assert!(parent_port.inside_connections);
-        assert_eq!(port_dummy.graph_id, "cluster");
-
-        let nested = cluster.nested_graph.as_ref().unwrap();
+        let nested = &lgraph[cluster.nested_graph.unwrap()];
+        assert_eq!(port_dummy.graph_id, nested.id);
         let external = &nested.layerless_nodes[port_dummy.node];
         let origin = external
             .origin_port
             .as_ref()
             .expect("external dummy should point back to parent port");
-        assert_eq!(origin.graph_id, "root");
+        assert_eq!(origin.graph_id, GraphId::ROOT);
         assert_eq!(origin.port.node, cluster_index);
         assert_eq!(origin.port.port, PortId::new(0));
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the input segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn source_ported_compound_parent_boundary_segments_use_external_port_dummies() {
         let mut cluster = node("cluster");
@@ -3379,7 +3511,7 @@ mod tests {
             .iter()
             .find(|node| node.id == "cluster")
             .unwrap();
-        let nested = cluster.nested_graph.as_ref().unwrap();
+        let nested = &lgraph[cluster.nested_graph.unwrap()];
         let segment = nested
             .edges
             .iter()
@@ -3393,6 +3525,8 @@ mod tests {
         assert_eq!(nested.layerless_nodes[segment.target.node].id, "A");
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, give the segment between the two paths
+    // the depth `common_depth + 1`.
     #[test]
     fn source_ported_compound_import_records_cross_hierarchy_segments() {
         let mut outer = node("outer");
@@ -3417,16 +3551,16 @@ mod tests {
             .unwrap();
         let inner_graph = outer
             .nested_graph
-            .as_ref()
+            .map(|id| &lgraph[id])
             .unwrap()
             .layerless_nodes
             .iter()
             .find(|node| node.id == "inner")
             .unwrap()
             .nested_graph
-            .as_ref()
+            .map(|id| &lgraph[id])
             .unwrap();
-        let outer_graph = outer.nested_graph.as_ref().unwrap();
+        let outer_graph = &lgraph[outer.nested_graph.unwrap()];
         assert_eq!(
             inner_graph.cross_hierarchy_edges[0].segment,
             CompoundEdgeSegment::Output { depth: 2 }
@@ -3441,6 +3575,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `hierarchy_port_key`, never use the shared `node:collector:type` key (`if
+    // false`).
     #[test]
     fn source_ported_compound_reuses_exported_external_port_when_hierarchy_edges_merge() {
         let mut cluster = node("cluster");
@@ -3471,7 +3607,7 @@ mod tests {
             .find(|node| node.id == "cluster")
             .unwrap()
             .nested_graph
-            .as_ref()
+            .map(|id| &lgraph[id])
             .unwrap();
         assert_eq!(nested.edges.len(), 1);
         assert_eq!(nested.cross_hierarchy_edges.len(), 2);
@@ -3493,6 +3629,8 @@ mod tests {
         assert!(nested.graph_properties.end_labels);
     }
 
+    // Mutation: in `hierarchy_port_key`, never use the shared `node:collector:type` key (`if
+    // false`).
     #[test]
     fn source_ported_compound_keeps_nested_hierarchy_merge_default_when_root_disables_merge() {
         let mut cluster = node("cluster");
@@ -3515,7 +3653,7 @@ mod tests {
             .find(|node| node.id == "cluster")
             .unwrap()
             .nested_graph
-            .as_ref()
+            .map(|id| &lgraph[id])
             .unwrap();
         assert_eq!(nested.edges.len(), 1);
         assert_eq!(
@@ -3528,6 +3666,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the input segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn source_ported_compound_parent_end_segments_are_not_reused() {
         let mut cluster = node("cluster");
@@ -3553,7 +3693,7 @@ mod tests {
             .find(|node| node.id == "cluster")
             .unwrap()
             .nested_graph
-            .as_ref()
+            .map(|id| &lgraph[id])
             .unwrap();
         assert_eq!(nested.edges.len(), 2);
         assert_eq!(
@@ -3799,6 +3939,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, give the segment between the two paths
+    // the depth `common_depth + 1`.
     #[test]
     fn scoped_segment_import_accepts_a_materialized_owner_scope() {
         let mut group = node("group");
@@ -3830,7 +3972,7 @@ mod tests {
             .layerless_nodes
             .iter()
             .find(|node| node.id == "group")
-            .and_then(|node| node.nested_graph.as_deref())
+            .and_then(|node| node.nested_graph.map(|id| &imported[id]))
             .expect("group scope should be materialized");
         assert_eq!(nested.cross_hierarchy_edges.len(), 1);
         assert_eq!(
@@ -3863,6 +4005,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the input segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn scoped_input_segment_rebases_every_materialized_hierarchy_level() {
         let mut group = node("group");
@@ -3889,7 +4033,7 @@ mod tests {
             .layerless_nodes
             .iter()
             .find(|node| node.id == "group")
-            .and_then(|node| node.nested_graph.as_deref())
+            .and_then(|node| node.nested_graph.map(|id| &imported[id]))
             .expect("group scope should be materialized");
 
         assert_eq!(

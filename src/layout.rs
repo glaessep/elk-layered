@@ -830,7 +830,10 @@ impl<'a, 't> Work<'a, 't> {
                 .collect(),
             edges: edges.iter().map(|&edge| self.input_edge(edge)).collect(),
         };
-        let mut graph = importer::import_scope(
+        let importer::ImportedScope {
+            graphs: mut graph,
+            edge_containers,
+        } = importer::import_scope(
             &input,
             &[],
             root_label_padding,
@@ -884,15 +887,6 @@ impl<'a, 't> Work<'a, 't> {
             .iter()
             .filter(|&&node| !self.sizing[node].constraints.is_empty())
             .map(|&node| tree.nodes[node].node.id.clone())
-            .collect();
-        let edge_containers: HashMap<String, String> = edges
-            .iter()
-            .map(|&edge| {
-                (
-                    tree.edges[edge].edge.id.clone(),
-                    tree.nodes[tree.edges[edge].container].node.id.clone(),
-                )
-            })
             .collect();
         let transfer = TransferInput {
             parents: &parents,

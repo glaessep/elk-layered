@@ -23,8 +23,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::common::cells::grow_label_cell;
 use crate::graph::{
-    EdgeLabelPlacement, HorizontalLabelAlignment, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize,
-    LabelCellLayout, LabelSide, LayeredEdge, PortId, PortRef, PortSide, PortType,
+    EdgeLabelPlacement, GraphId, HorizontalLabelAlignment, LGraph, LLabel, LNode, LNodeKind,
+    LPoint, LSize, LabelCellLayout, LabelSide, LayeredEdge, PortId, PortRef, PortSide, PortType,
     VerticalLabelAlignment, reverse_edge,
 };
 use crate::options::{
@@ -3932,7 +3932,7 @@ struct ReplacementDummy {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum NorthSouthReplacementKey {
-    Origin { graph_id: String, port: PortRef },
+    Origin { graph_id: GraphId, port: PortRef },
     Dummy(usize),
 }
 
@@ -3942,7 +3942,7 @@ fn north_south_replacement_key(graph: &LGraph, original_dummy: usize) -> NorthSo
         .get(original_dummy)
         .and_then(|node| node.origin_port.as_ref())
         .map(|origin| NorthSouthReplacementKey::Origin {
-            graph_id: origin.graph_id.clone(),
+            graph_id: origin.graph_id,
             port: origin.port,
         })
         .unwrap_or(NorthSouthReplacementKey::Dummy(original_dummy))
@@ -4172,7 +4172,7 @@ mod tests {
         }
     }
 
-    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> LGraph {
+    fn graph(nodes: Vec<ElkInputNode>, edges: Vec<ElkInputEdge>) -> crate::graph::GraphArena {
         import_graph(&ElkInputGraph {
             id: "root".to_string(),
             options: LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
@@ -4589,7 +4589,7 @@ mod tests {
         direction: ElkDirection,
         thickness: f64,
         labels: Vec<ElkInputLabel>,
-    ) -> (LGraph, usize, usize) {
+    ) -> (crate::graph::GraphArena, usize, usize) {
         let mut labelled = edge("A-B", "A", "B");
         labelled.labels = labels;
         let mut graph = graph(vec![node("A"), node("B")], vec![labelled]);
@@ -4916,7 +4916,7 @@ mod tests {
         let mut graph = graph(vec![node("A"), node("B")], vec![labelled]);
 
         layer_network_simplex(&mut graph).unwrap();
-        crate::p3order::process_port_sides(&mut graph);
+        crate::p3order::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
         crate::p4nodes::calculate_label_and_node_sizes(&mut graph);
         crate::p4nodes::calculate_innermost_node_margins(&mut graph);
         select_label_sides(&mut graph);
@@ -4950,7 +4950,7 @@ mod tests {
         graph.options.edge_label_side_selection = EdgeLabelSideSelection::SmartDown;
 
         layer_network_simplex(&mut graph).unwrap();
-        crate::p3order::process_port_sides(&mut graph);
+        crate::p3order::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
         select_label_sides(&mut graph);
 
         // A has one port per edge, and both sit on the same side. ELK pairs them up: the first
@@ -5590,11 +5590,11 @@ mod tests {
             port: PortId::new(7),
         };
         graph.layerless_nodes[first].origin_port = Some(crate::graph::GraphPortRef {
-            graph_id: "parent".to_string(),
+            graph_id: GraphId::new(1),
             port: origin_port,
         });
         graph.layerless_nodes[second].origin_port = Some(crate::graph::GraphPortRef {
-            graph_id: "parent".to_string(),
+            graph_id: GraphId::new(1),
             port: origin_port,
         });
 
@@ -5638,7 +5638,7 @@ mod tests {
         };
         for dummy in [north_source, north_target] {
             graph.layerless_nodes[dummy].origin_port = Some(crate::graph::GraphPortRef {
-                graph_id: "parent".to_string(),
+                graph_id: GraphId::new(1),
                 port: origin_port,
             });
         }
@@ -5692,13 +5692,13 @@ mod tests {
         let north = push_external_dummy(&mut graph, "north", PortSide::North, 0.42);
         let target = push_normal_node(&mut graph, "target");
         let origin = crate::graph::GraphPortRef {
-            graph_id: "parent".to_string(),
+            graph_id: GraphId::new(1),
             port: PortRef {
                 node: 9,
                 port: PortId::new(3),
             },
         };
-        graph.layerless_nodes[north].origin_port = Some(origin.clone());
+        graph.layerless_nodes[north].origin_port = Some(origin);
         graph.layerless_nodes[north].model_order = Some(17);
         graph.layerless_nodes[north].in_layer_constraint = InLayerConstraint::Top;
 
