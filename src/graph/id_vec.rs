@@ -35,7 +35,7 @@ impl VecId for EdgeId {
 /// A `Vec<T>` that only an id of type `I` indexes. It has no `Index<usize>` and does not deref to
 /// `Vec`, so a stray number cannot name an item. `as_slice` is the way out for code that needs
 /// the plain list.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdVec<I, T> {
     items: Vec<T>,
     _id: PhantomData<fn(I) -> I>,

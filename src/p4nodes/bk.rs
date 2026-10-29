@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::vertical_spacing;
-use crate::graph::{EdgeId, LGraph, LNodeKind, LayeredEdge, NodeId, PortRef};
+use crate::graph::{EdgeId, IdVec, LGraph, LNodeKind, LayeredEdge, NodeId, PortRef};
 use crate::options::{EdgeStraighteningStrategy, FixedAlignment};
 
 const MIN_LAYERS_FOR_CONFLICTS: usize = 3;
@@ -91,7 +91,7 @@ impl BKAlignedLayout {
         let mut max = f64::NEG_INFINITY;
 
         for node in ni.iter_nodes() {
-            let id = ni.node_id[node.index()];
+            let id = ni.node_id[node];
             let root = self.root[id];
             let Some(y_min) = self.y[id] else {
                 continue;
@@ -123,7 +123,7 @@ struct Neighbor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NeighborhoodInformation {
     node_count: usize,
-    node_id: Vec<usize>,
+    node_id: IdVec<NodeId, usize>,
     id_to_node: Vec<NodeId>,
     layer_index: Vec<usize>,
     node_index: Vec<usize>,
@@ -134,7 +134,7 @@ struct NeighborhoodInformation {
 impl NeighborhoodInformation {
     fn build_for(graph: &LGraph) -> Self {
         let node_count = graph.layers.iter().map(|layer| layer.nodes.len()).sum();
-        let mut node_id = vec![usize::MAX; graph.layerless_nodes.len()];
+        let mut node_id = IdVec::filled(graph.layerless_nodes.len(), usize::MAX);
         let mut id_to_node = Vec::with_capacity(node_count);
         let mut layer_index = vec![usize::MAX; graph.layers.len()];
         let mut node_index = vec![usize::MAX; node_count];
@@ -143,7 +143,7 @@ impl NeighborhoodInformation {
         for (layer_idx, layer) in graph.layers.iter().enumerate() {
             layer_index[layer_idx] = layer_idx;
             for (node_idx, node) in layer.nodes.iter().copied().enumerate() {
-                node_id[node.index()] = next_id;
+                node_id[node] = next_id;
                 id_to_node.push(node);
                 node_index[next_id] = node_idx;
                 next_id += 1;
@@ -171,7 +171,7 @@ impl NeighborhoodInformation {
     fn determine_all_left_neighbors(&mut self, graph: &LGraph) {
         let nodes = self.id_to_node.clone();
         for node in nodes {
-            let id = self.node_id[node.index()];
+            let id = self.node_id[node];
             let mut result = Vec::new();
             let mut max_priority = 0;
 
@@ -192,7 +192,7 @@ impl NeighborhoodInformation {
                 }
             }
 
-            result.sort_by_key(|neighbor| self.node_index[self.node_id[neighbor.node.index()]]);
+            result.sort_by_key(|neighbor| self.node_index[self.node_id[neighbor.node]]);
             self.left_neighbors[id] = result;
         }
     }
@@ -200,7 +200,7 @@ impl NeighborhoodInformation {
     fn determine_all_right_neighbors(&mut self, graph: &LGraph) {
         let nodes = self.id_to_node.clone();
         for node in nodes {
-            let id = self.node_id[node.index()];
+            let id = self.node_id[node];
             let mut result = Vec::new();
             let mut max_priority = 0;
 
@@ -221,7 +221,7 @@ impl NeighborhoodInformation {
                 }
             }
 
-            result.sort_by_key(|neighbor| self.node_index[self.node_id[neighbor.node.index()]]);
+            result.sort_by_key(|neighbor| self.node_index[self.node_id[neighbor.node]]);
             self.right_neighbors[id] = result;
         }
     }
@@ -286,16 +286,16 @@ fn mark_conflicts(graph: &LGraph, ni: &NeighborhoodInformation) -> HashSet<EdgeI
             {
                 let mut k_1 = layer_sizes[i].saturating_sub(1);
                 if incident_to_inner_segment(graph, ni, v_l_i, i + 1, i)
-                    && let Some(left) = ni.left_neighbors[ni.node_id[v_l_i.index()]].first()
+                    && let Some(left) = ni.left_neighbors[ni.node_id[v_l_i]].first()
                 {
-                    k_1 = ni.node_index[ni.node_id[left.node.index()]];
+                    k_1 = ni.node_index[ni.node_id[left.node]];
                 }
 
                 while l <= l_1 {
                     let v_l = current_layer.nodes[l];
                     if !incident_to_inner_segment(graph, ni, v_l, i + 1, i) {
-                        for upper_neighbor in &ni.left_neighbors[ni.node_id[v_l.index()]] {
-                            let k = ni.node_index[ni.node_id[upper_neighbor.node.index()]];
+                        for upper_neighbor in &ni.left_neighbors[ni.node_id[v_l]] {
+                            let k = ni.node_index[ni.node_id[upper_neighbor.node]];
                             if k < k_0 || k > k_1 {
                                 marked_edges.insert(upper_neighbor.edge);
                             }
@@ -344,7 +344,7 @@ fn vertical_alignment(
     marked_edges: &HashSet<EdgeId>,
 ) {
     for node in ni.iter_nodes() {
-        let id = ni.node_id[node.index()];
+        let id = ni.node_id[node];
         layout.root[id] = id;
         layout.align[id] = id;
         layout.inner_shift[id] = 0.0;
@@ -369,7 +369,7 @@ fn vertical_alignment(
         };
 
         for v_i_k in node_iter {
-            let v_id = ni.node_id[v_i_k.index()];
+            let v_id = ni.node_id[v_i_k];
             let neighbors = match layout.hdir {
                 HDirection::Left => &ni.right_neighbors[v_id],
                 HDirection::Right => &ni.left_neighbors[v_id],
@@ -386,7 +386,7 @@ fn vertical_alignment(
                 for m in (low..=high).rev() {
                     if layout.align[v_id] == v_id {
                         let u_m = &neighbors[m];
-                        let u_id = ni.node_id[u_m.node.index()];
+                        let u_id = ni.node_id[u_m.node];
                         if !marked_edges.contains(&u_m.edge) && r > ni.node_index[u_id] as isize {
                             layout.align[u_id] = v_id;
                             layout.root[v_id] = layout.root[u_id];
@@ -401,7 +401,7 @@ fn vertical_alignment(
             } else {
                 for u_m in neighbors.iter().take(high + 1).skip(low) {
                     if layout.align[v_id] == v_id {
-                        let u_id = ni.node_id[u_m.node.index()];
+                        let u_id = ni.node_id[u_m.node];
                         if !marked_edges.contains(&u_m.edge) && r < ni.node_index[u_id] as isize {
                             layout.align[u_id] = v_id;
                             layout.root[v_id] = layout.root[u_id];
@@ -465,7 +465,7 @@ fn horizontal_compaction(
     layout: &mut BKAlignedLayout,
 ) {
     for node in ni.iter_nodes() {
-        let id = ni.node_id[node.index()];
+        let id = ni.node_id[node];
         layout.sink[id] = id;
         layout.shift[id] = match layout.vdir {
             VDirection::Up => f64::NEG_INFINITY,
@@ -481,7 +481,7 @@ fn horizontal_compaction(
     for layer_index in layers {
         let nodes = node_order_for_direction(&graph.layers[layer_index].nodes, layout.vdir);
         for v in nodes {
-            let id = ni.node_id[v.index()];
+            let id = ni.node_id[v];
             if layout.root[id] == id {
                 place_block(graph, ni, layout, &mut class_graph, &mut threshold, id);
             }
@@ -493,7 +493,7 @@ fn horizontal_compaction(
     let layers = layer_indices(graph, layout.hdir);
     for layer_index in layers {
         for v in &graph.layers[layer_index].nodes {
-            let id = ni.node_id[(*v).index()];
+            let id = ni.node_id[*v];
             let root = layout.root[id];
             layout.y[id] = layout.y[root];
             if id == root {
@@ -552,7 +552,7 @@ fn place_block(
                 VDirection::Up => layer.nodes[current_index + 1],
                 VDirection::Down => layer.nodes[current_index - 1],
             };
-            let neighbor_root = layout.root[ni.node_id[neighbor_node.index()]];
+            let neighbor_root = layout.root[ni.node_id[neighbor_node]];
             place_block(graph, ni, layout, class_graph, threshold, neighbor_root);
 
             thresh = threshold.calculate_threshold(graph, ni, layout, thresh, root, current);
@@ -568,7 +568,7 @@ fn place_block(
                     let neighbor = &graph.layerless_nodes[neighbor_node];
                     let current_lnode = &graph.layerless_nodes[current_node];
                     let new_position = layout.y[neighbor_root].unwrap_or(0.0)
-                        + layout.inner_shift[ni.node_id[neighbor_node.index()]]
+                        + layout.inner_shift[ni.node_id[neighbor_node]]
                         - neighbor.margin.top
                         - spacing
                         - current_lnode.margin.bottom
@@ -586,7 +586,7 @@ fn place_block(
                     let neighbor = &graph.layerless_nodes[neighbor_node];
                     let current_lnode = &graph.layerless_nodes[current_node];
                     let new_position = layout.y[neighbor_root].unwrap_or(0.0)
-                        + layout.inner_shift[ni.node_id[neighbor_node.index()]]
+                        + layout.inner_shift[ni.node_id[neighbor_node]]
                         + neighbor.size.height
                         + neighbor.margin.bottom
                         + spacing
@@ -611,13 +611,13 @@ fn place_block(
                         + current_lnode.margin.bottom
                         + spacing
                         - (layout.y[neighbor_root].unwrap_or(0.0)
-                            + layout.inner_shift[ni.node_id[neighbor_node.index()]]
+                            + layout.inner_shift[ni.node_id[neighbor_node]]
                             - neighbor.margin.top)
                 } else {
                     layout.y[root].unwrap_or(0.0) + layout.inner_shift[current]
                         - current_lnode.margin.top
                         - layout.y[neighbor_root].unwrap_or(0.0)
-                        - layout.inner_shift[ni.node_id[neighbor_node.index()]]
+                        - layout.inner_shift[ni.node_id[neighbor_node]]
                         - neighbor.size.height
                         - neighbor.margin.bottom
                         - spacing
@@ -764,12 +764,12 @@ impl SimpleThresholdStrategy {
                     };
                     let other_node = other_port.node;
                     let root_node = root_port.node;
-                    let other_root = layout.root[ni.node_id[other_node.index()]];
+                    let other_root = layout.root[ni.node_id[other_node]];
                     layout.y[other_root].unwrap_or(0.0)
-                        + layout.inner_shift[ni.node_id[other_node.index()]]
+                        + layout.inner_shift[ni.node_id[other_node]]
                         + port_position_y(graph, other_port)
                         + port_anchor_y(graph, other_port)
-                        - layout.inner_shift[ni.node_id[root_node.index()]]
+                        - layout.inner_shift[ni.node_id[root_node]]
                         - port_position_y(graph, root_port)
                         - port_anchor_y(graph, root_port)
                 } else {
@@ -785,18 +785,18 @@ impl SimpleThresholdStrategy {
                     };
                     let other_node = other_port.node;
                     let root_node = root_port.node;
-                    let other_root = layout.root[ni.node_id[other_node.index()]];
+                    let other_root = layout.root[ni.node_id[other_node]];
                     layout.y[other_root].unwrap_or(0.0)
-                        + layout.inner_shift[ni.node_id[other_node.index()]]
+                        + layout.inner_shift[ni.node_id[other_node]]
                         + port_position_y(graph, other_port)
                         + port_anchor_y(graph, other_port)
-                        - layout.inner_shift[ni.node_id[root_node.index()]]
+                        - layout.inner_shift[ni.node_id[root_node]]
                         - port_position_y(graph, root_port)
                         - port_anchor_y(graph, root_port)
                 };
 
-                layout.straightened[layout.root[ni.node_id[left.node.index()]]] = true;
-                layout.straightened[layout.root[ni.node_id[right.node.index()]]] = true;
+                layout.straightened[layout.root[ni.node_id[left.node]]] = true;
+                layout.straightened[layout.root[ni.node_id[right.node]]] = true;
                 threshold
             }
             None => invalid,
@@ -837,10 +837,10 @@ impl SimpleThresholdStrategy {
             let Some(other) = edge_opposite_node(&graph.edges[edge], free_node) else {
                 continue;
             };
-            if ni.node_id.get(other.index()).copied().unwrap_or(usize::MAX) == usize::MAX {
+            if ni.node_id.get(other).copied().unwrap_or(usize::MAX) == usize::MAX {
                 continue;
             }
-            let other_root = layout.root[ni.node_id[other.index()]];
+            let other_root = layout.root[ni.node_id[other]];
             if self.block_finished.contains(&other_root) {
                 postprocessable.has_edges = true;
                 postprocessable.edge = Some(edge);
@@ -904,12 +904,12 @@ impl SimpleThresholdStrategy {
         let delta = calculate_delta(graph, ni, layout, fix, block);
         if delta > 0.0 && delta < f64::MAX {
             let available_space = check_space_above(graph, ni, layout, block.node, delta);
-            let block_root = ni.id_to_node[layout.root[ni.node_id[block.node.index()]]];
+            let block_root = ni.id_to_node[layout.root[ni.node_id[block.node]]];
             shift_block(ni, layout, block_root, -available_space);
             available_space > 0.0
         } else if delta < 0.0 && -delta < f64::MAX {
             let available_space = check_space_below(graph, ni, layout, block.node, -delta);
-            let block_root = ni.id_to_node[layout.root[ni.node_id[block.node.index()]]];
+            let block_root = ni.id_to_node[layout.root[ni.node_id[block.node]]];
             shift_block(ni, layout, block_root, available_space);
             available_space > 0.0
         } else {
@@ -1078,7 +1078,7 @@ fn create_balanced_layout(
             min_width_layout = index;
         }
         for node in ni.iter_nodes() {
-            let id = ni.node_id[node.index()];
+            let id = ni.node_id[node];
             let node_pos_y = layout.y[id]? + layout.inner_shift[id];
             min[index] = min[index].min(node_pos_y);
             max[index] = max[index].max(node_pos_y + graph.layerless_nodes[node].size.height);
@@ -1094,7 +1094,7 @@ fn create_balanced_layout(
     }
 
     for node in ni.iter_nodes() {
-        let id = ni.node_id[node.index()];
+        let id = ni.node_id[node];
         let mut calculated_y = Vec::with_capacity(no_of_layouts);
         for (index, layout) in layouts.iter().enumerate() {
             calculated_y.push(layout.y[id]? + layout.inner_shift[id] + shift[index]);
@@ -1119,7 +1119,7 @@ fn check_order_constraint(
     for layer in &graph.layers {
         let mut pos = f64::NEG_INFINITY;
         for node in &layer.nodes {
-            let id = ni.node_id[(*node).index()];
+            let id = ni.node_id[*node];
             let Some(y) = layout.y[id] else {
                 return false;
             };
@@ -1140,7 +1140,7 @@ fn check_order_constraint(
 
 fn apply_layout(graph: &mut LGraph, ni: &NeighborhoodInformation, layout: &BKAlignedLayout) {
     for node in ni.iter_nodes() {
-        let id = ni.node_id[node.index()];
+        let id = ni.node_id[node];
         if let Some(y) = layout.y[id] {
             graph.layerless_nodes[node].position.y = y + layout.inner_shift[id];
         }
@@ -1214,8 +1214,8 @@ fn calculate_delta(
     src: PortRef,
     tgt: PortRef,
 ) -> f64 {
-    let src_id = ni.node_id[src.node.index()];
-    let tgt_id = ni.node_id[tgt.node.index()];
+    let src_id = ni.node_id[src.node];
+    let tgt_id = ni.node_id[tgt.node];
     let src_root = layout.root[src_id];
     let tgt_root = layout.root[tgt_id];
     let src_pos = layout.y[src_root].unwrap_or(0.0)
@@ -1235,7 +1235,7 @@ fn shift_block(
     root_node: NodeId,
     delta: f64,
 ) {
-    let root = ni.node_id[root_node.index()];
+    let root = ni.node_id[root_node];
     let mut current = root;
     loop {
         let new_pos = layout.y[current].unwrap_or(0.0) + delta;
@@ -1254,7 +1254,7 @@ fn check_space_above(
     block_root: NodeId,
     delta: f64,
 ) -> f64 {
-    let root = ni.node_id[block_root.index()];
+    let root = ni.node_id[block_root];
     let mut available_space = delta;
     let mut current = root;
     loop {
@@ -1283,7 +1283,7 @@ fn check_space_below(
     block_root: NodeId,
     delta: f64,
 ) -> f64 {
-    let root = ni.node_id[block_root.index()];
+    let root = ni.node_id[block_root];
     let mut available_space = delta;
     let mut current = root;
     loop {
@@ -1311,7 +1311,7 @@ fn min_y(
     layout: &BKAlignedLayout,
     node: NodeId,
 ) -> f64 {
-    let node_id = ni.node_id[node.index()];
+    let node_id = ni.node_id[node];
     let root = layout.root[node_id];
     layout.y[root].unwrap_or(0.0) + layout.inner_shift[node_id]
         - graph.layerless_nodes[node].margin.top
@@ -1323,7 +1323,7 @@ fn max_y(
     layout: &BKAlignedLayout,
     node: NodeId,
 ) -> f64 {
-    let node_id = ni.node_id[node.index()];
+    let node_id = ni.node_id[node];
     let root = layout.root[node_id];
     layout.y[root].unwrap_or(0.0)
         + layout.inner_shift[node_id]
@@ -1333,13 +1333,13 @@ fn max_y(
 
 fn lower_neighbor(graph: &LGraph, ni: &NeighborhoodInformation, node: NodeId) -> Option<NodeId> {
     let layer = graph.layerless_nodes[node].layer_index?;
-    let index = ni.node_index[ni.node_id[node.index()]];
+    let index = ni.node_index[ni.node_id[node]];
     graph.layers[layer].nodes.get(index + 1).copied()
 }
 
 fn upper_neighbor(graph: &LGraph, ni: &NeighborhoodInformation, node: NodeId) -> Option<NodeId> {
     let layer = graph.layerless_nodes[node].layer_index?;
-    let index = ni.node_index[ni.node_id[node.index()]];
+    let index = ni.node_index[ni.node_id[node]];
     if index > 0 {
         graph.layers[layer].nodes.get(index - 1).copied()
     } else {
