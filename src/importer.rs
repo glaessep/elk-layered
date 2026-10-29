@@ -16,8 +16,9 @@ use crate::compound::{
 use crate::graph::{
     CompoundEdgeSegment, EdgeId, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge,
     HierarchyStep, LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId,
-    PortId, PortRef, PortSide, PortType, SelfLoopOptions, apply_port_index_to_dummy,
-    create_external_port_dummy, is_across_flow, port_box, port_side_from_direction,
+    PlacementOptions, PortId, PortRef, PortSide, PortType, SelfLoopOptions,
+    apply_port_index_to_dummy, create_external_port_dummy, is_across_flow, port_box,
+    port_side_from_direction,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
@@ -422,7 +423,7 @@ fn import_external_ports(
             }
         });
         let direction = root.options.direction;
-        let node = root.push_node_with(|node| {
+        let node = root.push_external_port_dummy(|node| {
             let mut dummy = create_external_port_dummy(
                 node,
                 format!("{scope_id}:external:{}", port.id),
@@ -1152,7 +1153,7 @@ fn ensure_inside_self_loop_dummy(
 
     let dummy_id = format!("external:{parent_node_id}");
     let direction = graph.options.direction;
-    let node = graph.push_node_with(|node| {
+    let node = graph.push_external_port_dummy(|node| {
         let mut dummy = create_external_port_dummy(
             node,
             dummy_id,
@@ -1367,10 +1368,8 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     ) {
         graph.graph_properties.non_free_ports = true;
     }
-    lnode.port_alignment = node.port_alignment;
     if let Some(layer_constraint) = node.layer_constraint {
         lnode.layer_constraint = layer_constraint;
-        lnode.layer_constraint_explicit = true;
     }
     // `ElkGraphImporter.transformNode` skips labels without text.
     for label in node.labels.iter().filter(|label| !label.text.is_empty()) {
@@ -1378,10 +1377,16 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     }
     lnode.node_label_placement = node.node_label_placement;
     lnode.node_size = node.node_size;
-    lnode.node_flexibility = node.node_flexibility;
-    lnode.ports_surrounding = node.ports_surrounding;
     let node_size = lnode.size;
     let node_index = graph.push_node_with(|_| lnode);
+    if node.layer_constraint.is_some() {
+        graph.mark_layer_constraint_explicit(node_index);
+    }
+    *graph.port_alignment.row_mut(node_index) = node.port_alignment;
+    *graph.placement_options.row_mut(node_index) = PlacementOptions {
+        flexibility: node.node_flexibility,
+        ports_surrounding: node.ports_surrounding,
+    };
     *graph.self_loop_options.row_mut(node_index) = SelfLoopOptions {
         distribution: node.self_loop_distribution,
         ordering: node.self_loop_ordering,
@@ -2625,6 +2630,48 @@ mod tests {
             options("B").ordering,
             crate::options::SelfLoopOrderingStrategy::Sequenced
         );
+    }
+
+    // Mutation: in `transform_node`, write the port alignment, the placement options or the
+    // explicit layer constraint of every node to the row of node 0.
+    #[test]
+    fn import_records_the_options_the_processors_read() {
+        let mut first = node("A");
+        first.port_alignment = Some(crate::options::PortAlignment::End);
+        first.node_flexibility = crate::options::NodeFlexibility::PortPosition;
+        first.ports_surrounding = Some(crate::options::SpacingMargin {
+            top: 1.0,
+            right: 2.0,
+            bottom: 3.0,
+            left: 4.0,
+        });
+        first.layer_constraint = Some(crate::options::LayerConstraint::First);
+        let second = node("B");
+        let imported = import_graph(&graph(vec![first, second], vec![])).unwrap();
+
+        let root = imported.root();
+        let (a, b) = (root.node_named("A"), root.node_named("B"));
+
+        assert_eq!(
+            root.port_alignment_of(a),
+            Some(crate::options::PortAlignment::End)
+        );
+        assert_eq!(root.port_alignment_of(b), None);
+        let placement = root.placement_options.get(a).unwrap();
+        assert_eq!(
+            placement.flexibility,
+            crate::options::NodeFlexibility::PortPosition
+        );
+        assert_eq!(
+            placement.ports_surrounding.map(|margin| margin.left),
+            Some(4.0)
+        );
+        assert_eq!(
+            root.placement_options.get(b).unwrap().flexibility,
+            crate::options::NodeFlexibility::None
+        );
+        assert!(root.is_layer_constraint_explicit(a));
+        assert!(!root.is_layer_constraint_explicit(b));
     }
 
     #[test]

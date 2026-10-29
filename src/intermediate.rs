@@ -493,7 +493,7 @@ fn update_opposite_node_layer_constraints(
     opposite_node: NodeId,
     hidden_connections: &mut IdVec<NodeId, HiddenNodeConnections>,
 ) {
-    if graph.layerless_nodes[opposite_node].layer_constraint_explicit {
+    if graph.is_layer_constraint_explicit(opposite_node) {
         return;
     }
 
@@ -507,11 +507,11 @@ fn update_opposite_node_layer_constraints(
     match hidden_connections[opposite_node] {
         HiddenNodeConnections::FirstSeparate => {
             graph.layerless_nodes[opposite_node].layer_constraint = LayerConstraint::First;
-            graph.layerless_nodes[opposite_node].layer_constraint_explicit = true;
+            graph.mark_layer_constraint_explicit(opposite_node);
         }
         HiddenNodeConnections::LastSeparate => {
             graph.layerless_nodes[opposite_node].layer_constraint = LayerConstraint::Last;
-            graph.layerless_nodes[opposite_node].layer_constraint_explicit = true;
+            graph.mark_layer_constraint_explicit(opposite_node);
         }
         HiddenNodeConnections::None | HiddenNodeConnections::Both => {}
     }
@@ -4011,11 +4011,13 @@ fn create_hierarchical_port_replacement_dummy(
         replacement.node_label_placement = original.node_label_placement;
         replacement.model_order = original.model_order;
         replacement.layer_constraint = original.layer_constraint;
-        replacement.layer_constraint_explicit = original.layer_constraint_explicit;
         replacement.port_constraints = PortConstraints::FixedPos;
         replacement.node_alignment = Alignment::Center;
         replacement
     });
+    if graph.is_layer_constraint_explicit(original_dummy) {
+        graph.mark_layer_constraint_explicit(node_index);
+    }
     // The replacement takes over the successors of the dummy it stands in for.
     let successor_constraints = graph
         .in_layer_successor_constraints(original_dummy)
@@ -5389,7 +5391,7 @@ mod tests {
         preprocess_layer_constraints(&mut graph).unwrap();
 
         let a = graph.node_named("A");
-        assert!(graph.layerless_nodes[a].layer_constraint_explicit);
+        assert!(graph.is_layer_constraint_explicit(a));
         assert_eq!(
             graph.layerless_nodes[a].layer_constraint,
             LayerConstraint::None
@@ -5772,7 +5774,7 @@ mod tests {
     }
 
     // Mutation: in `create_hierarchical_port_replacement_dummy`, leave out the copy of the
-    // successor constraints to the replacement dummy.
+    // successor constraints to the replacement dummy, or of the explicit layer constraint.
     #[test]
     fn hierarchical_port_constraint_processor_copies_replacement_dummy_metadata() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
@@ -5801,6 +5803,7 @@ mod tests {
             .row_mut(north)
             .successor_constraints
             .push(target);
+        graph.mark_layer_constraint_explicit(north);
 
         graph.set_node_layer(north, 0);
         graph.set_node_layer(target, 0);
@@ -5820,6 +5823,7 @@ mod tests {
             .unwrap();
         let node = &graph.layerless_nodes[replacement];
         assert_eq!(graph.in_layer_successor_constraints(replacement), [target]);
+        assert!(graph.is_layer_constraint_explicit(replacement));
         assert_eq!(node.external_port().unwrap().ratio_or_position, 0.42);
         assert_eq!(node.external_port().unwrap().origin_port, Some(origin));
         assert_eq!(node.model_order, Some(17));

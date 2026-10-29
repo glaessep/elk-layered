@@ -58,6 +58,23 @@ pub struct LGraph {
     /// `layered.edgeRouting.selfLoopDistribution` and `selfLoopOrdering` of the nodes the importer
     /// read them for. The self loop processors are the only readers.
     pub(crate) self_loop_options: NodeTable<SelfLoopOptions>,
+    /// `portAlignment` of the nodes that set it. The node size and port placement is the only
+    /// reader. A node without a row follows the graph's default.
+    pub(crate) port_alignment: NodeTable<Option<PortAlignment>>,
+    /// The options only the node placement reads, of the nodes the importer read them for.
+    pub(crate) placement_options: NodeTable<PlacementOptions>,
+    /// Whether the node's layer constraint was set by the caller or by a hierarchical port
+    /// dummy, not derived. Only the layer constraint preprocessing reads it.
+    pub(crate) layer_constraint_explicit: NodeTable<bool>,
+}
+
+/// The node options that only the node placement (`NetworkSimplexPlacer`) reads.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlacementOptions {
+    /// `nodeFlexibility`.
+    pub(crate) flexibility: super::options::NodeFlexibility,
+    /// `portsSurrounding`: the margin the ports leave around a node, if the node sets it.
+    pub(crate) ports_surrounding: Option<super::options::SpacingMargin>,
 }
 
 /// What `NorthSouthPortPreprocessor` records for one node, for the crossing minimization.
@@ -123,6 +140,9 @@ impl LGraph {
             in_layer_successor_constraints_between_non_dummies: false,
             in_layer: NodeTable::default(),
             self_loop_options: NodeTable::default(),
+            port_alignment: NodeTable::default(),
+            placement_options: NodeTable::default(),
+            layer_constraint_explicit: NodeTable::default(),
         }
     }
 
@@ -211,10 +231,6 @@ pub struct LNode {
     pub layer_constraint: super::options::LayerConstraint,
     pub node_alignment: Alignment,
     pub port_constraints: PortConstraints,
-    pub port_alignment: Option<PortAlignment>,
-    pub node_flexibility: super::options::NodeFlexibility,
-    pub ports_surrounding: Option<super::options::SpacingMargin>,
-    pub layer_constraint_explicit: bool,
 }
 
 /// The data that only one kind of dummy node has. ELK keeps these as properties that are set
@@ -461,10 +477,6 @@ impl LNode {
             layer_constraint: super::options::LayerConstraint::None,
             node_alignment: Alignment::Automatic,
             port_constraints: PortConstraints::Undefined,
-            port_alignment: None,
-            node_flexibility: super::options::NodeFlexibility::None,
-            ports_surrounding: None,
-            layer_constraint_explicit: false,
         }
     }
 }
@@ -1141,6 +1153,37 @@ impl LGraph {
             .map_or(&[], |row| row.barycenter_associates.as_slice())
     }
 
+    /// The `portAlignment` the node sets, or `None` if it sets none.
+    pub(crate) fn port_alignment_of(&self, node: NodeId) -> Option<PortAlignment> {
+        self.port_alignment.get(node).copied().flatten()
+    }
+
+    /// Whether the caller, or a hierarchical port dummy, set the layer constraint of `node`.
+    pub(crate) fn is_layer_constraint_explicit(&self, node: NodeId) -> bool {
+        self.layer_constraint_explicit
+            .get(node)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Records that the layer constraint of `node` is explicit.
+    pub(crate) fn mark_layer_constraint_explicit(&mut self, node: NodeId) {
+        *self.layer_constraint_explicit.row_mut(node) = true;
+    }
+
+    /// Pushes a node made by [`create_external_port_dummy`]. ELK sets the layer constraint of a
+    /// west or east dummy on purpose, so a separate constraint on the new node counts as explicit.
+    pub fn push_external_port_dummy(&mut self, build: impl FnOnce(NodeId) -> LNode) -> NodeId {
+        let node = self.push_node_with(build);
+        if matches!(
+            self.layerless_nodes[node].layer_constraint,
+            LayerConstraint::FirstSeparate | LayerConstraint::LastSeparate
+        ) {
+            self.mark_layer_constraint_explicit(node);
+        }
+        node
+    }
+
     /// Which nodes the layer constraint preprocessing has hidden from the layering. A node is
     /// hidden while it is in [`Self::hidden_nodes`].
     pub fn hidden_mask(&self) -> IdVec<NodeId, bool> {
@@ -1795,7 +1838,6 @@ pub fn create_external_port_dummy(
     match external_side {
         PortSide::West => {
             dummy.layer_constraint = LayerConstraint::FirstSeparate;
-            dummy.layer_constraint_explicit = true;
             dummy.size.height = port_size.height;
             if border_offset < 0.0 {
                 dummy.size.width = -border_offset;
@@ -1803,7 +1845,6 @@ pub fn create_external_port_dummy(
         }
         PortSide::East => {
             dummy.layer_constraint = LayerConstraint::LastSeparate;
-            dummy.layer_constraint_explicit = true;
             dummy.size.height = port_size.height;
             if border_offset < 0.0 {
                 dummy.size.width = -border_offset;
@@ -2463,6 +2504,61 @@ mod tests {
             [false, false, true]
         );
         assert!(graph.layerless_nodes.iter().count() == mask.len());
+    }
+
+    fn external_dummy_on(side: PortSide) -> LNode {
+        create_external_port_dummy(
+            NodeId::new(0),
+            "dummy",
+            "port",
+            PortType::Output,
+            PortConstraints::FixedSide,
+            side,
+            0,
+            LPoint::default(),
+            LSize::default(),
+            LSize::default(),
+            0.0,
+            ElkDirection::Right,
+        )
+    }
+
+    // Mutation: in `push_external_port_dummy`, mark the layer constraint of every dummy explicit,
+    // or of none.
+    #[test]
+    fn a_west_or_east_external_port_dummy_has_an_explicit_layer_constraint() {
+        let mut graph = graph_with_nodes(0);
+        let nodes = [
+            (PortSide::West, true),
+            (PortSide::East, true),
+            (PortSide::North, false),
+            (PortSide::South, false),
+        ]
+        .map(|(side, explicit)| {
+            let dummy = graph.push_external_port_dummy(|_| external_dummy_on(side));
+            (dummy, explicit, side)
+        });
+
+        for (dummy, explicit, side) in nodes {
+            assert_eq!(
+                graph.is_layer_constraint_explicit(dummy),
+                explicit,
+                "{side:?}"
+            );
+        }
+    }
+
+    // Mutation: in `port_alignment_of`, read the row of node 0 for every node.
+    #[test]
+    fn port_alignment_of_is_none_for_a_node_that_sets_none() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        *graph.port_alignment.row_mut(all[0]) = Some(PortAlignment::End);
+        *graph.port_alignment.row_mut(all[1]) = None;
+
+        assert_eq!(graph.port_alignment_of(all[0]), Some(PortAlignment::End));
+        assert_eq!(graph.port_alignment_of(all[1]), None);
+        assert_eq!(graph.port_alignment_of(all[2]), None);
     }
 
     // Mutation: swap `x` and `y`, or `width` and `height`, in `port_box`.

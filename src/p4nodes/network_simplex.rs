@@ -238,17 +238,23 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
 }
 
 fn is_flexible(graph: &LGraph, node: NodeId) -> bool {
+    // A node the importer made no row for, a dummy, has no flexibility.
+    let options = graph
+        .placement_options
+        .get(node)
+        .cloned()
+        .unwrap_or_default();
     let node = &graph.layerless_nodes[node];
     if node.kind() != LNodeKind::Normal
         || node.ports.len() <= 1
         || node.port_constraints.is_pos_fixed()
-        || node.node_flexibility == NodeFlexibility::None
+        || options.flexibility == NodeFlexibility::None
     {
         return false;
     }
     let spacing = graph.options.spacing.port_port;
     // Eligibility reads the node property, unlike transformPorts' inherited spacing.
-    let margins = node
+    let margins = options
         .ports_surrounding
         .map(|m| m.top + m.bottom)
         .unwrap_or(2.0 * spacing);
@@ -776,6 +782,40 @@ mod tests {
         assert!(graph.layerless_nodes[NodeId::new(0)].position.y.is_finite());
     }
 
+    // Mutation: in `is_flexible`, take the margins from the default instead of the node's own
+    // `ports_surrounding`.
+    #[test]
+    fn a_node_whose_own_ports_surrounding_leave_no_room_is_not_flexible() {
+        let mut graph = graph(
+            vec![
+                node("A", 40.0, 20.0),
+                node("B", 40.0, 20.0),
+                node("X", 80.0, 160.0),
+            ],
+            vec![edge("A-X", "A", "X"), edge("B-X", "B", "X")],
+        );
+        let x = NodeId::new(2);
+        graph.placement_options.row_mut(x).flexibility = NodeFlexibility::PortPosition;
+
+        graph.placement_options.row_mut(x).ports_surrounding =
+            Some(crate::options::SpacingMargin {
+                top: 5.0,
+                right: 0.0,
+                bottom: 5.0,
+                left: 0.0,
+            });
+        assert!(is_flexible(&graph, x));
+
+        graph.placement_options.row_mut(x).ports_surrounding =
+            Some(crate::options::SpacingMargin {
+                top: 100.0,
+                right: 0.0,
+                bottom: 100.0,
+                left: 0.0,
+            });
+        assert!(!is_flexible(&graph, x));
+    }
+
     #[test]
     fn fixed_or_crowded_ports_preserve_their_precomputed_positions() {
         let mut graph = graph(
@@ -786,7 +826,7 @@ mod tests {
             ],
             vec![edge("A-X", "A", "X"), edge("B-X", "B", "X")],
         );
-        graph.layerless_nodes[NodeId::new(2)].node_flexibility = NodeFlexibility::PortPosition;
+        graph.placement_options.row_mut(NodeId::new(2)).flexibility = NodeFlexibility::PortPosition;
         assert!(is_flexible(&graph, NodeId::new(2)));
         graph.layerless_nodes[NodeId::new(2)].port_constraints =
             crate::options::PortConstraints::FixedPos;

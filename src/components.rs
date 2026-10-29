@@ -136,6 +136,10 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
                 .collect();
             component.in_layer = graph.in_layer.subset(&original_nodes);
             component.self_loop_options = graph.self_loop_options.subset(&original_nodes);
+            component.port_alignment = graph.port_alignment.subset(&original_nodes);
+            component.placement_options = graph.placement_options.subset(&original_nodes);
+            component.layer_constraint_explicit =
+                graph.layer_constraint_explicit.subset(&original_nodes);
             // The importer reads no node priority yet, so every component has priority 0. A
             // port of ELK's node priority adds the sum over the component's nodes here.
             let priority = 0i32;
@@ -569,6 +573,9 @@ pub(crate) fn combine(
     let mut self_loops = Vec::new();
     let mut in_layer_rows = Vec::new();
     let mut self_loop_option_rows = Vec::new();
+    let mut port_alignment_rows = Vec::new();
+    let mut placement_option_rows = Vec::new();
+    let mut explicit_rows = Vec::new();
     let mut cyclic = false;
     for mut component in components {
         let mut node_map = component.original_nodes;
@@ -593,6 +600,24 @@ pub(crate) fn combine(
                 .iter()
                 .copied()
                 .zip(component.graph.self_loop_options.into_rows()),
+        );
+        port_alignment_rows.extend(
+            node_map
+                .iter()
+                .copied()
+                .zip(component.graph.port_alignment.into_rows()),
+        );
+        placement_option_rows.extend(
+            node_map
+                .iter()
+                .copied()
+                .zip(component.graph.placement_options.into_rows()),
+        );
+        explicit_rows.extend(
+            node_map
+                .iter()
+                .copied()
+                .zip(component.graph.layer_constraint_explicit.into_rows()),
         );
         for (index, node) in node_map.into_iter().zip(component.graph.layerless_nodes) {
             nodes[index] = Some(node);
@@ -628,6 +653,9 @@ pub(crate) fn combine(
     let target = graphs.root_mut();
     target.in_layer = NodeTable::scattered(layerless_nodes.len(), in_layer_rows);
     target.self_loop_options = NodeTable::scattered(layerless_nodes.len(), self_loop_option_rows);
+    target.port_alignment = NodeTable::scattered(layerless_nodes.len(), port_alignment_rows);
+    target.placement_options = NodeTable::scattered(layerless_nodes.len(), placement_option_rows);
+    target.layer_constraint_explicit = NodeTable::scattered(layerless_nodes.len(), explicit_rows);
     target.layerless_nodes = layerless_nodes.into();
     target.edges = edges.into();
     target.clear_layers();
@@ -861,8 +889,10 @@ mod tests {
     }
 
     // Mutation: in `split`, leave out the `in_layer` table of a component, or its
-    // `self_loop_options`. In `remap_references`, leave out the loop over the `in_layer` rows. In
-    // `combine`, leave the root's `in_layer` or `self_loop_options` empty.
+    // `self_loop_options`, `port_alignment`, `placement_options` or `layer_constraint_explicit`.
+    // In `remap_references`, leave out the loop over the `in_layer` rows. In `combine`, leave the
+    // root's `in_layer`, `self_loop_options`, `port_alignment`, `placement_options` or
+    // `layer_constraint_explicit` empty.
     #[test]
     fn the_side_tables_of_nodes_follow_them_through_split_and_combine() {
         let mut graph = LGraph::new("g", LayeredOptions::default());
@@ -898,6 +928,10 @@ mod tests {
         row.barycenter_associates = vec![NodeId::new(2)];
         graph.self_loop_options.row_mut(NodeId::new(3)).ordering =
             crate::options::SelfLoopOrderingStrategy::Sequenced;
+        *graph.port_alignment.row_mut(NodeId::new(3)) = Some(crate::options::PortAlignment::End);
+        graph.placement_options.row_mut(NodeId::new(3)).flexibility =
+            crate::options::NodeFlexibility::PortPosition;
+        graph.mark_layer_constraint_explicit(NodeId::new(3));
         let mut graphs = GraphArena::new(graph);
 
         let components = split(&mut graphs).unwrap().unwrap();
@@ -916,6 +950,24 @@ mod tests {
             crate::options::SelfLoopOrderingStrategy::Sequenced
         );
         assert_eq!(
+            second.port_alignment_of(NodeId::new(1)),
+            Some(crate::options::PortAlignment::End)
+        );
+        assert_eq!(
+            second
+                .placement_options
+                .get(NodeId::new(1))
+                .unwrap()
+                .flexibility,
+            crate::options::NodeFlexibility::PortPosition
+        );
+        assert!(second.is_layer_constraint_explicit(NodeId::new(1)));
+        assert!(
+            !components[0]
+                .graph
+                .is_layer_constraint_explicit(NodeId::new(1))
+        );
+        assert_eq!(
             components[0].graph.in_layer_layout_unit(NodeId::new(1)),
             None
         );
@@ -932,6 +984,16 @@ mod tests {
             .self_loop_options
             .row_mut(NodeId::new(0))
             .distribution = crate::options::SelfLoopDistributionStrategy::Equally;
+        *components[1].graph.port_alignment.row_mut(NodeId::new(0)) =
+            Some(crate::options::PortAlignment::Begin);
+        components[1]
+            .graph
+            .placement_options
+            .row_mut(NodeId::new(0))
+            .flexibility = crate::options::NodeFlexibility::PortPosition;
+        components[1]
+            .graph
+            .mark_layer_constraint_explicit(NodeId::new(0));
 
         combine(&mut graphs, components).unwrap();
 
@@ -962,5 +1024,23 @@ mod tests {
                 .distribution,
             crate::options::SelfLoopDistributionStrategy::Equally
         );
+        assert_eq!(
+            root.port_alignment_of(NodeId::new(2)),
+            Some(crate::options::PortAlignment::Begin)
+        );
+        assert_eq!(
+            root.port_alignment_of(NodeId::new(3)),
+            Some(crate::options::PortAlignment::End)
+        );
+        assert_eq!(
+            root.placement_options
+                .get(NodeId::new(2))
+                .unwrap()
+                .flexibility,
+            crate::options::NodeFlexibility::PortPosition
+        );
+        assert!(root.is_layer_constraint_explicit(NodeId::new(2)));
+        assert!(root.is_layer_constraint_explicit(NodeId::new(3)));
+        assert!(!root.is_layer_constraint_explicit(NodeId::new(0)));
     }
 }

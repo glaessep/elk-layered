@@ -169,8 +169,8 @@ fn place_free_ports(graph: &mut LGraph, node: NodeId, side: PortSide) {
     }
 
     let node_size = graph.layerless_nodes[node].size;
-    let alignment = graph.layerless_nodes[node]
-        .port_alignment
+    let alignment = graph
+        .port_alignment_of(node)
         .unwrap_or(graph.options.port_alignment_default);
     let spacing = graph.options.spacing.port_port;
     let surrounding = graph.options.spacing.ports_surrounding;
@@ -592,6 +592,47 @@ mod tests {
             );
             assert_eq!(port.position.y, 54.0);
         }
+    }
+
+    // Mutation: in `place_free_ports`, use the graph's default port alignment for every node.
+    #[test]
+    fn a_node_places_its_free_ports_by_its_own_port_alignment() {
+        let first_port_x = |alignment: Option<crate::options::PortAlignment>| {
+            let mut graph = LGraph::new("root", LayeredOptions::default());
+            graph
+                .layerless_nodes
+                .push(LNode::new("A", 200.0, 40.0, None));
+            let node = NodeId::new(0);
+            graph.set_node_layer(node, 0);
+            *graph.port_alignment.row_mut(node) = alignment;
+            let ports = [0, 1].map(|_| {
+                let port = graph
+                    .add_port(
+                        node,
+                        PortType::Output,
+                        PortSide::North,
+                        crate::graph::LPoint::default(),
+                    )
+                    .unwrap();
+                graph.layerless_nodes[node].ports[port.port].set_side(PortSide::North);
+                graph.layerless_nodes[node].ports[port.port].size.width = 10.0;
+                port
+            });
+
+            calculate_label_and_node_sizes(&mut graph, [node]);
+
+            graph.layerless_nodes[node].ports[ports[0].port].position.x
+        };
+
+        let begin = first_port_x(Some(crate::options::PortAlignment::Begin));
+        let end = first_port_x(Some(crate::options::PortAlignment::End));
+        let default = first_port_x(None);
+
+        assert!(begin < end, "begin {begin}, end {end}");
+        assert_eq!(
+            default,
+            first_port_x(Some(LayeredOptions::default().port_alignment_default))
+        );
     }
 
     #[test]
