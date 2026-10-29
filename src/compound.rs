@@ -1522,7 +1522,9 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
             let (port_constraints, port_side) = (parent_constraints, port.side);
             // ELK passes no position and no node size here: `new KVector()` and `null`. The node
             // size only guards against a division by zero for fixed ratios, where ELK fails.
+            let dummy_node = nested_graph.next_node_id();
             let mut dummy = create_external_port_dummy(
+                dummy_node,
                 format!("external:{parent_node_id}"),
                 format!("external:{parent_node_id}:0"),
                 port.port_type,
@@ -1543,8 +1545,6 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
             dummy.parent_port_type = Some(port.port_type);
             let dummy_side = dummy.external_port_side;
             let dummy_border_offset = port.border_offset;
-            let dummy_node = nested_graph.next_node_id();
-            dummy.ports[PortId::new(0)].node = dummy_node;
             nested_graph.layerless_nodes.push(dummy);
 
             link_external_port_dummy(
@@ -1842,7 +1842,9 @@ fn create_parent_boundary_port(
     let (port_position, port_size) = named.map_or((LPoint::default(), LSize::default()), |named| {
         (named.position, named.size)
     });
+    let node = graph.next_node_id();
     let mut dummy = create_external_port_dummy(
+        node,
         format!("external:{parent_node_id}"),
         if parent_port_key.is_empty() {
             format!("external:{parent_node_id}:0")
@@ -1864,14 +1866,12 @@ fn create_parent_boundary_port(
         parent_constraints,
         named.and_then(|named| named.port_index),
     );
-    let node = graph.next_node_id();
     dummy.parent_port_key = (!parent_port_key.is_empty()).then(|| parent_port_key.to_string());
     dummy.parent_port_type = if connects_parent_node {
         Some(parent_port_type)
     } else {
         Some(dummy_port_type)
     };
-    dummy.ports[PortId::new(0)].node = node;
     graph.layerless_nodes.push(dummy);
     PortRef {
         node,
@@ -1879,28 +1879,24 @@ fn create_parent_boundary_port(
     }
 }
 
-/// A port that holds only a position and a size, for [`calc_port_side`] and the port offset.
-///
-/// ELK's `ElkUtil.calcPortSide` and `LGraphUtil.calcPortOffset` read these from the port they
-/// get. Here they take an `LPort`, and the caller has no such port yet.
-pub(crate) fn port_at(id: &str, x: f64, y: f64, width: f64, height: f64) -> LPort {
-    let mut port = LPort::new(id, NodeId::new(0), PortType::Output);
-    port.position = LPoint { x, y };
-    port.size = LSize { width, height };
-    port
-}
-
-pub(crate) fn calc_port_side(port: &LPort, node_size: LSize, direction: ElkDirection) -> PortSide {
+/// ELK's `ElkUtil.calcPortSide`. It reads only the position and size of the port it gets, so
+/// here it takes those two. A caller with no `LPort` yet has nothing to invent.
+pub(crate) fn calc_port_side(
+    position: LPoint,
+    size: LSize,
+    node_size: LSize,
+    direction: ElkDirection,
+) -> PortSide {
     let node_width = node_size.width;
     let node_height = node_size.height;
     if node_width <= 0.0 && node_height <= 0.0 {
         return PortSide::Undefined;
     }
 
-    let xpos = port.position.x;
-    let ypos = port.position.y;
-    let width = port.size.width;
-    let height = port.size.height;
+    let xpos = position.x;
+    let ypos = position.y;
+    let width = size.width;
+    let height = size.height;
 
     match direction {
         ElkDirection::Left | ElkDirection::Right => {

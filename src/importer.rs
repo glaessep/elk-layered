@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::common::cells::{self, CellLabel, CellNode};
 use crate::compound::{
     PendingCompoundSegment, PendingSegmentEndpoint, ScopedHierarchySegment,
-    compound_label_segment_index, introduce_source_ported_scoped_edge_segments, port_at,
+    compound_label_segment_index, introduce_source_ported_scoped_edge_segments,
     source_ported_cross_hierarchy_segments,
 };
 use crate::graph::{
@@ -409,11 +409,23 @@ fn import_external_ports(
             if port.x == 0.0 && port.y == 0.0 {
                 0.0
             } else {
-                let lport = port_at(&port.id, port.x, port.y, port.width, port.height);
-                calc_port_offset(&lport, scope.node_size, port.side)
+                calc_port_offset(
+                    LPoint {
+                        x: port.x,
+                        y: port.y,
+                    },
+                    LSize {
+                        width: port.width,
+                        height: port.height,
+                    },
+                    scope.node_size,
+                    port.side,
+                )
             }
         });
+        let node = root.next_node_id();
         let mut dummy = create_external_port_dummy(
+            node,
             format!("{scope_id}:external:{}", port.id),
             port.id.clone(),
             PortType::Output,
@@ -433,9 +445,7 @@ fn import_external_ports(
             root.options.direction,
         );
         apply_port_index_to_dummy(&mut dummy, constraints, port.index.map(|i| i as isize));
-        let node = root.next_node_id();
         let dummy_port = &mut dummy.ports[PortId::new(0)];
-        dummy_port.node = node;
         dummy_port.named = true;
         dummy_port.connected_to_external_nodes = port.connected_to_external_nodes;
         dummy.scope_port = Some(position);
@@ -1149,7 +1159,9 @@ fn ensure_inside_self_loop_dummy(
     graph.graph_properties.non_free_ports = true;
 
     let dummy_id = format!("external:{parent_node_id}");
+    let node = graph.next_node_id();
     let mut dummy = create_external_port_dummy(
+        node,
         dummy_id,
         parent_port_key.to_string(),
         port_type,
@@ -1168,8 +1180,6 @@ fn ensure_inside_self_loop_dummy(
     dummy.parent_port_key = Some(parent_port_key.to_string());
     dummy.parent_port_type = Some(port_type);
 
-    let node = graph.next_node_id();
-    dummy.ports[PortId::new(0)].node = node;
     graph.layerless_nodes.push(dummy);
     let port = PortRef {
         node,
@@ -1454,13 +1464,13 @@ fn initialize_port(
     let mut side = port.side;
     if side == PortSide::Undefined && constraints.is_side_fixed() {
         // The common case of a port at (0, 0) keeps border offset 0.
-        side = crate::compound::calc_port_side(port, node_size, direction);
+        side = crate::compound::calc_port_side(port.position, port.size, node_size, direction);
         port.side = side;
         if port.border_offset.is_none()
             && side != PortSide::Undefined
             && (port.position.x != 0.0 || port.position.y != 0.0)
         {
-            port.border_offset = Some(calc_port_offset(port, node_size, side));
+            port.border_offset = Some(calc_port_offset(port.position, port.size, node_size, side));
         }
     }
 
@@ -1516,12 +1526,12 @@ fn initialize_port(
 }
 
 /// Ports `LGraphUtil.calcPortOffset`.
-fn calc_port_offset(port: &LPort, node_size: LSize, side: PortSide) -> f64 {
+fn calc_port_offset(position: LPoint, size: LSize, node_size: LSize, side: PortSide) -> f64 {
     match side {
-        PortSide::North => -(port.position.y + port.size.height),
-        PortSide::East => port.position.x - node_size.width,
-        PortSide::South => port.position.y - node_size.height,
-        PortSide::West => -(port.position.x + port.size.width),
+        PortSide::North => -(position.y + size.height),
+        PortSide::East => position.x - node_size.width,
+        PortSide::South => position.y - node_size.height,
+        PortSide::West => -(position.x + size.width),
         PortSide::Undefined => 0.0,
     }
 }

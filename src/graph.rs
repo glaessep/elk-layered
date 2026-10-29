@@ -1202,7 +1202,9 @@ fn remove_node(nodes: &mut Vec<NodeId>, node_index: NodeId) {
 /// Source:
 /// https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/graph/LGraphUtil.java
 #[allow(clippy::too_many_arguments)]
+/// `node` is the id the dummy will have in its graph. The dummy's one port names it as its owner.
 pub fn create_external_port_dummy(
+    node: NodeId,
     id: impl Into<String>,
     port_id: impl Into<String>,
     port_type: PortType,
@@ -1281,7 +1283,7 @@ pub fn create_external_port_dummy(
         }
     }
 
-    let mut port = LPort::new(port_id, NodeId::new(0), port_type);
+    let mut port = LPort::new(port_id, node, port_type);
     port.side = dummy_port_side;
     port.position = position;
     port.set_side(dummy_port_side);
@@ -1408,6 +1410,7 @@ mod tests {
     #[test]
     fn external_port_dummy_uses_direction_and_net_flow_for_free_ports() {
         let dummy = create_external_port_dummy(
+            NodeId::new(0),
             "external:A",
             "external:A:0",
             PortType::Input,
@@ -1434,9 +1437,31 @@ mod tests {
         );
     }
 
+    // Mutation: build the dummy's port with `NodeId::new(0)` instead of the `node` argument.
+    #[test]
+    fn external_port_dummy_port_names_the_given_node_as_owner() {
+        let dummy = create_external_port_dummy(
+            NodeId::new(5),
+            "external:A",
+            "external:A:0",
+            PortType::Output,
+            PortConstraints::Free,
+            PortSide::Undefined,
+            -1,
+            LPoint::default(),
+            LSize::default(),
+            LSize::default(),
+            0.0,
+            ElkDirection::Right,
+        );
+
+        assert_eq!(dummy.ports[PortId::new(0)].node, NodeId::new(5));
+    }
+
     #[test]
     fn external_port_dummy_keeps_fixed_side_and_order_metadata() {
         let dummy = create_external_port_dummy(
+            NodeId::new(0),
             "external:A",
             "external:A:0",
             PortType::Output,
