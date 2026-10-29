@@ -140,7 +140,7 @@ impl CrossingsCounter {
         let current_order = graph
             .layers
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         self.count_all_crossings_in_order(graph, &current_order)
     }
@@ -1185,8 +1185,8 @@ mod tests {
         let bottom = graph.node_named("Bottom");
         let left = graph.node_named("Left");
         let right = graph.node_named("Right");
-        graph.layers[0].nodes = vec![top, bottom];
-        graph.layers[1].nodes = vec![left, right];
+        graph.set_layer_nodes(0, vec![top, bottom]);
+        graph.set_layer_nodes(1, vec![left, right]);
 
         let crossings = CrossingsCounter::default().count_all_crossings(&graph);
 
@@ -1206,8 +1206,8 @@ mod tests {
         let bottom = graph.node_named("Bottom");
         let left = graph.node_named("Left");
         let right = graph.node_named("Right");
-        graph.layers[0].nodes = vec![top, bottom];
-        graph.layers[1].nodes = vec![left, right];
+        graph.set_layer_nodes(0, vec![top, bottom]);
+        graph.set_layer_nodes(1, vec![left, right]);
 
         let crossings = CrossingsCounter::default().count_all_crossings(&graph);
 
@@ -1227,11 +1227,11 @@ mod tests {
         let bottom = graph.node_named("Bottom");
         let left = graph.node_named("Left");
         let right = graph.node_named("Right");
-        graph.layers[0].nodes = vec![top, bottom];
-        graph.layers[1].nodes = vec![left, right];
+        graph.set_layer_nodes(0, vec![top, bottom]);
+        graph.set_layer_nodes(1, vec![left, right]);
 
         let crossing_order = CrossingsCounter::default().count_all_crossings(&graph);
-        graph.layers[1].nodes = vec![right, left];
+        graph.set_layer_nodes(1, vec![right, left]);
         let improved_order = CrossingsCounter::default().count_all_crossings(&graph);
 
         assert_eq!(crossing_order, 1.0);
@@ -1604,8 +1604,8 @@ mod tests {
 
     /// Sets the order of layer 1 to the given nodes.
     fn set_layer_order(graph: &mut LGraph, order: &[NodeId]) {
-        assert_eq!(graph.layers[1].nodes.len(), order.len());
-        graph.layers[1].nodes = order.to_vec();
+        assert_eq!(graph.layers[1].nodes().len(), order.len());
+        graph.set_layer_nodes(1, order.to_vec());
     }
 
     fn dummy_for(graph: &LGraph, node: NodeId, port: usize) -> NodeId {
@@ -1618,7 +1618,7 @@ mod tests {
 
     fn ns_crossings(graph: &LGraph) -> f64 {
         let graph = numbered(graph);
-        let layer = graph.layers[1].nodes.clone();
+        let layer = graph.layers[1].nodes().to_vec();
         CrossingsCounter::default().count_north_south_port_crossings_in_layer(&graph, &layer)
     }
 
@@ -1813,7 +1813,7 @@ mod tests {
         // The first port of the list is the eastern one, which is port 1. Its dummy is the last in
         // the layer.
         let (east, west) = (dummy_for(&graph, a, 1), dummy_for(&graph, a, 0));
-        assert_eq!(graph.layers[1].nodes, vec![a, west, east]);
+        assert_eq!(graph.layers[1].nodes(), vec![a, west, east]);
         assert_eq!(ns_crossings(&graph), 0.0);
 
         set_layer_order(&mut graph, &[a, east, west]);
@@ -1858,7 +1858,7 @@ mod tests {
 
         let graph = numbered(&graph);
         let mut counter = CrossingsCounter::default();
-        let layer = graph.layers[1].nodes.clone();
+        let layer = graph.layers[1].nodes().to_vec();
         let ports = counter.init_positions_for_north_south_counting(&graph, &layer);
 
         // `a`'s southern port, the eastern port of its dummy, the western port of the dummy of
@@ -1893,7 +1893,7 @@ mod tests {
         let order = graph
             .layers
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         let graph = numbered(&graph);
         let mut counter = CrossingsCounter::default();

@@ -59,7 +59,7 @@ impl HierarchyGraphInfo {
         let current_node_order = graph
             .layers
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         let mut port_distributor =
             PortDistributor::create(cross_min_type, &mut random, &current_node_order);
@@ -594,7 +594,7 @@ impl HierarchySweep {
             let children = graph
                 .layers
                 .iter()
-                .flat_map(|layer| layer.nodes.iter().copied())
+                .flat_map(|layer| layer.nodes().iter().copied())
                 .filter_map(|node_index| graph.layerless_nodes[node_index].nested_graph)
                 .collect::<Vec<_>>();
             info.child_graphs = children.clone();
@@ -1390,7 +1390,7 @@ impl LayerSweepTypeDecider {
         let mut north_south_dummies = Vec::new();
 
         for layer in &graph.layers {
-            for node in &layer.nodes {
+            for node in layer.nodes() {
                 if is_north_south_node(graph, *node) {
                     north_south_dummies.push(*node);
                     continue;
@@ -1491,14 +1491,14 @@ impl BarycenterHeuristic {
         let states = graph
             .layers
             .iter()
-            .flat_map(|layer| layer.nodes.iter().copied())
+            .flat_map(|layer| layer.nodes().iter().copied())
             .map(|node| (node, BarycenterState::default()))
             .collect();
         let mut layout_units: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
         for node in graph
             .layers
             .iter()
-            .flat_map(|layer| layer.nodes.iter().copied())
+            .flat_map(|layer| layer.nodes().iter().copied())
         {
             if let Some(unit) = graph.layerless_nodes[node].in_layer_layout_unit {
                 layout_units.entry(unit).or_default().push(node);
@@ -3327,10 +3327,10 @@ pub(crate) fn minimize_crossings_layer_sweep_with_type(
     others: OtherGraphs<'_>,
     cross_min_type: CrossMinType,
 ) -> bool {
-    if graph.layers.is_empty() || graph.layers.iter().all(|layer| layer.nodes.is_empty()) {
+    if graph.layers.is_empty() || graph.layers.iter().all(|layer| layer.nodes().is_empty()) {
         return false;
     }
-    if graph.layers.len() == 1 && graph.layers[0].nodes.len() <= 1 {
+    if graph.layers.len() == 1 && graph.layers[0].nodes().len() <= 1 {
         return false;
     }
 
@@ -3347,7 +3347,7 @@ pub(crate) fn minimize_crossings_layer_sweep_hierarchical_with_type(
     cross_min_type: CrossMinType,
 ) -> bool {
     let graph = graphs.root();
-    if graph.layers.is_empty() || graph.layers.iter().all(|layer| layer.nodes.is_empty()) {
+    if graph.layers.is_empty() || graph.layers.iter().all(|layer| layer.nodes().is_empty()) {
         let hierarchical_graphs = graph
             .layerless_nodes
             .iter()
@@ -3355,7 +3355,7 @@ pub(crate) fn minimize_crossings_layer_sweep_hierarchical_with_type(
             .any(|nested| {
                 let nested = &graphs[nested];
                 !nested.layers.is_empty()
-                    && nested.layers.iter().any(|layer| !layer.nodes.is_empty())
+                    && nested.layers.iter().any(|layer| !layer.nodes().is_empty())
             });
         if !hierarchical_graphs {
             return false;
@@ -4423,7 +4423,7 @@ mod tests {
 
             assert_eq!(CrossingsCounter::default().count_all_crossings(&graph), 3.0);
             let layer_order = graph.layers[2]
-                .nodes
+                .nodes()
                 .iter()
                 .map(|&index| {
                     let node = &graph.layerless_nodes[index];
@@ -4484,7 +4484,7 @@ mod tests {
             expected_root.next_bool();
 
             minimize_crossings_layer_sweep_hierarchical_with_type(&mut graphs, cross_min_type);
-            assert_eq!(graphs.root().layers[0].nodes, vec![NodeId::new(0)]);
+            assert_eq!(graphs.root().layers[0].nodes(), vec![NodeId::new(0)]);
             assert_eq!(graphs.root().random, expected_root, "{cross_min_type:?}");
             assert_eq!(
                 graphs[child_id].random, expected_child,
@@ -4531,10 +4531,7 @@ mod tests {
         graph
             .layerless_nodes
             .push(LNode::new("first", 10.0, 10.0, None));
-        graph.layers = vec![crate::graph::Layer {
-            nodes: vec![NodeId::new(1), NodeId::new(0)],
-            size: Default::default(),
-        }];
+        graph.set_layer_nodes(0, vec![NodeId::new(1), NodeId::new(0)]);
         let mut graphs = GraphArena::new(graph);
         let second = graphs.nest(
             GraphId::ROOT,
@@ -4626,14 +4623,14 @@ mod tests {
         let bottom = graph.node_named("Bottom");
         let left = graph.node_named("Left");
         let right = graph.node_named("Right");
-        graph.layers[0].nodes = vec![top, bottom];
-        graph.layers[1].nodes = vec![left, right];
+        graph.set_layer_nodes(0, vec![top, bottom]);
+        graph.set_layer_nodes(1, vec![left, right]);
         initialize_crossing_minimization_port_ids(&mut graph);
 
         let mut order = graph
             .layers
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         let port_distributor =
             BarycenterPortDistributor::new(PortDistributorKind::NodeRelative, &order);
@@ -4658,14 +4655,14 @@ mod tests {
         let bottom = graph.node_named("Bottom");
         let left = graph.node_named("Left");
         let right = graph.node_named("Right");
-        graph.layers[0].nodes = vec![top, bottom];
-        graph.layers[1].nodes = vec![left, right];
+        graph.set_layer_nodes(0, vec![top, bottom]);
+        graph.set_layer_nodes(1, vec![left, right]);
         initialize_crossing_minimization_port_ids(&mut graph);
 
         let mut order = graph
             .layers
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         let port_distributor =
             BarycenterPortDistributor::new(PortDistributorKind::NodeRelative, &order);
@@ -4721,8 +4718,8 @@ mod tests {
         let top = graph.node_named("Top");
         let bottom = graph.node_named("Bottom");
         let free = graph.node_named("Free");
-        graph.layers[0].nodes = vec![top, bottom];
-        graph.layers[1].nodes = vec![free];
+        graph.set_layer_nodes(0, vec![top, bottom]);
+        graph.set_layer_nodes(1, vec![free]);
         for port in graph.layerless_nodes[top].ports.slots_mut() {
             port.id = "shared".to_string();
         }
@@ -4734,7 +4731,7 @@ mod tests {
         let order = graph
             .layers
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         let mut distributor =
             BarycenterPortDistributor::new(PortDistributorKind::NodeRelative, &order);
@@ -4761,8 +4758,8 @@ mod tests {
         );
         let a = graph.node_named("A");
         let b = graph.node_named("B");
-        graph.layers[0].nodes = vec![a];
-        graph.layers[1].nodes = vec![b];
+        graph.set_layer_nodes(0, vec![a]);
+        graph.set_layer_nodes(1, vec![b]);
         initialize_crossing_minimization_port_ids(&mut graph);
         let a_out = graph.layerless_nodes[a]
             .ports
@@ -4806,8 +4803,8 @@ mod tests {
         let bottom = graph.node_named("Bottom");
         let left = graph.node_named("Left");
         let right = graph.node_named("Right");
-        graph.layers[0].nodes = vec![top, bottom];
-        graph.layers[1].nodes = vec![left, right];
+        graph.set_layer_nodes(0, vec![top, bottom]);
+        graph.set_layer_nodes(1, vec![left, right]);
 
         let before = CrossingsCounter::default().count_all_crossings(&graph);
         assert!(minimize_crossings_layer_sweep(&mut graph));
@@ -5065,7 +5062,7 @@ mod tests {
         graph.set_node_layer(NodeId::new(1), 0);
         graph.set_node_layer(NodeId::new(2), 0);
         graph.set_node_layer(NodeId::new(3), 0);
-        graph.layers[0].nodes = vec![NodeId::new(1), NodeId::new(2), NodeId::new(3)];
+        graph.set_layer_nodes(0, vec![NodeId::new(1), NodeId::new(2), NodeId::new(3)]);
 
         let north_input = graph
             .add_port(
@@ -5231,7 +5228,7 @@ mod tests {
             .unwrap();
 
         let node_positions = graph.layers[0]
-            .nodes
+            .nodes()
             .iter()
             .copied()
             .enumerate()
@@ -5325,18 +5322,9 @@ mod tests {
         let free = graph.node_named("Free");
         let fixed = graph.node_named("Fixed");
 
-        graph.layers[0].nodes = vec![top, bottom, fixed];
-        graph.layers[1].nodes = vec![free, right, left];
-        let layer_nodes = graph
-            .layers
-            .iter()
-            .map(|layer| layer.nodes.clone())
-            .collect::<Vec<_>>();
-        for (layer_index, nodes) in layer_nodes.iter().enumerate() {
-            for node in nodes {
-                graph.layerless_nodes[*node].layer_index = Some(layer_index);
-            }
-        }
+        graph.set_layer_nodes(0, vec![top, bottom, fixed]);
+        graph.set_layer_nodes(1, vec![free]);
+        graph.set_layer_nodes(2, vec![right, left]);
         initialize_crossing_minimization_port_ids(&mut graph);
 
         let mut graph_info = GraphInfoHolder::new(&graph);
@@ -5486,8 +5474,8 @@ mod tests {
         let a = graph.node_named("A");
         let b = graph.node_named("B");
         let c = graph.node_named("C");
-        graph.layers[0].nodes = vec![c];
-        graph.layers[1].nodes = vec![b, a];
+        graph.set_layer_nodes(0, vec![c]);
+        graph.set_layer_nodes(1, vec![b, a]);
         graph.layerless_nodes[a]
             .in_layer_successor_constraints
             .push(b);
@@ -5495,7 +5483,7 @@ mod tests {
         let mut order = graph
             .layers
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         let port_distributor =
             BarycenterPortDistributor::new(PortDistributorKind::NodeRelative, &order);
@@ -5561,32 +5549,22 @@ mod tests {
         let middle_bottom = graph.node_named("MiddleBottom");
         let right_top = graph.node_named("RightTop");
         let right_bottom = graph.node_named("RightBottom");
-        graph.layers[0].nodes = vec![left_top, left_bottom];
-        graph.layers[1].nodes = vec![middle_top, middle_bottom];
-        graph.layers[2].nodes = vec![right_top, right_bottom];
-        let layer_nodes = graph
-            .layers
-            .iter()
-            .map(|layer| layer.nodes.clone())
-            .collect::<Vec<_>>();
-        for (layer_index, nodes) in layer_nodes.iter().enumerate() {
-            for node in nodes {
-                graph.layerless_nodes[*node].layer_index = Some(layer_index);
-            }
-        }
+        graph.set_layer_nodes(0, vec![left_top, left_bottom]);
+        graph.set_layer_nodes(1, vec![middle_top, middle_bottom]);
+        graph.set_layer_nodes(2, vec![right_top, right_bottom]);
 
         let before = CrossingsCounter::default().count_all_crossings(&graph);
         let mut order = graph
             .layers
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         let mut heuristic = GreedySwitchHeuristic::new(CrossMinType::TwoSidedGreedySwitch);
 
         assert!(heuristic.minimize_crossings(&graph, &mut order, 1, true));
         assert_eq!(order[1], vec![middle_bottom, middle_top]);
 
-        graph.layers[1].nodes = order[1].clone();
+        graph.set_layer_nodes(1, order[1].clone());
         let after = CrossingsCounter::default().count_all_crossings(&graph);
 
         assert_eq!(before, 2.0);
@@ -5606,18 +5584,8 @@ mod tests {
         let bottom = graph.node_named("Bottom");
         let left = graph.node_named("Left");
         let right = graph.node_named("Right");
-        graph.layers[0].nodes = vec![top, bottom];
-        graph.layers[1].nodes = vec![left, right];
-        let layer_nodes = graph
-            .layers
-            .iter()
-            .map(|layer| layer.nodes.clone())
-            .collect::<Vec<_>>();
-        for (layer_index, nodes) in layer_nodes.iter().enumerate() {
-            for node in nodes {
-                graph.layerless_nodes[*node].layer_index = Some(layer_index);
-            }
-        }
+        graph.set_layer_nodes(0, vec![top, bottom]);
+        graph.set_layer_nodes(1, vec![left, right]);
 
         let before = CrossingsCounter::default().count_all_crossings(&graph);
         minimize_crossings_layer_sweep_with_type(
@@ -5749,7 +5717,7 @@ mod north_south_tests {
     fn dummies_of_different_nodes_may_not_switch_places() {
         let (graph, [a, b], [north_a, north_b]) = two_nodes_with_north_ports([1, 1]);
         // The southern dummy of the first node stands next to the northern one of the second.
-        assert_eq!(graph.layers[1].nodes.len(), 4);
+        assert_eq!(graph.layers[1].nodes().len(), 4);
         assert!(have_layout_unit_constraints(&graph, north_a, north_b));
         assert!(have_layout_unit_constraints(&graph, a, north_b));
         assert!(have_layout_unit_constraints(&graph, a, b));
@@ -5815,7 +5783,7 @@ mod north_south_tests {
         let order = graph
             .layers
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         let filler = CrossingMatrixFiller::new(
             order[1].len(),
@@ -5858,7 +5826,7 @@ mod north_south_tests {
     }
 
     fn counter_for(graph: &LGraph) -> NorthSouthEdgeNeighbouringNodeCrossingsCounter {
-        NorthSouthEdgeNeighbouringNodeCrossingsCounter::new(graph, &graph.layers[1].nodes)
+        NorthSouthEdgeNeighbouringNodeCrossingsCounter::new(graph, graph.layers[1].nodes())
     }
 
     /// A node with two northern ports, the first with one edge and the second with two. Returns
@@ -5981,7 +5949,7 @@ mod north_south_tests {
         let order = graph
             .layers
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         let distributor = BarycenterPortDistributor::new(PortDistributorKind::NodeRelative, &order);
         let heuristic = BarycenterHeuristic::new(&graph, JavaRandom::new(1), distributor);
@@ -6092,7 +6060,7 @@ mod greedy_port_distributor_tests {
         graph
             .layers
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect()
     }
 

@@ -236,7 +236,7 @@ impl HiddenNodeConnections {
 
 pub fn restore_reversed_edges(graph: &mut LGraph) {
     for layer_index in 0..graph.layers.len() {
-        let nodes = graph.layers[layer_index].nodes.clone();
+        let nodes = graph.layers[layer_index].nodes().to_vec();
         for node_index in nodes {
             let Some(node) = graph.layerless_nodes.get(node_index) else {
                 continue;
@@ -567,7 +567,7 @@ pub fn process_inverted_ports(graph: &mut LGraph) {
         }
         previous_layer = Some(layer_index);
 
-        let layer_nodes = graph.layers[layer_index].nodes.clone();
+        let layer_nodes = graph.layers[layer_index].nodes().to_vec();
         for node in layer_nodes {
             if graph.layerless_nodes[node].kind != LNodeKind::Normal
                 || !graph.layerless_nodes[node].port_constraints.is_side_fixed()
@@ -788,7 +788,7 @@ fn move_first_and_last_nodes(graph: &mut LGraph) -> IntermediateResult<()> {
     let layered_nodes = graph
         .layers
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .collect::<Vec<_>>();
 
     for node in layered_nodes {
@@ -1037,8 +1037,8 @@ pub fn split_long_edges(graph: &mut LGraph) {
         let next_layer_index = layer_index + 1;
         let mut node_position = 0usize;
 
-        while node_position < graph.layers[layer_index].nodes.len() {
-            let node_index = graph.layers[layer_index].nodes[node_position];
+        while node_position < graph.layers[layer_index].nodes().len() {
+            let node_index = graph.layers[layer_index].nodes()[node_position];
             let outgoing_edges = graph.node_outgoing_edges(node_index);
 
             for edge_index in outgoing_edges {
@@ -1066,9 +1066,9 @@ pub fn merge_hyperedge_dummies(graph: &mut LGraph) {
 
     for layer_index in 0..graph.layers.len() {
         let mut node_position = 1usize;
-        while node_position < graph.layers[layer_index].nodes.len() {
-            let current = graph.layers[layer_index].nodes[node_position];
-            let previous = graph.layers[layer_index].nodes[node_position - 1];
+        while node_position < graph.layers[layer_index].nodes().len() {
+            let current = graph.layers[layer_index].nodes()[node_position];
+            let previous = graph.layers[layer_index].nodes()[node_position - 1];
 
             if graph.layerless_nodes[current].kind == LNodeKind::LongEdge
                 && graph.layerless_nodes[previous].kind == LNodeKind::LongEdge
@@ -1207,7 +1207,7 @@ fn identify_hyperedges(graph: &LGraph) -> HashMap<PortRef, i32> {
     let ports = graph
         .layers
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .flat_map(|node| {
             graph.layerless_nodes[node]
                 .ports
@@ -1342,7 +1342,7 @@ pub fn join_long_edges(graph: &mut LGraph) {
     let add_unnecessary_bendpoints = graph.options.unnecessary_bendpoints;
     let mut has_long_edge_dummy = false;
     'preflight: for layer in &graph.layers {
-        for &node_index in &layer.nodes {
+        for &node_index in layer.nodes() {
             if graph.layerless_nodes[node_index].kind == LNodeKind::LongEdge {
                 has_long_edge_dummy = true;
                 break 'preflight;
@@ -1356,7 +1356,7 @@ pub fn join_long_edges(graph: &mut LGraph) {
     let mut incoming_edge_positions = index_all_incoming_edges(graph);
 
     for layer_index in 0..graph.layers.len() {
-        let mut layer_nodes = std::mem::take(&mut graph.layers[layer_index].nodes);
+        let mut layer_nodes = graph.layers[layer_index].nodes().to_vec();
         let mut retained_count = 0usize;
 
         for node_position in 0..layer_nodes.len() {
@@ -1375,7 +1375,7 @@ pub fn join_long_edges(graph: &mut LGraph) {
         }
 
         layer_nodes.truncate(retained_count);
-        graph.layers[layer_index].nodes = layer_nodes;
+        graph.set_layer_nodes(layer_index, layer_nodes);
     }
 }
 
@@ -1383,7 +1383,7 @@ pub fn switch_label_dummies(graph: &mut LGraph) {
     let label_dummies = graph
         .layers
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .filter(|node| graph.layerless_nodes[*node].kind == LNodeKind::Label)
         .collect::<Vec<_>>();
 
@@ -1427,7 +1427,7 @@ pub fn preprocess_end_labels(graph: &mut LGraph) {
     let nodes = graph
         .layers
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .collect::<Vec<_>>();
 
     let mut moved_labels = Vec::new();
@@ -1459,7 +1459,7 @@ pub fn preprocess_end_labels(graph: &mut LGraph) {
 
 fn same_side(graph: &mut LGraph, label_side: LabelSide) {
     for layer_index in 0..graph.layers.len() {
-        let nodes = graph.layers[layer_index].nodes.clone();
+        let nodes = graph.layers[layer_index].nodes().to_vec();
         for node in nodes {
             if graph.layerless_nodes[node].kind == LNodeKind::Label {
                 apply_label_side(graph, node, label_side);
@@ -1475,7 +1475,7 @@ fn same_side(graph: &mut LGraph, label_side: LabelSide) {
 
 fn based_on_direction(graph: &mut LGraph, side_for_rightward_edges: LabelSide) {
     for layer_index in 0..graph.layers.len() {
-        let nodes = graph.layers[layer_index].nodes.clone();
+        let nodes = graph.layers[layer_index].nodes().to_vec();
         for node in nodes {
             if graph.layerless_nodes[node].kind == LNodeKind::Label {
                 let side = if does_label_dummy_point_right(graph, node) {
@@ -1503,7 +1503,7 @@ fn smart(graph: &mut LGraph, default_side: LabelSide) {
     let mut dummy_node_queue = VecDeque::new();
 
     for layer_index in 0..graph.layers.len() {
-        let nodes = graph.layers[layer_index].nodes.clone();
+        let nodes = graph.layers[layer_index].nodes().to_vec();
         let mut top_group = true;
         let mut label_dummies_in_queue = 0usize;
 
@@ -2311,7 +2311,7 @@ fn end_label_sorter_ids(graph: &LGraph) -> (IdVec<NodeId, usize>, IdVec<NodeId, 
         .collect::<IdVec<NodeId, _>>();
     let mut next_element_id = 0;
     for layer in &graph.layers {
-        for &node in &layer.nodes {
+        for &node in layer.nodes() {
             node_ids[node] = next_element_id;
             next_element_id += 1;
             for port in graph.layerless_nodes[node].ports.ids() {
@@ -2423,14 +2423,14 @@ pub fn remove_label_dummies(graph: &mut LGraph) {
     for layer_index in 0..graph.layers.len() {
         let mut node_position = 0usize;
 
-        while node_position < graph.layers[layer_index].nodes.len() {
-            let node = graph.layers[layer_index].nodes[node_position];
+        while node_position < graph.layers[layer_index].nodes().len() {
+            let node = graph.layers[layer_index].nodes()[node_position];
             if graph.layerless_nodes[node].kind == LNodeKind::Label {
                 place_label_dummy_labels(graph, node);
                 let add_unnecessary_bendpoints =
                     graph.options.edge_routing == crate::options::EdgeRouting::Polyline;
                 join_long_edge_at(graph, node, add_unnecessary_bendpoints);
-                graph.layers[layer_index].nodes.remove(node_position);
+                graph.remove_node_from_layer(node);
             } else {
                 node_position += 1;
             }
@@ -2556,20 +2556,13 @@ fn swap_label_and_long_edge_dummies(
     let Some(long_edge_layer) = graph.layerless_nodes[long_edge_dummy].layer_index else {
         return;
     };
-    let Some(label_position) = graph.layers[label_layer]
-        .nodes
-        .iter()
-        .position(|node| *node == label_dummy)
-    else {
+    if !graph.layers[label_layer].nodes().contains(&label_dummy)
+        || !graph.layers[long_edge_layer]
+            .nodes()
+            .contains(&long_edge_dummy)
+    {
         return;
-    };
-    let Some(long_edge_position) = graph.layers[long_edge_layer]
-        .nodes
-        .iter()
-        .position(|node| *node == long_edge_dummy)
-    else {
-        return;
-    };
+    }
 
     let Some(label_input) = first_port_on_side(graph, label_dummy, PortSide::West) else {
         return;
@@ -2613,8 +2606,7 @@ fn swap_label_and_long_edge_dummies(
         .outgoing_edges
         .clone();
 
-    graph.layers[long_edge_layer].nodes[long_edge_position] = label_dummy;
-    graph.layerless_nodes[label_dummy].layer_index = Some(long_edge_layer);
+    graph.swap_layer_places(label_dummy, long_edge_dummy);
     for edge in long_incoming {
         graph.set_edge_target(edge, label_input_ref);
     }
@@ -2622,8 +2614,6 @@ fn swap_label_and_long_edge_dummies(
         graph.set_edge_source(edge, label_output_ref);
     }
 
-    graph.layers[label_layer].nodes[label_position] = long_edge_dummy;
-    graph.layerless_nodes[long_edge_dummy].layer_index = Some(label_layer);
     for edge in label_incoming {
         graph.set_edge_target(edge, long_input_ref);
     }
@@ -3014,27 +3004,26 @@ pub fn calculate_layer_sizes_and_graph_height(graph: &mut LGraph) {
         layer.size.width = 0.0;
         layer.size.height = 0.0;
 
-        if layer.nodes.is_empty() {
+        if layer.nodes().is_empty() {
             continue;
         }
 
         found_nodes = true;
 
-        for node_index in &layer.nodes {
+        let mut width = layer.size.width;
+        for node_index in layer.nodes() {
             let node = &graph.layerless_nodes[*node_index];
-            layer.size.width = layer
-                .size
-                .width
-                .max(node.size.width + node.margin.left + node.margin.right);
+            width = width.max(node.size.width + node.margin.left + node.margin.right);
         }
+        layer.size.width = width;
 
-        let first_node = &graph.layerless_nodes[layer.nodes[0]];
+        let first_node = &graph.layerless_nodes[layer.nodes()[0]];
         let mut top = first_node.position.y - first_node.margin.top;
         if first_node.kind == LNodeKind::ExternalPort {
             top -= ports_surrounding.top;
         }
 
-        let last_node = &graph.layerless_nodes[layer.nodes[layer.nodes.len() - 1]];
+        let last_node = &graph.layerless_nodes[layer.nodes()[layer.nodes().len() - 1]];
         let mut bottom = last_node.position.y + last_node.size.height + last_node.margin.bottom;
         if last_node.kind == LNodeKind::ExternalPort {
             bottom += ports_surrounding.bottom;
@@ -3072,7 +3061,7 @@ fn collect_north_south_external_port_dummies(
     let mut northern_dummies = Vec::new();
     let mut southern_dummies = Vec::new();
 
-    for node_index in &graph.layers[layer_index].nodes {
+    for node_index in graph.layers[layer_index].nodes() {
         let node = &graph.layerless_nodes[*node_index];
         if node.kind != LNodeKind::ExternalPort {
             continue;
@@ -3132,7 +3121,7 @@ pub fn process_hierarchical_port_positions(graph: &mut LGraph) {
 
 fn process_hierarchical_port_positions_for_layer(graph: &mut LGraph, layer_index: usize) {
     let graph_height = actual_graph_height(graph);
-    let nodes = graph.layers[layer_index].nodes.clone();
+    let nodes = graph.layers[layer_index].nodes().to_vec();
 
     for node in nodes {
         if graph.layerless_nodes[node].kind != LNodeKind::ExternalPort {
@@ -3198,7 +3187,7 @@ fn restore_north_south_dummies(graph: &mut LGraph) -> Vec<NodeId> {
     let replacement_nodes = graph
         .layers
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .filter(|node| {
             graph.layerless_nodes[*node].kind == LNodeKind::ExternalPort
                 && graph.layerless_nodes[*node]
@@ -3514,7 +3503,7 @@ fn remove_temporary_north_south_dummies(graph: &mut LGraph) {
     let temporary_nodes = graph
         .layers
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .filter(|node| {
             graph.layerless_nodes[*node].kind == LNodeKind::ExternalPort
                 && graph.layerless_nodes[*node]
@@ -3618,7 +3607,7 @@ fn fix_hierarchical_port_coordinates(graph: &mut LGraph) {
 }
 
 fn fix_hierarchical_port_coordinates_for_layer(graph: &mut LGraph, layer_index: usize) {
-    let nodes = graph.layers[layer_index].nodes.clone();
+    let nodes = graph.layers[layer_index].nodes().to_vec();
     let graph_actual_height = actual_graph_height(graph);
     let mut new_actual_graph_height = graph_actual_height;
 
@@ -3702,7 +3691,7 @@ fn correct_hierarchical_port_slanted_edge_segments_for_layer(
     graph: &mut LGraph,
     layer_index: usize,
 ) {
-    let nodes = graph.layers[layer_index].nodes.clone();
+    let nodes = graph.layers[layer_index].nodes().to_vec();
 
     for node in nodes {
         if graph.layerless_nodes[node].kind != LNodeKind::ExternalPort
@@ -3768,7 +3757,7 @@ fn process_east_west_hierarchical_port_constraints_for_layer(
     graph: &mut LGraph,
     layer_index: usize,
 ) {
-    let mut nodes = graph.layers[layer_index].nodes.clone();
+    let mut nodes = graph.layers[layer_index].nodes().to_vec();
     nodes.sort_by(|left, right| {
         let left_node = &graph.layerless_nodes[*left];
         let right_node = &graph.layerless_nodes[*right];
@@ -3818,7 +3807,7 @@ fn process_north_south_hierarchical_port_constraints(graph: &mut LGraph) {
     let mut original_external_port_dummies = Vec::new();
 
     for layer_index in 0..original_layer_count {
-        let current_nodes = graph.layers[layer_index].nodes.clone();
+        let current_nodes = graph.layers[layer_index].nodes().to_vec();
 
         for current_node in current_nodes {
             if is_north_south_external_port_dummy(graph, current_node) {
@@ -4347,7 +4336,7 @@ mod tests {
         let before = input
             .layers
             .iter()
-            .flat_map(|layer| layer.nodes.iter().copied())
+            .flat_map(|layer| layer.nodes().iter().copied())
             .filter(|node| input.layerless_nodes[*node].kind == LNodeKind::LongEdge)
             .count();
         assert!(before >= 4);
@@ -4357,7 +4346,7 @@ mod tests {
         let after = input
             .layers
             .iter()
-            .flat_map(|layer| layer.nodes.iter().copied())
+            .flat_map(|layer| layer.nodes().iter().copied())
             .filter(|node| input.layerless_nodes[*node].kind == LNodeKind::LongEdge)
             .count();
         assert!(after < before);
@@ -4830,7 +4819,7 @@ mod tests {
 
         assert!(!graph.layers.iter().any(|layer| {
             layer
-                .nodes
+                .nodes()
                 .iter()
                 .any(|node| graph.layerless_nodes[*node].kind == LNodeKind::Label)
         }));
@@ -5115,7 +5104,7 @@ mod tests {
             !graph
                 .layers
                 .iter()
-                .any(|layer| layer.nodes.contains(&dummy))
+                .any(|layer| layer.nodes().contains(&dummy))
         );
         assert_eq!(
             graph.edges[long_edge].bend_points,
@@ -5137,7 +5126,7 @@ mod tests {
     fn long_edge_joiner_keeps_target_slots_and_order_with_fanout() {
         for pair_count in [1usize, 8, 64] {
             let mut fixture = long_edge_join_fanout_fixture(pair_count);
-            let retained_layer_nodes = fixture.graph.layers[0].nodes.clone();
+            let retained_layer_nodes = fixture.graph.layers[0].nodes().to_vec();
 
             join_long_edges(&mut fixture.graph);
 
@@ -5157,9 +5146,9 @@ mod tests {
                     .graph
                     .layers
                     .iter()
-                    .any(|layer| layer.nodes.contains(&fixture.dummy))
+                    .any(|layer| layer.nodes().contains(&fixture.dummy))
             );
-            assert_eq!(fixture.graph.layers[0].nodes, retained_layer_nodes);
+            assert_eq!(fixture.graph.layers[0].nodes(), retained_layer_nodes);
 
             for pair in &fixture.joined_pairs {
                 let surviving = pair.surviving_edge;
@@ -5463,10 +5452,8 @@ mod tests {
         graph.layerless_nodes[NodeId::new(1)].margin.right = 3.0;
         graph.layerless_nodes[NodeId::new(1)].margin.bottom = 4.0;
         graph.layerless_nodes[NodeId::new(1)].margin.left = 1.0;
-        graph.layers.push(crate::graph::Layer {
-            nodes: vec![NodeId::new(0), NodeId::new(1)],
-            size: Default::default(),
-        });
+        let layer_index = graph.layers.len();
+        graph.set_layer_nodes(layer_index, vec![NodeId::new(0), NodeId::new(1)]);
 
         calculate_layer_sizes_and_graph_height(&mut graph);
 
@@ -5492,10 +5479,8 @@ mod tests {
         graph.layerless_nodes[NodeId::new(0)].position.y = 10.0;
         graph.layerless_nodes[NodeId::new(0)].margin.top = 1.0;
         graph.layerless_nodes[NodeId::new(0)].margin.bottom = 2.0;
-        graph.layers.push(crate::graph::Layer {
-            nodes: vec![NodeId::new(0)],
-            size: Default::default(),
-        });
+        let layer_index = graph.layers.len();
+        graph.set_layer_nodes(layer_index, vec![NodeId::new(0)]);
 
         calculate_layer_sizes_and_graph_height(&mut graph);
 
@@ -5638,10 +5623,7 @@ mod tests {
 
         graph.set_node_layer(next, 0);
         graph.set_node_layer(north_target, 0);
-        graph.layers.push(crate::graph::Layer {
-            nodes: vec![],
-            size: Default::default(),
-        });
+        graph.set_layer_nodes(graph.layers.len(), vec![]);
         graph.set_node_layer(north_source, 2);
         graph.set_node_layer(middle, 2);
 
@@ -6132,10 +6114,7 @@ mod tests {
             .position
             .x = 3.0;
         graph.replaced_external_port_dummies = vec![north, south];
-        graph.layers.push(crate::graph::Layer {
-            nodes: vec![],
-            size: Default::default(),
-        });
+        graph.set_layer_nodes(graph.layers.len(), vec![]);
 
         process_hierarchical_port_orthogonal_edges(&mut graph);
 
@@ -6217,10 +6196,7 @@ mod tests {
         graph.layerless_nodes[late].size.width = 5.0;
         graph.layerless_nodes[early].size.width = 5.0;
         graph.replaced_external_port_dummies = vec![late, early];
-        graph.layers.push(crate::graph::Layer {
-            nodes: vec![],
-            size: Default::default(),
-        });
+        graph.set_layer_nodes(graph.layers.len(), vec![]);
 
         process_hierarchical_port_orthogonal_edges(&mut graph);
 

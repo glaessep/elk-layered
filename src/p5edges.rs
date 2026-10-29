@@ -21,7 +21,7 @@ pub fn route_edges_orthogonal(graph: &mut LGraph) {
         let right_layer_nodes = graph
             .layers
             .get(layer_index)
-            .map(|layer| layer.nodes.clone());
+            .map(|layer| layer.nodes().to_vec());
 
         if let Some(nodes) = left_layer_nodes.as_ref() {
             place_nodes_horizontally(graph, nodes, xpos);

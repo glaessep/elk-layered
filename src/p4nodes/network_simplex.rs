@@ -32,7 +32,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
     let order: Vec<_> = graph
         .layers
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .filter(|node| !graph.layerless_nodes[*node].hidden)
         .collect();
     if order.is_empty() {
@@ -64,7 +64,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
     };
     for layer in &graph.layers {
         let mut previous: Option<NodeId> = None;
-        for &node in &layer.nodes {
+        for &node in layer.nodes() {
             if graph.layerless_nodes[node].hidden {
                 continue;
             }
@@ -332,7 +332,7 @@ fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[Nod
     }
     let mut position = IdVec::filled(graph.layerless_nodes.len(), 0);
     for layer in &graph.layers {
-        for (index, &node) in layer.nodes.iter().enumerate() {
+        for (index, &node) in layer.nodes().iter().enumerate() {
             position[node] = index;
         }
     }
@@ -506,7 +506,7 @@ fn mark_crossings(graph: &LGraph) -> IdVec<EdgeId, bool> {
     let mut crossing = IdVec::filled(graph.edges.len(), false);
     for (layer_index, layers) in graph.layers.windows(2).enumerate() {
         let mut open = Vec::new();
-        for &node in &layers[0].nodes {
+        for &node in layers[0].nodes() {
             for port in graph.layerless_nodes[node]
                 .ports
                 .iter()
@@ -519,7 +519,7 @@ fn mark_crossings(graph: &LGraph) -> IdVec<EdgeId, bool> {
                 }));
             }
         }
-        for &node in layers[1].nodes.iter().rev() {
+        for &node in layers[1].nodes().iter().rev() {
             for port in graph.layerless_nodes[node]
                 .ports
                 .iter()
@@ -575,7 +575,7 @@ fn improve_two_path(
         return Ok(false);
     }
     let data = &graph.layerless_nodes[center];
-    let layer = &graph.layers[data.layer_index.unwrap()].nodes;
+    let layer = graph.layers[data.layer_index.unwrap()].nodes();
     let index = layer.iter().position(|node| *node == center).unwrap();
     let y = aux.graph.nodes[rep.head].layer as f64;
     let mut above = f64::INFINITY;

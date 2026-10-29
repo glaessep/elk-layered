@@ -111,7 +111,9 @@ impl LGraph {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
-    pub nodes: Vec<NodeId>,
+    /// The layer's nodes in order. Private so a node cannot join or leave a layer without its
+    /// `layer_index` following: `LGraph` owns every change, as `LNode#setLayer` does in ELK.
+    nodes: Vec<NodeId>,
     pub size: LSize,
 }
 
@@ -127,6 +129,23 @@ impl Layer {
             nodes: Vec::new(),
             size: LSize::default(),
         }
+    }
+
+    /// Renames every node id in place, keeping the order. Used when graphs merge and their node
+    /// ids change; `LNode::layer_index` does not move.
+    pub(crate) fn map_nodes<E>(
+        &mut self,
+        mut map: impl FnMut(NodeId) -> Result<NodeId, E>,
+    ) -> Result<(), E> {
+        for node in &mut self.nodes {
+            *node = map(*node)?;
+        }
+        Ok(())
+    }
+
+    /// The layer's nodes, top to bottom.
+    pub fn nodes(&self) -> &[NodeId] {
+        &self.nodes
     }
 }
 
@@ -818,6 +837,78 @@ impl LGraph {
         self.layers[layer_index].nodes.push(node_index);
     }
 
+    /// Puts a node into layer `layer_index` at `position`, as `LNode#setLayer(int, Layer)` does.
+    /// The node leaves the layer it was in. A `position` past the end appends.
+    pub fn insert_node_into_layer(
+        &mut self,
+        node_index: NodeId,
+        layer_index: usize,
+        position: usize,
+    ) {
+        self.remove_node_from_layer(node_index);
+        while self.layers.len() <= layer_index {
+            self.layers.push(Layer::new());
+        }
+        let nodes = &mut self.layers[layer_index].nodes;
+        nodes.insert(position.min(nodes.len()), node_index);
+        self.layerless_nodes[node_index].layer_index = Some(layer_index);
+    }
+
+    /// Swaps the places of two nodes that sit in layers: each takes the other's layer and
+    /// position. Does nothing unless both are in a layer.
+    pub fn swap_layer_places(&mut self, first: NodeId, second: NodeId) {
+        let (Some(first_layer), Some(second_layer)) = (
+            self.layerless_nodes[first].layer_index,
+            self.layerless_nodes[second].layer_index,
+        ) else {
+            return;
+        };
+        let Some(first_position) = self.layers[first_layer]
+            .nodes
+            .iter()
+            .position(|n| *n == first)
+        else {
+            return;
+        };
+        let Some(second_position) = self.layers[second_layer]
+            .nodes
+            .iter()
+            .position(|n| *n == second)
+        else {
+            return;
+        };
+        self.layers[first_layer].nodes[first_position] = second;
+        self.layers[second_layer].nodes[second_position] = first;
+        self.layerless_nodes[first].layer_index = Some(second_layer);
+        self.layerless_nodes[second].layer_index = Some(first_layer);
+    }
+
+    /// Makes layer `layer_index` hold exactly `nodes`, in this order.
+    ///
+    /// Mirrors `LNode#setLayer`, which ELK calls once per node: a node that joins gets
+    /// `layer_index`, leaves its old layer, and a node that no longer appears becomes layerless.
+    /// Use it to reorder a layer, or to drop nodes from one in a single step.
+    pub fn set_layer_nodes(&mut self, layer_index: usize, nodes: Vec<NodeId>) {
+        while self.layers.len() <= layer_index {
+            self.layers.push(Layer::new());
+        }
+
+        let old_nodes = std::mem::take(&mut self.layers[layer_index].nodes);
+        for node in old_nodes {
+            self.layerless_nodes[node].layer_index = None;
+        }
+        for &node in &nodes {
+            if let Some(other) = self.layerless_nodes[node].layer_index
+                && other != layer_index
+                && let Some(layer) = self.layers.get_mut(other)
+            {
+                remove_node(&mut layer.nodes, node);
+            }
+            self.layerless_nodes[node].layer_index = Some(layer_index);
+        }
+        self.layers[layer_index].nodes = nodes;
+    }
+
     pub fn insert_layer(&mut self, layer_index: usize) {
         self.layers.insert(layer_index, Layer::new());
         for node in &mut self.layerless_nodes {
@@ -843,7 +934,7 @@ impl LGraph {
         let mut compacted = Vec::new();
 
         for (old_index, layer) in self.layers.iter().enumerate() {
-            if !layer.nodes.is_empty() {
+            if !layer.nodes().is_empty() {
                 layer_map[old_index] = Some(compacted.len());
                 compacted.push(layer.clone());
             }
@@ -1399,6 +1490,189 @@ fn port_ratio_or_position(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn graph_with_nodes(count: usize) -> LGraph {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        for index in 0..count {
+            graph.push_node_with(|_| LNode::new(format!("n{index}"), 10.0, 10.0, Some(index)));
+        }
+        graph
+    }
+
+    /// Every node that names a layer sits in it exactly once, and every layer lists only nodes
+    /// that name it.
+    fn assert_layers_agree_with_nodes(graph: &LGraph) {
+        for (id, node) in graph.nodes_with_ids() {
+            if let Some(layer) = node.layer_index {
+                let places = graph.layers[layer]
+                    .nodes()
+                    .iter()
+                    .filter(|listed| **listed == id)
+                    .count();
+                assert_eq!(places, 1, "{} is not listed once in layer {layer}", node.id);
+            }
+        }
+        for (index, layer) in graph.layers.iter().enumerate() {
+            for listed in layer.nodes() {
+                assert_eq!(
+                    graph.layerless_nodes[*listed].layer_index,
+                    Some(index),
+                    "layer {index} lists {}",
+                    graph.layerless_nodes[*listed].id
+                );
+            }
+        }
+    }
+
+    fn ids(graph: &LGraph, indexes: &[usize]) -> Vec<NodeId> {
+        let all = graph.node_ids().collect::<Vec<_>>();
+        indexes.iter().map(|index| all[*index]).collect()
+    }
+
+    // Mutation: in `set_layer_nodes`, skip clearing `layer_index` of the nodes that leave.
+    #[test]
+    fn set_layer_nodes_makes_a_node_that_no_longer_appears_layerless() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        graph.set_layer_nodes(0, all.clone());
+
+        graph.set_layer_nodes(0, vec![all[2], all[0]]);
+
+        assert_eq!(graph.layers[0].nodes(), [all[2], all[0]]);
+        assert_eq!(graph.layerless_nodes[all[1]].layer_index, None);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `set_layer_nodes`, skip removing a joining node from the layer it was in.
+    #[test]
+    fn set_layer_nodes_takes_a_node_out_of_its_old_layer() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        graph.set_layer_nodes(0, vec![all[0], all[1]]);
+        graph.set_layer_nodes(1, vec![all[2]]);
+
+        graph.set_layer_nodes(1, vec![all[1], all[2]]);
+
+        assert_eq!(graph.layers[0].nodes(), [all[0]]);
+        assert_eq!(graph.layers[1].nodes(), [all[1], all[2]]);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `set_layer_nodes`, do not add the missing layers.
+    #[test]
+    fn set_layer_nodes_adds_the_layers_up_to_the_one_it_fills() {
+        let mut graph = graph_with_nodes(1);
+        let all = ids(&graph, &[0]);
+
+        graph.set_layer_nodes(2, all.clone());
+
+        assert_eq!(graph.layers.len(), 3);
+        assert!(graph.layers[0].nodes().is_empty());
+        assert_eq!(graph.layers[2].nodes(), all);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `insert_node_into_layer`, leave `layer_index` unset.
+    #[test]
+    fn insert_node_into_layer_places_the_node_at_the_position() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        graph.set_layer_nodes(0, vec![all[0], all[1]]);
+
+        graph.insert_node_into_layer(all[2], 0, 1);
+
+        assert_eq!(graph.layers[0].nodes(), [all[0], all[2], all[1]]);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `insert_node_into_layer`, skip removing the node from its old layer.
+    #[test]
+    fn insert_node_into_layer_moves_a_node_that_is_in_another_layer() {
+        let mut graph = graph_with_nodes(2);
+        let all = ids(&graph, &[0, 1]);
+        graph.set_layer_nodes(0, vec![all[0]]);
+        graph.set_layer_nodes(1, vec![all[1]]);
+
+        graph.insert_node_into_layer(all[0], 1, 0);
+
+        assert!(graph.layers[0].nodes().is_empty());
+        assert_eq!(graph.layers[1].nodes(), [all[0], all[1]]);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `insert_node_into_layer`, insert at `position` without capping it to the
+    // layer's length. The call then panics.
+    #[test]
+    fn insert_node_into_layer_appends_when_the_position_is_past_the_end() {
+        let mut graph = graph_with_nodes(2);
+        let all = ids(&graph, &[0, 1]);
+        graph.set_layer_nodes(0, vec![all[0]]);
+
+        graph.insert_node_into_layer(all[1], 0, 9);
+
+        assert_eq!(graph.layers[0].nodes(), [all[0], all[1]]);
+    }
+
+    // Mutation: in `swap_layer_places`, swap the two list slots but not the two `layer_index`
+    // values.
+    #[test]
+    fn swap_layer_places_exchanges_layer_and_position() {
+        let mut graph = graph_with_nodes(4);
+        let all = ids(&graph, &[0, 1, 2, 3]);
+        graph.set_layer_nodes(0, vec![all[0], all[1]]);
+        graph.set_layer_nodes(1, vec![all[2], all[3]]);
+
+        graph.swap_layer_places(all[1], all[2]);
+
+        assert_eq!(graph.layers[0].nodes(), [all[0], all[2]]);
+        assert_eq!(graph.layers[1].nodes(), [all[1], all[3]]);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `swap_layer_places`, read a missing layer or position as 0 instead of
+    // returning. The layerless node then swaps with the first node of layer 0.
+    #[test]
+    fn swap_layer_places_does_nothing_for_a_node_without_a_layer() {
+        let mut graph = graph_with_nodes(2);
+        let all = ids(&graph, &[0, 1]);
+        graph.set_layer_nodes(0, vec![all[0]]);
+        let before = graph.clone();
+
+        graph.swap_layer_places(all[0], all[1]);
+
+        assert_eq!(graph, before);
+    }
+
+    // Mutation: in `set_node_layer`, leave the node in its old layer when it joins the new one.
+    #[test]
+    fn set_node_layer_moves_the_node_to_the_end_of_the_new_layer() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        graph.set_node_layer(all[0], 0);
+        graph.set_node_layer(all[1], 1);
+        graph.set_node_layer(all[2], 1);
+
+        graph.set_node_layer(all[0], 1);
+
+        assert!(graph.layers[0].nodes().is_empty());
+        assert_eq!(graph.layers[1].nodes(), [all[1], all[2], all[0]]);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `remove_node_from_layer`, keep `layer_index` set.
+    #[test]
+    fn remove_node_from_layer_makes_the_node_layerless() {
+        let mut graph = graph_with_nodes(2);
+        let all = ids(&graph, &[0, 1]);
+        graph.set_layer_nodes(0, all.clone());
+
+        graph.remove_node_from_layer(all[0]);
+        graph.remove_node_from_layer(all[0]);
+
+        assert_eq!(graph.layers[0].nodes(), [all[1]]);
+        assert_eq!(graph.layerless_nodes[all[0]].layer_index, None);
+        assert_layers_agree_with_nodes(&graph);
+    }
 
     // Mutation: swap `x` and `y`, or `width` and `height`, in `port_box`.
     #[test]

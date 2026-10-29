@@ -108,12 +108,7 @@ pub(crate) fn layer_with_strategy(
     graph.clear_layers();
     for nodes in layers {
         let index = graph.layers.len();
-        for &node in &nodes {
-            graph.layerless_nodes[node].layer_index = Some(index);
-        }
-        let mut layer = crate::graph::Layer::new();
-        layer.nodes = nodes;
-        graph.layers.push(layer);
+        graph.set_layer_nodes(index, nodes);
     }
     Ok(())
 }
@@ -163,8 +158,13 @@ pub fn layer_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexErr
         }
 
         if connected_components.len() > 1 {
-            previous_layering_node_counts =
-                Some(graph.layers.iter().map(|layer| layer.nodes.len()).collect());
+            previous_layering_node_counts = Some(
+                graph
+                    .layers
+                    .iter()
+                    .map(|layer| layer.nodes().len())
+                    .collect(),
+            );
         }
     }
     Ok(())
@@ -374,7 +374,7 @@ mod tests {
 
         assert_layer_order(&graph, "A", "B");
         assert_layer_order(&graph, "C", "D");
-        assert_eq!(graph.layers[0].nodes.len(), 2);
+        assert_eq!(graph.layers[0].nodes().len(), 2);
     }
 
     #[test]

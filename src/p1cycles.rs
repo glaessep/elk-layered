@@ -457,7 +457,7 @@ fn non_negative_priority_weight(priority: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{EdgeLabelPlacement, LPoint, Layer, PortSide, PortType};
+    use crate::graph::{EdgeLabelPlacement, LPoint, PortSide, PortType};
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, import_graph};
     use crate::intermediate::restore_reversed_edges;
     use crate::options::{ElkDirection, LayeredOptions};
@@ -697,10 +697,7 @@ mod tests {
 
         break_cycles_greedy(&mut graph);
         let all_nodes = graph.node_ids().collect();
-        graph.layers.push(Layer {
-            nodes: all_nodes,
-            size: Default::default(),
-        });
+        graph.set_layer_nodes(0, all_nodes);
         restore_reversed_edges(&mut graph);
 
         assert!(graph.edges.iter().all(|edge| !edge.reversed));

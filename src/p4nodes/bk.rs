@@ -107,7 +107,7 @@ impl BKAlignedLayout {
             graph
                 .layers
                 .iter()
-                .flat_map(|layer| layer.nodes.iter().copied())
+                .flat_map(|layer| layer.nodes().iter().copied())
                 .map(|node| graph.layerless_nodes[node].size.height)
                 .fold(0.0, f64::max)
         }
@@ -133,7 +133,7 @@ struct NeighborhoodInformation {
 
 impl NeighborhoodInformation {
     fn build_for(graph: &LGraph) -> Self {
-        let node_count = graph.layers.iter().map(|layer| layer.nodes.len()).sum();
+        let node_count = graph.layers.iter().map(|layer| layer.nodes().len()).sum();
         let mut node_id = IdVec::filled(graph.layerless_nodes.len(), usize::MAX);
         let mut id_to_node = Vec::with_capacity(node_count);
         let mut layer_index = vec![usize::MAX; graph.layers.len()];
@@ -142,7 +142,7 @@ impl NeighborhoodInformation {
         let mut next_id = 0usize;
         for (layer_idx, layer) in graph.layers.iter().enumerate() {
             layer_index[layer_idx] = layer_idx;
-            for (node_idx, node) in layer.nodes.iter().copied().enumerate() {
+            for (node_idx, node) in layer.nodes().iter().copied().enumerate() {
                 node_id[node] = next_id;
                 id_to_node.push(node);
                 node_index[next_id] = node_idx;
@@ -271,7 +271,7 @@ fn mark_conflicts(graph: &LGraph, ni: &NeighborhoodInformation) -> HashSet<EdgeI
     let layer_sizes = graph
         .layers
         .iter()
-        .map(|layer| layer.nodes.len())
+        .map(|layer| layer.nodes().len())
         .collect::<Vec<_>>();
 
     for i in 1..number_of_layers - 1 {
@@ -280,7 +280,7 @@ fn mark_conflicts(graph: &LGraph, ni: &NeighborhoodInformation) -> HashSet<EdgeI
         let mut l = 0usize;
 
         for l_1 in 0..layer_sizes[i + 1] {
-            let v_l_i = current_layer.nodes[l_1];
+            let v_l_i = current_layer.nodes()[l_1];
             if l_1 == layer_sizes[i + 1] - 1
                 || incident_to_inner_segment(graph, ni, v_l_i, i + 1, i)
             {
@@ -292,7 +292,7 @@ fn mark_conflicts(graph: &LGraph, ni: &NeighborhoodInformation) -> HashSet<EdgeI
                 }
 
                 while l <= l_1 {
-                    let v_l = current_layer.nodes[l];
+                    let v_l = current_layer.nodes()[l];
                     if !incident_to_inner_segment(graph, ni, v_l, i + 1, i) {
                         for upper_neighbor in &ni.left_neighbors[ni.node_id[v_l]] {
                             let k = ni.node_index[ni.node_id[upper_neighbor.node]];
@@ -364,8 +364,8 @@ fn vertical_alignment(
         };
 
         let node_iter: Box<dyn Iterator<Item = NodeId>> = match layout.vdir {
-            VDirection::Up => Box::new(layer.nodes.iter().copied().rev()),
-            VDirection::Down => Box::new(layer.nodes.iter().copied()),
+            VDirection::Up => Box::new(layer.nodes().iter().copied().rev()),
+            VDirection::Down => Box::new(layer.nodes().iter().copied()),
         };
 
         for v_i_k in node_iter {
@@ -479,7 +479,7 @@ fn horizontal_compaction(
     let mut threshold = ThresholdStrategy::for_graph(graph);
 
     for layer_index in layers {
-        let nodes = node_order_for_direction(&graph.layers[layer_index].nodes, layout.vdir);
+        let nodes = node_order_for_direction(graph.layers[layer_index].nodes(), layout.vdir);
         for v in nodes {
             let id = ni.node_id[v];
             if layout.root[id] == id {
@@ -492,7 +492,7 @@ fn horizontal_compaction(
 
     let layers = layer_indices(graph, layout.hdir);
     for layer_index in layers {
-        for v in &graph.layers[layer_index].nodes {
+        for v in graph.layers[layer_index].nodes() {
             let id = ni.node_id[*v];
             let root = layout.root[id];
             layout.y[id] = layout.y[root];
@@ -538,7 +538,7 @@ fn place_block(
         let current_index = ni.node_index[current];
         let current_layer_size = graph.layers
             [graph.layerless_nodes[current_node].layer_index.unwrap()]
-        .nodes
+        .nodes()
         .len();
 
         let needs_neighbor = match layout.vdir {
@@ -549,8 +549,8 @@ fn place_block(
         if needs_neighbor {
             let layer = &graph.layers[graph.layerless_nodes[current_node].layer_index.unwrap()];
             let neighbor_node = match layout.vdir {
-                VDirection::Up => layer.nodes[current_index + 1],
-                VDirection::Down => layer.nodes[current_index - 1],
+                VDirection::Up => layer.nodes()[current_index + 1],
+                VDirection::Down => layer.nodes()[current_index - 1],
             };
             let neighbor_root = layout.root[ni.node_id[neighbor_node]];
             place_block(graph, ni, layout, class_graph, threshold, neighbor_root);
@@ -1118,7 +1118,7 @@ fn check_order_constraint(
 ) -> bool {
     for layer in &graph.layers {
         let mut pos = f64::NEG_INFINITY;
-        for node in &layer.nodes {
+        for node in layer.nodes() {
             let id = ni.node_id[*node];
             let Some(y) = layout.y[id] else {
                 return false;
@@ -1334,14 +1334,14 @@ fn max_y(
 fn lower_neighbor(graph: &LGraph, ni: &NeighborhoodInformation, node: NodeId) -> Option<NodeId> {
     let layer = graph.layerless_nodes[node].layer_index?;
     let index = ni.node_index[ni.node_id[node]];
-    graph.layers[layer].nodes.get(index + 1).copied()
+    graph.layers[layer].nodes().get(index + 1).copied()
 }
 
 fn upper_neighbor(graph: &LGraph, ni: &NeighborhoodInformation, node: NodeId) -> Option<NodeId> {
     let layer = graph.layerless_nodes[node].layer_index?;
     let index = ni.node_index[ni.node_id[node]];
     if index > 0 {
-        graph.layers[layer].nodes.get(index - 1).copied()
+        graph.layers[layer].nodes().get(index - 1).copied()
     } else {
         None
     }
@@ -1446,7 +1446,7 @@ mod tests {
         assert!(!graph.layers.is_empty());
         for layer in &graph.layers {
             let mut bottom = f64::NEG_INFINITY;
-            for node in &layer.nodes {
+            for node in layer.nodes() {
                 let lnode = &graph.layerless_nodes[*node];
                 assert!(lnode.position.y - lnode.margin.top > bottom);
                 bottom = lnode.position.y + lnode.size.height + lnode.margin.bottom;

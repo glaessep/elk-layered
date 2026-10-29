@@ -31,7 +31,7 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
         let mut pointer: isize = -1;
 
         // A copy, because the loop inserts dummies into the layer.
-        let node_array = graph.layers[layer_index].nodes.clone();
+        let node_array = graph.layers[layer_index].nodes().to_vec();
         for node in node_array {
             pointer += 1;
 
@@ -117,8 +117,7 @@ fn origin_allows_side_switch(graph: &LGraph, dummy: NodeId) -> bool {
 }
 
 fn insert_into_layer(graph: &mut LGraph, node: NodeId, layer_index: usize, index: usize) {
-    graph.layers[layer_index].nodes.insert(index, node);
-    graph.layerless_nodes[node].layer_index = Some(layer_index);
+    graph.insert_node_into_layer(node, layer_index, index);
 }
 
 /// Ports `NorthSouthPortPreprocessor.sortPortList`: ports with only incoming edges end up left,
@@ -303,7 +302,7 @@ fn push_dummy_port(
 pub fn postprocess_north_south_ports(graph: &mut LGraph) {
     for layer_index in 0..graph.layers.len() {
         // A copy, because the loop takes nodes out of the layer.
-        let node_array = graph.layers[layer_index].nodes.clone();
+        let node_array = graph.layers[layer_index].nodes().to_vec();
         for node in node_array {
             if graph.layerless_nodes[node].kind != LNodeKind::NorthSouthPort {
                 continue;
@@ -481,7 +480,7 @@ mod tests {
     }
 
     fn layer(graph: &LGraph, index: usize) -> Vec<NodeId> {
-        graph.layers[index].nodes.clone()
+        graph.layers[index].nodes().to_vec()
     }
 
     fn dummy_of(graph: &LGraph, node: NodeId, port: usize) -> NodeId {

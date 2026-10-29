@@ -23,7 +23,7 @@ pub(crate) fn initialize_crossing_minimization_port_ids(graph: &mut LGraph) {
     let order = graph
         .layers
         .iter()
-        .map(|layer| layer.nodes.clone())
+        .map(|layer| layer.nodes().to_vec())
         .collect::<Vec<_>>();
     assign_crossing_minimization_port_ids(graph, &order);
 }
@@ -92,13 +92,13 @@ impl SweepCopy {
         }
 
         for (layer_index, layer_order) in self.node_order.iter().enumerate() {
-            if layer_order.len() != graph.layers[layer_index].nodes.len() {
+            if layer_order.len() != graph.layers[layer_index].nodes().len() {
                 return false;
             }
         }
 
         for (layer_index, layer_order) in self.node_order.iter().enumerate() {
-            graph.layers[layer_index].nodes = layer_order.clone();
+            graph.set_layer_nodes(layer_index, layer_order.clone());
             for (position, node) in layer_order.iter().copied().enumerate() {
                 graph.layerless_nodes[node].layer_index = Some(layer_index);
                 let Some(port_order) = self
@@ -139,7 +139,7 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
     let mut queued = IdVec::filled(graph.layerless_nodes.len(), false);
     let mut position_in_layer = IdVec::filled(graph.layerless_nodes.len(), usize::MAX);
     for layer_index in 0..graph.layers.len() {
-        let layer = graph.layers[layer_index].nodes.clone();
+        let layer = graph.layers[layer_index].nodes().to_vec();
         for (position, node) in layer.iter().copied().enumerate() {
             position_in_layer[node] = position;
         }
@@ -216,7 +216,7 @@ impl GraphInfoHolder {
             current_node_order: graph
                 .layers
                 .iter()
-                .map(|layer| layer.nodes.clone())
+                .map(|layer| layer.nodes().to_vec())
                 .collect(),
             currently_best_node_and_port_order: None,
             best_node_and_port_order: None,
@@ -266,7 +266,7 @@ pub fn process_port_sides(graph: &mut LGraph, others: OtherGraphs<'_>) {
     let layered_nodes = graph
         .layers
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .collect::<Vec<_>>();
     for node in layered_nodes {
         process_node_port_sides(graph, others, node);
@@ -336,7 +336,7 @@ pub fn sort_port_lists(graph: &mut LGraph) {
     let node_indices = graph
         .layers
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .collect::<Vec<_>>();
 
     for node in node_indices {
@@ -380,8 +380,8 @@ pub fn sort_by_input_model(graph: &mut LGraph) {
     let mut layer_index = 0usize;
     while layer_index < graph.layers.len() {
         let previous_layer_index = if layer_index == 0 { 0 } else { layer_index - 1 };
-        let previous_layer = graph.layers[previous_layer_index].nodes.clone();
-        let layer_nodes = graph.layers[layer_index].nodes.clone();
+        let previous_layer = graph.layers[previous_layer_index].nodes().to_vec();
+        let layer_nodes = graph.layers[layer_index].nodes().to_vec();
 
         for node in layer_nodes {
             let constraints = graph.layerless_nodes[node].port_constraints;
@@ -396,8 +396,8 @@ pub fn sort_by_input_model(graph: &mut LGraph) {
         }
 
         let node_order =
-            sorted_nodes_by_model_order(graph, &graph.layers[layer_index].nodes, &previous_layer);
-        graph.layers[layer_index].nodes = node_order;
+            sorted_nodes_by_model_order(graph, graph.layers[layer_index].nodes(), &previous_layer);
+        graph.set_layer_nodes(layer_index, node_order);
         layer_index += 1;
     }
 }
@@ -1821,11 +1821,11 @@ mod tests {
         let left = graph.node_named("Left");
         let right = graph.node_named("Right");
         let target_layer = graph.layerless_nodes[left].layer_index.unwrap();
-        graph.layers[target_layer].nodes = vec![right, left];
+        graph.set_layer_nodes(target_layer, vec![right, left]);
 
         sort_by_input_model(&mut graph);
 
-        assert_eq!(graph.layers[target_layer].nodes, vec![left, right]);
+        assert_eq!(graph.layers[target_layer].nodes(), vec![left, right]);
     }
 
     #[test]
@@ -2217,7 +2217,7 @@ mod tests {
     fn a_dummy_on_the_other_side_of_its_node_switches_the_side_of_its_port() {
         let (mut graph, a, north, south) = node_with_movable_ports();
         // The dummies trade places around the node: the south dummy first, the north one last.
-        graph.layers[1].nodes = vec![south, a, north];
+        graph.set_layer_nodes(1, vec![south, a, north]);
 
         correct_north_south_port_sides(&mut graph);
 
@@ -2242,14 +2242,14 @@ mod tests {
         let mut order = graph
             .layers
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         order[1] = vec![south, a, north];
         let sweep = SweepCopy::new(&graph, &order);
 
         assert!(sweep.transfer_node_and_port_orders_to_graph(&mut graph, true));
 
-        assert_eq!(graph.layers[1].nodes, vec![south, a, north]);
+        assert_eq!(graph.layers[1].nodes(), vec![south, a, north]);
         // The northern port is below its dummy and became the southern one: it is last now.
         assert_eq!(graph.layerless_nodes[a].ports.first().unwrap().id, "a:1");
         assert_eq!(side_of(&graph, a, 0), PortSide::South);
@@ -2264,7 +2264,7 @@ mod tests {
     #[test]
     fn dummies_on_the_expected_side_leave_the_sides_of_the_ports_alone() {
         let (mut graph, a, north, south) = node_with_movable_ports();
-        assert_eq!(graph.layers[1].nodes, vec![north, a, south]);
+        assert_eq!(graph.layers[1].nodes(), vec![north, a, south]);
 
         correct_north_south_port_sides(&mut graph);
 
@@ -2278,7 +2278,7 @@ mod tests {
     fn a_north_and_a_south_port_switch_independently() {
         let (mut graph, a, north, south) = node_with_movable_ports();
         // Both dummies above the node: the south port becomes a north port.
-        graph.layers[1].nodes = vec![north, south, a];
+        graph.set_layer_nodes(1, vec![north, south, a]);
 
         correct_north_south_port_sides(&mut graph);
 
@@ -2287,7 +2287,7 @@ mod tests {
 
         let (mut graph, a, north, south) = node_with_movable_ports();
         // Both below: the north port becomes a south port.
-        graph.layers[1].nodes = vec![a, north, south];
+        graph.set_layer_nodes(1, vec![a, north, south]);
 
         correct_north_south_port_sides(&mut graph);
 

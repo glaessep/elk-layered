@@ -1044,7 +1044,7 @@ fn resize_hierarchical_node_graph(graph: &mut LGraph) -> PipelineResult<()> {
     let layered_nodes = graph
         .layers
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .collect::<Vec<_>>();
     for node in layered_nodes {
         graph.layerless_nodes[node].layer_index = None;
@@ -2803,7 +2803,7 @@ mod tests {
             !graph
                 .layers
                 .iter()
-                .flat_map(|layer| layer.nodes.iter().copied())
+                .flat_map(|layer| layer.nodes().iter().copied())
                 .any(|node| graph.layerless_nodes[node].kind == crate::graph::LNodeKind::Label)
         );
         let restored = graph

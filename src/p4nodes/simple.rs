@@ -23,7 +23,7 @@ pub fn place_nodes_simple(graph: &mut LGraph) {
     for layer_index in 0..graph.layers.len() {
         let mut y = (max_layer_height - graph.layers[layer_index].size.height) / 2.0;
         let mut previous = None;
-        let nodes = graph.layers[layer_index].nodes.clone();
+        let nodes = graph.layers[layer_index].nodes().to_vec();
 
         for node_index in nodes {
             if let Some(previous_index) = previous {
@@ -44,7 +44,7 @@ fn layer_height(graph: &LGraph, layer_index: usize) -> f64 {
     let mut height = 0.0;
     let mut previous = None;
 
-    for node_index in graph.layers[layer_index].nodes.iter().copied() {
+    for node_index in graph.layers[layer_index].nodes().iter().copied() {
         if let Some(previous_index) = previous {
             height += vertical_spacing(graph, previous_index, node_index);
         }
@@ -59,7 +59,7 @@ fn layer_height(graph: &LGraph, layer_index: usize) -> f64 {
 
 fn layer_width(graph: &LGraph, layer_index: usize) -> f64 {
     graph.layers[layer_index]
-        .nodes
+        .nodes()
         .iter()
         .map(|node_index| {
             let node = &graph.layerless_nodes[*node_index];

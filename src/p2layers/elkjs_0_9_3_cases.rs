@@ -55,7 +55,7 @@ fn assert_oracle(
         .iter()
         .map(|layer| {
             layer
-                .nodes
+                .nodes()
                 .iter()
                 .map(|&node| graph.layerless_nodes[node].id.parse::<usize>().unwrap())
                 .collect::<Vec<_>>()

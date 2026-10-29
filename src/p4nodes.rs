@@ -60,7 +60,7 @@ pub(crate) fn vertical_spacing(graph: &LGraph, first: NodeId, second: NodeId) ->
 
 pub fn process_in_layer_constraints(graph: &mut LGraph) {
     for layer_index in 0..graph.layers.len() {
-        let nodes = graph.layers[layer_index].nodes.clone();
+        let nodes = graph.layers[layer_index].nodes().to_vec();
         let mut top_nodes = Vec::new();
         let mut middle_nodes = Vec::new();
         let mut bottom_nodes = Vec::new();
@@ -75,7 +75,7 @@ pub fn process_in_layer_constraints(graph: &mut LGraph) {
 
         top_nodes.extend(middle_nodes);
         top_nodes.extend(bottom_nodes);
-        graph.layers[layer_index].nodes = top_nodes;
+        graph.set_layer_nodes(layer_index, top_nodes);
     }
 }
 
@@ -83,7 +83,7 @@ pub fn calculate_label_and_node_sizes(graph: &mut LGraph) {
     let layered_nodes = graph
         .layers
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .collect::<Vec<_>>();
 
     for node in layered_nodes {
@@ -97,7 +97,7 @@ pub fn calculate_innermost_node_margins(graph: &mut LGraph) {
     let layered_nodes = graph
         .layers
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .collect::<Vec<_>>();
 
     nodespacing::calculate_node_margins(graph, layered_nodes);
@@ -212,7 +212,7 @@ mod tests {
         process_in_layer_constraints(&mut graph);
 
         let order = graph.layers[0]
-            .nodes
+            .nodes()
             .iter()
             .map(|node| graph.layerless_nodes[*node].id.as_str())
             .collect::<Vec<_>>();
