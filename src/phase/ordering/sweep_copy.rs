@@ -136,8 +136,10 @@ pub(crate) fn correct_north_south_port_sides(graph: &mut LGraph) {
     for node in to_sort {
         let constraints = graph.layerless_nodes[node].port_constraints;
         let mut order = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-        order
-            .sort_by(|left, right| compare_combined_ports(graph, node, *left, *right, constraints));
+        // The comparator is no total order: see `crate::gwt::sort`.
+        crate::gwt::sort(&mut order, |left, right| {
+            compare_combined_ports(graph, node, left, right, constraints)
+        });
         // A sort of the port indices is a permutation, so a refusal is a bug, never caller
         // input. It stays loud in release builds.
         assert!(

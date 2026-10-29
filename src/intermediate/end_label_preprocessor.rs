@@ -465,7 +465,8 @@ fn remove_end_label_overlaps(
         return;
     }
 
-    // removeOverlaps: a stable sort by left border (Java's List.sort, also stable in GWT).
+    // removeOverlaps: a stable sort by left border (Java's List.sort, also stable in GWT: see
+    // `crate::gwt::sort`; the key is a total order, so Rust's stable sort gives the same order).
     // `RectangleStripOverlapRemover.rectangleNodes` is an `ArrayList` that
     // `rectangleNodes.sort(compareLeftRectangleBorders)` sorts in place. The greedy remover
     // walks that same sorted list (`overlapRemover.getRectangleNodes()`). So `rects`, sorted

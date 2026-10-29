@@ -162,7 +162,8 @@ fn sort_port_list(graph: &mut LGraph, node: NodeId) {
 
     let port_ids = ports.ids().collect::<Vec<_>>();
     let mut order = (0..port_ids.len()).collect::<Vec<_>>();
-    // The sort is stable, as the merge sort of elkjs is.
+    // The sort is stable, as the merge sort of elkjs is (`crate::gwt::sort`). The key is a total
+    // order, so Rust's stable sort gives the same order.
     order.sort_by(|&first, &second| {
         let (side1, side2) = (ports[port_ids[first]].side, ports[port_ids[second]].side);
         if side1 != side2 {

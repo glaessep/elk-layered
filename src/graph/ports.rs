@@ -6,8 +6,9 @@ use std::ops::{Index, IndexMut};
 /// Names one port of one node. Two ports of the same node never share an id, and the id of a
 /// port never changes: reordering the node's ports leaves every id as it was.
 ///
-/// An id is not a place in the node's list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// An id is not a place in the node's list. Ids order by when they were made, which is no order
+/// ELK knows; only code that needs some fixed order, such as a sort for determinism, may use it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PortId(usize);
 
 impl PortId {

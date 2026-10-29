@@ -1760,3 +1760,56 @@ fn the_row_of_components_is_as_wide_as_the_double_square_root_allows() {
         assert_eq!(at(&out, "b"), b, "{ratio}");
     }
 }
+
+// Mutation: sort the ports in `PortListSorter` with Rust's `sort_by` instead of `gwt::sort`.
+#[test]
+fn ports_with_and_without_an_index_sort_as_elkjs_sorts_them() {
+    // ELK compares port indices only when both ports have one, so its comparator is no total
+    // order. elkjs sorts with GWT's merge sort; the expected positions are what it returns.
+    let data: [(Option<u32>, f64); 8] = [
+        (None, 3.0),
+        (Some(7), 13.0),
+        (None, 23.0),
+        (Some(1), 36.0),
+        (Some(2), 41.0),
+        (Some(6), 50.0),
+        (Some(1), 60.0),
+        (Some(0), 71.0),
+    ];
+    let ports = data
+        .iter()
+        .enumerate()
+        .map(|(i, (index, x))| {
+            let mut layout_options = options(&[("elk.port.side", "NORTH")]);
+            if let Some(index) = index {
+                layout_options.insert("elk.port.index".into(), index.to_string());
+            }
+            ElkPort {
+                id: format!("p{i}"),
+                x: *x,
+                width: 2.0,
+                height: 2.0,
+                layout_options,
+                ..Default::default()
+            }
+        })
+        .collect();
+    let mut n = node("n", 100.0, 40.0);
+    n.ports = ports;
+    n.layout_options = options(&[("elk.portConstraints", "FIXED_ORDER")]);
+    let out = layout(&root(vec![n], vec![])).unwrap();
+    let xs: Vec<f64> = out.children[0].ports.iter().map(|p| p.x).collect();
+    assert_eq!(
+        xs,
+        vec![
+            9.333333333333334,
+            66.0,
+            77.33333333333333,
+            88.66666666666666,
+            43.333333333333336,
+            54.66666666666667,
+            32.0,
+            20.666666666666668
+        ]
+    );
+}

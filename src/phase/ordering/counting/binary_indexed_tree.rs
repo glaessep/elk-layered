@@ -4,7 +4,7 @@
 
 /// `BinaryIndexedTree`.
 ///
-/// elkjs does not check array bounds. Java would throw `ArrayIndexOutOfBoundsException` for an
+/// elkjs does not check array bounds (see the module docs of `crate::gwt`). Java would throw `ArrayIndexOutOfBoundsException` for an
 /// index past the end; elkjs reads `undefined` and adds `NaN` to the sum, or grows the array. Both
 /// happen when a counter reads the stale position of a port it did not number in this call. This
 /// tree follows elkjs: `add` counts an index past the end in `size` and in nothing else, and `rank`

@@ -185,7 +185,7 @@ fn layout_unit_nodes(layout_units: &HashMap<NodeId, Vec<NodeId>>, unit: NodeId) 
     layout_units.get(&unit).map_or(&[], Vec::as_slice)
 }
 
-fn add_forster_constraint(groups: &mut [ConstraintGroup], from: usize, to: usize) {
+pub(crate) fn add_forster_constraint(groups: &mut [ConstraintGroup], from: usize, to: usize) {
     if from == to {
         return;
     }
@@ -195,7 +195,7 @@ fn add_forster_constraint(groups: &mut [ConstraintGroup], from: usize, to: usize
     }
 }
 
-fn find_violated_forster_constraint(
+pub(crate) fn find_violated_forster_constraint(
     states: &HashMap<NodeId, BarycenterState>,
     groups: &mut [ConstraintGroup],
 ) -> Option<(usize, usize)> {
@@ -212,7 +212,11 @@ fn find_violated_forster_constraint(
             for predecessor in groups[group_index].incoming.clone() {
                 let predecessor_barycenter = groups[predecessor].barycenter(states).unwrap_or(0.0);
                 let group_barycenter = groups[group_index].barycenter(states).unwrap_or(0.0);
-                if predecessor_barycenter as f32 == group_barycenter as f32 {
+                // Java compares `floatValue()`s, which elkjs leaves doubles: see
+                // `crate::gwt::float_value`.
+                if crate::gwt::float_value(predecessor_barycenter)
+                    == crate::gwt::float_value(group_barycenter)
+                {
                     if predecessor > group_index {
                         return Some((predecessor, group_index));
                     }

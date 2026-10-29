@@ -35,8 +35,9 @@ pub fn sort_port_lists(graph: &mut LGraph) {
         let constraints = graph.layerless_nodes[node].port_constraints;
         if constraints.is_order_fixed() {
             let mut order = graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>();
-            order.sort_by(|left, right| {
-                compare_combined_ports(graph, node, *left, *right, constraints)
+            // The comparator is no total order: see `crate::gwt::sort`.
+            crate::gwt::sort(&mut order, |left, right| {
+                compare_combined_ports(graph, node, left, right, constraints)
             });
             graph.reorder_node_ports(node, order);
         } else if constraints.is_side_fixed() {

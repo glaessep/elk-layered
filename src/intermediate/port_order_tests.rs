@@ -10,7 +10,7 @@ use crate::intermediate::port_side_processor::{process_port_sides, set_port_side
 use crate::intermediate::preserveorder::model_order_node_comparator::last_previous_layer_source_port;
 use crate::intermediate::preserveorder::model_order_port_comparator::ModelOrderPortComparator;
 use crate::intermediate::sort_by_input_model_processor::{
-    long_edge_target_node_preprocessing, sort_by_input_model, sort_model_order, target_node,
+    long_edge_target_node_preprocessing, sort_by_input_model, target_node,
 };
 use crate::intermediate::split_long_edges;
 use crate::options::{ElkDirection, LayeredOptions};
@@ -120,7 +120,7 @@ fn model_order_sort_matches_pinned_worker_comparison_schedule() {
     for &(input, expected, expected_calls) in cases {
         let mut order = input.to_vec();
         let mut calls = Vec::new();
-        sort_model_order(&mut order, |left, right| {
+        crate::gwt::sort(&mut order, |left, right| {
             calls.push((left, right));
             left.cmp(&right)
         });
@@ -133,7 +133,7 @@ fn model_order_sort_matches_pinned_worker_comparison_schedule() {
 fn model_order_sort_preserves_equal_keys_across_recursive_merges() {
     let keys = [2, 1, 2, 0, 1, 0, 2, 1, 2, 0, 1, 0, 2, 1];
     let mut order = (0..keys.len()).collect::<Vec<_>>();
-    sort_model_order(&mut order, |left, right| keys[left].cmp(&keys[right]));
+    crate::gwt::sort(&mut order, |left, right| keys[left].cmp(&keys[right]));
     assert_eq!(order, [3, 5, 9, 11, 1, 4, 7, 10, 13, 0, 2, 6, 8, 12]);
 }
 
@@ -164,7 +164,7 @@ fn model_order_sort_preserves_source_stateful_port_fallback() {
             false,
         );
         let mut order = (0..length).map(PortId::new).collect::<Vec<_>>();
-        sort_model_order(&mut order, |left, right| comparator.compare(left, right));
+        crate::gwt::sort(&mut order, |left, right| comparator.compare(left, right));
         assert_eq!(order, (0..length).map(PortId::new).collect::<Vec<_>>());
         // The first source comparison records port 0 < port 1. Reversing
         // the first call (as Rust sort_by can do) records the opposite.

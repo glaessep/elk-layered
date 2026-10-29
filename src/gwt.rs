@@ -7,6 +7,11 @@
 //!
 //! The emulated classes are in GWT's `user/super/com/google/gwt/emul/java`, compiled into
 //! `elkjs/lib/elk-worker.js`.
+//!
+//! One difference has no function here, because it lives in the data structure that meets it:
+//! a JavaScript array has no bounds check. Java throws `ArrayIndexOutOfBoundsException` for an
+//! index past the end; elkjs reads `undefined`, which turns a sum into `NaN`, or grows the array.
+//! `BinaryIndexedTree` in `phase/ordering/counting` follows elkjs there.
 
 use std::cmp::Ordering;
 
@@ -108,6 +113,63 @@ pub(crate) fn priority_queue_poll<T: Copy>(
         heap[cursor] = value;
     }
     Some(result)
+}
+
+/// `Arrays.sort` and `Collections.sort` with a comparator, as GWT implements them: insertion sort
+/// below seven elements, then a merge sort that swaps two buffers.
+///
+/// A JVM uses TimSort. With a comparator that is a total order, both give the one stable order.
+/// They differ when the comparator is not one: ELK's model-order comparators answer from a cache
+/// that can contradict itself, and `PortListSorter.CMP_FIXED_ORDER_AND_FIXED_POS` compares port
+/// indices only when both ports have one. GWT then makes the comparisons in its own schedule, and
+/// this function makes the same ones (`insertionSort`, `mergeSort_0` and `merge_1` in
+/// `elk-worker.js`). It never panics, where Rust's `sort_by` may for such a comparator.
+pub(crate) fn sort<T: Copy>(order: &mut [T], mut compare: impl FnMut(T, T) -> Ordering) {
+    fn merge_sort<T: Copy>(
+        source: &mut [T],
+        destination: &mut [T],
+        compare: &mut impl FnMut(T, T) -> Ordering,
+    ) {
+        if destination.len() < 7 {
+            for index in 1..destination.len() {
+                let mut current = index;
+                while current > 0
+                    && compare(destination[current - 1], destination[current]) == Ordering::Greater
+                {
+                    destination.swap(current - 1, current);
+                    current -= 1;
+                }
+            }
+            return;
+        }
+
+        let middle = destination.len() / 2;
+        let (source_left, source_right) = source.split_at_mut(middle);
+        let (destination_left, destination_right) = destination.split_at_mut(middle);
+        merge_sort(destination_left, source_left, compare);
+        merge_sort(destination_right, source_right, compare);
+        if compare(source[middle - 1], source[middle]) != Ordering::Greater {
+            destination.copy_from_slice(source);
+            return;
+        }
+
+        let mut left = 0;
+        let mut right = middle;
+        for item in destination {
+            if right >= source.len()
+                || (left < middle && compare(source[left], source[right]) != Ordering::Greater)
+            {
+                *item = source[left];
+                left += 1;
+            } else {
+                *item = source[right];
+                right += 1;
+            }
+        }
+    }
+
+    let mut source = order.to_vec();
+    merge_sort(&mut source, order, &mut compare);
 }
 
 /// The keys of a GWT `HashMap` whose keys are enum constants, in the order elkjs iterates them:

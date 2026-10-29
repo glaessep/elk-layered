@@ -2,7 +2,6 @@
 //!
 //! Source: https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/SortByInputModelProcessor.java
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use crate::graph::{LGraph, LNodeKind, NodeId, PortId, PortRef};
@@ -39,62 +38,6 @@ pub fn sort_by_input_model(graph: &mut LGraph) {
     }
 }
 
-// elkjs 0.9.3's GWT Arrays sort uses insertion sort below seven elements, then
-// alternating merge buffers. Model-order comparators cache relations, including a
-// fallback that returns Less for an unseen pair in either direction. Preserve the
-// exact comparison schedule for both node and port sorting; Rust's sort_by is not
-// interchangeable here. Source: elk-worker.js insertionSort/mergeSort_0/merge_1.
-pub(crate) fn sort_model_order<T: Copy>(
-    order: &mut [T],
-    mut compare: impl FnMut(T, T) -> Ordering,
-) {
-    fn merge_sort<T: Copy>(
-        source: &mut [T],
-        destination: &mut [T],
-        compare: &mut impl FnMut(T, T) -> Ordering,
-    ) {
-        if destination.len() < 7 {
-            for index in 1..destination.len() {
-                let mut current = index;
-                while current > 0
-                    && compare(destination[current - 1], destination[current]) == Ordering::Greater
-                {
-                    destination.swap(current - 1, current);
-                    current -= 1;
-                }
-            }
-            return;
-        }
-
-        let middle = destination.len() / 2;
-        let (source_left, source_right) = source.split_at_mut(middle);
-        let (destination_left, destination_right) = destination.split_at_mut(middle);
-        merge_sort(destination_left, source_left, compare);
-        merge_sort(destination_right, source_right, compare);
-        if compare(source[middle - 1], source[middle]) != Ordering::Greater {
-            destination.copy_from_slice(source);
-            return;
-        }
-
-        let mut left = 0;
-        let mut right = middle;
-        for item in destination {
-            if right >= source.len()
-                || (left < middle && compare(source[left], source[right]) != Ordering::Greater)
-            {
-                *item = source[left];
-                left += 1;
-            } else {
-                *item = source[right];
-                right += 1;
-            }
-        }
-    }
-
-    let mut source = order.to_vec();
-    merge_sort(&mut source, order, &mut compare);
-}
-
 fn sorted_ports_by_model_order(
     graph: &LGraph,
     node: NodeId,
@@ -113,7 +56,7 @@ fn sorted_ports_by_model_order(
         target_node_model_order,
         graph.options.consider_model_order_port_model_order,
     );
-    sort_model_order(&mut order, |left, right| comparator.compare(left, right));
+    crate::gwt::sort(&mut order, |left, right| comparator.compare(left, right));
     order
 }
 
@@ -129,7 +72,7 @@ fn sorted_nodes_by_model_order(
         previous_layer,
         graph.options.consider_model_order_strategy,
     );
-    sort_model_order(&mut order, |left, right| comparator.compare(left, right));
+    crate::gwt::sort(&mut order, |left, right| comparator.compare(left, right));
     order
 }
 

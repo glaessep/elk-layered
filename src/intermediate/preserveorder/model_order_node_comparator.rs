@@ -172,15 +172,19 @@ pub(crate) fn update_bigger_and_smaller_associations<T>(
     bigger_than: &mut HashMap<T, HashSet<T>>,
     smaller_than: &mut HashMap<T, HashSet<T>>,
 ) where
-    T: Copy + Eq + std::hash::Hash,
+    T: Copy + Ord + std::hash::Hash,
 {
     bigger_than.entry(bigger).or_default();
     bigger_than.entry(smaller).or_default();
     smaller_than.entry(bigger).or_default();
     smaller_than.entry(smaller).or_default();
 
-    let smaller_bigger_than = bigger_than[&smaller].clone();
-    let bigger_smaller_than = smaller_than[&bigger].clone();
+    // Sorted, so no hash order reaches the sets. ELK's `HashSet` iteration order would depend on
+    // object hashes; the sets it builds do not, since each step only adds to them.
+    let mut smaller_bigger_than = bigger_than[&smaller].iter().copied().collect::<Vec<_>>();
+    smaller_bigger_than.sort_unstable();
+    let mut bigger_smaller_than = smaller_than[&bigger].iter().copied().collect::<Vec<_>>();
+    bigger_smaller_than.sort_unstable();
 
     bigger_than.get_mut(&bigger).unwrap().insert(smaller);
     smaller_than.get_mut(&smaller).unwrap().insert(bigger);

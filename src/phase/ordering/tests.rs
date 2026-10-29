@@ -1376,6 +1376,38 @@ fn one_sided_greedy_switch_reduces_between_layer_crossings() {
     assert_eq!(after, 0.0);
 }
 
+// Mutation: compare the two barycenters as `f32`, as Java on a JVM does.
+#[test]
+fn barycenters_that_differ_only_beyond_float_precision_are_not_equal() {
+    use crate::phase::ordering::barycenter_heuristic::BarycenterState;
+    use crate::phase::ordering::forster_constraint_resolver::{
+        ConstraintGroup, add_forster_constraint, find_violated_forster_constraint,
+    };
+    // Group 1 must stay above group 0. Its barycenter is a little smaller, so the constraint
+    // holds. As `f32`, the two are equal, and the later group 1 would count as a violation.
+    let mut groups = vec![
+        ConstraintGroup::new(NodeId::new(0)),
+        ConstraintGroup::new(NodeId::new(1)),
+    ];
+    add_forster_constraint(&mut groups, 1, 0);
+    let state = |barycenter: f64| BarycenterState {
+        barycenter: Some(barycenter),
+        ..BarycenterState::default()
+    };
+    let mut states = HashMap::new();
+    states.insert(NodeId::new(0), state(1.0 + 1e-12));
+    states.insert(NodeId::new(1), state(1.0));
+    assert_eq!((1.0_f64 + 1e-12) as f32, 1.0_f32);
+    assert_eq!(find_violated_forster_constraint(&states, &mut groups), None);
+
+    // The same barycenter is a tie, and the tie goes against the later group.
+    states.insert(NodeId::new(0), state(1.0));
+    assert_eq!(
+        find_violated_forster_constraint(&states, &mut groups),
+        Some((1, 0))
+    );
+}
+
 /// Tests of the parts of the greedy switch that deal with north and south port dummies.
 #[cfg(test)]
 mod north_south_tests {
