@@ -59,7 +59,7 @@ impl GraphArena {
     }
 
     /// Takes a graph into the arena and returns its id. The graph's own `id` is overwritten.
-    pub fn add(&mut self, mut graph: LGraph) -> GraphId {
+    fn add(&mut self, mut graph: LGraph) -> GraphId {
         let id = GraphId::new(self.graphs.len());
         graph.id = id;
         self.graphs.push(graph);
@@ -70,8 +70,15 @@ impl GraphArena {
     ///
     /// # Panics
     ///
-    /// When `parent` has no such node.
+    /// When `parent` has no such node. In a debug build, also when that node already holds a
+    /// graph: a node owns at most one, and a second would orphan the first.
     pub fn nest(&mut self, parent: GraphId, node: usize, graph: LGraph) -> GraphId {
+        debug_assert!(
+            self.graphs[parent.0].layerless_nodes[node]
+                .nested_graph
+                .is_none(),
+            "a node owns at most one nested graph"
+        );
         let id = self.add(graph);
         self.graphs[id.0].parent = Some(GraphParent {
             graph: parent,
@@ -320,6 +327,17 @@ mod tests {
                 .push(LNode::new(format!("{name}-{index}"), 1.0, 1.0, None));
         }
         graph
+    }
+
+    // Mutation: leave out the `debug_assert!` in `nest`. A second graph then replaces the first
+    // one in the node, and the first one stays in the arena with no node that owns it.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "a node owns at most one nested graph")]
+    fn nesting_a_second_graph_in_the_same_node_panics() {
+        let mut graphs = GraphArena::new(graph("root", 1));
+        graphs.nest(GraphId::ROOT, 0, graph("first", 0));
+        graphs.nest(GraphId::ROOT, 0, graph("second", 0));
     }
 
     /// root (2 nodes) -> a (in node 0, 2 nodes) -> a0 (in a's node 0), a1 (in a's node 1)
