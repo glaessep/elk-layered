@@ -16,7 +16,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::compound::compare_compound_segments;
 use crate::error::Error;
 use crate::graph::{
-    GraphArena, GraphId, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize, PortRef, PortSide,
+    EdgeId, EdgeSlice, GraphArena, GraphId, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize,
+    NodeId, NodeSlice, PortRef, PortSide,
 };
 
 /// `OrthogonalRoutingGenerator.TOLERANCE`.
@@ -84,7 +85,7 @@ pub(crate) struct LayoutResult {
 }
 
 /// An `LNode` anywhere in the hierarchy: graph and node index.
-type NodeAt = (GraphId, usize);
+type NodeAt = (GraphId, NodeId);
 
 /// A port anywhere in the hierarchy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,7 +112,7 @@ impl<'a> Hierarchy<'a> {
     /// The graph and node index of the node `graph` is inside, or `None` for the root.
     ///
     /// Ports `LGraph.getParentNode`.
-    fn parent_of(&self, graph: GraphId) -> Option<(GraphId, usize)> {
+    fn parent_of(&self, graph: GraphId) -> Option<(GraphId, NodeId)> {
         self.graph(graph).parent.map(|p| (p.graph, p.node))
     }
 
@@ -207,12 +208,12 @@ impl<'a> Hierarchy<'a> {
         let node = self
             .graph(graph)
             .layerless_nodes
-            .get(port.node)
+            .get_node(port.node)
             .ok_or_else(|| Error::Internal {
                 message: format!(
                     "an edge in graph {} ends at node {}, which does not exist",
                     graph.index(),
-                    port.node
+                    port.node.index()
                 ),
             })?;
         if node.kind == LNodeKind::ExternalPort
@@ -271,12 +272,12 @@ fn join_cross_hierarchy_edges(
             hierarchy
                 .graph(*graph)
                 .edges
-                .get(record.edge)
+                .get_edge(record.edge)
                 .map(|edge| (*graph, edge))
                 .ok_or_else(|| Error::Internal {
                     message: format!(
                         "a record of edge \"{id}\" names edge {}, which graph {} does not have",
-                        record.edge,
+                        record.edge.index(),
                         graph.index()
                     ),
                 })
@@ -400,7 +401,7 @@ pub(crate) fn apply_layout(
     // The external ports of the top graph are placed first. This moves their dummies, which
     // the edges that end at them read.
     let mut scope_ports = Vec::new();
-    for index in 0..root.layerless_nodes.len() {
+    for index in root.node_ids() {
         let Some(port) = root.layerless_nodes[index].scope_port else {
             continue;
         };
@@ -430,7 +431,7 @@ pub(crate) fn apply_layout(
     let mut by_graph: Vec<Vec<EdgeToApply<'_>>> = (0..graphs.len()).map(|_| Vec::new()).collect();
     for &graph_id in &hierarchy.order {
         let graph = hierarchy.graph(graph_id);
-        for (edge_index, edge) in graph.edges.iter().enumerate() {
+        for (edge_index, edge) in graph.edges_with_ids() {
             if !is_original_edge(graph, edge_index, input) {
                 continue;
             }
@@ -491,7 +492,7 @@ pub(crate) fn apply_layout(
 /// Whether a layered edge is an input edge as the layout left it, not a dummy edge.
 ///
 /// Ports `ElkGraphLayoutTransferrer.applyEdgeLayout`'s `ORIGIN` check: only input edges are written.
-fn is_original_edge(graph: &LGraph, index: usize, input: &TransferInput<'_>) -> bool {
+fn is_original_edge(graph: &LGraph, index: EdgeId, input: &TransferInput<'_>) -> bool {
     let edge = &graph.edges[index];
     if edge.compound_segment.is_some() || !input.edge_containers.contains_key(&edge.id) {
         return false;
@@ -499,7 +500,7 @@ fn is_original_edge(graph: &LGraph, index: usize, input: &TransferInput<'_>) -> 
     let attached = |port: PortRef, outgoing: bool| {
         graph
             .layerless_nodes
-            .get(port.node)
+            .get_node(port.node)
             .and_then(|node| node.ports.get(port.port))
             .is_some_and(|data| {
                 let list = if outgoing {
@@ -546,7 +547,7 @@ fn apply_graph_layout(
         x: graph.offset.x + graph.padding.left,
         y: graph.offset.y + graph.padding.top,
     };
-    for (index, node) in graph.layerless_nodes.iter().enumerate() {
+    for (index, node) in graph.nodes_with_ids() {
         if node.kind != LNodeKind::Normal || !input.parents.contains_key(&node.id) {
             continue;
         }
@@ -730,7 +731,7 @@ mod tests {
                 .push(LNode::new(id, 10.0, 10.0, None));
             graphs.nest(
                 GraphId::ROOT,
-                position,
+                NodeId::new(position),
                 LGraph::new(id, LayeredOptions::default()),
             );
         }
@@ -749,8 +750,8 @@ mod tests {
         };
         hierarchical_offset(
             &hierarchy,
-            (GraphId::new(1), 0),
-            (GraphId::new(2), 0),
+            (GraphId::new(1), NodeId::new(0)),
+            (GraphId::new(2), NodeId::new(0)),
             "e",
             &input,
         )
@@ -850,7 +851,7 @@ mod tests {
     #[test]
     fn a_cross_hierarchy_record_of_a_missing_edge_is_an_internal_error() {
         let mut graph = laid_out_edge_across_levels();
-        graph.root_mut().cross_hierarchy_edges[0].edge = 99;
+        graph.root_mut().cross_hierarchy_edges[0].edge = crate::graph::EdgeId::new(99);
 
         let error = apply_to_edge_e(&mut graph).expect_err("an error");
 
@@ -869,8 +870,8 @@ mod tests {
             .collect();
         for (graph_id, edge) in records {
             let edge = &mut graph[graph_id].edges[edge];
-            edge.source.node = 99;
-            edge.target.node = 99;
+            edge.source.node = crate::graph::NodeId::new(99);
+            edge.target.node = crate::graph::NodeId::new(99);
         }
 
         let error = apply_to_edge_e(&mut graph).expect_err("an error");
@@ -918,8 +919,8 @@ mod tests {
 
         let offset = hierarchical_offset(
             &hierarchy,
-            (GraphId::new(1), 0),
-            (GraphId::new(2), 0),
+            (GraphId::new(1), crate::graph::NodeId::new(0)),
+            (GraphId::new(2), crate::graph::NodeId::new(0)),
             "e",
             &input,
         )

@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
-use crate::graph::{LGraph, LPoint, PortRef, PortSide};
+use crate::graph::{EdgeId, EdgeSlice, LGraph, LPoint, NodeId, NodeSlice, PortRef, PortSide};
 use crate::random::JavaRandom;
 
 pub const TOLERANCE: f64 = 1e-3;
@@ -460,8 +460,8 @@ impl OrthogonalRoutingThresholds {
 
 pub fn route_edges_west_to_east(
     graph: &mut LGraph,
-    source_layer_nodes: Option<&[usize]>,
-    target_layer_nodes: Option<&[usize]>,
+    source_layer_nodes: Option<&[NodeId]>,
+    target_layer_nodes: Option<&[NodeId]>,
     start_pos: f64,
     edge_spacing: f64,
 ) -> usize {
@@ -478,8 +478,8 @@ pub fn route_edges_west_to_east(
 pub fn route_edges(
     graph: &mut LGraph,
     direction: RoutingDirection,
-    source_layer_nodes: Option<&[usize]>,
-    target_layer_nodes: Option<&[usize]>,
+    source_layer_nodes: Option<&[NodeId]>,
+    target_layer_nodes: Option<&[NodeId]>,
     start_pos: f64,
     edge_spacing: f64,
 ) -> usize {
@@ -579,7 +579,7 @@ pub fn minimum_horizontal_segment_distance(segments: &[HyperEdgeSegment]) -> f64
 fn create_hyperedge_segments(
     graph: &LGraph,
     direction: RoutingDirection,
-    nodes: Option<&[usize]>,
+    nodes: Option<&[NodeId]>,
     port_side: PortSide,
     hyper_graph: &mut HyperEdgeGraph,
     port_to_segment: &mut HashMap<PortRef, usize>,
@@ -589,7 +589,7 @@ fn create_hyperedge_segments(
     };
 
     for node in nodes {
-        let Some(lnode) = graph.layerless_nodes.get(*node) else {
+        let Some(lnode) = graph.layerless_nodes.get_node(*node) else {
             continue;
         };
         for (port_index, port) in lnode.ports.iter_with_ids() {
@@ -1407,7 +1407,7 @@ fn dependency_weight(
 }
 
 fn connected_ports(graph: &LGraph, port_ref: PortRef) -> Vec<PortRef> {
-    let Some(node) = graph.layerless_nodes.get(port_ref.node) else {
+    let Some(node) = graph.layerless_nodes.get_node(port_ref.node) else {
         return Vec::new();
     };
     let Some(port) = node.ports.get(port_ref.port) else {
@@ -1416,11 +1416,11 @@ fn connected_ports(graph: &LGraph, port_ref: PortRef) -> Vec<PortRef> {
 
     port.incoming_edges
         .iter()
-        .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.source))
+        .filter_map(|edge| graph.edges.get_edge(*edge).map(|edge| edge.source))
         .chain(
             port.outgoing_edges
                 .iter()
-                .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.target)),
+                .filter_map(|edge| graph.edges.get_edge(*edge).map(|edge| edge.target)),
         )
         .filter(|other| *other != port_ref)
         .collect()
@@ -1499,7 +1499,7 @@ fn target_bend_point(
     }
 }
 
-fn is_self_loop(graph: &LGraph, edge_index: usize) -> bool {
+fn is_self_loop(graph: &LGraph, edge_index: EdgeId) -> bool {
     graph.edges[edge_index].source.node == graph.edges[edge_index].target.node
 }
 
@@ -1507,7 +1507,7 @@ fn is_self_loop(graph: &LGraph, edge_index: usize) -> bool {
 /// point when it is not at one of the two ends of the hyperedge segment.
 fn add_junction_point_if_necessary(
     graph: &mut LGraph,
-    edge_index: usize,
+    edge_index: EdgeId,
     segment: &HyperEdgeSegment,
     position: LPoint,
     vertical: bool,
@@ -1558,7 +1558,7 @@ fn junction_key(position: LPoint) -> Option<(u64, u64)> {
     Some(((position.x + 0.0).to_bits(), (position.y + 0.0).to_bits()))
 }
 
-fn add_bend_point_if_needed(graph: &mut LGraph, edge_index: usize, point: LPoint) {
+fn add_bend_point_if_needed(graph: &mut LGraph, edge_index: EdgeId, point: LPoint) {
     if let Some(last) = graph.edges[edge_index].bend_points.last()
         && (last.x - point.x).abs() < TOLERANCE
         && (last.y - point.y).abs() < TOLERANCE
@@ -1666,7 +1666,14 @@ mod tests {
         created: &mut HashSet<(u64, u64)>,
         graph: &mut LGraph,
     ) {
-        add_junction_point_if_necessary(graph, 0, segment, position, vertical, created);
+        add_junction_point_if_necessary(
+            graph,
+            EdgeId::new(0),
+            segment,
+            position,
+            vertical,
+            created,
+        );
     }
 
     // Mutation: use the `x` coordinate for a vertical connecting segment, or drop the strict
@@ -1840,7 +1847,7 @@ mod tests {
 
     fn route_test_graph(source_y: f64, target_y: f64) -> LGraph {
         let mut graph = LGraph::new("root", LayeredOptions::default());
-        let source = graph.layerless_nodes.len();
+        let source = graph.next_node_id();
         let mut source_node = LNode::new("A", 40.0, 20.0, Some(0));
         source_node.position = LPoint {
             x: 0.0,
@@ -1848,7 +1855,7 @@ mod tests {
         };
         graph.layerless_nodes.push(source_node);
 
-        let target = graph.layerless_nodes.len();
+        let target = graph.next_node_id();
         let mut target_node = LNode::new("B", 40.0, 20.0, Some(1));
         target_node.position = LPoint {
             x: 100.0,
@@ -1901,7 +1908,7 @@ mod tests {
 
     fn vertical_route_test_graph(source_x: f64, target_x: f64, source_side: PortSide) -> LGraph {
         let mut graph = LGraph::new("root", LayeredOptions::default());
-        let source = graph.layerless_nodes.len();
+        let source = graph.next_node_id();
         let mut source_node = LNode::new("A", 20.0, 40.0, Some(0));
         source_node.position = LPoint {
             x: source_x,
@@ -1909,7 +1916,7 @@ mod tests {
         };
         graph.layerless_nodes.push(source_node);
 
-        let target = graph.layerless_nodes.len();
+        let target = graph.next_node_id();
         let mut target_node = LNode::new("B", 20.0, 40.0, Some(1));
         target_node.position = LPoint {
             x: target_x,

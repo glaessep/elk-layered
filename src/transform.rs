@@ -444,8 +444,8 @@ impl PaddingTransform for ElkPadding {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::PortId;
     use crate::graph::{EdgeLabelPlacement, LayeredEdge, PortType};
+    use crate::graph::{NodeId, PortId};
     use crate::options::{
         Alignment, ElkPadding, LayeredOptions, NodeLabelPlacement, PortConstraints,
     };
@@ -1240,12 +1240,12 @@ mod tests {
     }
 
     trait TestGraphExt {
-        fn add_node_for_test(&mut self, node: LNode) -> usize;
+        fn add_node_for_test(&mut self, node: LNode) -> NodeId;
     }
 
     impl TestGraphExt for LGraph {
-        fn add_node_for_test(&mut self, mut node: LNode) -> usize {
-            let index = self.layerless_nodes.len();
+        fn add_node_for_test(&mut self, mut node: LNode) -> NodeId {
+            let index = self.next_node_id();
             node.port_constraints = PortConstraints::FixedSide;
             node.ports.push(LPort::new(
                 format!("{}:0", node.id),

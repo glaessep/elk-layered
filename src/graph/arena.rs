@@ -6,7 +6,7 @@
 //! hierarchy instead. A node holds the [`GraphId`] of the graph inside it, and a graph never
 //! leaves its slot.
 
-use super::LGraph;
+use super::{LGraph, NodeId};
 use std::collections::VecDeque;
 use std::ops::{Index, IndexMut};
 
@@ -38,7 +38,7 @@ pub struct GraphParent {
     /// The graph that holds the node.
     pub graph: GraphId,
     /// The node's index in that graph.
-    pub node: usize,
+    pub node: NodeId,
 }
 
 /// Every graph of one layout. The root sits in slot [`GraphId::ROOT`].
@@ -72,7 +72,7 @@ impl GraphArena {
     ///
     /// When `parent` has no such node. In a debug build, also when that node already holds a
     /// graph: a node owns at most one, and a second would orphan the first.
-    pub fn nest(&mut self, parent: GraphId, node: usize, graph: LGraph) -> GraphId {
+    pub fn nest(&mut self, parent: GraphId, node: NodeId, graph: LGraph) -> GraphId {
         debug_assert!(
             self.graphs[parent.0].layerless_nodes[node]
                 .nested_graph
@@ -330,19 +330,27 @@ mod tests {
     #[should_panic(expected = "a node owns at most one nested graph")]
     fn nesting_a_second_graph_in_the_same_node_panics() {
         let mut graphs = GraphArena::new(graph("root", 1));
-        graphs.nest(GraphId::ROOT, 0, graph("first", 0));
-        graphs.nest(GraphId::ROOT, 0, graph("second", 0));
+        graphs.nest(
+            GraphId::ROOT,
+            crate::graph::NodeId::new(0),
+            graph("first", 0),
+        );
+        graphs.nest(
+            GraphId::ROOT,
+            crate::graph::NodeId::new(0),
+            graph("second", 0),
+        );
     }
 
     /// root (2 nodes) -> a (in node 0, 2 nodes) -> a0 (in a's node 0), a1 (in a's node 1)
     ///                -> b (in node 1, 1 node)  -> b0 (in b's node 0)
     fn branched() -> (GraphArena, [GraphId; 5]) {
         let mut graphs = GraphArena::new(graph("root", 2));
-        let a = graphs.nest(GraphId::ROOT, 0, graph("a", 2));
-        let b = graphs.nest(GraphId::ROOT, 1, graph("b", 1));
-        let a0 = graphs.nest(a, 0, graph("a0", 0));
-        let a1 = graphs.nest(a, 1, graph("a1", 0));
-        let b0 = graphs.nest(b, 0, graph("b0", 0));
+        let a = graphs.nest(GraphId::ROOT, NodeId::new(0), graph("a", 2));
+        let b = graphs.nest(GraphId::ROOT, NodeId::new(1), graph("b", 1));
+        let a0 = graphs.nest(a, NodeId::new(0), graph("a0", 0));
+        let a1 = graphs.nest(a, NodeId::new(1), graph("a1", 0));
+        let b0 = graphs.nest(b, NodeId::new(0), graph("b0", 0));
         let _ = (a0, a1);
         (graphs, [a, b, a0, a1, b0])
     }
@@ -379,12 +387,15 @@ mod tests {
     #[test]
     fn two_graphs_with_one_name_have_two_ids() {
         let mut graphs = GraphArena::new(graph("root", 2));
-        let first = graphs.nest(GraphId::ROOT, 0, graph("same", 0));
-        let second = graphs.nest(GraphId::ROOT, 1, graph("same", 0));
+        let first = graphs.nest(GraphId::ROOT, NodeId::new(0), graph("same", 0));
+        let second = graphs.nest(GraphId::ROOT, NodeId::new(1), graph("same", 0));
 
         assert_ne!(first, second);
         assert_eq!(graphs[first].name, graphs[second].name);
-        let ref_to = |graph_id| GraphNodeRef { graph_id, node: 0 };
+        let ref_to = |graph_id| GraphNodeRef {
+            graph_id,
+            node: NodeId::new(0),
+        };
         assert_ne!(ref_to(first), ref_to(second));
     }
 
@@ -502,12 +513,12 @@ mod tests {
             let mut dummy = LNode::new("external", 0.0, 0.0, None);
             dummy.external_port_side = side;
             nested.layerless_nodes.push(dummy);
-            sides.push(graphs.nest(GraphId::ROOT, position, nested));
+            sides.push(graphs.nest(GraphId::ROOT, NodeId::new(position), nested));
         }
         let port = graphs
             .root_mut()
             .add_port(
-                1,
+                NodeId::new(1),
                 crate::graph::PortType::Output,
                 PortSide::Undefined,
                 Default::default(),
@@ -517,7 +528,7 @@ mod tests {
             let (graph, others) = graphs.split_mut(GraphId::ROOT);
             graph.layerless_nodes[1].ports[port.port].port_dummy = Some(GraphNodeRef {
                 graph_id: dummy_graph,
-                node: 0,
+                node: NodeId::new(0),
             });
             graph.layerless_nodes[1].ports[port.port].side = PortSide::Undefined;
             crate::p3order::set_port_side(graph, others, port);

@@ -6,7 +6,7 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/NodeMarginCalculator.java
 
 use super::cells::{self, CellLabel, CellNode};
-use crate::graph::{LGraph, LMargin, LPadding, LPort, PortId, PortSide};
+use crate::graph::{LGraph, LMargin, LPadding, LPort, NodeId, PortId, PortSide};
 use crate::options::{PortAlignment, PortConstraints};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -34,20 +34,20 @@ impl Rect {
 ///
 /// Source: `NodeLabelAndSizeCalculator.process(graph, node, true, false)`. ELK places the ports
 /// with the node size it has just computed, so the size comes first here too.
-pub fn calculate_label_and_node_sizes(graph: &mut LGraph, nodes: impl IntoIterator<Item = usize>) {
+pub fn calculate_label_and_node_sizes(graph: &mut LGraph, nodes: impl IntoIterator<Item = NodeId>) {
     for node in nodes {
         size_node_and_place_labels(graph, node);
         place_ports(graph, node);
     }
 }
 
-pub fn calculate_node_margins(graph: &mut LGraph, nodes: impl IntoIterator<Item = usize>) {
+pub fn calculate_node_margins(graph: &mut LGraph, nodes: impl IntoIterator<Item = NodeId>) {
     for node in nodes {
         process_node_margin(graph, node);
     }
 }
 
-fn place_ports(graph: &mut LGraph, node: usize) {
+fn place_ports(graph: &mut LGraph, node: NodeId) {
     match graph.layerless_nodes[node].port_constraints {
         PortConstraints::FixedPos => {
             place_fixed_pos_ports(graph, node, PortSide::North);
@@ -76,7 +76,7 @@ fn place_ports(graph: &mut LGraph, node: usize) {
 /// Ports `NodeLabelAndSizeUtilities.offsetSouthernPortsByNodeSize`. ELK places the southern ports
 /// as if the node had no height, because the height is not known until the horizontal ports are
 /// placed. This moves them down to the southern border.
-fn offset_southern_ports_by_node_size(graph: &mut LGraph, node: usize) {
+fn offset_southern_ports_by_node_size(graph: &mut LGraph, node: NodeId) {
     let height = graph.layerless_nodes[node].size.height;
     for port in ports_on_side(graph, node, PortSide::South) {
         graph.layerless_nodes[node].ports[port].position.y += height;
@@ -85,7 +85,7 @@ fn offset_southern_ports_by_node_size(graph: &mut LGraph, node: usize) {
 
 /// Runs ELK's cell system on one node: its size, when its size constraints are not fixed, and
 /// the positions of the labels it places.
-fn size_node_and_place_labels(graph: &mut LGraph, node: usize) {
+fn size_node_and_place_labels(graph: &mut LGraph, node: NodeId) {
     let horizontal_layout_mode = !graph.options.direction.is_vertical();
     let data = &graph.layerless_nodes[node];
     let cell_node = CellNode {
@@ -123,7 +123,7 @@ fn size_node_and_place_labels(graph: &mut LGraph, node: usize) {
     }
 }
 
-fn place_fixed_pos_ports(graph: &mut LGraph, node: usize, side: PortSide) {
+fn place_fixed_pos_ports(graph: &mut LGraph, node: NodeId, side: PortSide) {
     let size = graph.layerless_nodes[node].size;
     let port_indices = ports_on_side(graph, node, side);
     for port in port_indices {
@@ -141,7 +141,7 @@ fn place_fixed_pos_ports(graph: &mut LGraph, node: usize, side: PortSide) {
     }
 }
 
-fn place_fixed_ratio_ports(graph: &mut LGraph, node: usize, side: PortSide) {
+fn place_fixed_ratio_ports(graph: &mut LGraph, node: NodeId, side: PortSide) {
     let size = graph.layerless_nodes[node].size;
     let port_indices = ports_on_side(graph, node, side);
     for port in port_indices {
@@ -162,7 +162,7 @@ fn place_fixed_ratio_ports(graph: &mut LGraph, node: usize, side: PortSide) {
     }
 }
 
-fn place_free_ports(graph: &mut LGraph, node: usize, side: PortSide) {
+fn place_free_ports(graph: &mut LGraph, node: NodeId, side: PortSide) {
     let port_indices = ports_on_side(graph, node, side);
     if port_indices.is_empty() {
         return;
@@ -314,7 +314,7 @@ fn vertical_port_x(port: &LPort, node_width: f64) -> f64 {
     }
 }
 
-fn ports_on_side(graph: &LGraph, node: usize, side: PortSide) -> Vec<PortId> {
+fn ports_on_side(graph: &LGraph, node: NodeId, side: PortSide) -> Vec<PortId> {
     let mut ports = graph.layerless_nodes[node]
         .ports
         .iter_with_ids()
@@ -326,7 +326,7 @@ fn ports_on_side(graph: &LGraph, node: usize, side: PortSide) -> Vec<PortId> {
     ports
 }
 
-fn process_node_margin(graph: &mut LGraph, node: usize) {
+fn process_node_margin(graph: &mut LGraph, node: NodeId) {
     let position = graph.layerless_nodes[node].position;
     let size = graph.layerless_nodes[node].size;
     let mut bounds = Rect {
@@ -420,10 +420,10 @@ mod tests {
             node_label_placement: None,
         });
         graph.layerless_nodes.push(node);
-        graph.set_node_layer(0, 0);
+        graph.set_node_layer(NodeId::new(0), 0);
 
-        calculate_label_and_node_sizes(&mut graph, [0]);
-        calculate_node_margins(&mut graph, [0]);
+        calculate_label_and_node_sizes(&mut graph, [NodeId::new(0)]);
+        calculate_node_margins(&mut graph, [NodeId::new(0)]);
 
         assert_eq!(
             graph.layerless_nodes[0].labels[0].position,
@@ -447,7 +447,7 @@ mod tests {
         node.labels.push(node_label(30.0, 12.0));
         graph.layerless_nodes.push(node);
 
-        calculate_label_and_node_sizes(&mut graph, [0]);
+        calculate_label_and_node_sizes(&mut graph, [NodeId::new(0)]);
 
         assert_eq!(
             graph.layerless_nodes[0].labels[0].position,
@@ -471,7 +471,7 @@ mod tests {
         node.labels.push(node_label(12.0, 30.0));
         graph.layerless_nodes.push(node);
 
-        calculate_label_and_node_sizes(&mut graph, [0]);
+        calculate_label_and_node_sizes(&mut graph, [NodeId::new(0)]);
 
         assert_eq!(
             graph.layerless_nodes[0].labels[0].position,
@@ -496,7 +496,7 @@ mod tests {
             graph
                 .layerless_nodes
                 .push(LNode::new("A", 80.0, 40.0, None));
-            let node = 0;
+            let node = NodeId::new(0);
             graph.set_node_layer(node, 0);
             graph.layerless_nodes[node].port_constraints = constraints;
             let mut refs = Vec::new();
@@ -533,7 +533,7 @@ mod tests {
         graph
             .layerless_nodes
             .push(LNode::new("A", 80.0, 40.0, None));
-        let node = 0;
+        let node = NodeId::new(0);
         graph.set_node_layer(node, 0);
         let port = graph
             .add_port(
@@ -561,7 +561,7 @@ mod tests {
         graph
             .layerless_nodes
             .push(LNode::new("C", 69.578125, 54.0, None));
-        let node = 0;
+        let node = NodeId::new(0);
         graph.set_node_layer(node, 0);
 
         for _ in 0..5 {
@@ -597,7 +597,7 @@ mod tests {
         graph
             .layerless_nodes
             .push(LNode::new("A", 80.0, 70.0, None));
-        let node = 0;
+        let node = NodeId::new(0);
         graph.set_node_layer(node, 0);
 
         for id in ["bottom", "middle", "top"] {
@@ -627,7 +627,7 @@ mod tests {
     #[test]
     fn node_margin_calculation_includes_ports_and_port_labels() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
-        let node = graph.layerless_nodes.len();
+        let node = graph.next_node_id();
         graph
             .layerless_nodes
             .push(LNode::new("A", 80.0, 40.0, None));

@@ -7,7 +7,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::common::networksimplex::{NGraph, NetworkSimplex, NetworkSimplexError};
-use crate::graph::{LGraph, LayeredEdge};
+use crate::graph::{EdgeId, EdgeSlice, LGraph, LayeredEdge, NodeId};
 
 mod coffman_graham;
 #[cfg(test)]
@@ -39,20 +39,19 @@ type LayeringResult<T> = Result<T, LayeringError>;
 /// Snapshot adjacency in ELK port order; hidden constraint nodes are not layerless input.
 struct LayeringInput<'a> {
     graph: &'a LGraph,
-    nodes: Vec<usize>,
-    incoming: Vec<Vec<usize>>,
-    outgoing: Vec<Vec<usize>>,
+    nodes: Vec<NodeId>,
+    incoming: Vec<Vec<EdgeId>>,
+    outgoing: Vec<Vec<EdgeId>>,
 }
 
 impl<'a> LayeringInput<'a> {
     fn new(graph: &'a LGraph) -> Self {
         let nodes = graph
-            .layerless_nodes
-            .iter()
-            .enumerate()
-            .filter_map(|(index, node)| (!node.hidden).then_some(index))
+            .node_ids()
+            .filter(|&node| !graph.layerless_nodes[node].hidden)
             .collect();
-        let incoming = (0..graph.layerless_nodes.len())
+        let incoming = graph
+            .node_ids()
             .map(|node| {
                 graph
                     .node_incoming_edges(node)
@@ -61,7 +60,8 @@ impl<'a> LayeringInput<'a> {
                     .collect()
             })
             .collect();
-        let outgoing = (0..graph.layerless_nodes.len())
+        let outgoing = graph
+            .node_ids()
             .map(|node| {
                 graph
                     .node_outgoing_edges(node)
@@ -78,10 +78,10 @@ impl<'a> LayeringInput<'a> {
         }
     }
 
-    fn source(&self, edge: usize) -> usize {
+    fn source(&self, edge: EdgeId) -> NodeId {
         self.graph.edges[edge].source.node
     }
-    fn target(&self, edge: usize) -> usize {
+    fn target(&self, edge: EdgeId) -> NodeId {
         self.graph.edges[edge].target.node
     }
     fn len(&self) -> usize {
@@ -135,10 +135,8 @@ fn iteration_limit(thoroughness: usize, component_len: usize) -> usize {
 pub fn layer_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexError> {
     graph.clear_layers();
     let nodes = graph
-        .layerless_nodes
-        .iter()
-        .enumerate()
-        .filter_map(|(index, node)| (!node.hidden).then_some(index))
+        .node_ids()
+        .filter(|&node| !graph.layerless_nodes[node].hidden)
         .collect::<Vec<_>>();
     if nodes.is_empty() {
         return Ok(());
@@ -161,7 +159,7 @@ pub fn layer_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexErr
             let Some(l_node) = ngraph.nodes[n_node].origin else {
                 continue;
             };
-            graph.set_node_layer(l_node, ngraph.nodes[n_node].layer as usize);
+            graph.set_node_layer(NodeId::new(l_node), ngraph.nodes[n_node].layer as usize);
         }
 
         if connected_components.len() > 1 {
@@ -172,12 +170,12 @@ pub fn layer_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexErr
     Ok(())
 }
 
-fn connected_components(graph: &LGraph, nodes: &[usize]) -> Vec<Vec<usize>> {
+fn connected_components(graph: &LGraph, nodes: &[NodeId]) -> Vec<Vec<NodeId>> {
     let mut visited = vec![false; graph.layerless_nodes.len()];
-    let mut components: VecDeque<Vec<usize>> = VecDeque::new();
+    let mut components: VecDeque<Vec<NodeId>> = VecDeque::new();
 
     for node in nodes.iter().copied() {
-        if visited[node] {
+        if visited[node.index()] {
             continue;
         }
 
@@ -199,29 +197,29 @@ fn connected_components(graph: &LGraph, nodes: &[usize]) -> Vec<Vec<usize>> {
 
 fn connected_components_dfs(
     graph: &LGraph,
-    node: usize,
+    node: NodeId,
     visited: &mut [bool],
-    component: &mut Vec<usize>,
+    component: &mut Vec<NodeId>,
 ) {
-    visited[node] = true;
+    visited[node.index()] = true;
     component.push(node);
 
     for edge_index in graph.node_connected_edges(node) {
         let Some(opposite) = opposite_node(graph, node, edge_index) else {
             continue;
         };
-        if !visited[opposite] {
+        if !visited[opposite.index()] {
             connected_components_dfs(graph, opposite, visited, component);
         }
     }
 }
 
-fn initialize(graph: &LGraph, nodes: &[usize]) -> NGraph {
+fn initialize(graph: &LGraph, nodes: &[NodeId]) -> NGraph {
     let mut ngraph = NGraph::new();
     let mut node_map = HashMap::new();
 
     for l_node in nodes {
-        let n_node = ngraph.add_node(Some(*l_node));
+        let n_node = ngraph.add_node(Some(l_node.index()));
         node_map.insert(*l_node, n_node);
     }
 
@@ -239,7 +237,7 @@ fn initialize(graph: &LGraph, nodes: &[usize]) -> NGraph {
                 continue;
             };
             ngraph.add_edge(
-                Some(edge_index),
+                Some(edge_index.index()),
                 source,
                 target,
                 priority_shortness_weight(edge),
@@ -251,8 +249,8 @@ fn initialize(graph: &LGraph, nodes: &[usize]) -> NGraph {
     ngraph
 }
 
-fn opposite_node(graph: &LGraph, node: usize, edge_index: usize) -> Option<usize> {
-    let edge = graph.edges.get(edge_index)?;
+fn opposite_node(graph: &LGraph, node: NodeId, edge_index: EdgeId) -> Option<NodeId> {
+    let edge = graph.edges.get_edge(edge_index)?;
     if edge.source.node == node {
         Some(edge.target.node)
     } else if edge.target.node == node {

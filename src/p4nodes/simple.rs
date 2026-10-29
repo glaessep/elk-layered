@@ -71,7 +71,7 @@ fn layer_width(graph: &LGraph, layer_index: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::LMargin;
+    use crate::graph::{LMargin, NodeId};
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::options::{ElkDirection, LayeredOptions};
 
@@ -137,9 +137,9 @@ mod tests {
             ],
             vec![edge("A-C", "A", "C"), edge("B-C", "B", "C")],
         );
-        graph.set_node_layer(0, 0);
-        graph.set_node_layer(1, 0);
-        graph.set_node_layer(2, 1);
+        graph.set_node_layer(NodeId::new(0), 0);
+        graph.set_node_layer(NodeId::new(1), 0);
+        graph.set_node_layer(NodeId::new(2), 1);
 
         place_nodes_simple(&mut graph);
 
@@ -153,8 +153,8 @@ mod tests {
     #[test]
     fn simple_placer_respects_node_margins() {
         let mut graph = graph(vec![node("A", 80.0, 20.0), node("B", 80.0, 20.0)], vec![]);
-        graph.set_node_layer(0, 0);
-        graph.set_node_layer(1, 0);
+        graph.set_node_layer(NodeId::new(0), 0);
+        graph.set_node_layer(NodeId::new(1), 0);
         graph.layerless_nodes[0].margin = LMargin {
             top: 3.0,
             bottom: 7.0,
