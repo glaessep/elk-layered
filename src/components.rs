@@ -36,6 +36,21 @@ pub(crate) struct Component {
 
 /// The supplied graph has already passed GraphConfigurator. Component construction copies
 /// properties, not a new configuration or random seed.
+///
+/// What `split` changes, and what the caller owes:
+/// - The root graph in `graphs` keeps its node and edge lists. The components hold copies of them
+///   under new, component-local indices.
+/// - The graphs inside the root's nodes are shared, so they cannot be copied per component.
+///   `split` renumbers their references to the root in place (the origin of an external port
+///   dummy, the port dummies, the cross-hierarchy edges), so that they match the component that
+///   holds the node. [`combine`] renumbers them back.
+/// - `GraphParent.node` of those graphs is not renumbered. It keeps naming the node's index in
+///   the root, which the root still holds, and nothing reads it while components run: only
+///   compound preprocessing reads it, and that never runs after `split`. `combine` puts every
+///   original node back at its original index, so the value is right again afterwards.
+/// - After an error between `split` and the end of `combine`, the references of the nested graphs
+///   are half renumbered, and `graphs` is not valid. The caller drops it. The one caller,
+///   `execute_ported_processors`, hands the error up, and `layout` drops the graphs.
 pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Component>>> {
     let graph = graphs.root();
     if !graph.options.separate_connected_components

@@ -592,6 +592,10 @@ pub(crate) fn run_processors_until_phase(
 /// This is the library equivalent of `ElkLayered.layout(...)`: it uses the same assembled
 /// processor list as the compound runner and rejects unsupported processors before mutating
 /// the graph.
+///
+/// A zero seed and an unsupported processor fail before anything changes. After an error from a
+/// later step, `graphs` may be half changed, so drop it. An error between the component split
+/// and its combine, for one, leaves the references of the nested graphs half renumbered.
 pub fn execute_ported_processors(graphs: &mut GraphArena) -> PipelineResult<Vec<ProcessorKind>> {
     let mut executed = Vec::new();
     // The full runner promises to reject a zero seed and unsupported processors without mutating
