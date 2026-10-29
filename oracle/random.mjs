@@ -33,12 +33,21 @@
 // and each centre label sets `elk.edgeLabels.inline` with a chance of 0.6, so inline and plain
 // labels mix in one graph.
 //
+//   node random.mjs ../tests/elkjs/random-one-sided --one-sided && node record.mjs ../tests/elkjs/random-one-sided --drop-crashes
+//
+// With `--one-sided`, the generator is that of `--ports`, with its own seed and count, but every
+// graph sets `elk.layered.crossingMinimization.greedySwitch.type` to ONE_SIDED. A node with ports
+// draws its port constraints from none, FREE, FIXED_SIDE and FIXED_ORDER. FREE is written out
+// because #26 found its differences with FREE ports. elkjs crashes on some of these graphs;
+// `--drop-crashes` lists them in `dropped.txt`.
+//
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
 // a feature, and then write and record the whole corpus again.
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const USAGE = "usage: node random.mjs <directory> [--group-ends | --ports | --group-ports | --cross-ports | --inline-labels]";
+const USAGE =
+  "usage: node random.mjs <directory> [--group-ends | --ports | --group-ports | --cross-ports | --inline-labels | --one-sided]";
 const dir = process.argv[2];
 // A mode typed first would be read as the directory, and the script deletes the files of that
 // directory. So a directory that starts with `-` is refused, and so is any extra argument.
@@ -49,7 +58,7 @@ if (!dir || dir.startsWith("-") || process.argv.length > 4) {
 const mode = process.argv[3] ?? "";
 // A mistyped mode must not fall through to the default mode: that mode would delete the files of
 // the directory it was given.
-const MODES = ["", "--group-ends", "--ports", "--group-ports", "--cross-ports", "--inline-labels"];
+const MODES = ["", "--group-ends", "--ports", "--group-ports", "--cross-ports", "--inline-labels", "--one-sided"];
 if (!MODES.includes(mode)) {
   console.error(`unknown mode "${mode}"; use one of: ${MODES.slice(1).join(" ")}`);
   process.exit(2);
@@ -58,9 +67,10 @@ const groupEnds = mode === "--group-ends";
 const groupPorts = mode === "--group-ports";
 const crossPorts = mode === "--cross-ports";
 const inlineLabels = mode === "--inline-labels";
-const withPorts = mode === "--ports" || groupPorts || crossPorts;
-const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200, "--inline-labels": 150 }[mode] ?? 200;
-const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed, "--inline-labels": 0xaeed }[mode] ?? 0x5eed;
+const oneSided = mode === "--one-sided";
+const withPorts = mode === "--ports" || groupPorts || crossPorts || oneSided;
+const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200, "--inline-labels": 150, "--one-sided": 200 }[mode] ?? 200;
+const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed, "--inline-labels": 0xaeed, "--one-sided": 0xbeed }[mode] ?? 0x5eed;
 
 // mulberry32: a small generator with a fixed seed. Its numbers only pick the graphs, so any
 // generator with a fixed seed would do.
@@ -99,6 +109,7 @@ function graph() {
   const options = { "elk.algorithm": "layered" };
   const direction = rand.pick([null, "RIGHT", "LEFT", "DOWN", "UP"]);
   if (direction) options["elk.direction"] = direction;
+  if (oneSided) options["elk.layered.crossingMinimization.greedySwitch.type"] = "ONE_SIDED";
   const hierarchy = groupPorts
     ? rand.pick(["include", "include", "separate"])
     : withPorts
@@ -184,12 +195,14 @@ function graph() {
     for (const node of groupPorts ? [...leaves, ...groups] : leaves) {
       const flowSides = sidesOf(node);
       if (!rand.chance(0.6)) continue;
-      const constraint = rand.pick([null, "FIXED_SIDE", "FIXED_SIDE", "FIXED_ORDER"]);
+      const constraint = oneSided
+        ? rand.pick([null, "FREE", "FIXED_SIDE", "FIXED_ORDER"])
+        : rand.pick([null, "FIXED_SIDE", "FIXED_SIDE", "FIXED_ORDER"]);
       if (constraint) (node.layoutOptions ??= {})["elk.portConstraints"] = constraint;
       node.ports = [];
       for (let i = 0, n = rand.int(1, 4); i < n; i++) {
         const port = { id: `p${p++}`, width: rand.int(4, 10), height: rand.int(4, 10) };
-        if (constraint) port.layoutOptions = { "elk.port.side": rand.pick(flowSides) };
+        if (constraint && constraint !== "FREE") port.layoutOptions = { "elk.port.side": rand.pick(flowSides) };
         node.ports.push(port);
         parent.set(port.id, parent.get(node.id));
         ends.push(port.id);

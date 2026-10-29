@@ -16,7 +16,7 @@ pub(crate) struct FreeArea {
 }
 
 impl FreeArea {
-    fn new(start_position: f64, end_position: f64) -> Self {
+    pub(crate) fn new(start_position: f64, end_position: f64) -> Self {
         debug_assert!(end_position >= start_position);
         Self {
             start_position,
@@ -31,9 +31,9 @@ impl FreeArea {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct AreaRating {
-    dependencies: i32,
-    crossings: i32,
+pub(crate) struct AreaRating {
+    pub(crate) dependencies: i32,
+    pub(crate) crossings: i32,
 }
 
 pub fn split_segments(
@@ -244,7 +244,7 @@ fn choose_best_area_index(
     best_area_index
 }
 
-fn rate_area(
+pub(crate) fn rate_area(
     graph: &HyperEdgeGraph,
     segment: &HyperEdgeSegment,
     split_segment: &mut HyperEdgeSegment,
@@ -253,17 +253,18 @@ fn rate_area(
 ) -> AreaRating {
     let area_center = area.center();
 
+    // HyperEdgeSegmentSplitter.rateArea changes the connection lists only. It does not call
+    // recomputeExtent, so both segments keep the extent that simulateSplit gave them: the split
+    // segment spans its incoming coordinates, the partner its outgoing ones, without the centre.
     split_segment.outgoing_connection_coordinates.clear();
     split_segment
         .outgoing_connection_coordinates
         .push(area_center);
-    split_segment.recompute_extent();
 
     split_partner.incoming_connection_coordinates.clear();
     split_partner
         .incoming_connection_coordinates
         .push(area_center);
-    split_partner.recompute_extent();
 
     let mut rating = AreaRating::default();
 

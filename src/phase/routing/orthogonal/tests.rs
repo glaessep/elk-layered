@@ -13,6 +13,9 @@ use crate::phase::routing::orthogonal::hyper_edge_segment_dependency::{
     DependencyType, HyperEdgeGraph,
 };
 use crate::phase::routing::orthogonal::hyper_edge_segment_splitter::split_segments;
+use crate::phase::routing::orthogonal::hyper_edge_segment_splitter::{
+    AreaRating, FreeArea, rate_area,
+};
 use crate::phase::routing::orthogonal::orthogonal_routing_generator::{
     OrthogonalRoutingThresholds, break_critical_cycles, break_non_critical_cycles, route_edges,
     route_edges_west_to_east, topological_numbering,
@@ -34,6 +37,55 @@ fn junction(
     graph: &mut LGraph,
 ) {
     add_junction_point_if_necessary(graph, EdgeId::new(0), segment, position, vertical, created);
+}
+
+// Mutation: in `rate_area`, call `split_segment.recompute_extent()` after the area centre
+// joins its connections. A second mutation calls `split_partner.recompute_extent()` there.
+// Either one counts 3 crossings instead of 2.
+#[test]
+fn rating_an_area_keeps_the_extent_of_the_simulated_split() {
+    // The segment to split runs from 0 to 10 in and from 40 to 50 out. The segment that causes
+    // the split runs from 20 to 30, and the free area has its centre at 25.
+    let mut segment = HyperEdgeSegment::with_incoming_outgoing([0.0, 10.0], [40.0, 50.0]);
+    segment.split_by = Some(1);
+    let split_by = HyperEdgeSegment::with_incoming_outgoing([20.0], [30.0]);
+    let mut graph = HyperEdgeGraph::default();
+    graph.add_segment(segment.clone());
+    graph.add_segment(split_by);
+    let (mut split_segment, mut split_partner) = segment.simulate_split();
+
+    let rating = rate_area(
+        &graph,
+        &segment,
+        &mut split_segment,
+        &mut split_partner,
+        FreeArea::new(20.0, 30.0),
+    );
+
+    // The centre 25 crosses the causing segment once on each side. The split segment keeps
+    // its extent 0 to 10, so the causing segment's incoming 20 misses it, and the partner
+    // keeps 40 to 50, so the outgoing 30 misses it too.
+    assert_eq!(
+        rating,
+        AreaRating {
+            dependencies: 2,
+            crossings: 2,
+        }
+    );
+    assert_eq!(
+        (
+            split_segment.start_coordinate(),
+            split_segment.end_coordinate()
+        ),
+        (0.0, 10.0)
+    );
+    assert_eq!(
+        (
+            split_partner.start_coordinate(),
+            split_partner.end_coordinate()
+        ),
+        (40.0, 50.0)
+    );
 }
 
 // Mutation: use the `x` coordinate for a vertical connecting segment, or drop the strict
