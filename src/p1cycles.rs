@@ -679,6 +679,7 @@ mod tests {
         assert!(!graph.edges[EdgeId::new(0)].reversed);
     }
 
+    // Mutation: in `restore_reversed_edges`, skip the edges that are marked reversed.
     #[test]
     fn reversed_edge_restorer_restores_original_direction() {
         let mut graph = graph(

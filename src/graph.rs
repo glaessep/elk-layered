@@ -821,7 +821,9 @@ pub struct LayeredEdge {
 }
 
 impl LayeredEdge {
-    /// An edge between two ports with ELK's defaults. `LGraph::add_edge` attaches it to them.
+    /// An edge between two ports with no labels, no bend points and a thickness of 0. ELK's
+    /// default thickness is 1, as the importer sets it: a caller that wants it sets it on the
+    /// edge. `LGraph::add_edge` attaches the edge to its ports.
     pub fn new(id: impl Into<String>, source: PortRef, target: PortRef) -> Self {
         Self {
             id: id.into(),
