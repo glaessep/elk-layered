@@ -481,9 +481,8 @@ pub(crate) fn apply_layout(
         actual_size: actual_size(root),
     };
     // Level by level, like the graphs were collected, not in slot order.
-    let mut by_graph = by_graph.into_iter().map(Some).collect::<Vec<_>>();
     for &graph_id in &hierarchy.order {
-        let edges = by_graph[graph_id.index()].take().unwrap_or_default();
+        let edges = std::mem::take(&mut by_graph[graph_id.index()]);
         apply_graph_layout(&hierarchy, graph_id, edges, input, &mut result)?;
     }
     Ok(result)
