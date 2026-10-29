@@ -6,9 +6,10 @@
 //! hierarchy instead. A node holds the [`GraphId`] of the graph inside it, and a graph never
 //! leaves its slot.
 
-use super::{LGraph, NodeId};
 use std::collections::VecDeque;
 use std::ops::{Index, IndexMut};
+
+use super::{LGraph, NodeId};
 
 /// Names one graph of the hierarchy: the root or the graph inside a node.
 ///
@@ -542,7 +543,7 @@ mod tests {
                     node: NodeId::new(0),
                 });
             graph.layerless_nodes[NodeId::new(1)].ports[port.port].side = PortSide::Undefined;
-            crate::p3order::set_port_side(graph, others, port);
+            crate::intermediate::port_side_processor::set_port_side(graph, others, port);
             graph.layerless_nodes[NodeId::new(1)].ports[port.port].side
         };
 

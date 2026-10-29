@@ -31,7 +31,7 @@ use crate::options::{
     GreedySwitchType, HierarchyHandling, LayeredOptions, LayeringStrategy, NodePlacementStrategy,
     OrderingStrategy, WrappingStrategy,
 };
-use crate::p3order::sweep::CrossMinType;
+use crate::phase::ordering::CrossMinType;
 
 /// The five phases of ELK's layered algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

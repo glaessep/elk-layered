@@ -880,7 +880,10 @@ mod tests {
                     graph.set_node_layer(NodeId::new(node), node);
                 }
                 graph.options.direction = ElkDirection::Right;
-                crate::p3order::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
+                crate::intermediate::process_port_sides(
+                    &mut graph,
+                    crate::graph::OtherGraphs::none(),
+                );
                 let mut label = crate::graph::LLabel::new("bottom", 20.0, 10.0);
                 label.position.y = height + 7.0;
                 graph.layerless_nodes[NodeId::new(1)].labels.push(label);

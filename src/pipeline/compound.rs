@@ -15,7 +15,7 @@ use crate::graph::{
     GraphArena, GraphId, GraphParent, LGraph, LNodeKind, LPoint, LSize, NodeId, PortSide,
 };
 use crate::options::PortConstraints;
-use crate::p3order::sweep::minimize_crossings_layer_sweep_hierarchical_with_type;
+use crate::phase::ordering::minimize_crossings_layer_sweep_hierarchical_with_type;
 
 /// What ran on one graph of a compound run.
 #[derive(Debug, Clone, PartialEq, Eq)]

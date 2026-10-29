@@ -21,16 +21,14 @@ use crate::intermediate::{
     sort_end_labels, split_long_edges, switch_label_dummies,
 };
 use crate::intermediate::{postprocess_north_south_ports, preprocess_north_south_ports};
+use crate::intermediate::{process_port_sides, sort_by_input_model, sort_port_lists};
 use crate::options::{LayeringStrategy, PortConstraints};
-use crate::p3order::{
-    process_port_sides, sort_by_input_model, sort_port_lists,
-    sweep::{CrossMinType, minimize_crossings_layer_sweep_with_type},
-};
 use crate::phase::cycles::{
     break_cycles_depth_first, break_cycles_greedy, break_cycles_greedy_model_order,
     break_cycles_interactive, break_cycles_model_order,
 };
 use crate::phase::layering::{layer_network_simplex, layer_with_strategy};
+use crate::phase::ordering::{CrossMinType, minimize_crossings_layer_sweep_with_type};
 use crate::phase::placement::{
     place_nodes_brandes_koepf, place_nodes_network_simplex, place_nodes_simple,
 };

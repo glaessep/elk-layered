@@ -4,5 +4,6 @@
 
 pub(crate) mod cycles;
 pub(crate) mod layering;
+pub(crate) mod ordering;
 pub(crate) mod placement;
 pub(crate) mod routing;

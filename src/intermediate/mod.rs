@@ -7,6 +7,7 @@ pub(crate) mod end_label_postprocessor;
 pub(crate) mod end_label_preprocessor;
 pub(crate) mod end_label_sorter;
 pub(crate) mod graph_transformer;
+pub(crate) mod greedyswitch;
 pub(crate) mod hierarchical_node_resizing_processor;
 pub(crate) mod hierarchical_port_constraint_processor;
 pub(crate) mod hierarchical_port_dummy_size_processor;
@@ -33,7 +34,13 @@ pub(crate) mod north_south_port_postprocessor;
 pub(crate) mod north_south_port_preprocessor;
 #[cfg(test)]
 mod north_south_port_tests;
+pub(crate) mod port_list_sorter;
+#[cfg(test)]
+mod port_order_tests;
+pub(crate) mod port_side_processor;
+pub(crate) mod preserveorder;
 pub(crate) mod reversed_edge_restorer;
+pub(crate) mod sort_by_input_model_processor;
 #[cfg(test)]
 mod tests;
 
@@ -63,7 +70,10 @@ pub use long_edge_joiner::join_long_edges;
 pub use long_edge_splitter::split_long_edges;
 pub use north_south_port_postprocessor::postprocess_north_south_ports;
 pub use north_south_port_preprocessor::preprocess_north_south_ports;
+pub use port_list_sorter::sort_port_lists;
+pub use port_side_processor::process_port_sides;
 pub use reversed_edge_restorer::restore_reversed_edges;
+pub use sort_by_input_model_processor::sort_by_input_model;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 // Each variant names the edge that breaks a layer constraint, so all end in `Edge`.

@@ -47,7 +47,6 @@ mod intermediate;
 mod layout;
 mod layout_options;
 mod options;
-mod p3order;
 mod phase;
 mod pipeline;
 mod random;

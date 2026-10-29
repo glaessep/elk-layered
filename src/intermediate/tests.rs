@@ -855,7 +855,7 @@ fn end_label_preprocessor_moves_head_labels_to_port_cell_and_expands_margin() {
     let mut graph = graph(vec![node("A"), node("B")], vec![labelled]);
 
     layer_network_simplex(&mut graph).unwrap();
-    crate::p3order::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
+    crate::intermediate::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
     crate::intermediate::calculate_label_and_node_sizes(&mut graph);
     crate::intermediate::calculate_innermost_node_margins(&mut graph);
     select_label_sides(&mut graph);
@@ -889,7 +889,7 @@ fn smart_label_sides_count_a_port_whose_edges_carry_no_end_label() {
     graph.options.edge_label_side_selection = EdgeLabelSideSelection::SmartDown;
 
     layer_network_simplex(&mut graph).unwrap();
-    crate::p3order::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
+    crate::intermediate::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
     select_label_sides(&mut graph);
 
     // A has one port per edge, and both sit on the same side. ELK pairs them up: the first
