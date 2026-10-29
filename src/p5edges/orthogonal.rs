@@ -1018,17 +1018,18 @@ fn rate_area(
 ) -> AreaRating {
     let area_center = area.center();
 
+    // HyperEdgeSegmentSplitter.rateArea changes the connection lists only. It does not call
+    // recomputeExtent, so both segments keep the extent that simulateSplit gave them: the split
+    // segment spans its incoming coordinates, the partner its outgoing ones, without the centre.
     split_segment.outgoing_connection_coordinates.clear();
     split_segment
         .outgoing_connection_coordinates
         .push(area_center);
-    split_segment.recompute_extent();
 
     split_partner.incoming_connection_coordinates.clear();
     split_partner
         .incoming_connection_coordinates
         .push(area_center);
-    split_partner.recompute_extent();
 
     let mut rating = AreaRating::default();
 
