@@ -12,7 +12,7 @@ fn a_float_keeps_every_bit_of_its_double() {
     assert!(float_value(f64::NAN).is_nan());
 }
 
-// Mutation: round with `(value + 0.5).floor()`.
+// Mutation: round with `(value + 0.5).floor()`. A second mutation drops the sign of a zero.
 #[test]
 fn math_round_rounds_like_javascript() {
     assert_eq!(math_round(2.5), 3.0);
@@ -20,6 +20,11 @@ fn math_round_rounds_like_javascript() {
     assert_eq!(math_round(-2.6), -3.0);
     assert_eq!(math_round(1.4), 1.0);
     assert_eq!(math_round(0.0), 0.0);
+    // A zero keeps the sign of the input, as in JavaScript: -0.4 and -0.5 round to -0.
+    for value in [-0.4, -0.5, -0.0] {
+        assert_eq!(math_round(value).to_bits(), (-0.0_f64).to_bits(), "{value}");
+    }
+    assert_eq!(math_round(0.4).to_bits(), 0.0_f64.to_bits());
     // `(x + 0.5).floor()` gives 1 here: the sum rounds up to 1.0.
     assert_eq!(math_round(0.499_999_999_999_999_94), 0.0);
     // Above 2^52 every double is an integer. The sum with 0.5 rounds to the even neighbour.
@@ -99,6 +104,7 @@ fn a_linked_set_keeps_the_order_values_were_first_added() {
     set.extend([9, 2, 1]);
     assert!(set.contains(&9));
     assert!(!set.contains(&3));
+    assert_eq!(set.to_vec(), vec![5, 2, 9, 1]);
     assert_eq!(set.into_iter().collect::<Vec<_>>(), vec![5, 2, 9, 1]);
     assert_eq!(LinkedSet::<u8>::default().into_iter().count(), 0);
 }

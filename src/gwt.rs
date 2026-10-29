@@ -35,10 +35,16 @@ pub(crate) fn float_value(value: f64) -> f64 {
 /// integer itself.
 pub(crate) fn math_round(value: f64) -> f64 {
     let floor = value.floor();
-    if value - floor >= 0.5 {
+    let rounded = if value - floor >= 0.5 {
         floor + 1.0
     } else {
         floor
+    };
+    // JavaScript rounds -0.5 up to -0 and keeps the sign of a zero.
+    if rounded == 0.0 {
+        0.0_f64.copysign(value)
+    } else {
+        rounded
     }
 }
 
@@ -201,6 +207,11 @@ impl<T: Copy + Eq + std::hash::Hash> LinkedSet<T> {
             self.order.push(value);
         }
         added
+    }
+
+    /// The elements in the order they were first added, without the lookup table.
+    pub(crate) fn to_vec(&self) -> Vec<T> {
+        self.order.clone()
     }
 
     /// Whether the set holds `value`.

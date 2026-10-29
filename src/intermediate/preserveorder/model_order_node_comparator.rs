@@ -180,8 +180,8 @@ pub(crate) fn update_bigger_and_smaller_associations<T>(
     smaller_than.entry(smaller).or_default();
 
     // The sets iterate as elkjs's do, in insertion order: see `crate::gwt::LinkedSet`.
-    let smaller_bigger_than = bigger_than[&smaller].clone();
-    let bigger_smaller_than = smaller_than[&bigger].clone();
+    let smaller_bigger_than = bigger_than[&smaller].to_vec();
+    let bigger_smaller_than = smaller_than[&bigger].to_vec();
 
     bigger_than.get_mut(&bigger).unwrap().insert(smaller);
     smaller_than.get_mut(&smaller).unwrap().insert(bigger);
@@ -189,7 +189,7 @@ pub(crate) fn update_bigger_and_smaller_associations<T>(
     for very_small in smaller_bigger_than {
         bigger_than.get_mut(&bigger).unwrap().insert(very_small);
         smaller_than.entry(very_small).or_default().insert(bigger);
-        let bigger_smaller_than = smaller_than[&bigger].clone();
+        let bigger_smaller_than = smaller_than[&bigger].to_vec();
         smaller_than
             .get_mut(&very_small)
             .unwrap()
@@ -199,7 +199,7 @@ pub(crate) fn update_bigger_and_smaller_associations<T>(
     for very_big in bigger_smaller_than {
         smaller_than.get_mut(&smaller).unwrap().insert(very_big);
         bigger_than.entry(very_big).or_default().insert(smaller);
-        let smaller_bigger_than = bigger_than[&smaller].clone();
+        let smaller_bigger_than = bigger_than[&smaller].to_vec();
         bigger_than
             .get_mut(&very_big)
             .unwrap()

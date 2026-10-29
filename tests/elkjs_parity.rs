@@ -412,10 +412,10 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 41. In the segment code of src/compound.rs, set the flag when the source port already has an
 //    edge, as the compound preprocessor used to: 2 cases,
 //    hierarchy-edge-in-and-out-at-one-port and random-group-ports/r092.
-// 42. In `GraphInfoHolder::new` (src/phase/ordering/graph_info_holder.rs), the port distributor
-//    and the heuristic are made once and serve every run. Making new ones for each run broke 3
-//    cases, free-port-in-and-out-between-separate-layers and its two seed variants, when the flat
-//    sweep still had its own copy; this entry was not run again after the merge into one sweep.
+// 42. In `HierarchySweep::compare_different_randomized_layouts`
+//    (src/phase/ordering/layer_sweep_crossing_minimizer.rs), give each run a new port distributor
+//    and heuristic instead of the ones `GraphInfoHolder::new` makes once for all runs: 3 cases,
+//    free-port-in-and-out-between-separate-layers and its two seed variants.
 // 43. In `BinaryIndexedTree::rank` (src/phase/ordering/counting/binary_indexed_tree.rs), clamp the index to the last one
 //    instead of giving `None`: 1 case, hierarchy-count-of-crossings-is-nan, and
 //    random-group-ports/r122.

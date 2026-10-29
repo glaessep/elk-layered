@@ -29,9 +29,12 @@ fn process_east_west_hierarchical_port_constraints_for_layer(
     layer_index: usize,
 ) {
     let mut nodes = graph.layers()[layer_index].nodes().to_vec();
-    nodes.sort_by(|left, right| {
-        let left_node = &graph.layerless_nodes[*left];
-        let right_node = &graph.layerless_nodes[*right];
+    // ELK's comparator answers "less" for any node against one without an external port, both
+    // ways round, so it is no total order: see `crate::gwt::sort`. Only two regular nodes compare
+    // inconsistently, so Rust's sort gives the dummies the same order, but it may panic on it.
+    crate::gwt::sort(&mut nodes, |left, right| {
+        let left_node = &graph.layerless_nodes[left];
+        let right_node = &graph.layerless_nodes[right];
 
         match (left_node.external_port(), right_node.external_port()) {
             (_, None) => std::cmp::Ordering::Less,
