@@ -59,7 +59,7 @@ impl GraphArena {
     }
 
     /// Takes a graph into the arena and returns its id. The graph's own `id` is overwritten.
-    pub fn add(&mut self, mut graph: LGraph) -> GraphId {
+    fn add(&mut self, mut graph: LGraph) -> GraphId {
         let id = GraphId::new(self.graphs.len());
         graph.id = id;
         self.graphs.push(graph);
@@ -70,8 +70,15 @@ impl GraphArena {
     ///
     /// # Panics
     ///
-    /// When `parent` has no such node.
+    /// When `parent` has no such node. In a debug build, also when that node already holds a
+    /// graph: a node owns at most one, and a second would orphan the first.
     pub fn nest(&mut self, parent: GraphId, node: NodeId, graph: LGraph) -> GraphId {
+        debug_assert!(
+            self.graphs[parent.0].layerless_nodes[node]
+                .nested_graph
+                .is_none(),
+            "a node owns at most one nested graph"
+        );
         let id = self.add(graph);
         self.graphs[id.0].parent = Some(GraphParent {
             graph: parent,
@@ -86,6 +93,13 @@ impl GraphArena {
         self.graphs.len()
     }
 
+    /// The graph `id` names, or `None` when this arena has no such graph. Use it for an id that
+    /// came out of the data being processed, such as a record of a cross-hierarchy edge; indexing
+    /// with a bad id panics.
+    pub fn get(&self, id: GraphId) -> Option<&LGraph> {
+        self.graphs.get(id.0)
+    }
+
     /// The root graph.
     pub fn root(&self) -> &LGraph {
         &self.graphs[GraphId::ROOT.0]
@@ -94,12 +108,6 @@ impl GraphArena {
     /// The root graph, mutable.
     pub fn root_mut(&mut self) -> &mut LGraph {
         &mut self.graphs[GraphId::ROOT.0]
-    }
-
-    /// Gives the root graph back and drops the rest.
-    #[cfg(test)]
-    pub fn into_root(mut self) -> LGraph {
-        self.graphs.swap_remove(GraphId::ROOT.0)
     }
 
     /// Every graph in slot order. Use it only where the order cannot reach a result.
@@ -315,6 +323,25 @@ mod tests {
         graph
     }
 
+    // Mutation: leave out the `debug_assert!` in `nest`. A second graph then replaces the first
+    // one in the node, and the first one stays in the arena with no node that owns it.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "a node owns at most one nested graph")]
+    fn nesting_a_second_graph_in_the_same_node_panics() {
+        let mut graphs = GraphArena::new(graph("root", 1));
+        graphs.nest(
+            GraphId::ROOT,
+            crate::graph::NodeId::new(0),
+            graph("first", 0),
+        );
+        graphs.nest(
+            GraphId::ROOT,
+            crate::graph::NodeId::new(0),
+            graph("second", 0),
+        );
+    }
+
     /// root (2 nodes) -> a (in node 0, 2 nodes) -> a0 (in a's node 0), a1 (in a's node 1)
     ///                -> b (in node 1, 1 node)  -> b0 (in b's node 0)
     fn branched() -> (GraphArena, [GraphId; 5]) {
@@ -344,6 +371,16 @@ mod tests {
             assert_eq!(graphs[id].id, id, "{}", graphs[id].name);
         }
         assert_eq!(graphs[a0].name, "a0");
+    }
+
+    // Mutation: make `get` index the graphs (`Some(&self.graphs[id.0])`). An id past the last
+    // graph then panics instead of giving `None`.
+    #[test]
+    fn get_gives_none_for_an_id_the_arena_does_not_hold() {
+        let (graphs, [a, ..]) = branched();
+
+        assert_eq!(graphs.get(a).map(|graph| graph.name.as_str()), Some("a"));
+        assert!(graphs.get(GraphId::new(graphs.len())).is_none());
     }
 
     // Mutation: let `add` give the new graph the id of the previous one.

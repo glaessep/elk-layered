@@ -39,6 +39,21 @@ pub(crate) struct Component {
 
 /// The supplied graph has already passed GraphConfigurator. Component construction copies
 /// properties, not a new configuration or random seed.
+///
+/// What `split` changes, and what the caller owes:
+/// - The root graph in `graphs` keeps its node and edge lists. The components hold copies of them
+///   under new, component-local indices.
+/// - The graphs inside the root's nodes are shared, so they cannot be copied per component.
+///   `split` renumbers their references to the root in place (the origin of an external port
+///   dummy, the port dummies, the cross-hierarchy edges), so that they match the component that
+///   holds the node. [`combine`] renumbers them back.
+/// - `GraphParent.node` of those graphs is not renumbered. It keeps naming the node's index in
+///   the root, which the root still holds, and nothing reads it while components run: only
+///   compound preprocessing reads it, and that never runs after `split`. `combine` puts every
+///   original node back at its original index, so the value is right again afterwards.
+/// - After an error between `split` and the end of `combine`, the references of the nested graphs
+///   are half renumbered, and `graphs` is not valid. The caller drops it. The one caller,
+///   `execute_ported_processors`, hands the error up, and `layout` drops the graphs.
 pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Component>>> {
     let graph = graphs.root();
     if !graph.options.separate_connected_components
@@ -715,5 +730,150 @@ mod tests {
                 .map(|dummy| dummy.node),
             Some(NodeId::new(1))
         );
+    }
+
+    fn edge_between(id: &str, source: PortRef, target: PortRef) -> LayeredEdge {
+        LayeredEdge {
+            id: id.to_string(),
+            source,
+            target,
+            source_node_id: String::new(),
+            target_node_id: String::new(),
+            labels: Vec::new(),
+            minlen: 1,
+            reversed: false,
+            bend_points: Vec::new(),
+            junction_points: Vec::new(),
+            model_order: None,
+            priority_direction: 0,
+            priority_shortness: 0,
+            priority_straightness: 0,
+            thickness: 1.0,
+            original_opposite_port: None,
+            compound_segment: None,
+        }
+    }
+
+    // Mutation: leave out the `remap_nested_references` call in `split`. The nested graph then
+    // keeps the indices of the whole graph while its component has smaller ones. Leave out the
+    // call in `combine`: the nested graph keeps the component's indices after the nodes are back
+    // where they were.
+    #[test]
+    fn a_graph_inside_a_node_follows_the_node_through_split_and_combine() {
+        use crate::graph::{CompoundEdgeSegment, CrossHierarchyEdge, GraphPortRef};
+
+        let mut graph = LGraph::new("g", LayeredOptions::default());
+        for id in ["a", "b", "holder", "c"] {
+            graph.layerless_nodes.push(LNode::new(id, 10.0, 10.0, None));
+        }
+        // The first component is nodes 0 and 1 with edge 0. The second is nodes 2 and 3 with
+        // edge 1, so everything in it moves down: node 2 to 0, node 3 to 1, edge 1 to 0.
+        let a_out = graph
+            .add_port(
+                crate::graph::NodeId::new(0),
+                PortType::Output,
+                PortSide::East,
+                LPoint::default(),
+            )
+            .unwrap();
+        let b_in = graph
+            .add_port(
+                crate::graph::NodeId::new(1),
+                PortType::Input,
+                PortSide::West,
+                LPoint::default(),
+            )
+            .unwrap();
+        graph.add_edge(edge_between("e0", a_out, b_in)).unwrap();
+        let holder_out = graph
+            .add_port(
+                crate::graph::NodeId::new(2),
+                PortType::Output,
+                PortSide::East,
+                LPoint::default(),
+            )
+            .unwrap();
+        let c_in = graph
+            .add_port(
+                crate::graph::NodeId::new(3),
+                PortType::Input,
+                PortSide::West,
+                LPoint::default(),
+            )
+            .unwrap();
+        graph
+            .add_edge(edge_between("e1", holder_out, c_in))
+            .unwrap();
+
+        let mut inside = LGraph::new("inside", LayeredOptions::default());
+        inside
+            .layerless_nodes
+            .push(LNode::new("dummy", 1.0, 1.0, None));
+        let port = inside
+            .add_port(
+                crate::graph::NodeId::new(0),
+                PortType::Output,
+                PortSide::East,
+                LPoint::default(),
+            )
+            .unwrap();
+        // The dummy stands for the port of `holder`, and holds the dummy made for `c`'s port.
+        inside.layerless_nodes[0].origin_port = Some(GraphPortRef {
+            graph_id: GraphId::ROOT,
+            port: holder_out,
+        });
+        inside.layerless_nodes[0].ports[port.port].port_dummy = Some(GraphNodeRef {
+            graph_id: GraphId::ROOT,
+            node: crate::graph::NodeId::new(3),
+        });
+        let mut graphs = GraphArena::new(graph);
+        let inside_id = graphs.nest(GraphId::ROOT, crate::graph::NodeId::new(2), inside);
+        let record = |graph_id, edge| CrossHierarchyEdge {
+            original_edge_id: "e1".to_string(),
+            original_model_order: None,
+            graph_id,
+            edge,
+            segment: CompoundEdgeSegment::Output { depth: 0 },
+        };
+        graphs[inside_id].cross_hierarchy_edges = vec![
+            // A record of the root's edge 1, and one of the nested graph's own edge 5, which
+            // belongs to no component.
+            record(GraphId::ROOT, crate::graph::EdgeId::new(1)),
+            record(inside_id, crate::graph::EdgeId::new(5)),
+        ];
+        let before = graphs[inside_id].clone();
+
+        let components = split(&mut graphs).unwrap().unwrap();
+
+        assert_eq!(components.len(), 2);
+        let between = &graphs[inside_id];
+        assert_eq!(
+            between.layerless_nodes[0].origin_port.map(|o| o.port.node),
+            Some(crate::graph::NodeId::new(0)),
+            "the origin is node 0 of its component"
+        );
+        assert_eq!(
+            between.layerless_nodes[0].ports[port.port]
+                .port_dummy
+                .map(|dummy| dummy.node),
+            Some(crate::graph::NodeId::new(1))
+        );
+        assert_eq!(
+            between
+                .cross_hierarchy_edges
+                .iter()
+                .map(|record| (record.graph_id, record.edge))
+                .collect::<Vec<_>>(),
+            [
+                (GraphId::ROOT, crate::graph::EdgeId::new(0)),
+                (inside_id, crate::graph::EdgeId::new(5))
+            ]
+        );
+        // The root still holds the node, so the parent link keeps its index.
+        assert_eq!(between.parent, before.parent);
+
+        combine(&mut graphs, components).unwrap();
+
+        assert_eq!(graphs[inside_id], before);
     }
 }

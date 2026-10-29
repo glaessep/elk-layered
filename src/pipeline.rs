@@ -215,6 +215,7 @@ impl ProcessorKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphExecution {
+    /// The graph the processors run on.
     pub graph: GraphId,
     /// The caller's id of the graph, as `LGraph::name` keeps it.
     pub graph_name: String,
@@ -225,9 +226,6 @@ pub struct GraphExecution {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GraphAlgorithm {
-    graph: GraphId,
-    /// The graph and node this graph lies in. `None` for the root.
-    parent: Option<GraphParent>,
     next_processor: usize,
     processors: Vec<ProcessorSlot>,
     execution: GraphExecution,
@@ -265,8 +263,6 @@ impl CompoundRun {
 
 fn graph_algorithm(graph: &LGraph) -> GraphAlgorithm {
     GraphAlgorithm {
-        graph: graph.id,
-        parent: graph.parent,
         next_processor: 0,
         processors: assemble_processors_for_graph(graph),
         execution: GraphExecution {
@@ -539,23 +535,19 @@ fn validate_ported_graph_processors(graphs: &GraphArena) -> PipelineResult<()> {
     Ok(())
 }
 
-/// Run the assembled processors of a flat graph up to and including the first one `is_last`
+/// Run the assembled processors of the root graph up to and including the first one `is_last`
 /// accepts.
 ///
 /// Tests use this to stop at a phase boundary with exactly the state the full runner has there:
 /// the configurator, the edge and layer constraint steps and every other scheduled processor.
+/// The graphs inside nodes stay as they are, in `graphs`.
 #[cfg(test)]
 fn run_processors_until_slot(
-    graph: &mut LGraph,
+    graphs: &mut GraphArena,
     is_last: impl Fn(&ProcessorSlot) -> bool,
 ) -> PipelineResult<Vec<ProcessorKind>> {
-    // The graph is flat: it has no graph inside a node, so an arena of it alone is enough.
-    let mut graphs = GraphArena::new(std::mem::replace(
-        graph,
-        LGraph::new("", LayeredOptions::default()),
-    ));
     let mut executed = Vec::new();
-    let result = prepare_single_graph_processors(&mut graphs).and_then(|processors| {
+    prepare_single_graph_processors(graphs).and_then(|processors| {
         for slot in processors {
             execute_processor(graphs.root_mut(), OtherGraphs::none(), slot.kind)?;
             executed.push(slot.kind);
@@ -564,15 +556,14 @@ fn run_processors_until_slot(
             }
         }
         Ok(())
-    });
-    *graph = graphs.into_root();
-    result.map(|()| executed)
+    })?;
+    Ok(executed)
 }
 
 /// Run the assembled processors up to and including `target`.
 #[cfg(test)]
 pub(crate) fn run_processors_until(
-    graph: &mut LGraph,
+    graph: &mut GraphArena,
     target: ProcessorKind,
 ) -> PipelineResult<Vec<ProcessorKind>> {
     run_processors_until_slot(graph, |slot| slot.kind == target)
@@ -581,7 +572,7 @@ pub(crate) fn run_processors_until(
 /// Run the assembled processors up to and including the one that carries `phase`.
 #[cfg(test)]
 pub(crate) fn run_processors_until_phase(
-    graph: &mut LGraph,
+    graph: &mut GraphArena,
     phase: LayeredPhase,
 ) -> PipelineResult<Vec<ProcessorKind>> {
     run_processors_until_slot(graph, |slot| slot.phase == Some(phase))
@@ -592,6 +583,10 @@ pub(crate) fn run_processors_until_phase(
 /// This is the library equivalent of `ElkLayered.layout(...)`: it uses the same assembled
 /// processor list as the compound runner and rejects unsupported processors before mutating
 /// the graph.
+///
+/// A zero seed and an unsupported processor fail before anything changes. After an error from a
+/// later step, `graphs` may be half changed, so drop it. An error between the component split
+/// and its combine, for one, leaves the references of the nested graphs half renumbered.
 pub fn execute_ported_processors(graphs: &mut GraphArena) -> PipelineResult<Vec<ProcessorKind>> {
     let mut executed = Vec::new();
     // The full runner promises to reject a zero seed and unsupported processors without mutating
@@ -707,7 +702,7 @@ fn execute_compound_algorithm_until_pause(
     graphs: &mut GraphArena,
     algorithm: &mut GraphAlgorithm,
 ) -> PipelineResult<()> {
-    let is_root = algorithm.parent.is_none();
+    let is_root = algorithm.execution.parent.is_none();
     while algorithm.next_processor < algorithm.processors.len() {
         let kind = algorithm.processors[algorithm.next_processor].kind;
         algorithm.next_processor += 1;
@@ -720,14 +715,14 @@ fn execute_compound_algorithm_until_pause(
         if hierarchy_aware {
             execute_hierarchy_aware_processor(graphs, kind)?;
         } else {
-            let (graph, others) = graphs.split_mut(algorithm.graph);
+            let (graph, others) = graphs.split_mut(algorithm.execution.graph);
             execute_processor(graph, others, kind)?;
         }
-        let size = actual_graph_size(&graphs[algorithm.graph]);
+        let size = actual_graph_size(&graphs[algorithm.execution.graph]);
         if kind == ProcessorKind::HierarchicalNodeResizer
-            && let Some(parent) = algorithm.parent
+            && let Some(parent) = algorithm.execution.parent
         {
-            let (nested, parent_graph) = graphs.pair_mut(algorithm.graph, parent.graph);
+            let (nested, parent_graph) = graphs.pair_mut(algorithm.execution.graph, parent.graph);
             transfer_nested_graph_layout_to_parent_node(nested, parent_graph, parent.node, size);
         }
         algorithm.execution.processors.push(kind);
@@ -1632,6 +1627,36 @@ mod tests {
         }
     }
 
+    // Mutation: move only the root into a new one-graph arena inside `run_processors_until_slot`,
+    // and put it back afterwards. The graph inside `group` is then dropped from the arena the
+    // test passes in.
+    #[test]
+    fn running_processors_until_a_phase_keeps_the_graphs_inside_nodes() {
+        let mut group = node("group");
+        group.hierarchy_handling = Some(crate::options::HierarchyHandling::IncludeChildren);
+        let mut child = node("child");
+        child.parent = Some("group".to_string());
+        let input = ElkInputGraph {
+            id: "root".to_string(),
+            options: LayeredOptions {
+                hierarchy_handling: crate::options::HierarchyHandling::IncludeChildren,
+                ..p3_options()
+            },
+            nodes: vec![group, child],
+            edges: Vec::new(),
+        };
+        let mut graphs = import_graph(&input).unwrap();
+        assert_eq!(graphs.len(), 2);
+
+        run_processors_until_phase(&mut graphs, LayeredPhase::P1CycleBreaking).unwrap();
+
+        assert_eq!(graphs.len(), 2);
+        let nested = graphs.root().layerless_nodes[0]
+            .nested_graph
+            .expect("group still holds its graph");
+        assert_eq!(graphs[nested].layerless_nodes.len(), 1);
+    }
+
     fn p3_options() -> LayeredOptions {
         LayeredOptions {
             direction: ElkDirection::Right,
@@ -1697,6 +1722,8 @@ mod tests {
         graphs
     }
 
+    // Mutation: give each `GraphExecution` a `parent` of `None` in `graph_algorithm`. The nested graphs
+    // then have no parent link.
     #[test]
     fn compound_run_holds_one_algorithm_per_graph_and_a_parent_for_each_nested_one() {
         for graph_count in [8usize, 16, 32, 64, 128] {
@@ -1705,15 +1732,17 @@ mod tests {
             let parent_links = run
                 .algorithms
                 .iter()
-                .filter(|algorithm| algorithm.parent.is_some())
+                .filter(|algorithm| algorithm.execution.parent.is_some())
                 .count();
 
             assert_eq!(run.algorithms.len(), graph_count);
             assert_eq!(parent_links, graph_count - 1);
-            assert!(run.algorithms[0].parent.is_none());
+            assert!(run.algorithms[0].execution.parent.is_none());
         }
     }
 
+    // Mutation: build the run in pre-order (`GraphArena::preorder`) instead of ELK's discovery
+    // order. The grandchildren then come in another place.
     #[test]
     fn compound_run_preserves_official_reverse_discovery_order() {
         let graphs = branched_compound_graph();
@@ -1737,6 +1766,8 @@ mod tests {
         );
     }
 
+    // Mutation: drop the `.rev()` in `CompoundRun::into_executions`. The results then come in
+    // discovery order, root first.
     #[test]
     fn public_compound_execution_reports_official_reverse_discovery_order() {
         let mut root = branched_compound_graph();
@@ -1860,6 +1891,8 @@ mod tests {
         }
     }
 
+    // Mutation: check only the root in `validate_ported_graph_processors`. The child's processor
+    // is then found after the configurator has changed the graph.
     #[test]
     fn compound_full_runner_rejects_child_unported_processor_before_mutation() {
         let mut graph = deep_compound_chain(2);
@@ -1892,6 +1925,8 @@ mod tests {
         graph
     }
 
+    // Mutation: leave out `check_random_seeds` in `execute_ported_processors`. The configurator then
+    // rewrites the root before it reaches the child with seed 0.
     #[test]
     fn full_runner_rejects_nested_zero_seed_without_changing_the_graph() {
         let mut graph = root_to_rewrite_with_zero_seed_child();
@@ -1906,6 +1941,8 @@ mod tests {
         assert_eq!(graph, before);
     }
 
+    // Mutation: leave out `check_random_seeds` in `execute_ported_compound_processors`. The
+    // configurator then rewrites the root before it reaches the child with seed 0.
     #[test]
     fn compound_full_runner_rejects_nested_zero_seed_without_changing_the_graph() {
         let mut graph = root_to_rewrite_with_zero_seed_child();
@@ -1944,6 +1981,8 @@ mod tests {
         );
     }
 
+    // Mutation: check only the root in `validate_ported_graph_processors`. The processor of the
+    // deepest graph is then never found.
     #[test]
     fn compound_ported_processor_preflight_is_small_stack_safe() {
         const GRAPH_COUNT: usize = 4_096;
@@ -3577,6 +3616,8 @@ mod tests {
         );
     }
 
+    // Mutation: replace `graph.parent.is_none()` with `true` in the rule for the hierarchical greedy
+    // switch. A graph inside a node then follows the root's rule.
     #[test]
     fn graph_aware_greedy_switch_matches_graph_configurator_activation_rules() {
         let mut options = LayeredOptions {

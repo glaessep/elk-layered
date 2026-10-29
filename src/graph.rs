@@ -411,6 +411,7 @@ pub struct HierarchyEdge {
 pub struct HierarchyStep {
     /// The caller's id of the node.
     pub node_id: String,
+    /// The graph inside the node.
     pub graph: GraphId,
 }
 
@@ -422,12 +423,14 @@ pub struct PortRef {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphNodeRef {
+    /// The graph that holds the node.
     pub graph_id: GraphId,
     pub node: NodeId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphPortRef {
+    /// The graph that holds the port's node.
     pub graph_id: GraphId,
     pub port: PortRef,
 }
@@ -442,6 +445,7 @@ pub enum CompoundEdgeSegment {
 pub struct CrossHierarchyEdge {
     pub original_edge_id: String,
     pub original_model_order: Option<usize>,
+    /// The graph that holds the edge `edge` names.
     pub graph_id: GraphId,
     pub edge: EdgeId,
     pub segment: CompoundEdgeSegment,
