@@ -1,6 +1,6 @@
 use super::tests::{edge, graph, node};
 use super::{LayeringError, layer_with_strategy};
-use crate::graph::{LGraph, LNode};
+use crate::graph::{LGraph, LNode, NodeId};
 use crate::options::{ElkDirection, LayeredOptions, LayeringStrategy};
 use crate::pipeline::execute_ported_processors;
 
@@ -133,9 +133,9 @@ fn longest_path_uses_an_explicit_stack_for_deep_graphs() {
             ] {
                 layer_with_strategy(&mut graph, strategy).unwrap();
                 assert_eq!(graph.layers.len(), COUNT);
-                assert_eq!(graph.layerless_nodes[0].layer_index, Some(0));
+                assert_eq!(graph.layerless_nodes[NodeId::new(0)].layer_index, Some(0));
                 assert_eq!(
-                    graph.layerless_nodes[COUNT - 1].layer_index,
+                    graph.layerless_nodes[NodeId::new(COUNT - 1)].layer_index,
                     Some(COUNT - 1)
                 );
             }

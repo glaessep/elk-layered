@@ -18,8 +18,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::graph::{
-    EdgeId, EdgeSlice, GraphArena, GraphId, GraphParent, LGraph, LNode, LNodeKind, NodeId,
-    NodeSlice, OtherGraphs, PortId, PortRef, PortSide, PortType,
+    EdgeId, GraphArena, GraphId, GraphParent, LGraph, LNode, LNodeKind, NodeId, OtherGraphs,
+    PortId, PortRef, PortSide, PortType,
 };
 use crate::options::{OrderingStrategy, PortConstraints};
 use crate::p3order::counting::{
@@ -286,7 +286,7 @@ impl BarycenterPortDistributor {
         'port_loop: for port in ports.iter().copied() {
             let Some(port_data) = graph
                 .layerless_nodes
-                .get_node(port.node)
+                .get(port.node)
                 .and_then(|node| node.ports.get(port.port))
             else {
                 continue;
@@ -3676,7 +3676,7 @@ fn actual_ports_of_type(graph: &LGraph, node: NodeId, port_type: PortType) -> Ve
 fn crossing_minimization_port_id(graph: &LGraph, port: PortRef) -> Option<usize> {
     graph
         .layerless_nodes
-        .get_node(port.node)?
+        .get(port.node)?
         .ports
         .get(port.port)
         .and_then(|port_data| port_data.crossing_minimization_id)
@@ -3699,7 +3699,7 @@ fn north_south_port_barycenter_sum(
     dummy_node: NodeId,
     absurdly_large: f64,
 ) -> Option<f64> {
-    let dummy = graph.layerless_nodes.get_node(dummy_node)?;
+    let dummy = graph.layerless_nodes.get(dummy_node)?;
     let mut input = false;
     let mut output = false;
 
@@ -3914,12 +3914,12 @@ fn connected_edges(graph: &LGraph, port: PortRef) -> impl Iterator<Item = EdgeId
 fn is_edge_self_loop(graph: &LGraph, edge: EdgeId) -> bool {
     graph
         .edges
-        .get_edge(edge)
+        .get(edge)
         .is_some_and(|edge| edge.source.node == edge.target.node)
 }
 
 fn is_in_layer_edge(graph: &LGraph, edge: EdgeId) -> bool {
-    let Some(edge) = graph.edges.get_edge(edge) else {
+    let Some(edge) = graph.edges.get(edge) else {
         return false;
     };
     graph.layerless_nodes[edge.source.node].layer_index
@@ -3927,7 +3927,7 @@ fn is_in_layer_edge(graph: &LGraph, edge: EdgeId) -> bool {
 }
 
 fn other_end_of_edge(graph: &LGraph, edge: EdgeId, port: PortRef) -> Option<PortRef> {
-    let edge = graph.edges.get_edge(edge)?;
+    let edge = graph.edges.get(edge)?;
     if edge.source == port {
         Some(edge.target)
     } else if edge.target == port {
@@ -4051,9 +4051,9 @@ fn connected_ports_for_sweep(graph: &LGraph, port: PortRef, forward: bool) -> Ve
         .iter()
         .filter_map(|edge| {
             if forward {
-                graph.edges.get_edge(*edge).map(|edge| edge.source)
+                graph.edges.get(*edge).map(|edge| edge.source)
             } else {
-                graph.edges.get_edge(*edge).map(|edge| edge.target)
+                graph.edges.get(*edge).map(|edge| edge.target)
             }
         })
         .collect()
@@ -4084,7 +4084,7 @@ fn external_dummy_origin_side(
     parent_graph: Option<&LGraph>,
     node: NodeId,
 ) -> PortSide {
-    let Some(dummy) = graph.layerless_nodes.get_node(node) else {
+    let Some(dummy) = graph.layerless_nodes.get(node) else {
         return PortSide::Undefined;
     };
     if let Some(origin) = dummy.origin_port.as_ref() {
@@ -4106,7 +4106,7 @@ fn external_dummy_origin_side(
 fn port_side_at(graph: &LGraph, port: PortRef) -> Option<PortSide> {
     graph
         .layerless_nodes
-        .get_node(port.node)
+        .get(port.node)
         .and_then(|node| node.ports.get(port.port))
         .map(|port| port.side)
 }
@@ -4178,7 +4178,7 @@ fn parent_port_for_dummy_node(
 ) -> Option<PortId> {
     parent_graph
         .layerless_nodes
-        .get_node(parent_node_index)?
+        .get(parent_node_index)?
         .ports
         .iter_with_ids()
         .find_map(|(port_index, port)| {
@@ -4691,7 +4691,7 @@ mod tests {
         dummy.kind = LNodeKind::LongEdge;
         let mut second = LNode::new("second", 10.0, 10.0, None);
         second.model_order = Some(1);
-        graph.layerless_nodes = vec![first, dummy, second];
+        graph.layerless_nodes = vec![first, dummy, second].into();
         graph.set_node_layer(NodeId::new(0), 0);
         graph.set_node_layer(NodeId::new(1), 0);
         graph.set_node_layer(NodeId::new(2), 0);
@@ -4859,11 +4859,11 @@ mod tests {
             )
             .unwrap()
             .port;
-        graph.layerless_nodes[0].ports[west_a].id = "west_a".to_string();
-        graph.layerless_nodes[0].ports[east_a].id = "east_a".to_string();
-        graph.layerless_nodes[0].ports[west_b].id = "west_b".to_string();
-        graph.layerless_nodes[0].ports[east_b].id = "east_b".to_string();
-        for port in graph.layerless_nodes[0].ports.slots_mut() {
+        graph.layerless_nodes[NodeId::new(0)].ports[west_a].id = "west_a".to_string();
+        graph.layerless_nodes[NodeId::new(0)].ports[east_a].id = "east_a".to_string();
+        graph.layerless_nodes[NodeId::new(0)].ports[west_b].id = "west_b".to_string();
+        graph.layerless_nodes[NodeId::new(0)].ports[east_b].id = "east_b".to_string();
+        for port in graph.layerless_nodes[NodeId::new(0)].ports.slots_mut() {
             port.inside_connections = true;
         }
 
@@ -4874,12 +4874,12 @@ mod tests {
             &[east_b, east_a],
         );
 
-        let port_ids = graph.layerless_nodes[0]
+        let port_ids = graph.layerless_nodes[NodeId::new(0)]
             .ports
             .iter()
             .map(|port| port.id.as_str())
             .collect::<Vec<_>>();
-        let port_sides = graph.layerless_nodes[0]
+        let port_sides = graph.layerless_nodes[NodeId::new(0)]
             .ports
             .iter()
             .map(|port| port.side)
@@ -4939,7 +4939,7 @@ mod tests {
             )
             .unwrap()
             .port;
-        for port in graph.layerless_nodes[0].ports.slots_mut() {
+        for port in graph.layerless_nodes[NodeId::new(0)].ports.slots_mut() {
             port.inside_connections = true;
         }
         graph
@@ -5021,7 +5021,7 @@ mod tests {
         assert_eq!(graph.edges[edge_a].source.port, east_a);
         assert_eq!(graph.edges[edge_b].source.port, east_b);
         assert_eq!(
-            graph.layerless_nodes[0]
+            graph.layerless_nodes[NodeId::new(0)]
                 .ports
                 .iter()
                 .map(|port| port.id.as_str())
@@ -5029,7 +5029,7 @@ mod tests {
             vec!["parent:0", "parent:3", "parent:2", "parent:1"]
         );
         assert_eq!(
-            graph.layerless_nodes[0]
+            graph.layerless_nodes[NodeId::new(0)]
                 .ports
                 .iter()
                 .enumerate()
@@ -5053,15 +5053,15 @@ mod tests {
         graph
             .layerless_nodes
             .push(crate::graph::LNode::new("input_dummy", 0.0, 0.0, None));
-        graph.layerless_nodes[1].kind = LNodeKind::ExternalPort;
+        graph.layerless_nodes[NodeId::new(1)].kind = LNodeKind::ExternalPort;
         graph
             .layerless_nodes
             .push(crate::graph::LNode::new("output_dummy", 0.0, 0.0, None));
-        graph.layerless_nodes[2].kind = LNodeKind::ExternalPort;
+        graph.layerless_nodes[NodeId::new(2)].kind = LNodeKind::ExternalPort;
         graph
             .layerless_nodes
             .push(crate::graph::LNode::new("both_dummy", 0.0, 0.0, None));
-        graph.layerless_nodes[3].kind = LNodeKind::ExternalPort;
+        graph.layerless_nodes[NodeId::new(3)].kind = LNodeKind::ExternalPort;
         graph.set_node_layer(NodeId::new(1), 0);
         graph.set_node_layer(NodeId::new(2), 0);
         graph.set_node_layer(NodeId::new(3), 0);
@@ -5105,7 +5105,7 @@ mod tests {
             (north_output, NodeId::new(2)),
             (south_both, NodeId::new(3)),
         ] {
-            graph.layerless_nodes[0].ports[port.port].port_dummy =
+            graph.layerless_nodes[NodeId::new(0)].ports[port.port].port_dummy =
                 Some(crate::graph::GraphNodeRef {
                     graph_id: GraphId::ROOT,
                     node: dummy,
@@ -5387,8 +5387,8 @@ mod tests {
         crate::pipeline::execute_ported_compound_processors(&mut graph).unwrap();
 
         // The layout is top to bottom, so the order inside a layer is the order along x.
-        let o = &graph[graph.layerless_nodes[0].nested_graph.unwrap()];
-        let a = &graph[o.layerless_nodes[0].nested_graph.unwrap()];
+        let o = &graph[graph.layerless_nodes[NodeId::new(0)].nested_graph.unwrap()];
+        let a = &graph[o.layerless_nodes[NodeId::new(0)].nested_graph.unwrap()];
         let x_of = |id: &str| {
             a.layerless_nodes
                 .iter()
@@ -6155,8 +6155,8 @@ mod greedy_port_distributor_tests {
         // The list runs from bottom to top, so the upper edge now ends at the second port.
         assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
         // The ports moved in the list. The edges did not move: each still ends at its port.
-        let top_edge = &graph.edges[0];
-        let bottom_edge = &graph.edges[1];
+        let top_edge = &graph.edges[EdgeId::new(0)];
+        let bottom_edge = &graph.edges[EdgeId::new(1)];
         assert_eq!(top_edge.target, port(a, 0));
         assert_eq!(bottom_edge.target, port(a, 1));
         assert_eq!(

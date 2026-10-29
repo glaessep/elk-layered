@@ -16,8 +16,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::compound::compare_compound_segments;
 use crate::error::Error;
 use crate::graph::{
-    EdgeId, EdgeSlice, GraphArena, GraphId, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize,
-    NodeId, NodeSlice, PortRef, PortSide,
+    EdgeId, GraphArena, GraphId, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize, NodeId, PortRef,
+    PortSide,
 };
 
 /// `OrthogonalRoutingGenerator.TOLERANCE`.
@@ -208,7 +208,7 @@ impl<'a> Hierarchy<'a> {
         let node = self
             .graph(graph)
             .layerless_nodes
-            .get_node(port.node)
+            .get(port.node)
             .ok_or_else(|| Error::Internal {
                 message: format!(
                     "an edge in graph {} ends at node {}, which does not exist",
@@ -272,7 +272,7 @@ fn join_cross_hierarchy_edges(
             hierarchy
                 .graph(*graph)
                 .edges
-                .get_edge(record.edge)
+                .get(record.edge)
                 .map(|edge| (*graph, edge))
                 .ok_or_else(|| Error::Internal {
                     message: format!(
@@ -500,7 +500,7 @@ fn is_original_edge(graph: &LGraph, index: EdgeId, input: &TransferInput<'_>) ->
     let attached = |port: PortRef, outgoing: bool| {
         graph
             .layerless_nodes
-            .get_node(port.node)
+            .get(port.node)
             .and_then(|node| node.ports.get(port.port))
             .is_some_and(|data| {
                 let list = if outgoing {
@@ -904,7 +904,7 @@ mod tests {
     fn a_nested_graph_named_like_the_root_does_not_take_the_roots_edges() {
         let mut graphs = two_nested_graphs();
         graphs[GraphId::new(1)].name = "root".to_string();
-        graphs.root_mut().layerless_nodes[0].position = LPoint { x: 5.0, y: 7.0 };
+        graphs.root_mut().layerless_nodes[NodeId::new(0)].position = LPoint { x: 5.0, y: 7.0 };
         graphs.root_mut().padding.left = 3.0;
         graphs.root_mut().padding.top = 4.0;
         let hierarchy = Hierarchy::new(&graphs);

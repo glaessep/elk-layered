@@ -7,7 +7,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::common::networksimplex::{NGraph, NetworkSimplex, NetworkSimplexError};
-use crate::graph::{EdgeId, EdgeSlice, LGraph, LayeredEdge, NodeId};
+use crate::graph::{EdgeId, LGraph, LayeredEdge, NodeId};
 
 mod coffman_graham;
 #[cfg(test)]
@@ -250,7 +250,7 @@ fn initialize(graph: &LGraph, nodes: &[NodeId]) -> NGraph {
 }
 
 fn opposite_node(graph: &LGraph, node: NodeId, edge_index: EdgeId) -> Option<NodeId> {
-    let edge = graph.edges.get_edge(edge_index)?;
+    let edge = graph.edges.get(edge_index)?;
     if edge.source.node == node {
         Some(edge.target.node)
     } else if edge.target.node == node {

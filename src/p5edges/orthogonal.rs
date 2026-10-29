@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
-use crate::graph::{EdgeId, EdgeSlice, LGraph, LPoint, NodeId, NodeSlice, PortRef, PortSide};
+use crate::graph::{EdgeId, LGraph, LPoint, NodeId, PortRef, PortSide};
 use crate::random::JavaRandom;
 
 pub const TOLERANCE: f64 = 1e-3;
@@ -589,7 +589,7 @@ fn create_hyperedge_segments(
     };
 
     for node in nodes {
-        let Some(lnode) = graph.layerless_nodes.get_node(*node) else {
+        let Some(lnode) = graph.layerless_nodes.get(*node) else {
             continue;
         };
         for (port_index, port) in lnode.ports.iter_with_ids() {
@@ -1407,7 +1407,7 @@ fn dependency_weight(
 }
 
 fn connected_ports(graph: &LGraph, port_ref: PortRef) -> Vec<PortRef> {
-    let Some(node) = graph.layerless_nodes.get_node(port_ref.node) else {
+    let Some(node) = graph.layerless_nodes.get(port_ref.node) else {
         return Vec::new();
     };
     let Some(port) = node.ports.get(port_ref.port) else {
@@ -1416,11 +1416,11 @@ fn connected_ports(graph: &LGraph, port_ref: PortRef) -> Vec<PortRef> {
 
     port.incoming_edges
         .iter()
-        .filter_map(|edge| graph.edges.get_edge(*edge).map(|edge| edge.source))
+        .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.source))
         .chain(
             port.outgoing_edges
                 .iter()
-                .filter_map(|edge| graph.edges.get_edge(*edge).map(|edge| edge.target)),
+                .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.target)),
         )
         .filter(|other| *other != port_ref)
         .collect()
@@ -1701,7 +1701,7 @@ mod tests {
             &mut created,
             &mut graph,
         );
-        assert_eq!(graph.edges[0].junction_points.len(), 2);
+        assert_eq!(graph.edges[EdgeId::new(0)].junction_points.len(), 2);
 
         // At the ends, with edges on both sides at that coordinate: a junction.
         let mut graph = graph_with_one_edge();
@@ -1719,7 +1719,7 @@ mod tests {
             &mut HashSet::new(),
             &mut graph,
         );
-        assert_eq!(graph.edges[0].junction_points.len(), 2);
+        assert_eq!(graph.edges[EdgeId::new(0)].junction_points.len(), 2);
 
         // At the ends of a segment whose incoming and outgoing edges end elsewhere: none.
         let apart = segment(&[10.0, 30.0], &[20.0, 40.0]);
@@ -1738,7 +1738,7 @@ mod tests {
             &mut HashSet::new(),
             &mut graph,
         );
-        assert!(graph.edges[0].junction_points.is_empty());
+        assert!(graph.edges[EdgeId::new(0)].junction_points.is_empty());
 
         // Outside the segment, and on a segment without outgoing edges: none.
         let open = segment(&[10.0, 40.0], &[]);
@@ -1756,7 +1756,7 @@ mod tests {
             &mut HashSet::new(),
             &mut graph,
         );
-        assert!(graph.edges[0].junction_points.is_empty());
+        assert!(graph.edges[EdgeId::new(0)].junction_points.is_empty());
     }
 
     // Mutation: do not remember the junction points that were made. A bend point that two
@@ -1775,7 +1775,10 @@ mod tests {
                 &mut graph,
             );
         }
-        assert_eq!(graph.edges[0].junction_points, [LPoint { x: 7.0, y: 25.0 }]);
+        assert_eq!(
+            graph.edges[EdgeId::new(0)].junction_points,
+            [LPoint { x: 7.0, y: 25.0 }]
+        );
         junction(
             &both_ends,
             LPoint { x: 8.0, y: 25.0 },
@@ -1783,7 +1786,7 @@ mod tests {
             &mut created,
             &mut graph,
         );
-        assert_eq!(graph.edges[0].junction_points.len(), 2);
+        assert_eq!(graph.edges[EdgeId::new(0)].junction_points.len(), 2);
     }
 
     // Mutation: tell `-0.0` from `0.0` by the bits of the point, as a JVM hash does. The second
@@ -1802,7 +1805,7 @@ mod tests {
                 &mut graph,
             );
         }
-        assert_eq!(graph.edges[0].junction_points.len(), 1);
+        assert_eq!(graph.edges[EdgeId::new(0)].junction_points.len(), 1);
         // The same holds for the other coordinate, and when the negative zero comes first.
         let mut graph = graph_with_one_edge();
         let mut created = HashSet::new();
@@ -1815,7 +1818,7 @@ mod tests {
                 &mut graph,
             );
         }
-        assert_eq!(graph.edges[0].junction_points.len(), 1);
+        assert_eq!(graph.edges[EdgeId::new(0)].junction_points.len(), 1);
     }
 
     // Mutation: remember a point with a `NaN` by its bits. The second one is then taken for a
@@ -1837,7 +1840,7 @@ mod tests {
                 &mut graph,
             );
         }
-        assert_eq!(graph.edges[0].junction_points.len(), 2);
+        assert_eq!(graph.edges[EdgeId::new(0)].junction_points.len(), 2);
         assert!(created.is_empty());
     }
 
@@ -2249,7 +2252,7 @@ mod tests {
 
         assert_eq!(slots, 1);
         assert_eq!(
-            graph.edges[0].bend_points,
+            graph.edges[EdgeId::new(0)].bend_points,
             vec![LPoint { x: 50.0, y: 5.0 }, LPoint { x: 50.0, y: 45.0 }]
         );
     }
@@ -2257,7 +2260,7 @@ mod tests {
     #[test]
     fn route_edges_west_to_east_uses_actual_outgoing_edges_for_output_ports() {
         let mut graph = route_test_graph(0.0, 30.0);
-        let source_port = graph.edges[0].source;
+        let source_port = graph.edges[EdgeId::new(0)].source;
         graph.layerless_nodes[source_port.node].ports[source_port.port].port_type = PortType::Input;
         let left = graph.layers[0].nodes.clone();
         let right = graph.layers[1].nodes.clone();
@@ -2266,7 +2269,7 @@ mod tests {
 
         assert_eq!(slots, 1);
         assert_eq!(
-            graph.edges[0].bend_points,
+            graph.edges[EdgeId::new(0)].bend_points,
             vec![LPoint { x: 50.0, y: 5.0 }, LPoint { x: 50.0, y: 45.0 }]
         );
     }
@@ -2280,7 +2283,7 @@ mod tests {
         let slots = route_edges_west_to_east(&mut graph, Some(&left), Some(&right), 50.0, 10.0);
 
         assert_eq!(slots, 0);
-        assert!(graph.edges[0].bend_points.is_empty());
+        assert!(graph.edges[EdgeId::new(0)].bend_points.is_empty());
     }
 
     #[test]
@@ -2300,7 +2303,7 @@ mod tests {
 
         assert_eq!(slots, 1);
         assert_eq!(
-            graph.edges[0].bend_points,
+            graph.edges[EdgeId::new(0)].bend_points,
             vec![LPoint { x: 5.0, y: 60.0 }, LPoint { x: 45.0, y: 60.0 }]
         );
     }
@@ -2322,7 +2325,7 @@ mod tests {
 
         assert_eq!(slots, 1);
         assert_eq!(
-            graph.edges[0].bend_points,
+            graph.edges[EdgeId::new(0)].bend_points,
             vec![LPoint { x: 5.0, y: -20.0 }, LPoint { x: 45.0, y: -20.0 }]
         );
     }

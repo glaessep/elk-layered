@@ -16,8 +16,8 @@ use crate::compound::{
 use crate::graph::{
     CompoundEdgeSegment, EdgeId, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge,
     HierarchyStep, LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId,
-    NodeSlice, PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy,
-    create_external_port_dummy, is_across_flow, port_side_from_direction,
+    PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
+    is_across_flow, port_side_from_direction,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
@@ -1667,7 +1667,7 @@ fn named_port<'g>(
         })?;
     let node = graph
         .layerless_nodes
-        .get_node(port.node)
+        .get(port.node)
         .ok_or_else(missing_endpoint)?;
     if node.id != node_id {
         return Err(missing_endpoint());
@@ -1907,17 +1907,14 @@ fn ensure_hierarchy_endpoint_port(
     port_index: &mut ImportPortIndex,
 ) -> Option<PortRef> {
     if graph.options.merge_edges
-        && graph
-            .layerless_nodes
-            .get_node(node)
-            .is_some_and(|candidate| {
-                candidate.id == node_id && !candidate.port_constraints.is_side_fixed()
-            })
+        && graph.layerless_nodes.get(node).is_some_and(|candidate| {
+            candidate.id == node_id && !candidate.port_constraints.is_side_fixed()
+        })
     {
         return ensure_port_at_node(graph, graph_parent, node, node_id, port_type, port_index);
     }
 
-    let candidate = graph.layerless_nodes.get_node(node)?;
+    let candidate = graph.layerless_nodes.get(node)?;
     if candidate.id != node_id {
         return None;
     }
@@ -1963,7 +1960,7 @@ fn ensure_port_at_node(
     port_type: PortType,
     port_index: &mut ImportPortIndex,
 ) -> Option<PortRef> {
-    let candidate = graph.layerless_nodes.get_node(node)?;
+    let candidate = graph.layerless_nodes.get(node)?;
     if candidate.id != node_id {
         return None;
     }
@@ -2642,14 +2639,17 @@ mod tests {
             let mut graph: &LGraph = &imported;
             for index in 0..node_count {
                 assert_eq!(graph.layerless_nodes.len(), 1);
-                assert_eq!(graph.layerless_nodes[0].id, format!("node-{index}"));
+                assert_eq!(
+                    graph.layerless_nodes[NodeId::new(0)].id,
+                    format!("node-{index}")
+                );
                 if index + 1 < node_count {
-                    graph = graph.layerless_nodes[0]
+                    graph = graph.layerless_nodes[NodeId::new(0)]
                         .nested_graph
                         .map(|id| &imported[id])
                         .expect("every non-leaf chain node owns the next graph slot");
                 } else {
-                    assert!(graph.layerless_nodes[0].nested_graph.is_none());
+                    assert!(graph.layerless_nodes[NodeId::new(0)].nested_graph.is_none());
                 }
             }
         }
@@ -2754,7 +2754,7 @@ mod tests {
         input.options.inside_self_loops_activate = true;
 
         let imported = import_graph(&input).unwrap();
-        let nested = imported.layerless_nodes[0]
+        let nested = imported.layerless_nodes[NodeId::new(0)]
             .nested_graph
             .map(|id| &imported[id])
             .expect("inside self-loop creates a nested graph");
@@ -2798,7 +2798,7 @@ mod tests {
         let imported =
             import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::NONE).unwrap();
 
-        let group_graph = imported.graphs.root().layerless_nodes[0]
+        let group_graph = imported.graphs.root().layerless_nodes[NodeId::new(0)]
             .nested_graph
             .expect("group holds a graph");
         assert_ne!(group_graph, GraphId::ROOT);
@@ -2887,7 +2887,9 @@ mod tests {
             .find(|node| node.id == "outer")
             .unwrap();
         assert_eq!(outer.ports.len(), 1);
-        let nested = &imported[imported.layerless_nodes[0].nested_graph.unwrap()];
+        let nested = &imported[imported.layerless_nodes[NodeId::new(0)]
+            .nested_graph
+            .unwrap()];
         let child = nested
             .layerless_nodes
             .iter()
@@ -2931,7 +2933,9 @@ mod tests {
 
         let imported = import_graph(&input).unwrap();
 
-        let nested = &imported[imported.layerless_nodes[0].nested_graph.unwrap()];
+        let nested = &imported[imported.layerless_nodes[NodeId::new(0)]
+            .nested_graph
+            .unwrap()];
         assert_eq!(nested.layerless_nodes.len(), 2);
         assert_eq!(nested.edges.len(), edge_count);
     }
@@ -2946,7 +2950,7 @@ mod tests {
 
         let imported = import_graph(&input).unwrap();
 
-        assert_eq!(imported.edges[0].labels.len(), 128);
+        assert_eq!(imported.edges[EdgeId::new(0)].labels.len(), 128);
     }
 
     #[test]
@@ -2985,14 +2989,17 @@ mod tests {
         let lgraph = import_graph(&graph(vec![a, node("B")], vec![ab])).unwrap();
 
         assert_eq!(lgraph.layerless_nodes.len(), 2);
-        assert_eq!(lgraph.layerless_nodes[0].id, "A");
-        assert_eq!(lgraph.layerless_nodes[0].model_order, Some(0));
-        assert_eq!(lgraph.layerless_nodes[0].labels[0].text, "Alpha");
-        assert_eq!(lgraph.edges.len(), 1);
-        assert_eq!(lgraph.edges[0].model_order, Some(0));
-        assert_eq!(lgraph.edges[0].thickness, 1.0);
+        assert_eq!(lgraph.layerless_nodes[NodeId::new(0)].id, "A");
+        assert_eq!(lgraph.layerless_nodes[NodeId::new(0)].model_order, Some(0));
         assert_eq!(
-            lgraph.edges[0].labels[0].placement,
+            lgraph.layerless_nodes[NodeId::new(0)].labels[0].text,
+            "Alpha"
+        );
+        assert_eq!(lgraph.edges.len(), 1);
+        assert_eq!(lgraph.edges[EdgeId::new(0)].model_order, Some(0));
+        assert_eq!(lgraph.edges[EdgeId::new(0)].thickness, 1.0);
+        assert_eq!(
+            lgraph.edges[EdgeId::new(0)].labels[0].placement,
             EdgeLabelPlacement::Center
         );
         assert!(lgraph.graph_properties.center_labels);
@@ -3124,7 +3131,7 @@ mod tests {
         child.parent = Some("cluster".to_string());
 
         let lgraph = import_graph(&graph(vec![cluster, child], vec![])).unwrap();
-        let nested = &lgraph[lgraph.layerless_nodes[0].nested_graph.unwrap()];
+        let nested = &lgraph[lgraph.layerless_nodes[NodeId::new(0)].nested_graph.unwrap()];
 
         assert_eq!(lgraph.padding.top, 12.0);
         assert_eq!(lgraph.padding.left, 12.0);
@@ -3149,7 +3156,7 @@ mod tests {
         child.parent = Some("cluster".to_string());
 
         let lgraph = import_graph(&graph(vec![cluster, child], vec![])).unwrap();
-        let nested = &lgraph[lgraph.layerless_nodes[0].nested_graph.unwrap()];
+        let nested = &lgraph[lgraph.layerless_nodes[NodeId::new(0)].nested_graph.unwrap()];
 
         assert_eq!(nested.options.spacing.node_node, 30.0);
         assert_eq!(nested.padding.top, 39.0);
@@ -3180,10 +3187,10 @@ mod tests {
         input.options.random_seed = 42;
 
         let lgraph = import_graph(&input).unwrap();
-        let nested = &lgraph[lgraph.layerless_nodes[0].nested_graph.unwrap()];
+        let nested = &lgraph[lgraph.layerless_nodes[NodeId::new(0)].nested_graph.unwrap()];
 
-        assert_eq!(lgraph.layerless_nodes[0].model_order, Some(0));
-        assert_eq!(nested.layerless_nodes[0].model_order, None);
+        assert_eq!(lgraph.layerless_nodes[NodeId::new(0)].model_order, Some(0));
+        assert_eq!(nested.layerless_nodes[NodeId::new(0)].model_order, None);
         assert!(nested.options.merge_hierarchy_edges);
         assert_eq!(
             nested.options.consider_model_order_strategy,
@@ -3208,7 +3215,7 @@ mod tests {
         child.parent = Some("cluster".to_string());
 
         let lgraph = import_graph(&graph(vec![cluster, child], vec![])).unwrap();
-        let nested = &lgraph[lgraph.layerless_nodes[0].nested_graph.unwrap()];
+        let nested = &lgraph[lgraph.layerless_nodes[NodeId::new(0)].nested_graph.unwrap()];
 
         assert_eq!(nested.options.port_constraints, PortConstraints::FixedSide);
     }
@@ -3226,7 +3233,7 @@ mod tests {
         input.options.direction = ElkDirection::Down;
 
         let lgraph = import_graph(&input).unwrap();
-        let nested = &lgraph[lgraph.layerless_nodes[0].nested_graph.unwrap()];
+        let nested = &lgraph[lgraph.layerless_nodes[NodeId::new(0)].nested_graph.unwrap()];
 
         assert_eq!(nested.options.direction, ElkDirection::Down);
     }
@@ -3276,7 +3283,7 @@ mod tests {
                 ),
             })
         );
-        assert_eq!(nested.layerless_nodes[0].id, "A");
+        assert_eq!(nested.layerless_nodes[NodeId::new(0)].id, "A");
     }
 
     // Mutation: give every `HierarchyStep` the root as its graph in `transform_cross_hierarchy_edge`.
@@ -3353,7 +3360,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["A:0:source", "A:1"]
         );
-        assert_eq!(nested.edges[0].source.port, PortId::new(1));
+        assert_eq!(nested.edges[EdgeId::new(0)].source.port, PortId::new(1));
         assert_eq!(lgraph.hierarchy_edges[0].source_port_key, "A:0:source");
     }
 
@@ -3615,9 +3622,9 @@ mod tests {
                 .iter()
                 .all(|segment| segment.edge == EdgeId::new(0))
         );
-        assert_eq!(nested.edges[0].labels.len(), 2);
+        assert_eq!(nested.edges[EdgeId::new(0)].labels.len(), 2);
         assert_eq!(
-            nested.edges[0]
+            nested.edges[EdgeId::new(0)]
                 .labels
                 .iter()
                 .filter_map(|label| label.original_label_edge.as_deref())
@@ -3772,7 +3779,7 @@ mod tests {
             PortSide::East,
             Default::default(),
         );
-        lgraph.layerless_nodes[0]
+        lgraph.layerless_nodes[NodeId::new(0)]
             .ports
             .unlist(&[first.unwrap().port]);
 
@@ -3786,7 +3793,7 @@ mod tests {
         )
         .unwrap();
 
-        let ports = &lgraph.layerless_nodes[0].ports;
+        let ports = &lgraph.layerless_nodes[NodeId::new(0)].ports;
         assert_eq!(ports.slot_count(), 3);
         let made_up_name = &ports[made_up.port].id;
         let same_name = (0..ports.slot_count())

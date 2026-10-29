@@ -194,7 +194,10 @@ mod tests {
 
         calculate_innermost_node_margins(&mut graph);
 
-        assert_eq!(graph.layerless_nodes[0].margin, Default::default());
+        assert_eq!(
+            graph.layerless_nodes[NodeId::new(0)].margin,
+            Default::default()
+        );
     }
 
     #[test]
@@ -203,8 +206,8 @@ mod tests {
         for index in graph.node_ids() {
             graph.set_node_layer(index, 0);
         }
-        graph.layerless_nodes[2].in_layer_constraint = InLayerConstraint::Top;
-        graph.layerless_nodes[1].in_layer_constraint = InLayerConstraint::Bottom;
+        graph.layerless_nodes[NodeId::new(2)].in_layer_constraint = InLayerConstraint::Top;
+        graph.layerless_nodes[NodeId::new(1)].in_layer_constraint = InLayerConstraint::Bottom;
 
         process_in_layer_constraints(&mut graph);
 

@@ -163,7 +163,7 @@ fn is_external_west_or_east_port(graph: &LGraph, node: NodeId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{LNode, LPoint, LayeredEdge, PortSide, PortType};
+    use crate::graph::{EdgeId, LNode, LPoint, LayeredEdge, PortSide, PortType};
     use crate::options::LayeredOptions;
 
     #[test]
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(graph.layerless_nodes[target].position.x, 60.0);
         assert_eq!(graph.size.width, 100.0);
         assert_eq!(
-            graph.edges[0].bend_points,
+            graph.edges[EdgeId::new(0)].bend_points,
             vec![LPoint { x: 50.0, y: 10.0 }, LPoint { x: 50.0, y: 50.0 }]
         );
     }

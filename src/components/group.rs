@@ -405,7 +405,7 @@ mod tests {
     }
 
     fn position(component: &Component) -> (f64, f64) {
-        let at = component.graph.layerless_nodes[0].position;
+        let at = component.graph.layerless_nodes[NodeId::new(0)].position;
         (at.x, at.y)
     }
 

@@ -737,12 +737,12 @@ mod tests {
         graph.set_node_layer(NodeId::new(0), 0);
         graph.set_node_layer(NodeId::new(1), 0);
         graph.set_node_layer(NodeId::new(2), 1);
-        graph.layerless_nodes[0].margin = LMargin {
+        graph.layerless_nodes[NodeId::new(0)].margin = LMargin {
             top: 2.0,
             bottom: 3.0,
             ..LMargin::default()
         };
-        graph.layerless_nodes[1].margin = LMargin {
+        graph.layerless_nodes[NodeId::new(1)].margin = LMargin {
             top: 5.0,
             bottom: 7.0,
             ..LMargin::default()
@@ -750,12 +750,13 @@ mod tests {
 
         place_nodes_network_simplex(&mut graph).unwrap();
 
-        let required_gap = graph.layerless_nodes[0].size.height
-            + graph.layerless_nodes[0].margin.bottom
+        let required_gap = graph.layerless_nodes[NodeId::new(0)].size.height
+            + graph.layerless_nodes[NodeId::new(0)].margin.bottom
             + vertical_spacing(&graph, NodeId::new(0), NodeId::new(1))
-            + graph.layerless_nodes[1].margin.top;
+            + graph.layerless_nodes[NodeId::new(1)].margin.top;
         assert!(
-            graph.layerless_nodes[1].position.y - graph.layerless_nodes[0].position.y
+            graph.layerless_nodes[NodeId::new(1)].position.y
+                - graph.layerless_nodes[NodeId::new(0)].position.y
                 >= required_gap
         );
         assert!(
@@ -773,7 +774,7 @@ mod tests {
 
         place_nodes_network_simplex(&mut graph).unwrap();
 
-        assert!(graph.layerless_nodes[0].position.y.is_finite());
+        assert!(graph.layerless_nodes[NodeId::new(0)].position.y.is_finite());
     }
 
     #[test]
@@ -786,12 +787,14 @@ mod tests {
             ],
             vec![edge("A-X", "A", "X"), edge("B-X", "B", "X")],
         );
-        graph.layerless_nodes[2].node_flexibility = NodeFlexibility::PortPosition;
+        graph.layerless_nodes[NodeId::new(2)].node_flexibility = NodeFlexibility::PortPosition;
         assert!(is_flexible(&graph, NodeId::new(2)));
-        graph.layerless_nodes[2].port_constraints = crate::options::PortConstraints::FixedPos;
+        graph.layerless_nodes[NodeId::new(2)].port_constraints =
+            crate::options::PortConstraints::FixedPos;
         assert!(!is_flexible(&graph, NodeId::new(2)));
-        graph.layerless_nodes[2].port_constraints = crate::options::PortConstraints::Free;
-        graph.layerless_nodes[2].size.height = 10.0;
+        graph.layerless_nodes[NodeId::new(2)].port_constraints =
+            crate::options::PortConstraints::Free;
+        graph.layerless_nodes[NodeId::new(2)].size.height = 10.0;
         assert!(!is_flexible(&graph, NodeId::new(2)));
     }
 
@@ -824,11 +827,11 @@ mod tests {
                 crate::p3order::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
                 let mut label = crate::graph::LLabel::new("bottom", 20.0, 10.0);
                 label.position.y = height + 7.0;
-                graph.layerless_nodes[1].labels.push(label);
+                graph.layerless_nodes[NodeId::new(1)].labels.push(label);
 
                 place_nodes_network_simplex(&mut graph).unwrap();
 
-                let middle = &graph.layerless_nodes[1];
+                let middle = &graph.layerless_nodes[NodeId::new(1)];
                 assert_eq!(middle.size.height, height);
                 assert_eq!(middle.labels[0].position.y, height + 7.5, "{placement:?}");
                 assert!(
@@ -908,7 +911,7 @@ mod tests {
                     node.id
                 );
             }
-            assert_eq!(graph.layerless_nodes[2].size.height, 160.0);
+            assert_eq!(graph.layerless_nodes[NodeId::new(2)].size.height, 160.0);
             let straight_edges = graph
                 .edges
                 .iter()

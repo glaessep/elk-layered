@@ -23,9 +23,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::common::cells::grow_label_cell;
 use crate::graph::{
-    EdgeId, EdgeLabelPlacement, EdgeSlice, GraphId, HorizontalLabelAlignment, LGraph, LLabel,
-    LNode, LNodeKind, LPoint, LSize, LabelCellLayout, LabelSide, LayeredEdge, NodeId, NodeSlice,
-    PortId, PortRef, PortSide, PortType, VerticalLabelAlignment, reverse_edge,
+    EdgeId, EdgeLabelPlacement, GraphId, HorizontalLabelAlignment, LGraph, LLabel, LNode,
+    LNodeKind, LPoint, LSize, LabelCellLayout, LabelSide, LayeredEdge, NodeId, PortId, PortRef,
+    PortSide, PortType, VerticalLabelAlignment, reverse_edge,
 };
 use crate::options::{
     Alignment, EdgeLabelSideSelection, ElkDirection, LayerConstraint, PortConstraints,
@@ -169,7 +169,7 @@ fn first_connected_other_node_center_y(
         } else {
             edge.source.node
         };
-        let node = graph.layerless_nodes.get_node(other)?;
+        let node = graph.layerless_nodes.get(other)?;
         Some(node.position.y + node.size.height / 2.0)
     } else {
         None
@@ -177,7 +177,7 @@ fn first_connected_other_node_center_y(
 }
 
 fn north_south_external_port_x(graph: &LGraph, dummy_index: NodeId) -> Option<f64> {
-    let port = graph.layerless_nodes.get_node(dummy_index)?.ports.first()?;
+    let port = graph.layerless_nodes.get(dummy_index)?.ports.first()?;
     if !port.outgoing_edges.is_empty() && !port.incoming_edges.is_empty() {
         return None;
     }
@@ -186,8 +186,8 @@ fn north_south_external_port_x(graph: &LGraph, dummy_index: NodeId) -> Option<f6
         return port
             .outgoing_edges
             .iter()
-            .filter_map(|edge_index| graph.edges.get_edge(*edge_index))
-            .filter_map(|edge| graph.layerless_nodes.get_node(edge.target.node))
+            .filter_map(|edge_index| graph.edges.get(*edge_index))
+            .filter_map(|edge| graph.layerless_nodes.get(edge.target.node))
             .map(|node| node.position.x - node.margin.left)
             .reduce(f64::min);
     }
@@ -196,8 +196,8 @@ fn north_south_external_port_x(graph: &LGraph, dummy_index: NodeId) -> Option<f6
         return port
             .incoming_edges
             .iter()
-            .filter_map(|edge_index| graph.edges.get_edge(*edge_index))
-            .filter_map(|edge| graph.layerless_nodes.get_node(edge.source.node))
+            .filter_map(|edge_index| graph.edges.get(*edge_index))
+            .filter_map(|edge| graph.layerless_nodes.get(edge.source.node))
             .map(|node| node.position.x + node.size.width + node.margin.right)
             .reduce(f64::max);
     }
@@ -238,7 +238,7 @@ pub fn restore_reversed_edges(graph: &mut LGraph) {
     for layer_index in 0..graph.layers.len() {
         let nodes = graph.layers[layer_index].nodes.clone();
         for node_index in nodes {
-            let Some(node) = graph.layerless_nodes.get_node(node_index) else {
+            let Some(node) = graph.layerless_nodes.get(node_index) else {
                 continue;
             };
             let port_count = node.ports.len();
@@ -380,7 +380,7 @@ fn can_reverse_outgoing_edge(
     source_node_layer_constraint: LayerConstraint,
     edge: EdgeId,
 ) -> bool {
-    let Some(edge) = graph.edges.get_edge(edge) else {
+    let Some(edge) = graph.edges.get(edge) else {
         return false;
     };
     if edge.reversed {
@@ -402,7 +402,7 @@ fn can_reverse_incoming_edge(
     target_node_layer_constraint: LayerConstraint,
     edge: EdgeId,
 ) -> bool {
-    let Some(edge) = graph.edges.get_edge(edge) else {
+    let Some(edge) = graph.edges.get(edge) else {
         return false;
     };
     if edge.reversed {
@@ -1267,7 +1267,7 @@ fn mark_hyperedge_component(
 fn connected_ports(graph: &LGraph, port_ref: PortRef) -> Vec<PortRef> {
     let Some(port) = graph
         .layerless_nodes
-        .get_node(port_ref.node)
+        .get(port_ref.node)
         .and_then(|node| node.ports.get(port_ref.port))
     else {
         return Vec::new();
@@ -1275,11 +1275,11 @@ fn connected_ports(graph: &LGraph, port_ref: PortRef) -> Vec<PortRef> {
 
     port.outgoing_edges
         .iter()
-        .filter_map(|edge| graph.edges.get_edge(*edge).map(|edge| edge.target))
+        .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.target))
         .chain(
             port.incoming_edges
                 .iter()
-                .filter_map(|edge| graph.edges.get_edge(*edge).map(|edge| edge.source)),
+                .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.source)),
         )
         .collect()
 }
@@ -1309,7 +1309,7 @@ fn is_before_label_dummy(graph: &LGraph, node: NodeId) -> bool {
 fn find_port_by_side(graph: &LGraph, node: NodeId, side: PortSide) -> Option<PortRef> {
     graph
         .layerless_nodes
-        .get_node(node)?
+        .get(node)?
         .ports
         .iter_with_ids()
         .find(|(_, port)| port.side == side)
@@ -1319,7 +1319,7 @@ fn find_port_by_side(graph: &LGraph, node: NodeId, side: PortSide) -> Option<Por
 fn port_exists_in_graph(graph: &LGraph, port_ref: PortRef) -> bool {
     graph
         .layerless_nodes
-        .get_node(port_ref.node)
+        .get(port_ref.node)
         .and_then(|node| node.ports.get(port_ref.port))
         .is_some()
 }
@@ -2399,7 +2399,7 @@ fn apply_end_label_cell_layout(
                 .or_else(|| port.outgoing_edges.first())
                 .copied()
         });
-        if let Some(edge) = target_edge.and_then(|id| graph.edges.get_edge_mut(id)) {
+        if let Some(edge) = target_edge.and_then(|id| graph.edges.get_mut(id)) {
             edge.labels.push(label);
         }
     }
@@ -2660,7 +2660,7 @@ fn apply_label_side(graph: &mut LGraph, label_dummy: NodeId, side: LabelSide) {
 
     let origin_edge = graph.layerless_nodes[label_dummy]
         .origin_edge
-        .and_then(|edge| graph.edges.get_edge(edge))
+        .and_then(|edge| graph.edges.get(edge))
         .map(|edge| edge.thickness.max(0.0))
         .unwrap_or(0.0);
     let port_y = match effective_side {
@@ -3368,12 +3368,12 @@ fn calculate_north_south_dummy_position(graph: &mut LGraph, dummy: NodeId) {
     let connected_ports = dummy_port
         .incoming_edges
         .iter()
-        .filter_map(|edge| graph.edges.get_edge(*edge).map(|edge| edge.source))
+        .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.source))
         .chain(
             dummy_port
                 .outgoing_edges
                 .iter()
-                .filter_map(|edge| graph.edges.get_edge(*edge).map(|edge| edge.target)),
+                .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.target)),
         )
         .collect::<Vec<_>>();
 
@@ -3953,7 +3953,7 @@ enum NorthSouthReplacementKey {
 fn north_south_replacement_key(graph: &LGraph, original_dummy: NodeId) -> NorthSouthReplacementKey {
     graph
         .layerless_nodes
-        .get_node(original_dummy)
+        .get(original_dummy)
         .and_then(|node| node.origin_port.as_ref())
         .map(|origin| NorthSouthReplacementKey::Origin {
             graph_id: origin.graph_id,
@@ -4039,7 +4039,7 @@ fn create_long_edge_dummy_node(
 }
 
 pub fn split_edge(graph: &mut LGraph, edge_index: EdgeId, dummy_node: NodeId) -> Option<EdgeId> {
-    let old_edge_target = graph.edges.get_edge(edge_index)?.target;
+    let old_edge_target = graph.edges.get(edge_index)?.target;
     let thickness = graph.edges[edge_index].thickness.max(0.0);
     graph.edges[edge_index].thickness = thickness;
     graph.layerless_nodes[dummy_node].size.height = thickness;
@@ -4205,8 +4205,8 @@ mod tests {
 
         reverse_edges_for_edge_and_layer_constraints(&mut graph);
 
-        assert!(graph.edges[0].reversed);
-        assert_eq!(graph.edges[0].source.node, start);
+        assert!(graph.edges[EdgeId::new(0)].reversed);
+        assert_eq!(graph.edges[EdgeId::new(0)].source.node, start);
         assert!(graph.node_incoming_edges(start).is_empty());
         assert_eq!(graph.node_outgoing_edges(start), vec![EdgeId::new(0)]);
     }
@@ -4220,8 +4220,8 @@ mod tests {
 
         reverse_edges_for_edge_and_layer_constraints(&mut graph);
 
-        assert!(graph.edges[0].reversed);
-        assert_eq!(graph.edges[0].target.node, end);
+        assert!(graph.edges[EdgeId::new(0)].reversed);
+        assert_eq!(graph.edges[EdgeId::new(0)].target.node, end);
         assert_eq!(graph.node_incoming_edges(end), vec![EdgeId::new(0)]);
         assert!(graph.node_outgoing_edges(end).is_empty());
     }
@@ -4607,7 +4607,7 @@ mod tests {
         let mut graph = graph(vec![node("A"), node("B")], vec![labelled]);
         graph.options.direction = direction;
         graph.options.spacing.edge_label = 7.0;
-        graph.edges[0].thickness = thickness;
+        graph.edges[EdgeId::new(0)].thickness = thickness;
 
         insert_label_dummies(&mut graph);
 
@@ -4697,12 +4697,12 @@ mod tests {
     #[test]
     fn split_edge_counts_a_negative_edge_thickness_as_zero() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("A-B", "A", "B")]);
-        graph.edges[0].thickness = -3.0;
+        graph.edges[EdgeId::new(0)].thickness = -3.0;
         let dummy = create_label_dummy_node(&mut graph, EdgeId::new(0), 0.0);
 
         let second_half = split_edge(&mut graph, EdgeId::new(0), dummy).unwrap();
 
-        assert_eq!(graph.edges[0].thickness, 0.0);
+        assert_eq!(graph.edges[EdgeId::new(0)].thickness, 0.0);
         assert_eq!(graph.edges[second_half].thickness, 0.0);
         assert_eq!(graph.layerless_nodes[dummy].size.height, 0.0);
         // floor(0 / 2), not floor(-3 / 2).
@@ -4866,7 +4866,7 @@ mod tests {
             })
             .collect();
         let mut graph = graph(vec![node("A"), node("B")], vec![input]);
-        let target = graph.edges[0].target;
+        let target = graph.edges[EdgeId::new(0)].target;
         let gathered = gather_end_labels_for_node(&mut graph, target.node);
         copy_gathered_end_labels_into_ports(&mut graph, target.node, &gathered);
         remove_gathered_end_labels(&mut graph, gathered.labels.into_iter().flatten().collect());
@@ -4884,7 +4884,7 @@ mod tests {
                 .all(|label| label.end_label_edge == Some(EdgeId::new(0)))
         );
         assert_eq!(
-            graph.edges[0]
+            graph.edges[EdgeId::new(0)]
                 .labels
                 .iter()
                 .map(|label| label.source_index.unwrap())
@@ -4902,7 +4902,7 @@ mod tests {
         let mut labelled = edge("A-B", "A", "B");
         labelled.labels = vec![head];
         let mut graph = graph(vec![node("A"), node("B")], vec![labelled]);
-        let target = graph.edges[0].target;
+        let target = graph.edges[EdgeId::new(0)].target;
 
         let gathered = gather_end_labels_for_node(&mut graph, target.node);
 
@@ -4912,7 +4912,7 @@ mod tests {
                 .labels
                 .is_empty()
         );
-        assert_eq!(graph.edges[0].labels.len(), 1);
+        assert_eq!(graph.edges[EdgeId::new(0)].labels.len(), 1);
         copy_gathered_end_labels_into_ports(&mut graph, target.node, &gathered);
         assert_eq!(
             graph.layerless_nodes[target.node].ports[target.port]
@@ -4936,13 +4936,13 @@ mod tests {
         crate::p4nodes::calculate_label_and_node_sizes(&mut graph);
         crate::p4nodes::calculate_innermost_node_margins(&mut graph);
         select_label_sides(&mut graph);
-        let target = graph.edges[0].target.node;
-        let target_port = graph.edges[0].target.port;
+        let target = graph.edges[EdgeId::new(0)].target.node;
+        let target_port = graph.edges[EdgeId::new(0)].target.port;
         let old_left_margin = graph.layerless_nodes[target].margin.left;
 
         preprocess_end_labels(&mut graph);
 
-        assert!(graph.edges[0].labels.is_empty());
+        assert!(graph.edges[EdgeId::new(0)].labels.is_empty());
         let port = &graph.layerless_nodes[target].ports[target_port];
         assert_eq!(port.labels.len(), 1);
         assert_eq!(port.labels[0].text, "head");
@@ -4971,8 +4971,8 @@ mod tests {
 
         // A has one port per edge, and both sit on the same side. ELK pairs them up: the first
         // gets the label side that is not the default, here `Above`, whatever labels it has.
-        let source = graph.edges[0].source;
-        let second = graph.edges[1].source;
+        let source = graph.edges[EdgeId::new(0)].source;
+        let second = graph.edges[EdgeId::new(1)].source;
         assert_eq!(source.node, second.node);
         assert_eq!(
             graph.layerless_nodes[source.node].ports[source.port].side,
@@ -4986,7 +4986,10 @@ mod tests {
                     .ports
                     .position(second.port)
         );
-        assert_eq!(graph.edges[0].labels[0].label_side, Some(LabelSide::Above));
+        assert_eq!(
+            graph.edges[EdgeId::new(0)].labels[0].label_side,
+            Some(LabelSide::Above)
+        );
     }
 
     #[test]
@@ -5446,20 +5449,20 @@ mod tests {
             edges: Vec::new(),
         })
         .unwrap();
-        graph.layerless_nodes[0].size.width = 30.0;
-        graph.layerless_nodes[0].size.height = 10.0;
-        graph.layerless_nodes[0].position.y = -5.0;
-        graph.layerless_nodes[0].margin.top = 3.0;
-        graph.layerless_nodes[0].margin.right = 7.0;
-        graph.layerless_nodes[0].margin.bottom = 11.0;
-        graph.layerless_nodes[0].margin.left = 5.0;
-        graph.layerless_nodes[1].size.width = 40.0;
-        graph.layerless_nodes[1].size.height = 20.0;
-        graph.layerless_nodes[1].position.y = 25.0;
-        graph.layerless_nodes[1].margin.top = 2.0;
-        graph.layerless_nodes[1].margin.right = 3.0;
-        graph.layerless_nodes[1].margin.bottom = 4.0;
-        graph.layerless_nodes[1].margin.left = 1.0;
+        graph.layerless_nodes[NodeId::new(0)].size.width = 30.0;
+        graph.layerless_nodes[NodeId::new(0)].size.height = 10.0;
+        graph.layerless_nodes[NodeId::new(0)].position.y = -5.0;
+        graph.layerless_nodes[NodeId::new(0)].margin.top = 3.0;
+        graph.layerless_nodes[NodeId::new(0)].margin.right = 7.0;
+        graph.layerless_nodes[NodeId::new(0)].margin.bottom = 11.0;
+        graph.layerless_nodes[NodeId::new(0)].margin.left = 5.0;
+        graph.layerless_nodes[NodeId::new(1)].size.width = 40.0;
+        graph.layerless_nodes[NodeId::new(1)].size.height = 20.0;
+        graph.layerless_nodes[NodeId::new(1)].position.y = 25.0;
+        graph.layerless_nodes[NodeId::new(1)].margin.top = 2.0;
+        graph.layerless_nodes[NodeId::new(1)].margin.right = 3.0;
+        graph.layerless_nodes[NodeId::new(1)].margin.bottom = 4.0;
+        graph.layerless_nodes[NodeId::new(1)].margin.left = 1.0;
         graph.layers.push(crate::graph::Layer {
             nodes: vec![NodeId::new(0), NodeId::new(1)],
             size: Default::default(),
@@ -5484,11 +5487,11 @@ mod tests {
         .unwrap();
         graph.options.spacing.ports_surrounding.top = 6.0;
         graph.options.spacing.ports_surrounding.bottom = 8.0;
-        graph.layerless_nodes[0].kind = LNodeKind::ExternalPort;
-        graph.layerless_nodes[0].size.height = 12.0;
-        graph.layerless_nodes[0].position.y = 10.0;
-        graph.layerless_nodes[0].margin.top = 1.0;
-        graph.layerless_nodes[0].margin.bottom = 2.0;
+        graph.layerless_nodes[NodeId::new(0)].kind = LNodeKind::ExternalPort;
+        graph.layerless_nodes[NodeId::new(0)].size.height = 12.0;
+        graph.layerless_nodes[NodeId::new(0)].position.y = 10.0;
+        graph.layerless_nodes[NodeId::new(0)].margin.top = 1.0;
+        graph.layerless_nodes[NodeId::new(0)].margin.bottom = 2.0;
         graph.layers.push(crate::graph::Layer {
             nodes: vec![NodeId::new(0)],
             size: Default::default(),

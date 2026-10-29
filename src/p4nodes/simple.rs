@@ -145,9 +145,9 @@ mod tests {
 
         assert_eq!(graph.layers[0].size.height, 80.0);
         assert_eq!(graph.layers[1].size.height, 100.0);
-        assert_eq!(graph.layerless_nodes[0].position.y, 10.0);
-        assert_eq!(graph.layerless_nodes[1].position.y, 70.0);
-        assert_eq!(graph.layerless_nodes[2].position.y, 0.0);
+        assert_eq!(graph.layerless_nodes[NodeId::new(0)].position.y, 10.0);
+        assert_eq!(graph.layerless_nodes[NodeId::new(1)].position.y, 70.0);
+        assert_eq!(graph.layerless_nodes[NodeId::new(2)].position.y, 0.0);
     }
 
     #[test]
@@ -155,12 +155,12 @@ mod tests {
         let mut graph = graph(vec![node("A", 80.0, 20.0), node("B", 80.0, 20.0)], vec![]);
         graph.set_node_layer(NodeId::new(0), 0);
         graph.set_node_layer(NodeId::new(1), 0);
-        graph.layerless_nodes[0].margin = LMargin {
+        graph.layerless_nodes[NodeId::new(0)].margin = LMargin {
             top: 3.0,
             bottom: 7.0,
             ..LMargin::default()
         };
-        graph.layerless_nodes[1].margin = LMargin {
+        graph.layerless_nodes[NodeId::new(1)].margin = LMargin {
             top: 5.0,
             bottom: 11.0,
             ..LMargin::default()
@@ -169,7 +169,7 @@ mod tests {
         place_nodes_simple(&mut graph);
 
         assert_eq!(graph.layers[0].size.height, 106.0);
-        assert_eq!(graph.layerless_nodes[0].position.y, 3.0);
-        assert_eq!(graph.layerless_nodes[1].position.y, 75.0);
+        assert_eq!(graph.layerless_nodes[NodeId::new(0)].position.y, 3.0);
+        assert_eq!(graph.layerless_nodes[NodeId::new(1)].position.y, 75.0);
     }
 }

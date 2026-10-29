@@ -364,9 +364,18 @@ mod tests {
     fn a_nested_graph_is_reached_by_its_id_from_every_level() {
         let (graphs, [a, b, a0, _, b0]) = branched();
 
-        assert_eq!(graphs.root().layerless_nodes[0].nested_graph, Some(a));
-        assert_eq!(graphs[a].layerless_nodes[0].nested_graph, Some(a0));
-        assert_eq!(graphs[b].layerless_nodes[0].nested_graph, Some(b0));
+        assert_eq!(
+            graphs.root().layerless_nodes[NodeId::new(0)].nested_graph,
+            Some(a)
+        );
+        assert_eq!(
+            graphs[a].layerless_nodes[NodeId::new(0)].nested_graph,
+            Some(a0)
+        );
+        assert_eq!(
+            graphs[b].layerless_nodes[NodeId::new(0)].nested_graph,
+            Some(b0)
+        );
         for id in [a, b, a0, b0] {
             assert_eq!(graphs[id].id, id, "{}", graphs[id].name);
         }
@@ -526,13 +535,14 @@ mod tests {
             .unwrap();
         let side_of = |graphs: &mut GraphArena, dummy_graph: GraphId| {
             let (graph, others) = graphs.split_mut(GraphId::ROOT);
-            graph.layerless_nodes[1].ports[port.port].port_dummy = Some(GraphNodeRef {
-                graph_id: dummy_graph,
-                node: NodeId::new(0),
-            });
-            graph.layerless_nodes[1].ports[port.port].side = PortSide::Undefined;
+            graph.layerless_nodes[NodeId::new(1)].ports[port.port].port_dummy =
+                Some(GraphNodeRef {
+                    graph_id: dummy_graph,
+                    node: NodeId::new(0),
+                });
+            graph.layerless_nodes[NodeId::new(1)].ports[port.port].side = PortSide::Undefined;
             crate::p3order::set_port_side(graph, others, port);
-            graph.layerless_nodes[1].ports[port.port].side
+            graph.layerless_nodes[NodeId::new(1)].ports[port.port].side
         };
 
         // Node 1 holds the second graph. Both graphs have one name, so only the id tells them apart.

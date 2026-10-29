@@ -11,8 +11,7 @@
 mod group;
 
 use crate::graph::{
-    EdgeId, EdgeSlice, GraphArena, GraphId, LGraph, LLabel, LNodeKind, LPoint, LSize, NodeId,
-    NodeSlice, PortRef,
+    EdgeId, GraphArena, GraphId, LGraph, LLabel, LNodeKind, LPoint, LSize, NodeId, PortRef,
 };
 use crate::options::{HierarchyHandling, PortConstraints};
 use crate::pipeline::PipelineResult;
@@ -86,7 +85,7 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
             let node =
                 graph
                     .layerless_nodes
-                    .get_node(index)
+                    .get(index)
                     .ok_or(ComponentError::InvalidReference {
                         kind: "node",
                         index: index.index(),
@@ -100,25 +99,23 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
             // pushes so this iterative traversal retains the source recursive DFS order.
             for port in node.ports.iter().rev() {
                 for &edge in port.outgoing_edges.iter().rev() {
-                    let edge =
-                        graph
-                            .edges
-                            .get_edge(edge)
-                            .ok_or(ComponentError::InvalidReference {
-                                kind: "edge",
-                                index: edge.index(),
-                            })?;
+                    let edge = graph
+                        .edges
+                        .get(edge)
+                        .ok_or(ComponentError::InvalidReference {
+                            kind: "edge",
+                            index: edge.index(),
+                        })?;
                     stack.push(edge.target.node);
                 }
                 for &edge in port.incoming_edges.iter().rev() {
-                    let edge =
-                        graph
-                            .edges
-                            .get_edge(edge)
-                            .ok_or(ComponentError::InvalidReference {
-                                kind: "edge",
-                                index: edge.index(),
-                            })?;
+                    let edge = graph
+                        .edges
+                        .get(edge)
+                        .ok_or(ComponentError::InvalidReference {
+                            kind: "edge",
+                            index: edge.index(),
+                        })?;
                     stack.push(edge.source.node);
                 }
             }
@@ -615,8 +612,8 @@ pub(crate) fn combine(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let target = graphs.root_mut();
-    target.layerless_nodes = layerless_nodes;
-    target.edges = edges;
+    target.layerless_nodes = layerless_nodes.into();
+    target.edges = edges.into();
     target.layers.clear();
     target.hidden_nodes = hidden;
     target.replaced_external_port_dummies = replaced;
@@ -675,8 +672,8 @@ mod tests {
                 LPoint::default(),
             )
             .unwrap();
-        graph.layerless_nodes[2].ports[out.port].origin_port = Some(north);
-        graph.layerless_nodes[1].ports[north.port].port_dummy = Some(GraphNodeRef {
+        graph.layerless_nodes[NodeId::new(2)].ports[out.port].origin_port = Some(north);
+        graph.layerless_nodes[NodeId::new(1)].ports[north.port].port_dummy = Some(GraphNodeRef {
             graph_id: GraphId::ROOT,
             node: NodeId::new(2),
         });
@@ -709,14 +706,14 @@ mod tests {
         assert_eq!(second.layerless_nodes.len(), 2);
         // The dummy is node 1 here, and the node it was made for is node 0.
         assert_eq!(
-            second.layerless_nodes[1].ports[PortId::new(0)].origin_port,
+            second.layerless_nodes[NodeId::new(1)].ports[PortId::new(0)].origin_port,
             Some(PortRef {
                 node: NodeId::new(0),
                 port: PortId::new(0)
             })
         );
         assert_eq!(
-            second.layerless_nodes[0].ports[PortId::new(0)]
+            second.layerless_nodes[NodeId::new(0)].ports[PortId::new(0)]
                 .port_dummy
                 .as_ref()
                 .map(|dummy| dummy.node),
@@ -810,11 +807,11 @@ mod tests {
             )
             .unwrap();
         // The dummy stands for the port of `holder`, and holds the dummy made for `c`'s port.
-        inside.layerless_nodes[0].origin_port = Some(GraphPortRef {
+        inside.layerless_nodes[NodeId::new(0)].origin_port = Some(GraphPortRef {
             graph_id: GraphId::ROOT,
             port: holder_out,
         });
-        inside.layerless_nodes[0].ports[port.port].port_dummy = Some(GraphNodeRef {
+        inside.layerless_nodes[NodeId::new(0)].ports[port.port].port_dummy = Some(GraphNodeRef {
             graph_id: GraphId::ROOT,
             node: crate::graph::NodeId::new(3),
         });
@@ -840,12 +837,14 @@ mod tests {
         assert_eq!(components.len(), 2);
         let between = &graphs[inside_id];
         assert_eq!(
-            between.layerless_nodes[0].origin_port.map(|o| o.port.node),
+            between.layerless_nodes[NodeId::new(0)]
+                .origin_port
+                .map(|o| o.port.node),
             Some(crate::graph::NodeId::new(0)),
             "the origin is node 0 of its component"
         );
         assert_eq!(
-            between.layerless_nodes[0].ports[port.port]
+            between.layerless_nodes[NodeId::new(0)].ports[port.port]
                 .port_dummy
                 .map(|dummy| dummy.node),
             Some(crate::graph::NodeId::new(1))

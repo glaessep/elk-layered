@@ -527,8 +527,8 @@ mod tests {
 
         assert!(!graph.cyclic);
         assert!(graph.edges.iter().all(|edge| !edge.reversed));
-        assert_eq!(graph.edges[0].source_node_id, "A");
-        assert_eq!(graph.edges[0].target_node_id, "B");
+        assert_eq!(graph.edges[EdgeId::new(0)].source_node_id, "A");
+        assert_eq!(graph.edges[EdgeId::new(0)].target_node_id, "B");
     }
 
     #[test]
@@ -607,7 +607,7 @@ mod tests {
 
         break_cycles_interactive(&mut graph);
 
-        assert!(graph.edges[0].reversed);
+        assert!(graph.edges[EdgeId::new(0)].reversed);
         assert!(!has_directed_cycle(&graph));
     }
 
@@ -623,7 +623,7 @@ mod tests {
         break_cycles_model_order(&mut graph);
 
         assert!(graph.cyclic);
-        assert!(graph.edges[0].reversed);
+        assert!(graph.edges[EdgeId::new(0)].reversed);
         assert!(!has_directed_cycle(&graph));
     }
 
@@ -678,7 +678,7 @@ mod tests {
         break_cycles_greedy(&mut graph);
 
         assert!(!graph.cyclic);
-        assert!(!graph.edges[0].reversed);
+        assert!(!graph.edges[EdgeId::new(0)].reversed);
     }
 
     #[test]
@@ -729,14 +729,15 @@ mod tests {
             node_label_placement: None,
         }];
         let mut graph = graph(vec![node("A"), node("B")], vec![ab]);
-        graph.edges[0].bend_points = vec![LPoint { x: 1.0, y: 2.0 }, LPoint { x: 3.0, y: 4.0 }];
-        let old_source = graph.edges[0].source;
-        let old_target = graph.edges[0].target;
+        graph.edges[EdgeId::new(0)].bend_points =
+            vec![LPoint { x: 1.0, y: 2.0 }, LPoint { x: 3.0, y: 4.0 }];
+        let old_source = graph.edges[EdgeId::new(0)].source;
+        let old_target = graph.edges[EdgeId::new(0)].target;
 
         assert!(crate::graph::reverse_edge(&mut graph, EdgeId::new(0), true));
 
-        assert_eq!(graph.edges[0].source, old_target);
-        assert_eq!(graph.edges[0].target, old_source);
+        assert_eq!(graph.edges[EdgeId::new(0)].source, old_target);
+        assert_eq!(graph.edges[EdgeId::new(0)].target, old_source);
         assert!(
             graph.layerless_nodes[old_source.node].ports[old_source.port]
                 .outgoing_edges
@@ -750,12 +751,15 @@ mod tests {
             graph.layerless_nodes[old_target.node].ports[old_target.port].outgoing_edges,
             vec![EdgeId::new(0)]
         );
-        assert_eq!(graph.edges[0].labels[0].placement, EdgeLabelPlacement::Tail);
         assert_eq!(
-            graph.edges[0].bend_points,
+            graph.edges[EdgeId::new(0)].labels[0].placement,
+            EdgeLabelPlacement::Tail
+        );
+        assert_eq!(
+            graph.edges[EdgeId::new(0)].bend_points,
             vec![LPoint { x: 3.0, y: 4.0 }, LPoint { x: 1.0, y: 2.0 }]
         );
-        assert!(graph.edges[0].reversed);
+        assert!(graph.edges[EdgeId::new(0)].reversed);
     }
 
     #[test]
@@ -768,8 +772,8 @@ mod tests {
         };
         input.options.merge_edges = true;
         let mut graph = import_graph(&input).unwrap();
-        let old_source = graph.edges[0].source;
-        let old_target = graph.edges[0].target;
+        let old_source = graph.edges[EdgeId::new(0)].source;
+        let old_target = graph.edges[EdgeId::new(0)].target;
 
         assert_eq!(
             graph.layerless_nodes[old_source.node].ports[old_source.port].collector_type,
@@ -782,8 +786,8 @@ mod tests {
 
         assert!(crate::graph::reverse_edge(&mut graph, EdgeId::new(0), true));
 
-        let new_source = graph.edges[0].source;
-        let new_target = graph.edges[0].target;
+        let new_source = graph.edges[EdgeId::new(0)].source;
+        let new_target = graph.edges[EdgeId::new(0)].target;
         assert_eq!(new_source.node, old_target.node);
         assert_eq!(new_target.node, old_source.node);
         assert_ne!(new_source.port, old_target.port);

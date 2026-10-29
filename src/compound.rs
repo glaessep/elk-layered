@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use crate::graph::{
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeId, EdgeLabelPlacement, GraphArena, GraphId,
     GraphNodeRef, GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep, LGraph, LLabel,
-    LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, NodeSlice, PortId, PortRef, PortSide,
-    PortType, apply_port_index_to_dummy, create_external_port_dummy, port_side_from_direction,
+    LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, PortId, PortRef, PortSide, PortType,
+    apply_port_index_to_dummy, create_external_port_dummy, port_side_from_direction,
 };
 use crate::options::{ElkDirection, PortConstraints};
 
@@ -262,7 +262,7 @@ pub(crate) fn link_external_port_dummy(
     dummy_node: NodeId,
     dummy_border_offset: Option<f64>,
 ) {
-    let Some(parent_node) = parent_graph.layerless_nodes.get_node_mut(parent_port.node) else {
+    let Some(parent_node) = parent_graph.layerless_nodes.get_mut(parent_port.node) else {
         return;
     };
     let Some(parent_port_data) = parent_node.ports.get_mut(parent_port.port) else {
@@ -290,7 +290,7 @@ pub(crate) fn set_external_dummy_origin(
     origin_graph_id: GraphId,
     origin_port: PortRef,
 ) {
-    let Some(dummy) = dummy_graph.layerless_nodes.get_node_mut(dummy_node) else {
+    let Some(dummy) = dummy_graph.layerless_nodes.get_mut(dummy_node) else {
         return;
     };
     dummy.origin_port = Some(GraphPortRef {
@@ -949,7 +949,7 @@ impl NodePortIndex {
         let mut ports = HashMap::new();
         let node = graph
             .layerless_nodes
-            .get_node(owner)
+            .get(owner)
             .expect("compound parent node must exist while indexing its ports");
         for (port_index, port) in node.ports.iter_with_ids() {
             for &port_type in lookup_types(port) {
@@ -978,7 +978,7 @@ impl NodePortIndex {
     fn record_port(&mut self, graph: &LGraph, port: PortId) {
         let port_data = graph
             .layerless_nodes
-            .get_node(self.owner)
+            .get(self.owner)
             .and_then(|node| node.ports.get(port))
             .expect("new compound parent port must belong to the indexed owner");
         for &port_type in lookup_types(port_data) {
@@ -1027,7 +1027,7 @@ impl CompoundEndpointPlan {
             };
             if graph
                 .layerless_nodes
-                .get_node(port.node)
+                .get(port.node)
                 .is_some_and(|node| node.compound)
             {
                 by_node[port.node.index()].push(CompoundEndpoint {
@@ -1202,7 +1202,7 @@ fn introduce_hierarchical_edge_segment(
         };
         if graph
             .layerless_nodes
-            .get_node(dummy_port.node)
+            .get(dummy_port.node)
             .is_some_and(|node| node.kind == LNodeKind::ExternalPort)
         {
             let exported = !connects_parent_node;
@@ -1716,7 +1716,7 @@ fn parent_port_for_external_dummy(
         && origin_port.port.node == parent_node
         && graph
             .layerless_nodes
-            .get_node(parent_node)
+            .get(parent_node)
             .and_then(|node| node.ports.get(origin_port.port.port))
             .is_some()
     {
@@ -3073,7 +3073,7 @@ mod tests {
         let mut input = graph(vec![group, inner, leaf, sibling], Vec::new());
         input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
         let mut lgraph = import_graph(&input).unwrap();
-        let group_graph = lgraph.layerless_nodes[0]
+        let group_graph = lgraph.layerless_nodes[NodeId::new(0)]
             .nested_graph
             .expect("group graph is materialized");
         let inner_step = real_step(&lgraph, "inner");
@@ -3097,7 +3097,7 @@ mod tests {
 
         preprocess_source_ported_compound_graph(&mut lgraph);
 
-        let group_graph = lgraph.layerless_nodes[0]
+        let group_graph = lgraph.layerless_nodes[NodeId::new(0)]
             .nested_graph
             .map(|id| &lgraph[id])
             .expect("group graph remains materialized");
@@ -3107,7 +3107,7 @@ mod tests {
             group_graph.cross_hierarchy_edges[0].original_model_order,
             Some(3)
         );
-        let inner_graph = group_graph.layerless_nodes[0]
+        let inner_graph = group_graph.layerless_nodes[NodeId::new(0)]
             .nested_graph
             .map(|id| &lgraph[id])
             .expect("inner graph remains materialized");
@@ -3278,8 +3278,8 @@ mod tests {
             holder = graphs.nest(holder, node, nested);
             lands.push(holder);
         }
-        assert_eq!(graphs[lands[0]].layerless_nodes[1].id, "p");
-        assert_eq!(graphs[lands[1]].layerless_nodes[0].id, "child");
+        assert_eq!(graphs[lands[0]].layerless_nodes[NodeId::new(1)].id, "p");
+        assert_eq!(graphs[lands[1]].layerless_nodes[NodeId::new(0)].id, "child");
         let segments = lands
             .iter()
             .map(|&lands_in| ScopedHierarchySegment {
