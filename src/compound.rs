@@ -405,7 +405,7 @@ fn preprocess_source_ported_compound_graph_observed(
     let order = graphs.breadth_first(GraphId::ROOT);
     // `transformHierarchyEdges` reads the port constraints of each compound node before
     // `setSidesOfPortsToSidesOfDummyNodes` fixes them, so keep them.
-    let mut original_constraints = vec![Vec::new(); graphs.len()];
+    let mut original_constraints = vec![IdVec::new(); graphs.len()];
     for &graph in &order {
         original_constraints[graph.index()] = port_constraints_of(&graphs[graph]);
     }
@@ -465,7 +465,7 @@ fn original_net_flows(graphs: &GraphArena) -> HashMap<OriginalNetFlowKey, isize>
     flows
 }
 
-fn port_constraints_of(graph: &LGraph) -> Vec<PortConstraints> {
+fn port_constraints_of(graph: &LGraph) -> IdVec<NodeId, PortConstraints> {
     graph
         .layerless_nodes
         .iter()
@@ -1462,7 +1462,7 @@ fn prepare_compound_endpoint_metadata(
 fn ensure_nested_external_dummies_for_parent_ports(
     graphs: &mut GraphArena,
     order: &[GraphId],
-    original_constraints: &[Vec<PortConstraints>],
+    original_constraints: &[IdVec<NodeId, PortConstraints>],
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
     for &graph in order.iter().rev() {
@@ -1478,14 +1478,10 @@ fn ensure_nested_external_dummies_for_parent_ports(
 fn ensure_direct_nested_external_dummies_for_parent_ports(
     graphs: &mut GraphArena,
     graph_id: GraphId,
-    original_constraints: &[PortConstraints],
+    original_constraints: &IdVec<NodeId, PortConstraints>,
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
-    for (node_index, &parent_constraints) in original_constraints
-        .iter()
-        .enumerate()
-        .map(|(index, constraints)| (NodeId::new(index), constraints))
-    {
+    for (node_index, &parent_constraints) in original_constraints.iter_with_ids() {
         let Some(nested_graph_id) = graphs[graph_id].layerless_nodes[node_index].nested_graph
         else {
             continue;
