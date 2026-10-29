@@ -1382,12 +1382,14 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     if node.layer_constraint.is_some() {
         graph.mark_layer_constraint_explicit(node_index);
     }
-    *graph.port_alignment.row_mut(node_index) = node.port_alignment;
-    *graph.placement_options.row_mut(node_index) = PlacementOptions {
+    if let Some(alignment) = node.port_alignment {
+        *graph.tables.port_alignment.row_mut(node_index) = alignment;
+    }
+    *graph.tables.placement_options.row_mut(node_index) = PlacementOptions {
         flexibility: node.node_flexibility,
         ports_surrounding: node.ports_surrounding,
     };
-    *graph.self_loop_options.row_mut(node_index) = SelfLoopOptions {
+    *graph.tables.self_loop_options.row_mut(node_index) = SelfLoopOptions {
         distribution: node.self_loop_distribution,
         ordering: node.self_loop_ordering,
     };
@@ -2612,7 +2614,12 @@ mod tests {
         let imported = import_graph(&graph(vec![first, second], vec![])).unwrap();
 
         let root = imported.root();
-        let options = |name: &str| root.self_loop_options.get(root.node_named(name)).unwrap();
+        let options = |name: &str| {
+            root.tables
+                .self_loop_options
+                .get(root.node_named(name))
+                .unwrap()
+        };
 
         assert_eq!(
             options("A").distribution,
@@ -2657,7 +2664,7 @@ mod tests {
             Some(crate::options::PortAlignment::End)
         );
         assert_eq!(root.port_alignment_of(b), None);
-        let placement = root.placement_options.get(a).unwrap();
+        let placement = root.tables.placement_options.get(a).unwrap();
         assert_eq!(
             placement.flexibility,
             crate::options::NodeFlexibility::PortPosition
@@ -2667,7 +2674,7 @@ mod tests {
             Some(4.0)
         );
         assert_eq!(
-            root.placement_options.get(b).unwrap().flexibility,
+            root.tables.placement_options.get(b).unwrap().flexibility,
             crate::options::NodeFlexibility::None
         );
         assert!(root.is_layer_constraint_explicit(a));

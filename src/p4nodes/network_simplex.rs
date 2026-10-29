@@ -239,11 +239,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
 
 fn is_flexible(graph: &LGraph, node: NodeId) -> bool {
     // A node the importer made no row for, a dummy, has no flexibility.
-    let options = graph
-        .placement_options
-        .get(node)
-        .cloned()
-        .unwrap_or_default();
+    let options = graph.tables.placement_options.get_or_default(node);
     let node = &graph.layerless_nodes[node];
     if node.kind() != LNodeKind::Normal
         || node.ports.len() <= 1
@@ -795,9 +791,9 @@ mod tests {
             vec![edge("A-X", "A", "X"), edge("B-X", "B", "X")],
         );
         let x = NodeId::new(2);
-        graph.placement_options.row_mut(x).flexibility = NodeFlexibility::PortPosition;
+        graph.tables.placement_options.row_mut(x).flexibility = NodeFlexibility::PortPosition;
 
-        graph.placement_options.row_mut(x).ports_surrounding =
+        graph.tables.placement_options.row_mut(x).ports_surrounding =
             Some(crate::options::SpacingMargin {
                 top: 5.0,
                 right: 0.0,
@@ -806,7 +802,7 @@ mod tests {
             });
         assert!(is_flexible(&graph, x));
 
-        graph.placement_options.row_mut(x).ports_surrounding =
+        graph.tables.placement_options.row_mut(x).ports_surrounding =
             Some(crate::options::SpacingMargin {
                 top: 100.0,
                 right: 0.0,
@@ -826,7 +822,11 @@ mod tests {
             ],
             vec![edge("A-X", "A", "X"), edge("B-X", "B", "X")],
         );
-        graph.placement_options.row_mut(NodeId::new(2)).flexibility = NodeFlexibility::PortPosition;
+        graph
+            .tables
+            .placement_options
+            .row_mut(NodeId::new(2))
+            .flexibility = NodeFlexibility::PortPosition;
         assert!(is_flexible(&graph, NodeId::new(2)));
         graph.layerless_nodes[NodeId::new(2)].port_constraints =
             crate::options::PortConstraints::FixedPos;

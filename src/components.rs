@@ -11,7 +11,7 @@
 mod group;
 
 use crate::graph::{
-    EdgeId, GraphArena, GraphId, IdVec, LGraph, LLabel, LPoint, LSize, NodeId, NodeTable, PortRef,
+    EdgeId, GraphArena, GraphId, IdVec, LGraph, LLabel, LPoint, LSize, NodeId, NodeTables, PortRef,
     VecId,
 };
 use crate::options::{HierarchyHandling, PortConstraints};
@@ -134,12 +134,7 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
                 .iter()
                 .map(|&node| graph.layerless_nodes[node].clone())
                 .collect();
-            component.in_layer = graph.in_layer.subset(&original_nodes);
-            component.self_loop_options = graph.self_loop_options.subset(&original_nodes);
-            component.port_alignment = graph.port_alignment.subset(&original_nodes);
-            component.placement_options = graph.placement_options.subset(&original_nodes);
-            component.layer_constraint_explicit =
-                graph.layer_constraint_explicit.subset(&original_nodes);
+            component.tables = graph.tables.subset(&original_nodes);
             // The importer reads no node priority yet, so every component has priority 0. A
             // port of ELK's node priority adds the sum over the component's nodes here.
             let priority = 0i32;
@@ -308,15 +303,9 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     nodes: &IdVec<NodeId, N>,
     edges: &IdVec<EdgeId, E>,
 ) -> Result<(), ComponentError> {
-    for row in graph.in_layer.rows_mut() {
-        map_optional(&mut row.layout_unit, nodes, "layout unit")?;
-        map_list(&mut row.successor_constraints, nodes, "successor")?;
-        map_list(
-            &mut row.barycenter_associates,
-            nodes,
-            "barycenter associate",
-        )?;
-    }
+    graph
+        .tables
+        .map_node_ids(|node, kind| map_id(nodes, node, kind))?;
     for node in &mut graph.layerless_nodes {
         if let Some(external) = node.external_port_mut() {
             map_optional(&mut external.replaced_dummy, nodes, "replaced dummy")?;
@@ -569,11 +558,7 @@ pub(crate) fn combine(
     let mut hidden = Vec::new();
     let mut replaced = Vec::new();
     let mut self_loops = Vec::new();
-    let mut in_layer_rows = Vec::new();
-    let mut self_loop_option_rows = Vec::new();
-    let mut port_alignment_rows = Vec::new();
-    let mut placement_option_rows = Vec::new();
-    let mut explicit_rows = Vec::new();
+    let mut table_rows = Vec::new();
     let mut cyclic = false;
     for mut component in components {
         let mut node_map = component.original_nodes;
@@ -587,36 +572,7 @@ pub(crate) fn combine(
         component.graph.clear_layers();
         remap_references(&mut component.graph, &node_map, &edge_map)?;
         remap_nested_references(graphs, &component.graph, &node_map, &edge_map)?;
-        in_layer_rows.extend(
-            node_map
-                .iter()
-                .copied()
-                .zip(component.graph.in_layer.into_rows()),
-        );
-        self_loop_option_rows.extend(
-            node_map
-                .iter()
-                .copied()
-                .zip(component.graph.self_loop_options.into_rows()),
-        );
-        port_alignment_rows.extend(
-            node_map
-                .iter()
-                .copied()
-                .zip(component.graph.port_alignment.into_rows()),
-        );
-        placement_option_rows.extend(
-            node_map
-                .iter()
-                .copied()
-                .zip(component.graph.placement_options.into_rows()),
-        );
-        explicit_rows.extend(
-            node_map
-                .iter()
-                .copied()
-                .zip(component.graph.layer_constraint_explicit.into_rows()),
-        );
+        table_rows.extend(node_map.iter().copied().zip(component.graph.tables.rows()));
         for (index, node) in node_map.into_iter().zip(component.graph.layerless_nodes) {
             nodes[index] = Some(node);
         }
@@ -649,11 +605,7 @@ pub(crate) fn combine(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let target = graphs.root_mut();
-    target.in_layer = NodeTable::scattered(layerless_nodes.len(), in_layer_rows);
-    target.self_loop_options = NodeTable::scattered(layerless_nodes.len(), self_loop_option_rows);
-    target.port_alignment = NodeTable::scattered(layerless_nodes.len(), port_alignment_rows);
-    target.placement_options = NodeTable::scattered(layerless_nodes.len(), placement_option_rows);
-    target.layer_constraint_explicit = NodeTable::scattered(layerless_nodes.len(), explicit_rows);
+    target.tables = NodeTables::scattered(layerless_nodes.len(), table_rows);
     target.layerless_nodes = layerless_nodes.into();
     target.edges = edges.into();
     target.clear_layers();
@@ -886,11 +838,9 @@ mod tests {
         assert_eq!(graphs[inside_id], before);
     }
 
-    // Mutation: in `split`, leave out the `in_layer` table of a component, or its
-    // `self_loop_options`, `port_alignment`, `placement_options` or `layer_constraint_explicit`.
-    // In `remap_references`, leave out the loop over the `in_layer` rows. In `combine`, leave the
-    // root's `in_layer`, `self_loop_options`, `port_alignment`, `placement_options` or
-    // `layer_constraint_explicit` empty.
+    // Mutation: in `split`, leave out `tables` of a component. In `remap_references`, leave out
+    // `map_node_ids`. In `combine`, leave the root's `tables` as they were. In `NodeTables`, leave
+    // one of the five tables out of `subset`, `rows` or `scattered`.
     #[test]
     fn the_side_tables_of_nodes_follow_them_through_split_and_combine() {
         let mut graph = LGraph::new("g", LayeredOptions::default());
@@ -920,27 +870,34 @@ mod tests {
                 .add_edge(edge_between(&format!("e{source}"), out, into))
                 .unwrap();
         }
-        let row = graph.in_layer.row_mut(NodeId::new(3));
+        let row = graph.tables.in_layer.row_mut(NodeId::new(3));
         row.layout_unit = Some(NodeId::new(2));
         row.successor_constraints = vec![NodeId::new(2)];
         row.barycenter_associates = vec![NodeId::new(2)];
-        graph.self_loop_options.row_mut(NodeId::new(3)).ordering =
-            crate::options::SelfLoopOrderingStrategy::Sequenced;
-        *graph.port_alignment.row_mut(NodeId::new(3)) = Some(crate::options::PortAlignment::End);
-        graph.placement_options.row_mut(NodeId::new(3)).flexibility =
-            crate::options::NodeFlexibility::PortPosition;
+        graph
+            .tables
+            .self_loop_options
+            .row_mut(NodeId::new(3))
+            .ordering = crate::options::SelfLoopOrderingStrategy::Sequenced;
+        *graph.tables.port_alignment.row_mut(NodeId::new(3)) = crate::options::PortAlignment::End;
+        graph
+            .tables
+            .placement_options
+            .row_mut(NodeId::new(3))
+            .flexibility = crate::options::NodeFlexibility::PortPosition;
         graph.mark_layer_constraint_explicit(NodeId::new(3));
         let mut graphs = GraphArena::new(graph);
 
         let components = split(&mut graphs).unwrap().unwrap();
 
         let second = &components[1].graph;
-        let row = second.in_layer.get(NodeId::new(1)).unwrap();
+        let row = second.tables.in_layer.get(NodeId::new(1)).unwrap();
         assert_eq!(row.layout_unit, Some(NodeId::new(0)));
         assert_eq!(row.successor_constraints, [NodeId::new(0)]);
         assert_eq!(row.barycenter_associates, [NodeId::new(0)]);
         assert_eq!(
             second
+                .tables
                 .self_loop_options
                 .get(NodeId::new(1))
                 .unwrap()
@@ -953,6 +910,7 @@ mod tests {
         );
         assert_eq!(
             second
+                .tables
                 .placement_options
                 .get(NodeId::new(1))
                 .unwrap()
@@ -974,18 +932,24 @@ mod tests {
         let mut components = components;
         components[1]
             .graph
+            .tables
             .in_layer
             .row_mut(NodeId::new(0))
             .successor_constraints = vec![NodeId::new(1)];
         components[1]
             .graph
+            .tables
             .self_loop_options
             .row_mut(NodeId::new(0))
             .distribution = crate::options::SelfLoopDistributionStrategy::Equally;
-        *components[1].graph.port_alignment.row_mut(NodeId::new(0)) =
-            Some(crate::options::PortAlignment::Begin);
+        *components[1]
+            .graph
+            .tables
+            .port_alignment
+            .row_mut(NodeId::new(0)) = crate::options::PortAlignment::Begin;
         components[1]
             .graph
+            .tables
             .placement_options
             .row_mut(NodeId::new(0))
             .flexibility = crate::options::NodeFlexibility::PortPosition;
@@ -1006,7 +970,11 @@ mod tests {
         );
         assert_eq!(root.barycenter_associates(NodeId::new(3)), [NodeId::new(2)]);
         assert_eq!(
-            root.self_loop_options.get(NodeId::new(3)).unwrap().ordering,
+            root.tables
+                .self_loop_options
+                .get(NodeId::new(3))
+                .unwrap()
+                .ordering,
             crate::options::SelfLoopOrderingStrategy::Sequenced
         );
         assert_eq!(root.in_layer_layout_unit(NodeId::new(1)), None);
@@ -1016,7 +984,8 @@ mod tests {
             [NodeId::new(3)]
         );
         assert_eq!(
-            root.self_loop_options
+            root.tables
+                .self_loop_options
                 .get(NodeId::new(2))
                 .unwrap()
                 .distribution,
@@ -1031,7 +1000,8 @@ mod tests {
             Some(crate::options::PortAlignment::End)
         );
         assert_eq!(
-            root.placement_options
+            root.tables
+                .placement_options
                 .get(NodeId::new(2))
                 .unwrap()
                 .flexibility,

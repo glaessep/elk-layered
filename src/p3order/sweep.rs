@@ -5423,7 +5423,12 @@ mod tests {
         let c = graph.node_named("C");
         graph.set_layer_nodes(0, vec![c]);
         graph.set_layer_nodes(1, vec![b, a]);
-        graph.in_layer.row_mut(a).successor_constraints.push(b);
+        graph
+            .tables
+            .in_layer
+            .row_mut(a)
+            .successor_constraints
+            .push(b);
 
         let mut order = graph
             .layers()
@@ -5702,6 +5707,7 @@ mod north_south_tests {
         let first = add_node(&mut graph, "first", 1, &[]);
         let second = add_node(&mut graph, "second", 1, &[]);
         graph
+            .tables
             .in_layer
             .row_mut(first)
             .successor_constraints

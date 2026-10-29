@@ -604,7 +604,9 @@ mod tests {
                 .push(LNode::new("A", 200.0, 40.0, None));
             let node = NodeId::new(0);
             graph.set_node_layer(node, 0);
-            *graph.port_alignment.row_mut(node) = alignment;
+            if let Some(alignment) = alignment {
+                *graph.tables.port_alignment.row_mut(node) = alignment;
+            }
             let ports = [0, 1].map(|_| {
                 let port = graph
                     .add_port(

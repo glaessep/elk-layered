@@ -3817,6 +3817,7 @@ fn process_east_west_hierarchical_port_constraints_for_layer(
 
         if let Some(previous) = last_hierarchical_dummy {
             graph
+                .tables
                 .in_layer
                 .row_mut(previous)
                 .successor_constraints
@@ -4023,7 +4024,11 @@ fn create_hierarchical_port_replacement_dummy(
         .in_layer_successor_constraints(original_dummy)
         .to_vec();
     if !successor_constraints.is_empty() {
-        graph.in_layer.row_mut(node_index).successor_constraints = successor_constraints;
+        graph
+            .tables
+            .in_layer
+            .row_mut(node_index)
+            .successor_constraints = successor_constraints;
     }
 
     let input = graph
@@ -5799,6 +5804,7 @@ mod tests {
             .in_layer_constraint = InLayerConstraint::Top;
 
         graph
+            .tables
             .in_layer
             .row_mut(north)
             .successor_constraints

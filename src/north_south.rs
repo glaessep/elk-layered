@@ -51,7 +51,7 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
             }
 
             // Nodes form their own layout unit.
-            graph.in_layer.row_mut(node).layout_unit = Some(node);
+            graph.tables.in_layer.row_mut(node).layout_unit = Some(node);
 
             let mut barycenter_associates = Vec::new();
 
@@ -68,10 +68,11 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
                 pointer += 1;
 
                 // The dummies form a layout unit named by the node they were made for.
-                graph.in_layer.row_mut(dummy).layout_unit = Some(node);
+                graph.tables.in_layer.row_mut(dummy).layout_unit = Some(node);
 
                 if !origin_allows_side_switch(graph, dummy) {
                     graph
+                        .tables
                         .in_layer
                         .row_mut(dummy)
                         .successor_constraints
@@ -89,11 +90,12 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
                 pointer += 1;
                 insert_into_layer(graph, dummy, layer_index, pointer as usize);
 
-                graph.in_layer.row_mut(dummy).layout_unit = Some(node);
+                graph.tables.in_layer.row_mut(dummy).layout_unit = Some(node);
 
                 // The regular node has every southern dummy as its successor.
                 if !origin_allows_side_switch(graph, dummy) {
                     graph
+                        .tables
                         .in_layer
                         .row_mut(node)
                         .successor_constraints
@@ -102,7 +104,7 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
             }
 
             if !barycenter_associates.is_empty() {
-                graph.in_layer.row_mut(node).barycenter_associates = barycenter_associates;
+                graph.tables.in_layer.row_mut(node).barycenter_associates = barycenter_associates;
             }
         }
     }

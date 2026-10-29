@@ -87,6 +87,18 @@ pub struct LGraph {
     pub(crate) self_loop_holders: Vec<SelfLoopHolder>,
     /// Crate-visible: The crossing minimization reads it. Nothing sets it yet.
     pub(crate) in_layer_successor_constraints_between_non_dummies: bool,
+    /// The side tables of the nodes: the data that one processor owns.
+    ///
+    /// Crate-visible: the processors that own a table read and write it directly, and a component
+    /// split and combine carry it as a whole.
+    pub(crate) tables: NodeTables,
+}
+
+/// The side tables of the nodes of one graph. Each table belongs to one processor, as its doc
+/// says. A component split and combine move all of them through `subset`, `rows` and
+/// `scattered`, so a new table needs its edits only here.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct NodeTables {
     /// What `NorthSouthPortPreprocessor` tells the crossing minimization about a node. Only the
     /// nodes with fixed port sides and their dummies have a row.
     pub(crate) in_layer: NodeTable<InLayerLayout>,
@@ -95,12 +107,112 @@ pub struct LGraph {
     pub(crate) self_loop_options: NodeTable<SelfLoopOptions>,
     /// `portAlignment` of the nodes that set it. The node size and port placement is the only
     /// reader. A node without a row follows the graph's default.
-    pub(crate) port_alignment: NodeTable<Option<PortAlignment>>,
+    pub(crate) port_alignment: NodeTable<PortAlignment>,
     /// The options only the node placement reads, of the nodes the importer read them for.
     pub(crate) placement_options: NodeTable<PlacementOptions>,
-    /// Whether the node's layer constraint was set by the caller or by a hierarchical port
-    /// dummy, not derived. Only the layer constraint preprocessing reads it.
-    pub(crate) layer_constraint_explicit: NodeTable<bool>,
+    /// A node has a row when its layer constraint was set by the caller or by a hierarchical
+    /// port dummy, not derived. Only the layer constraint preprocessing reads it.
+    pub(crate) layer_constraint_explicit: NodeTable<()>,
+}
+
+/// One node's rows of every table in [`NodeTables`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct NodeRow {
+    in_layer: Option<InLayerLayout>,
+    self_loop_options: Option<SelfLoopOptions>,
+    port_alignment: Option<PortAlignment>,
+    placement_options: Option<PlacementOptions>,
+    layer_constraint_explicit: Option<()>,
+}
+
+impl NodeTables {
+    /// The tables of a graph made from just `nodes`, in this order.
+    pub(crate) fn subset(&self, nodes: &IdVec<NodeId, NodeId>) -> Self {
+        Self {
+            in_layer: self.in_layer.subset(nodes),
+            self_loop_options: self.self_loop_options.subset(nodes),
+            port_alignment: self.port_alignment.subset(nodes),
+            placement_options: self.placement_options.subset(nodes),
+            layer_constraint_explicit: self.layer_constraint_explicit.subset(nodes),
+        }
+    }
+
+    /// Renames the node ids that rows hold, `kind` naming the id for an error. Used when graphs
+    /// split or merge and their node ids change.
+    pub(crate) fn map_node_ids<E>(
+        &mut self,
+        mut map: impl FnMut(NodeId, &'static str) -> Result<NodeId, E>,
+    ) -> Result<(), E> {
+        for row in self.in_layer.rows_mut() {
+            if let Some(unit) = &mut row.layout_unit {
+                *unit = map(*unit, "layout unit")?;
+            }
+            for node in &mut row.successor_constraints {
+                *node = map(*node, "successor")?;
+            }
+            for node in &mut row.barycenter_associates {
+                *node = map(*node, "barycenter associate")?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The rows of every node from 0 up to the last node that has a row in any table, taking the
+    /// tables apart for a combine.
+    pub(crate) fn rows(&self) -> Vec<NodeRow> {
+        let len = [
+            self.in_layer.row_count(),
+            self.self_loop_options.row_count(),
+            self.port_alignment.row_count(),
+            self.placement_options.row_count(),
+            self.layer_constraint_explicit.row_count(),
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+        (0..len)
+            .map(|index| {
+                let node = NodeId::new(index);
+                NodeRow {
+                    in_layer: self.in_layer.get(node).cloned(),
+                    self_loop_options: self.self_loop_options.get(node).cloned(),
+                    port_alignment: self.port_alignment.get(node).copied(),
+                    placement_options: self.placement_options.get(node).cloned(),
+                    layer_constraint_explicit: self.layer_constraint_explicit.get(node).copied(),
+                }
+            })
+            .collect()
+    }
+
+    /// The tables of `len` nodes that put each row at the node it names, as a combine needs.
+    pub(crate) fn scattered(len: usize, rows: impl IntoIterator<Item = (NodeId, NodeRow)>) -> Self {
+        let rows = rows.into_iter().collect::<Vec<_>>();
+        Self {
+            in_layer: NodeTable::scattered(
+                len,
+                rows.iter().map(|(node, row)| (*node, row.in_layer.clone())),
+            ),
+            self_loop_options: NodeTable::scattered(
+                len,
+                rows.iter()
+                    .map(|(node, row)| (*node, row.self_loop_options.clone())),
+            ),
+            port_alignment: NodeTable::scattered(
+                len,
+                rows.iter().map(|(node, row)| (*node, row.port_alignment)),
+            ),
+            placement_options: NodeTable::scattered(
+                len,
+                rows.iter()
+                    .map(|(node, row)| (*node, row.placement_options.clone())),
+            ),
+            layer_constraint_explicit: NodeTable::scattered(
+                len,
+                rows.iter()
+                    .map(|(node, row)| (*node, row.layer_constraint_explicit)),
+            ),
+        }
+    }
 }
 
 /// The node options that only the node placement (`NetworkSimplexPlacer`) reads.
@@ -173,11 +285,7 @@ impl LGraph {
             cross_hierarchy_edges: Vec::new(),
             self_loop_holders: Vec::new(),
             in_layer_successor_constraints_between_non_dummies: false,
-            in_layer: NodeTable::default(),
-            self_loop_options: NodeTable::default(),
-            port_alignment: NodeTable::default(),
-            placement_options: NodeTable::default(),
-            layer_constraint_explicit: NodeTable::default(),
+            tables: NodeTables::default(),
         }
     }
 
@@ -1281,12 +1389,16 @@ impl LGraph {
     /// The node that `node` forms an in-layer layout unit under, if the north/south port
     /// preprocessing recorded one.
     pub(crate) fn in_layer_layout_unit(&self, node: NodeId) -> Option<NodeId> {
-        self.in_layer.get(node).and_then(|row| row.layout_unit)
+        self.tables
+            .in_layer
+            .get(node)
+            .and_then(|row| row.layout_unit)
     }
 
     /// The nodes that must stay below `node` in its layer. Empty if none were recorded.
     pub(crate) fn in_layer_successor_constraints(&self, node: NodeId) -> &[NodeId] {
-        self.in_layer
+        self.tables
+            .in_layer
             .get(node)
             .map_or(&[], |row| row.successor_constraints.as_slice())
     }
@@ -1294,27 +1406,25 @@ impl LGraph {
     /// The nodes whose positions pull `node` in the crossing minimization. Empty if none were
     /// recorded.
     pub(crate) fn barycenter_associates(&self, node: NodeId) -> &[NodeId] {
-        self.in_layer
+        self.tables
+            .in_layer
             .get(node)
             .map_or(&[], |row| row.barycenter_associates.as_slice())
     }
 
     /// The `portAlignment` the node sets, or `None` if it sets none.
     pub(crate) fn port_alignment_of(&self, node: NodeId) -> Option<PortAlignment> {
-        self.port_alignment.get(node).copied().flatten()
+        self.tables.port_alignment.get(node).copied()
     }
 
     /// Whether the caller, or a hierarchical port dummy, set the layer constraint of `node`.
     pub(crate) fn is_layer_constraint_explicit(&self, node: NodeId) -> bool {
-        self.layer_constraint_explicit
-            .get(node)
-            .copied()
-            .unwrap_or(false)
+        self.tables.layer_constraint_explicit.get(node).is_some()
     }
 
     /// Records that the layer constraint of `node` is explicit.
     pub(crate) fn mark_layer_constraint_explicit(&mut self, node: NodeId) {
-        *self.layer_constraint_explicit.row_mut(node) = true;
+        self.tables.layer_constraint_explicit.row_mut(node);
     }
 
     /// Pushes a node made by [`create_external_port_dummy`]. ELK sets the layer constraint of a
@@ -2773,8 +2883,7 @@ mod tests {
     fn port_alignment_of_is_none_for_a_node_that_sets_none() {
         let mut graph = graph_with_nodes(3);
         let all = ids(&graph, &[0, 1, 2]);
-        *graph.port_alignment.row_mut(all[0]) = Some(PortAlignment::End);
-        *graph.port_alignment.row_mut(all[1]) = None;
+        *graph.tables.port_alignment.row_mut(all[0]) = PortAlignment::End;
 
         assert_eq!(graph.port_alignment_of(all[0]), Some(PortAlignment::End));
         assert_eq!(graph.port_alignment_of(all[1]), None);
