@@ -423,33 +423,35 @@ fn import_external_ports(
                 )
             }
         });
-        let node = root.next_node_id();
-        let mut dummy = create_external_port_dummy(
-            node,
-            format!("{scope_id}:external:{}", port.id),
-            port.id.clone(),
-            PortType::Output,
-            constraints,
-            port.side,
-            port.net_flow as isize,
-            LPoint {
-                x: port.x + port.width / 2.0,
-                y: port.y + port.height / 2.0,
-            },
-            LSize {
-                width: port.width,
-                height: port.height,
-            },
-            scope.node_size,
-            border_offset,
-            root.options.direction,
-        );
-        apply_port_index_to_dummy(&mut dummy, constraints, port.index.map(|i| i as isize));
-        let dummy_port = &mut dummy.ports[PortId::new(0)];
-        dummy_port.named = true;
-        dummy_port.connected_to_external_nodes = port.connected_to_external_nodes;
-        dummy.scope_port = Some(position);
-        root.layerless_nodes.push(dummy);
+        let direction = root.options.direction;
+        let node = root.push_external_port_dummy(|node| {
+            let mut dummy = create_external_port_dummy(
+                node,
+                format!("{scope_id}:external:{}", port.id),
+                port.id.clone(),
+                PortType::Output,
+                constraints,
+                port.side,
+                port.net_flow as isize,
+                LPoint {
+                    x: port.x + port.width / 2.0,
+                    y: port.y + port.height / 2.0,
+                },
+                LSize {
+                    width: port.width,
+                    height: port.height,
+                },
+                scope.node_size,
+                border_offset,
+                direction,
+            );
+            apply_port_index_to_dummy(&mut dummy, constraints, port.index.map(|i| i as isize));
+            let dummy_port = &mut dummy.ports[PortId::new(0)];
+            dummy_port.named = true;
+            dummy_port.connected_to_external_nodes = port.connected_to_external_nodes;
+            dummy.scope_port = Some(position);
+            dummy
+        });
         dummies.insert(port.id.clone(), node);
     }
     dummies
@@ -1159,28 +1161,29 @@ fn ensure_inside_self_loop_dummy(
     graph.graph_properties.non_free_ports = true;
 
     let dummy_id = format!("external:{parent_node_id}");
-    let node = graph.next_node_id();
-    let mut dummy = create_external_port_dummy(
-        node,
-        dummy_id,
-        parent_port_key.to_string(),
-        port_type,
-        PortConstraints::Free,
-        PortSide::Undefined,
-        match port_type {
-            PortType::Input => 1,
-            PortType::Output => -1,
-        },
-        Default::default(),
-        LSize::default(),
-        LSize::default(),
-        0.0,
-        graph.options.direction,
-    );
-    dummy.parent_port_key = Some(parent_port_key.to_string());
-    dummy.parent_port_type = Some(port_type);
-
-    graph.layerless_nodes.push(dummy);
+    let direction = graph.options.direction;
+    let node = graph.push_external_port_dummy(|node| {
+        let mut dummy = create_external_port_dummy(
+            node,
+            dummy_id,
+            parent_port_key.to_string(),
+            port_type,
+            PortConstraints::Free,
+            PortSide::Undefined,
+            match port_type {
+                PortType::Input => 1,
+                PortType::Output => -1,
+            },
+            Default::default(),
+            LSize::default(),
+            LSize::default(),
+            0.0,
+            direction,
+        );
+        dummy.parent_port_key = Some(parent_port_key.to_string());
+        dummy.parent_port_type = Some(port_type);
+        dummy
+    });
     let port = PortRef {
         node,
         port: PortId::new(0),

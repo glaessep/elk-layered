@@ -775,6 +775,16 @@ impl LGraph {
         self.layerless_nodes.next_id()
     }
 
+    /// Builds an external port dummy and pushes it onto `layerless_nodes`. `build` gets the id the
+    /// dummy will have, because the dummy's port names it as owner. The method returns the id
+    /// `push` gave the dummy. Nothing can push between the two, as `build` cannot reach the graph.
+    pub fn push_external_port_dummy(&mut self, build: impl FnOnce(NodeId) -> LNode) -> NodeId {
+        let expected = self.next_node_id();
+        let id = self.layerless_nodes.push(build(expected));
+        debug_assert_eq!(id, expected, "the dummy got another id than its port names");
+        id
+    }
+
     pub fn clear_layers(&mut self) {
         self.layers.clear();
         for node in &mut self.layerless_nodes {
@@ -1435,6 +1445,35 @@ mod tests {
             dummy.ports[PortId::new(0)].position,
             LPoint { x: 2.0, y: 0.0 }
         );
+    }
+
+    // Mutation: hand `build` the id `NodeId::new(0)`, or return `NodeId::new(0)` from
+    // `push_external_port_dummy`.
+    #[test]
+    fn pushed_external_port_dummy_gets_the_id_its_port_names() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        graph.layerless_nodes.push(LNode::new("a", 1.0, 1.0, None));
+        graph.layerless_nodes.push(LNode::new("b", 1.0, 1.0, None));
+        let id = graph.push_external_port_dummy(|node| {
+            create_external_port_dummy(
+                node,
+                "external:A",
+                "external:A:0",
+                PortType::Output,
+                PortConstraints::Free,
+                PortSide::Undefined,
+                -1,
+                LPoint::default(),
+                LSize::default(),
+                LSize::default(),
+                0.0,
+                ElkDirection::Right,
+            )
+        });
+        assert_eq!(id, NodeId::new(2));
+        assert_eq!(graph.layerless_nodes.len(), 3);
+        assert_eq!(graph.layerless_nodes[id].kind, LNodeKind::ExternalPort);
+        assert_eq!(graph.layerless_nodes[id].ports[PortId::new(0)].node, id);
     }
 
     // Mutation: build the dummy's port with `NodeId::new(0)` instead of the `node` argument.
