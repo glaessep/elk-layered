@@ -35,7 +35,7 @@ use crate::p4nodes::{
     place_nodes_network_simplex, place_nodes_simple, process_in_layer_constraints,
 };
 use crate::p5edges::route_edges_orthogonal;
-use crate::selfloops::{
+use crate::selfloop::{
     postprocess_self_loops, preprocess_self_loops, restore_self_loop_ports, route_self_loops,
 };
 use crate::transform::{GraphTransformMode, transform_graph_direction};

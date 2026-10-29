@@ -54,7 +54,7 @@ mod p4nodes;
 mod p5edges;
 mod pipeline;
 mod random;
-mod selfloops;
+mod selfloop;
 mod transform;
 
 #[cfg(test)]
