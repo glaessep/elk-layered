@@ -258,8 +258,14 @@ pub fn import_graph_with_segments(
     input: &ElkInputGraph,
     segments: &[ElkInputEdgeSegment],
 ) -> ImportResult<GraphArena> {
-    import_scope(input, segments, ElkPadding::uniform(0.0), ScopePorts::NONE)
-        .map(|imported| imported.graphs)
+    import_scope_with(
+        input,
+        segments,
+        ElkPadding::uniform(0.0),
+        ScopePorts::NONE,
+        false,
+    )
+    .map(|imported| imported.graphs)
 }
 
 /// What importing a scope makes.
@@ -268,6 +274,7 @@ pub(crate) struct ImportedScope {
     pub(crate) graphs: GraphArena,
     /// The graph each input edge belongs to, by the edge's id: the root, or the graph inside the
     /// node that contains the edge. A later step never has to look a graph up by its name.
+    /// Empty when the caller did not ask for it.
     pub(crate) edge_containers: HashMap<String, GraphId>,
 }
 
@@ -299,6 +306,18 @@ pub(crate) fn import_scope(
     segments: &[ElkInputEdgeSegment],
     root_label_padding: ElkPadding,
     scope: ScopePorts<'_>,
+) -> ImportResult<ImportedScope> {
+    import_scope_with(input, segments, root_label_padding, scope, true)
+}
+
+/// [`import_scope`], with a choice about the edge containers. Only `layout` reads them, so the
+/// other callers pass `false` and skip building the map.
+fn import_scope_with(
+    input: &ElkInputGraph,
+    segments: &[ElkInputEdgeSegment],
+    root_label_padding: ElkPadding,
+    scope: ScopePorts<'_>,
+    with_edge_containers: bool,
 ) -> ImportResult<ImportedScope> {
     let mut index = InputIndex::new(input, scope.ports)?;
     validate_scoped_edge_segments(&index, segments)?;
@@ -338,20 +357,22 @@ pub(crate) fn import_scope(
     graphs.sync_graph_properties_to_options();
     // The same container the edges were grouped by above, now as the graph that holds it.
     let mut edge_containers = HashMap::new();
-    for edge in &input.edges {
-        let graph = match input_edge_containing_parent(&index, edge) {
-            // The scope itself holds the edge.
-            None => GraphId::ROOT,
-            // A named container without a graph is not the root. Reading it as the root would
-            // give the edge the wrong coordinates.
-            Some(container) => {
-                nested_of(container).ok_or_else(|| ImportError::ContainerWithoutGraph {
-                    edge_id: edge.id.clone(),
-                    container: container.to_string(),
-                })?
-            }
-        };
-        edge_containers.insert(edge.id.clone(), graph);
+    if with_edge_containers {
+        for edge in &input.edges {
+            let graph = match input_edge_containing_parent(&index, edge) {
+                // The scope itself holds the edge.
+                None => GraphId::ROOT,
+                // A named container without a graph is not the root. Reading it as the root would
+                // give the edge the wrong coordinates.
+                Some(container) => {
+                    nested_of(container).ok_or_else(|| ImportError::ContainerWithoutGraph {
+                        edge_id: edge.id.clone(),
+                        container: container.to_string(),
+                    })?
+                }
+            };
+            edge_containers.insert(edge.id.clone(), graph);
+        }
     }
     Ok(ImportedScope {
         graphs,
@@ -2744,6 +2765,22 @@ mod tests {
             .map(|id| &imported[id])
             .expect("inside self-loop creates a nested graph");
         assert!(nested.layerless_nodes.iter().all(|node| node.id != "child"));
+    }
+
+    // Mutation: build the map whatever `with_edge_containers` says. The import for a caller that
+    // does not read the map then still pays for it.
+    #[test]
+    fn the_edge_containers_are_built_only_when_asked_for() {
+        let input = graph(vec![node("a"), node("b")], vec![edge("e", "a", "b")]);
+        let scope = || (ElkPadding::uniform(0.0), ScopePorts::NONE);
+
+        let (padding, ports) = scope();
+        let without = import_scope_with(&input, &[], padding, ports, false).unwrap();
+        let (padding, ports) = scope();
+        let with = import_scope_with(&input, &[], padding, ports, true).unwrap();
+
+        assert!(without.edge_containers.is_empty());
+        assert_eq!(with.edge_containers["e"], GraphId::ROOT);
     }
 
     // Mutation: put every edge in `GraphId::ROOT`, or look the container up by the scope's id
