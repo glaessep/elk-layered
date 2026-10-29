@@ -313,6 +313,9 @@ pub enum DummyData {
     ExternalPort(ExternalPortData),
     /// `NodeType.NORTH_SOUTH_PORT`. It has no data of its own: its ports carry the origins.
     NorthSouthPort,
+    /// `NodeType.BREAKING_POINT`. ELK's graph wrapping makes these; wrapping is not ported, so no
+    /// processor builds one yet.
+    BreakingPoint,
 }
 
 impl DummyData {
@@ -322,6 +325,7 @@ impl DummyData {
             Self::Label(_) => LNodeKind::Label,
             Self::ExternalPort(_) => LNodeKind::ExternalPort,
             Self::NorthSouthPort => LNodeKind::NorthSouthPort,
+            Self::BreakingPoint => LNodeKind::BreakingPoint,
         }
     }
 }
@@ -428,11 +432,12 @@ impl LNode {
     /// [`LNodeKind::Normal`] makes it a node of the input again.
     pub fn set_kind(&mut self, kind: LNodeKind) {
         self.dummy = match kind {
-            LNodeKind::Normal | LNodeKind::BreakingPoint => None,
+            LNodeKind::Normal => None,
             LNodeKind::LongEdge => Some(DummyData::LongEdge(LongEdgeData::default())),
             LNodeKind::Label => Some(DummyData::Label(LabelData::default())),
             LNodeKind::ExternalPort => Some(DummyData::ExternalPort(ExternalPortData::default())),
             LNodeKind::NorthSouthPort => Some(DummyData::NorthSouthPort),
+            LNodeKind::BreakingPoint => Some(DummyData::BreakingPoint),
         };
     }
 
@@ -2537,7 +2542,8 @@ mod tests {
         node
     }
 
-    // Mutation: in `set_kind`, make a `Label` dummy hold the data of a long edge dummy.
+    // Mutation: in `set_kind`, make a `Label` dummy hold the data of a long edge dummy, or make a
+    // `BreakingPoint` node a plain node again.
     #[test]
     fn set_kind_gives_the_node_the_data_of_its_kind() {
         for kind in [
@@ -2546,6 +2552,7 @@ mod tests {
             LNodeKind::Label,
             LNodeKind::ExternalPort,
             LNodeKind::NorthSouthPort,
+            LNodeKind::BreakingPoint,
         ] {
             assert_eq!(dummy_of(kind).kind(), kind, "{kind:?}");
         }
