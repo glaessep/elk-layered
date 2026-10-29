@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use crate::graph::{
-    EdgeId, GraphArena, GraphId, LGraph, LNode, LNodeKind, NodeId, OtherGraphs, PortId, PortRef,
-    PortSide, PortType,
+    EdgeId, GraphArena, GraphId, LGraph, LNode, LNodeKind, NodeId, PortId, PortRef, PortSide,
+    PortType,
 };
 use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
 use crate::intermediate::greedyswitch::between_layer_edge_two_node_crossings_counter::{
@@ -31,23 +31,30 @@ use crate::phase::ordering::counting::crossings_counter::CrossingsCounter;
 use crate::phase::ordering::forster_constraint_resolver::{
     ConstraintGroup, merge_constraint_groups,
 };
-use crate::phase::ordering::graph_info_holder::{
-    GraphInfoHolder, initialize_crossing_minimization_port_ids,
-};
+use crate::phase::ordering::graph_info_holder::initialize_crossing_minimization_port_ids;
 use crate::phase::ordering::greedy_port_distributor::GreedyPortDistributor;
 use crate::phase::ordering::layer_sweep_crossing_minimizer::{
     CrossMinType, HierarchySweep, apply_parent_hierarchical_port_order_on_sweep_side,
-    minimize_crossings_layer_sweep, minimize_crossings_layer_sweep_hierarchical_with_type,
-    minimize_crossings_layer_sweep_with_type, sweep_reducing_crossings,
+    minimize_crossings_layer_sweep,
 };
 use crate::phase::ordering::layer_sweep_type_decider::external_dummy_origin_side;
 use crate::phase::ordering::sweep_port_distributor::{PortDistributor, PortDistributorKind};
 use crate::random::JavaRandom;
 
+/// Sweeps one graph alone, as a flat layout does: the graph takes the root's place in an arena.
+fn sweep_alone(graph: &mut LGraph, cross_min_type: CrossMinType) -> bool {
+    let mut graphs = GraphArena::new(LGraph::new("alone", LayeredOptions::default()));
+    std::mem::swap(&mut graphs[GraphId::ROOT], graph);
+    let changed = minimize_crossings_layer_sweep(&mut graphs, GraphId::ROOT, false, cross_min_type);
+    std::mem::swap(&mut graphs[GraphId::ROOT], graph);
+    changed
+}
+
 // Mutation: in `add_adjacency`, merge with any entry at the same position, not only the last.
 // A second mutation deletes the sort in `AdjacencyList::from_positions`. Either one changes the
 // counted crossings.
 #[test]
+
 fn an_adjacency_merges_only_with_the_entry_collected_just_before_it() {
     // Edges to positions 5, 5, 3 and 5: the first two merge, the last stays its own entry,
     // and the stable sort keeps it behind the merged one.
@@ -272,12 +279,14 @@ fn complete_dag_randomizes_after_the_shared_initial_order_attempt() {
         .unwrap();
 
         if hierarchical {
-            minimize_crossings_layer_sweep_hierarchical_with_type(
+            minimize_crossings_layer_sweep(
                 &mut graph,
+                GraphId::ROOT,
+                true,
                 CrossMinType::Barycenter,
             );
         } else {
-            minimize_crossings_layer_sweep(&mut graph);
+            sweep_alone(&mut graph, CrossMinType::Barycenter);
         }
 
         assert_eq!(CrossingsCounter::default().count_all_crossings(&graph), 3.0);
@@ -342,7 +351,7 @@ fn hierarchical_sweep_advances_graph_random_streams_without_order_changes() {
         }
         expected_root.next_bool();
 
-        minimize_crossings_layer_sweep_hierarchical_with_type(&mut graphs, cross_min_type);
+        minimize_crossings_layer_sweep(&mut graphs, GraphId::ROOT, true, cross_min_type);
         assert_eq!(graphs.root().layers()[0].nodes(), vec![NodeId::new(0)]);
         assert_eq!(graphs.root().random, expected_root, "{cross_min_type:?}");
         assert_eq!(
@@ -367,7 +376,7 @@ fn hierarchical_sweep_matches_source_node_port_counter_gate() {
         .consider_model_order_crossing_counter_port_influence = 1.0;
 
     let mut graphs = GraphArena::new(graph);
-    let sweep = HierarchySweep::new(&mut graphs, CrossMinType::Barycenter);
+    let sweep = HierarchySweep::new(&mut graphs, GraphId::ROOT, true, CrossMinType::Barycenter);
 
     assert!(!sweep.use_node_port_order_crossing_counter(&graphs, 0));
 
@@ -403,10 +412,16 @@ fn hierarchical_sweep_discovers_child_graphs_in_current_node_order() {
         LGraph::new("first:nested", LayeredOptions::default()),
     );
 
-    let sweep = HierarchySweep::new(&mut graphs, CrossMinType::Barycenter);
+    let sweep = HierarchySweep::new(&mut graphs, GraphId::ROOT, true, CrossMinType::Barycenter);
 
     // The root lists node 1 before node 0, so its nested graph comes first.
     assert_eq!(sweep.infos[0].child_graphs, vec![first, second]);
+
+    // Mutation: let `initialize_graphs` collect the nested graphs without `include_children`.
+    // A flat layout has laid them out already, so its sweep holds the root alone.
+    let flat = HierarchySweep::new(&mut graphs, GraphId::ROOT, false, CrossMinType::Barycenter);
+    assert_eq!(flat.infos.len(), 1);
+    assert!(flat.infos[0].child_graphs.is_empty());
 }
 
 #[test]
@@ -453,7 +468,7 @@ fn hierarchical_sweep_saves_currently_best_snapshot_not_current_order() {
     graph.set_node_layer(NodeId::new(1), 0);
 
     let mut graphs = GraphArena::new(graph);
-    let mut sweep = HierarchySweep::new(&mut graphs, CrossMinType::Barycenter);
+    let mut sweep = HierarchySweep::new(&mut graphs, GraphId::ROOT, true, CrossMinType::Barycenter);
     sweep.changed.insert(0);
     sweep.set_currently_best_node_orders(&graphs);
     sweep.infos[0].current_node_order[0] = vec![NodeId::new(1), NodeId::new(0)];
@@ -665,7 +680,7 @@ fn layer_sweep_keeps_best_crossing_order() {
     graph.set_layer_nodes(1, vec![left, right]);
 
     let before = CrossingsCounter::default().count_all_crossings(&graph);
-    assert!(minimize_crossings_layer_sweep(&mut graph));
+    assert!(sweep_alone(&mut graph, CrossMinType::Barycenter));
     let after = CrossingsCounter::default().count_all_crossings(&graph);
 
     assert_eq!(before, 1.0);
@@ -1101,14 +1116,11 @@ fn barycenter_sweep_distributes_free_and_fixed_layer_ports() {
     graph.set_layer_nodes(2, vec![right, left]);
     initialize_crossing_minimization_port_ids(&mut graph);
 
-    let mut graph_info = GraphInfoHolder::new(&graph);
-    let port_distributor = BarycenterPortDistributor::new(
-        PortDistributorKind::NodeRelative,
-        &graph_info.current_node_order,
-    );
-    let mut heuristic = BarycenterHeuristic::new(&graph, JavaRandom::new(1), port_distributor);
-
-    sweep_reducing_crossings(&mut graph, &mut graph_info, &mut heuristic, true, false);
+    let mut graphs = graph;
+    let mut sweep =
+        HierarchySweep::new(&mut graphs, GraphId::ROOT, false, CrossMinType::Barycenter);
+    sweep.sweep_reducing_crossings_barycenter(&mut graphs, 0, true, false, false);
+    let graph = graphs.root();
 
     let free_ports = graph.layerless_nodes[free]
         .ports
@@ -1365,11 +1377,7 @@ fn one_sided_greedy_switch_reduces_between_layer_crossings() {
     graph.set_layer_nodes(1, vec![left, right]);
 
     let before = CrossingsCounter::default().count_all_crossings(&graph);
-    minimize_crossings_layer_sweep_with_type(
-        &mut graph,
-        OtherGraphs::none(),
-        CrossMinType::OneSidedGreedySwitch,
-    );
+    sweep_alone(&mut graph, CrossMinType::OneSidedGreedySwitch);
     let after = CrossingsCounter::default().count_all_crossings(&graph);
 
     assert_eq!(before, 1.0);
@@ -2164,11 +2172,7 @@ mod greedy_port_distributor_tests {
         graph.random = JavaRandom::new(seed_for_a_forward_first_sweep(
             CrossMinType::TwoSidedGreedySwitch,
         ));
-        minimize_crossings_layer_sweep_with_type(
-            &mut graph,
-            OtherGraphs::none(),
-            CrossMinType::TwoSidedGreedySwitch,
-        );
+        sweep_alone(&mut graph, CrossMinType::TwoSidedGreedySwitch);
         assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
     }
 
@@ -2181,11 +2185,7 @@ mod greedy_port_distributor_tests {
         graph.random = JavaRandom::new(seed_for_a_forward_first_sweep(
             CrossMinType::OneSidedGreedySwitch,
         ));
-        minimize_crossings_layer_sweep_with_type(
-            &mut graph,
-            OtherGraphs::none(),
-            CrossMinType::OneSidedGreedySwitch,
-        );
+        sweep_alone(&mut graph, CrossMinType::OneSidedGreedySwitch);
         assert_eq!(port_ids(&graph, a), ["a.p1", "a.p0"]);
     }
 
@@ -2201,7 +2201,7 @@ mod greedy_port_distributor_tests {
             let (mut graph, a) = crossed_between_two_nodes();
             graph.random = JavaRandom::new(seed_for_a_forward_first_sweep(cross_min_type));
             let mut graphs = GraphArena::new(graph);
-            minimize_crossings_layer_sweep_hierarchical_with_type(&mut graphs, cross_min_type);
+            minimize_crossings_layer_sweep(&mut graphs, GraphId::ROOT, true, cross_min_type);
             assert_eq!(
                 port_ids(graphs.root(), a),
                 ["a.p1", "a.p0"],

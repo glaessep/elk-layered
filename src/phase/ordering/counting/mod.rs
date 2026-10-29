@@ -8,5 +8,3 @@ pub(crate) mod crossings_counter;
 pub(crate) mod hyperedge_crossings_counter;
 #[cfg(test)]
 mod tests;
-
-pub use crossings_counter::CrossingsCounter;

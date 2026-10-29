@@ -6,8 +6,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
-    GraphArena, GraphId, GraphParent, LGraph, LNode, LNodeKind, NodeId, OtherGraphs, PortId,
-    PortSide,
+    GraphArena, GraphId, GraphParent, LGraph, LNode, LNodeKind, NodeId, PortId, PortSide,
 };
 use crate::intermediate::greedyswitch::greedy_switch_heuristic::GreedySwitchHeuristic;
 use crate::intermediate::preserveorder::model_order_node_comparator::ModelOrderNodeComparator;
@@ -19,15 +18,13 @@ use crate::phase::ordering::graph_info_holder::{
     GraphInfoHolder, initialize_crossing_minimization_port_ids,
     initialize_crossing_minimization_port_ids_hierarchy,
 };
-use crate::phase::ordering::hierarchy_graph_info::HierarchyGraphInfo;
 use crate::phase::ordering::layer_sweep_type_decider::LayerSweepTypeDecider;
 use crate::phase::ordering::sweep_copy::SweepCopy;
-use crate::phase::ordering::sweep_port_distributor::PortDistributor;
 use crate::phase::ordering::{first_free, first_index, is_not_end, next_index};
 use crate::random::JavaRandom;
 
 pub(crate) struct HierarchySweep {
-    pub(crate) infos: Vec<HierarchyGraphInfo>,
+    pub(crate) infos: Vec<GraphInfoHolder>,
     index_by_graph: HashMap<GraphId, usize>,
     pub(crate) changed: HashSet<usize>,
     random: JavaRandom,
@@ -53,10 +50,15 @@ impl CrossMinType {
 }
 
 impl HierarchySweep {
-    pub(crate) fn new(graphs: &mut GraphArena, cross_min_type: CrossMinType) -> Self {
-        let mut random = graphs.root().random.clone();
+    pub(crate) fn new(
+        graphs: &mut GraphArena,
+        start: GraphId,
+        include_children: bool,
+        cross_min_type: CrossMinType,
+    ) -> Self {
+        let mut random = graphs[start].random.clone();
         let random_seed = random.next_long();
-        graphs.root_mut().random = random.clone();
+        graphs[start].random = random.clone();
 
         let mut sweep = Self {
             infos: Vec::new(),
@@ -66,29 +68,35 @@ impl HierarchySweep {
             random_seed,
             cross_min_type,
         };
-        sweep.initialize_graphs(graphs);
+        sweep.initialize_graphs(graphs, start, include_children);
         sweep
     }
 
-    fn initialize_graphs(&mut self, graphs: &GraphArena) {
+    fn initialize_graphs(&mut self, graphs: &GraphArena, start: GraphId, include_children: bool) {
         // Parents come before their children.
-        let mut found = vec![GraphId::ROOT];
+        let mut found = vec![start];
         let mut index = 0usize;
         while index < found.len() {
             let id = found[index];
             let graph = &graphs[id];
             let info_index = self.infos.len();
             self.index_by_graph.insert(id, info_index);
-            let mut info = HierarchyGraphInfo::new(graph, self.cross_min_type);
+            let mut info = GraphInfoHolder::new(graph, self.cross_min_type);
             if info.parent.is_none() {
                 self.random = info.random.clone();
             }
-            let children = graph
-                .layers()
-                .iter()
-                .flat_map(|layer| layer.nodes().iter().copied())
-                .filter_map(|node_index| graph.layerless_nodes[node_index].nested_graph)
-                .collect::<Vec<_>>();
+            // ELK links a nested graph to its node only when the children are laid out with the
+            // parent. Here a nested graph is always linked, so a run without them leaves it out.
+            let children = if include_children {
+                graph
+                    .layers()
+                    .iter()
+                    .flat_map(|layer| layer.nodes().iter().copied())
+                    .filter_map(|node_index| graph.layerless_nodes[node_index].nested_graph)
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
             info.child_graphs = children.clone();
             self.infos.push(info);
             found.extend(children);
@@ -332,7 +340,7 @@ impl HierarchySweep {
         }
     }
 
-    fn sweep_reducing_crossings_barycenter(
+    pub(crate) fn sweep_reducing_crossings_barycenter(
         &mut self,
         graphs: &mut GraphArena,
         info_index: usize,
@@ -861,355 +869,53 @@ impl HierarchySweep {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn minimize_crossings_layer_sweep(graph: &mut LGraph) -> bool {
-    minimize_crossings_layer_sweep_with_type(graph, OtherGraphs::none(), CrossMinType::Barycenter)
-}
-
-pub(crate) fn minimize_crossings_layer_sweep_with_type(
-    graph: &mut LGraph,
-    others: OtherGraphs<'_>,
-    cross_min_type: CrossMinType,
-) -> bool {
-    if graph.layers().is_empty() || graph.layers().iter().all(|layer| layer.nodes().is_empty()) {
-        return false;
-    }
-    if graph.layers().len() == 1 && graph.layers()[0].nodes().len() <= 1 {
-        return false;
-    }
-
-    initialize_crossing_minimization_port_ids(graph);
-    match cross_min_type {
-        CrossMinType::Barycenter => minimize_barycenter(graph),
-        CrossMinType::OneSidedGreedySwitch => minimize_one_sided_greedy_switch(graph, others),
-        CrossMinType::TwoSidedGreedySwitch => minimize_two_sided_greedy_switch(graph, others),
-    }
-}
-
-pub(crate) fn minimize_crossings_layer_sweep_hierarchical_with_type(
+/// Ports `LayerSweepCrossingMinimizer.process` for the graph `start`. With `include_children`,
+/// the sweep also orders the graphs inside its nodes, as ELK does for `INCLUDE_CHILDREN`.
+pub(crate) fn minimize_crossings_layer_sweep(
     graphs: &mut GraphArena,
+    start: GraphId,
+    include_children: bool,
     cross_min_type: CrossMinType,
 ) -> bool {
-    let graph = graphs.root();
-    if graph.layers().is_empty() || graph.layers().iter().all(|layer| layer.nodes().is_empty()) {
-        let hierarchical_graphs = graph
-            .layerless_nodes
-            .iter()
-            .filter_map(|node| node.nested_graph)
-            .any(|nested| {
-                let nested = &graphs[nested];
-                !nested.layers().is_empty()
-                    && nested
-                        .layers()
-                        .iter()
-                        .any(|layer| !layer.nodes().is_empty())
-            });
+    let graph = &graphs[start];
+    let empty_graph =
+        graph.layers().is_empty() || graph.layers().iter().all(|layer| layer.nodes().is_empty());
+    let single_node = graph.layers().len() == 1 && graph.layers()[0].nodes().len() == 1;
+    if empty_graph {
+        let hierarchical_graphs = include_children
+            && graph
+                .layerless_nodes
+                .iter()
+                .filter_map(|node| node.nested_graph)
+                .any(|nested| {
+                    let nested = &graphs[nested];
+                    !nested.layers().is_empty()
+                        && nested
+                            .layers()
+                            .iter()
+                            .any(|layer| !layer.nodes().is_empty())
+                });
         if !hierarchical_graphs {
             return false;
         }
     }
+    if single_node && !include_children {
+        return false;
+    }
 
-    initialize_crossing_minimization_port_ids_hierarchy(graphs);
-    let mut sweep = HierarchySweep::new(graphs, cross_min_type);
+    if include_children {
+        initialize_crossing_minimization_port_ids_hierarchy(graphs);
+    } else {
+        initialize_crossing_minimization_port_ids(&mut graphs[start]);
+    }
+    let mut sweep = HierarchySweep::new(graphs, start, include_children, cross_min_type);
     sweep.minimize(graphs)
-}
-
-fn minimize_barycenter(graph: &mut LGraph) -> bool {
-    let mut graph_info = GraphInfoHolder::new(graph);
-
-    let mut random = graph.random.clone();
-    let random_seed = random.next_long();
-    let mut port_distributor = PortDistributor::create(
-        CrossMinType::Barycenter,
-        &mut random,
-        &graph_info.current_node_order,
-    );
-    random.set_seed(random_seed);
-
-    let mut best_crossings = f64::MAX;
-    let thoroughness = graph.options.thoroughness.max(1);
-    // Match the shared FIRST_TRY / SECOND_TRY Property ID, as in the hierarchy sweep:
-    // only the first run preserves model order before randomized attempts begin.
-    let first_try_with_initial_order =
-        graph.options.consider_model_order_strategy != OrderingStrategy::None;
-
-    // One heuristic and one port distributor serve every run, as in GraphInfoHolder: the port
-    // ranks and barycenters of an earlier run stay in the arrays until a later run overwrites them.
-    let mut heuristic =
-        BarycenterHeuristic::new(graph, random.clone(), port_distributor.hand_to_heuristic());
-    for run_index in 0..thoroughness {
-        let crossings = minimize_crossings_with_counter(
-            graph,
-            &mut graph_info,
-            &mut heuristic,
-            first_try_with_initial_order && run_index == 0,
-        );
-        random = heuristic.random.clone();
-
-        if crossings < best_crossings {
-            best_crossings = crossings;
-            if let Some(copy) = graph_info.currently_best_node_and_port_order.clone() {
-                graph_info.set_best_node_and_port_order(copy);
-            }
-            if best_crossings == 0.0 {
-                break;
-            }
-        }
-    }
-
-    graph.random = random;
-    let Some(best_sweep) = graph_info.get_best_sweep().cloned() else {
-        return false;
-    };
-    best_sweep.transfer_node_and_port_orders_to_graph(graph, true)
-}
-
-fn minimize_two_sided_greedy_switch(graph: &mut LGraph, others: OtherGraphs<'_>) -> bool {
-    let mut graph_info = GraphInfoHolder::new(graph);
-    // LayerSweepCrossingMinimizer.initialize draws a seed for every cross-min type, also for
-    // the greedy switch. This one is never used, but the draw moves the shared Random on for
-    // the next connected component. ISweepPortDistributor.create draws nothing for two-sided.
-    graph.random.next_long();
-    let mut heuristic = GreedySwitchHeuristic::new(CrossMinType::TwoSidedGreedySwitch);
-    let mut port_distributor = PortDistributor::create(
-        CrossMinType::TwoSidedGreedySwitch,
-        &mut graph.random,
-        &graph_info.current_node_order,
-    );
-    let mut is_forward_sweep = graph.random.next_bool();
-
-    loop {
-        let mut sweep_improved = heuristic.set_first_layer_order(
-            graph,
-            &mut graph_info.current_node_order,
-            is_forward_sweep,
-        );
-        sweep_improved |= sweep_reducing_crossings_greedy(
-            graph,
-            others,
-            &mut graph_info,
-            &mut heuristic,
-            &mut port_distributor,
-            is_forward_sweep,
-        );
-        if !sweep_improved {
-            break;
-        }
-        is_forward_sweep = !is_forward_sweep;
-    }
-
-    graph_info.set_currently_best_node_and_port_order(graph);
-
-    let Some(best_sweep) = graph_info.get_best_sweep().cloned() else {
-        return false;
-    };
-    best_sweep.transfer_node_and_port_orders_to_graph(graph, true)
-}
-
-fn minimize_one_sided_greedy_switch(graph: &mut LGraph, others: OtherGraphs<'_>) -> bool {
-    let mut graph_info = GraphInfoHolder::new(graph);
-    // LayerSweepCrossingMinimizer.initialize draws a seed. That seed is never used, but the draw
-    // moves the shared Random on for the next connected component. ISweepPortDistributor.create
-    // then draws a boolean to choose the barycenter port distributor.
-    graph.random.next_long();
-    let mut port_distributor = PortDistributor::create(
-        CrossMinType::OneSidedGreedySwitch,
-        &mut graph.random,
-        &graph_info.current_node_order,
-    );
-    let mut heuristic = GreedySwitchHeuristic::new(CrossMinType::OneSidedGreedySwitch);
-    let mut is_forward_sweep = graph.random.next_bool();
-    // ELK's minimizeCrossingsWithCounter also reads InternalProperties.FIRST_TRY_WITH_INITIAL_ORDER
-    // here. That property and SECOND_TRY_WITH_INITIAL_ORDER share the id
-    // "firstTryWithInitialOrder". The barycenter sweep leaves it set only when its first run keeps
-    // the model order because that order has no crossings. Then ELK returns before it sweeps, and
-    // this sweep finds no crossing to remove either. A port of the flag changed no layout in 3,000
-    // graphs (#26), so it is left out.
-
-    heuristic.set_first_layer_order(graph, &mut graph_info.current_node_order, is_forward_sweep);
-    sweep_reducing_crossings_greedy(
-        graph,
-        others,
-        &mut graph_info,
-        &mut heuristic,
-        &mut port_distributor,
-        is_forward_sweep,
-    );
-
-    let mut crossings_in_graph = graph_info
-        .crossings_counter
-        .count_all_crossings_in_order(graph, &graph_info.current_node_order);
-    loop {
-        graph_info.set_currently_best_node_and_port_order(graph);
-        if crossings_in_graph == 0.0 {
-            break;
-        }
-
-        is_forward_sweep = !is_forward_sweep;
-        let old_number_of_crossings = crossings_in_graph;
-        sweep_reducing_crossings_greedy(
-            graph,
-            others,
-            &mut graph_info,
-            &mut heuristic,
-            &mut port_distributor,
-            is_forward_sweep,
-        );
-        crossings_in_graph = graph_info
-            .crossings_counter
-            .count_all_crossings_in_order(graph, &graph_info.current_node_order);
-        if !sweep_improved_crossings(old_number_of_crossings, crossings_in_graph) {
-            break;
-        }
-    }
-
-    let Some(best_sweep) = graph_info.get_best_sweep().cloned() else {
-        return false;
-    };
-    best_sweep.transfer_node_and_port_orders_to_graph(graph, true)
 }
 
 /// The condition of `do { ... } while (oldNumberOfCrossings > crossingsInGraph)`. A count can be
 /// `NaN`, and then the loop ends: no comparison with `NaN` is true.
 fn sweep_improved_crossings(old_number_of_crossings: f64, crossings_in_graph: f64) -> bool {
     old_number_of_crossings > crossings_in_graph
-}
-
-fn minimize_crossings_with_counter(
-    graph: &mut LGraph,
-    graph_info: &mut GraphInfoHolder,
-    heuristic: &mut BarycenterHeuristic,
-    first_try_with_initial_order: bool,
-) -> f64 {
-    let mut is_forward_sweep = heuristic.random.next_bool();
-
-    let initial_crossings = graph_info
-        .crossings_counter
-        .count_all_crossings_in_order(graph, &graph_info.current_node_order);
-    if initial_crossings == 0.0 && first_try_with_initial_order {
-        graph_info.set_currently_best_node_and_port_order(graph);
-        return 0.0;
-    }
-
-    if !first_try_with_initial_order
-        || graph.options.consider_model_order_strategy == OrderingStrategy::None
-    {
-        heuristic.set_first_layer_order(
-            graph,
-            &mut graph_info.current_node_order,
-            is_forward_sweep,
-        );
-    } else {
-        is_forward_sweep = first_try_with_initial_order;
-    }
-
-    sweep_reducing_crossings(
-        graph,
-        graph_info,
-        heuristic,
-        is_forward_sweep,
-        !first_try_with_initial_order,
-    );
-
-    let mut crossings_in_graph = graph_info
-        .crossings_counter
-        .count_all_crossings_in_order(graph, &graph_info.current_node_order);
-    loop {
-        graph_info.set_currently_best_node_and_port_order(graph);
-        if crossings_in_graph == 0.0 {
-            return 0.0;
-        }
-
-        is_forward_sweep = !is_forward_sweep;
-        let old_number_of_crossings = crossings_in_graph;
-        sweep_reducing_crossings(graph, graph_info, heuristic, is_forward_sweep, false);
-        crossings_in_graph = graph_info
-            .crossings_counter
-            .count_all_crossings_in_order(graph, &graph_info.current_node_order);
-        if !sweep_improved_crossings(old_number_of_crossings, crossings_in_graph) {
-            return old_number_of_crossings;
-        }
-    }
-}
-
-pub(crate) fn sweep_reducing_crossings(
-    graph: &mut LGraph,
-    graph_info: &mut GraphInfoHolder,
-    heuristic: &mut BarycenterHeuristic,
-    forward: bool,
-    first_sweep: bool,
-) {
-    let length = graph_info.current_node_order.len();
-    if length == 0 {
-        return;
-    }
-
-    heuristic.port_distributor.distribute_ports_while_sweeping(
-        graph,
-        &graph_info.current_node_order,
-        first_index(forward, length),
-        forward,
-    );
-
-    let mut index = first_free(forward, length);
-    while is_not_end(length, index, forward) {
-        let free_layer_index = index as usize;
-        heuristic.minimize_crossings(
-            graph,
-            &mut graph_info.current_node_order,
-            free_layer_index,
-            forward,
-            first_sweep,
-        );
-        heuristic.port_distributor.distribute_ports_while_sweeping(
-            graph,
-            &graph_info.current_node_order,
-            free_layer_index,
-            forward,
-        );
-        index = next_index(index, forward);
-    }
-}
-
-fn sweep_reducing_crossings_greedy(
-    graph: &mut LGraph,
-    others: OtherGraphs<'_>,
-    graph_info: &mut GraphInfoHolder,
-    heuristic: &mut GreedySwitchHeuristic,
-    port_distributor: &mut PortDistributor,
-    forward: bool,
-) -> bool {
-    let length = graph_info.current_node_order.len();
-    if length == 0 {
-        return false;
-    }
-
-    let mut improved = port_distributor.distribute_ports_while_sweeping(
-        graph,
-        others,
-        &graph_info.current_node_order,
-        first_index(forward, length),
-        forward,
-    );
-    let mut index = first_free(forward, length);
-    while is_not_end(length, index, forward) {
-        let free_layer_index = index as usize;
-        improved |= heuristic.minimize_crossings(
-            graph,
-            &mut graph_info.current_node_order,
-            free_layer_index,
-            forward,
-        );
-        improved |= port_distributor.distribute_ports_while_sweeping(
-            graph,
-            others,
-            &graph_info.current_node_order,
-            free_layer_index,
-            forward,
-        );
-        index = next_index(index, forward);
-    }
-    improved
 }
 
 fn fewer_than_two_in_out_parent_ports(parent_node: &LNode) -> bool {

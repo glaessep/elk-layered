@@ -233,15 +233,6 @@ impl GraphArena {
             },
         )
     }
-
-    /// A read-only view of every graph but `except`.
-    pub fn others(&self, except: GraphId) -> OtherGraphs<'_> {
-        OtherGraphs {
-            before: &self.graphs[..except.0],
-            after: &self.graphs[except.0 + 1..],
-            hole: except.0,
-        }
-    }
 }
 
 impl Index<GraphId> for GraphArena {
@@ -480,7 +471,6 @@ mod tests {
         for other in [GraphId::ROOT, b, a0] {
             assert_eq!(others.get(other).map(|g| g.id), Some(other));
         }
-        assert!(graphs.others(a).get(a).is_none());
     }
 
     // Mutation: subtract from the id in `OtherGraphs::get` before the view is checked for being

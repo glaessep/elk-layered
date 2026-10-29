@@ -9,7 +9,6 @@ pub(crate) mod counting;
 pub(crate) mod forster_constraint_resolver;
 pub(crate) mod graph_info_holder;
 pub(crate) mod greedy_port_distributor;
-pub(crate) mod hierarchy_graph_info;
 pub(crate) mod layer_sweep_crossing_minimizer;
 pub(crate) mod layer_sweep_type_decider;
 pub(crate) mod sweep_copy;
@@ -18,9 +17,7 @@ pub(crate) mod sweep_port_distributor;
 mod tests;
 
 pub use layer_sweep_crossing_minimizer::CrossMinType;
-pub(crate) use layer_sweep_crossing_minimizer::{
-    minimize_crossings_layer_sweep_hierarchical_with_type, minimize_crossings_layer_sweep_with_type,
-};
+pub(crate) use layer_sweep_crossing_minimizer::minimize_crossings_layer_sweep;
 
 use crate::graph::{EdgeId, LGraph, LNodeKind, NodeId, PortRef};
 

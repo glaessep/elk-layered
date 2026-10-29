@@ -15,7 +15,7 @@ use crate::graph::{
     GraphArena, GraphId, GraphParent, LGraph, LNodeKind, LPoint, LSize, NodeId, PortSide,
 };
 use crate::options::PortConstraints;
-use crate::phase::ordering::minimize_crossings_layer_sweep_hierarchical_with_type;
+use crate::phase::ordering::minimize_crossings_layer_sweep;
 
 /// What ran on one graph of a compound run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,7 +159,7 @@ fn execute_compound_algorithm_until_pause(
         }
 
         if let Some(sweep) = hierarchy_aware {
-            minimize_crossings_layer_sweep_hierarchical_with_type(graphs, sweep);
+            minimize_crossings_layer_sweep(graphs, GraphId::ROOT, true, sweep);
         } else {
             let (graph, others) = graphs.split_mut(algorithm.execution.graph);
             execute_processor(graph, others, processor)?;

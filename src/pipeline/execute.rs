@@ -5,7 +5,7 @@ use super::assembler::{
     CrossingMinimizer, CycleBreaker, EdgeRouter, IntermediateProcessor, Layerer, NodePlacer,
     Processor,
 };
-use crate::graph::{LGraph, LNode, LSize, OtherGraphs, PortSide};
+use crate::graph::{GraphArena, GraphId, LGraph, LNode, LSize, OtherGraphs, PortSide};
 use crate::intermediate::graph_transformer::{GraphTransformMode, transform_graph_direction};
 use crate::intermediate::{
     calculate_innermost_node_margins, calculate_label_and_node_sizes, process_in_layer_constraints,
@@ -28,7 +28,7 @@ use crate::phase::cycles::{
     break_cycles_interactive, break_cycles_model_order,
 };
 use crate::phase::layering::{layer_network_simplex, layer_with_strategy};
-use crate::phase::ordering::{CrossMinType, minimize_crossings_layer_sweep_with_type};
+use crate::phase::ordering::minimize_crossings_layer_sweep;
 use crate::phase::placement::{
     place_nodes_brandes_koepf, place_nodes_network_simplex, place_nodes_simple,
 };
@@ -37,7 +37,25 @@ use crate::selfloop::{
     postprocess_self_loops, preprocess_self_loops, restore_self_loop_ports, route_self_loops,
 };
 
-/// Runs `processor` on `graph`. `others` are the graphs inside its nodes.
+/// Runs `processor` on the graph `id` of `graphs`, without the graphs inside its nodes.
+///
+/// The layer sweep needs the arena, because it is the one port of `LayerSweepCrossingMinimizer`
+/// that also serves `INCLUDE_CHILDREN`. Every other processor runs through `execute_processor`.
+pub(super) fn execute_in_arena(
+    graphs: &mut GraphArena,
+    id: GraphId,
+    processor: Processor,
+) -> PipelineResult<()> {
+    if let Some(sweep) = processor.hierarchy_aware_sweep() {
+        minimize_crossings_layer_sweep(graphs, id, false, sweep);
+        return Ok(());
+    }
+    let (graph, others) = graphs.split_mut(id);
+    execute_processor(graph, others, processor)
+}
+
+/// Runs `processor` on `graph`. `others` are the graphs inside its nodes. The layer sweep is no
+/// such processor: it runs through `execute_in_arena`.
 pub(super) fn execute_processor(
     graph: &mut LGraph,
     others: OtherGraphs<'_>,
@@ -64,7 +82,7 @@ pub(super) fn execute_processor(
         },
         Processor::CrossingMinimizer(CrossingMinimizer::NoMinimizer) => {}
         Processor::CrossingMinimizer(CrossingMinimizer::LayerSweep) => {
-            minimize_crossings_layer_sweep_with_type(graph, others, CrossMinType::Barycenter);
+            unreachable!("the layer sweep runs through `execute_in_arena`")
         }
         Processor::NodePlacer(placer) => match placer {
             NodePlacer::Simple => place_nodes_simple(graph),
@@ -106,19 +124,8 @@ fn execute_intermediate(
         P::SortByInputModelProcessor => sort_by_input_model(graph),
         P::NorthSouthPortPreprocessor => preprocess_north_south_ports(graph),
         P::NorthSouthPortPostprocessor => postprocess_north_south_ports(graph),
-        P::OneSidedGreedySwitch => {
-            minimize_crossings_layer_sweep_with_type(
-                graph,
-                others,
-                CrossMinType::OneSidedGreedySwitch,
-            );
-        }
-        P::TwoSidedGreedySwitch => {
-            minimize_crossings_layer_sweep_with_type(
-                graph,
-                others,
-                CrossMinType::TwoSidedGreedySwitch,
-            );
+        P::OneSidedGreedySwitch | P::TwoSidedGreedySwitch => {
+            unreachable!("the layer sweep runs through `execute_in_arena`")
         }
         P::SelfLoopPortRestorer => restore_self_loop_ports(graph, others),
         P::InLayerConstraintProcessor => process_in_layer_constraints(graph),
