@@ -225,11 +225,24 @@ fn component_owner(owners: &[usize], node: NodeId) -> Result<usize, ComponentErr
         })
 }
 
-fn map_node(
-    map: &[Option<NodeId>],
-    id: NodeId,
-    kind: &'static str,
-) -> Result<NodeId, ComponentError> {
+/// What the three `map_*` helpers need from a node id or an edge id.
+trait Id: Copy {
+    fn index(self) -> usize;
+}
+
+impl Id for NodeId {
+    fn index(self) -> usize {
+        NodeId::index(self)
+    }
+}
+
+impl Id for EdgeId {
+    fn index(self) -> usize {
+        EdgeId::index(self)
+    }
+}
+
+fn map_id<I: Id>(map: &[Option<I>], id: I, kind: &'static str) -> Result<I, ComponentError> {
     map.get(id.index())
         .copied()
         .flatten()
@@ -239,72 +252,36 @@ fn map_node(
         })
 }
 
-fn map_optional_node(
-    value: &mut Option<NodeId>,
-    map: &[Option<NodeId>],
+fn map_optional<I: Id>(
+    value: &mut Option<I>,
+    map: &[Option<I>],
     kind: &'static str,
 ) -> Result<(), ComponentError> {
     if let Some(id) = value {
-        *id = map_node(map, *id, kind)?;
+        *id = map_id(map, *id, kind)?;
     }
     Ok(())
 }
 
-fn map_node_list(
-    values: &mut [NodeId],
-    map: &[Option<NodeId>],
+fn map_list<I: Id>(
+    values: &mut [I],
+    map: &[Option<I>],
     kind: &'static str,
 ) -> Result<(), ComponentError> {
     for id in values {
-        *id = map_node(map, *id, kind)?;
-    }
-    Ok(())
-}
-
-fn map_edge(
-    map: &[Option<EdgeId>],
-    id: EdgeId,
-    kind: &'static str,
-) -> Result<EdgeId, ComponentError> {
-    map.get(id.index())
-        .copied()
-        .flatten()
-        .ok_or(ComponentError::InvalidReference {
-            kind,
-            index: id.index(),
-        })
-}
-
-fn map_optional_edge(
-    value: &mut Option<EdgeId>,
-    map: &[Option<EdgeId>],
-    kind: &'static str,
-) -> Result<(), ComponentError> {
-    if let Some(id) = value {
-        *id = map_edge(map, *id, kind)?;
-    }
-    Ok(())
-}
-
-fn map_edge_list(
-    values: &mut [EdgeId],
-    map: &[Option<EdgeId>],
-    kind: &'static str,
-) -> Result<(), ComponentError> {
-    for id in values {
-        *id = map_edge(map, *id, kind)?;
+        *id = map_id(map, *id, kind)?;
     }
     Ok(())
 }
 
 fn map_port(port: &mut PortRef, nodes: &[Option<NodeId>]) -> Result<(), ComponentError> {
-    port.node = map_node(nodes, port.node, "port node")?;
+    port.node = map_id(nodes, port.node, "port node")?;
     Ok(())
 }
 
 fn map_labels(labels: &mut [LLabel], edges: &[Option<EdgeId>]) -> Result<(), ComponentError> {
     for label in labels {
-        map_optional_edge(&mut label.end_label_edge, edges, "label edge")?;
+        map_optional(&mut label.end_label_edge, edges, "label edge")?;
     }
     Ok(())
 }
@@ -317,19 +294,19 @@ fn remap_references(
     edges: &[Option<EdgeId>],
 ) -> Result<(), ComponentError> {
     for node in &mut graph.layerless_nodes {
-        map_optional_node(
+        map_optional(
             &mut node.replaced_external_port_dummy,
             nodes,
             "replaced dummy",
         )?;
-        map_node_list(&mut node.in_layer_successor_constraints, nodes, "successor")?;
-        map_optional_node(&mut node.in_layer_layout_unit, nodes, "layout unit")?;
-        map_node_list(
+        map_list(&mut node.in_layer_successor_constraints, nodes, "successor")?;
+        map_optional(&mut node.in_layer_layout_unit, nodes, "layout unit")?;
+        map_list(
             &mut node.barycenter_associates,
             nodes,
             "barycenter associate",
         )?;
-        map_optional_edge(&mut node.origin_edge, edges, "origin edge")?;
+        map_optional(&mut node.origin_edge, edges, "origin edge")?;
         for port in [&mut node.long_edge_source, &mut node.long_edge_target]
             .into_iter()
             .flatten()
@@ -339,13 +316,13 @@ fn remap_references(
         map_labels(&mut node.labels, edges)?;
         map_labels(&mut node.represented_labels, edges)?;
         for port in node.ports.slots_mut() {
-            port.node = map_node(nodes, port.node, "port owner")?;
-            map_optional_node(&mut port.long_edge_target_node, nodes, "long edge target")?;
+            port.node = map_id(nodes, port.node, "port owner")?;
+            map_optional(&mut port.long_edge_target_node, nodes, "long edge target")?;
             if let Some(origin) = &mut port.origin_port {
                 map_port(origin, nodes)?;
             }
-            map_edge_list(&mut port.incoming_edges, edges, "incoming edge")?;
-            map_edge_list(&mut port.outgoing_edges, edges, "outgoing edge")?;
+            map_list(&mut port.incoming_edges, edges, "incoming edge")?;
+            map_list(&mut port.outgoing_edges, edges, "outgoing edge")?;
             map_labels(&mut port.labels, edges)?;
         }
     }
@@ -358,23 +335,23 @@ fn remap_references(
         map_labels(&mut edge.labels, edges)?;
     }
     for layer in &mut graph.layers {
-        map_node_list(&mut layer.nodes, nodes, "layer node")?;
+        map_list(&mut layer.nodes, nodes, "layer node")?;
     }
-    map_node_list(&mut graph.hidden_nodes, nodes, "hidden node")?;
-    map_node_list(
+    map_list(&mut graph.hidden_nodes, nodes, "hidden node")?;
+    map_list(
         &mut graph.replaced_external_port_dummies,
         nodes,
         "external dummy",
     )?;
     for holder in &mut graph.self_loop_holders {
-        holder.node = map_node(nodes, holder.node, "self loop owner")?;
+        holder.node = map_id(nodes, holder.node, "self loop owner")?;
         for hyper_loop in &mut holder.hyper_loops {
             for edge in &mut hyper_loop.edges {
-                edge.edge = map_edge(edges, edge.edge, "self loop edge")?;
+                edge.edge = map_id(edges, edge.edge, "self loop edge")?;
             }
             if let Some(labels) = &mut hyper_loop.labels {
                 for label in &mut labels.label_refs {
-                    label.edge = map_edge(edges, label.edge, "self loop label")?;
+                    label.edge = map_id(edges, label.edge, "self loop label")?;
                 }
             }
         }
@@ -420,13 +397,13 @@ fn remap_graph_references(
             if let Some(dummy) = &mut port.port_dummy
                 && dummy.graph_id == graph_id
             {
-                dummy.node = map_node(nodes, dummy.node, "graph port dummy")?;
+                dummy.node = map_id(nodes, dummy.node, "graph port dummy")?;
             }
         }
     }
     for edge in &mut current.cross_hierarchy_edges {
         if edge.graph_id == graph_id {
-            edge.edge = map_edge(edges, edge.edge, "hierarchy edge")?;
+            edge.edge = map_id(edges, edge.edge, "hierarchy edge")?;
         }
     }
     Ok(())
