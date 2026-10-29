@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeId, EdgeLabelPlacement, GraphArena, GraphId,
-    GraphNodeRef, GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep, LGraph, LLabel,
+    GraphNodeRef, GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep, IdVec, LGraph, LLabel,
     LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, PortId, PortRef, PortSide, PortType,
     apply_port_index_to_dummy, create_external_port_dummy, port_side_from_direction,
 };
@@ -1010,12 +1010,15 @@ struct CompoundEndpoint {
 }
 
 struct CompoundEndpointPlan {
-    by_node: Vec<Vec<CompoundEndpoint>>,
+    by_node: IdVec<NodeId, Vec<CompoundEndpoint>>,
 }
 
 impl CompoundEndpointPlan {
     fn new(graph: &LGraph, observer: &mut impl CompoundPreprocessObserver) -> Self {
-        let mut by_node = graph.node_ids().map(|_| Vec::new()).collect::<Vec<_>>();
+        let mut by_node = graph
+            .node_ids()
+            .map(|_| Vec::new())
+            .collect::<IdVec<NodeId, _>>();
         for (edge_index, edge) in graph.edges_with_ids() {
             observer.visit_graph_edge_for_endpoint_plan();
             let Some(segment) = edge.compound_segment else {
@@ -1030,7 +1033,7 @@ impl CompoundEndpointPlan {
                 .get(port.node)
                 .is_some_and(|node| node.compound)
             {
-                by_node[port.node.index()].push(CompoundEndpoint {
+                by_node[port.node].push(CompoundEndpoint {
                     port,
                     edge: edge_index,
                 });
@@ -1041,7 +1044,7 @@ impl CompoundEndpointPlan {
 
     fn for_node(&self, node_index: NodeId) -> &[CompoundEndpoint] {
         self.by_node
-            .get(node_index.index())
+            .get(node_index)
             .map(Vec::as_slice)
             .expect("compound endpoint plan must match the graph node arena")
     }
@@ -1424,10 +1427,10 @@ fn prepare_compound_endpoint_metadata(
     observer: &mut impl CompoundPreprocessObserver,
 ) -> CompoundEndpointPlan {
     let endpoint_plan = CompoundEndpointPlan::new(graph, observer);
-    let mut recorded_edges = vec![false; graph.edges.len()];
+    let mut recorded_edges = IdVec::filled(graph.edges.len(), false);
     for record in &graph.cross_hierarchy_edges {
         observer.visit_existing_cross_hierarchy_edge();
-        if let Some(recorded) = recorded_edges.get_mut(record.edge.index()) {
+        if let Some(recorded) = recorded_edges.get_mut(record.edge) {
             *recorded = true;
         }
     }
