@@ -507,6 +507,15 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    `ElkDirection::Down`: 231 cases, such as labels-inline-direction-right. It is the one hand
 //    case with inline labels that sets `elk.direction` to RIGHT, which is also the default. Random
 //    cases set it too, so this case adds no other coverage; it stays as the small readable one.
+// 74. In `rate_area` (src/p5edges/orthogonal.rs), call `split_segment.recompute_extent()` after
+//    the area centre joins its connections: 1 case, greedy-switch-one-sided-split-segment. Its
+//    router splits a segment and must rate the free areas with the extent of the simulated split.
+// 75. In `add_adjacency` (src/p3order/sweep.rs), merge with any entry at the same position, not
+//    only the last one: 1 case, greedy-switch-one-sided-adjacency. Its free ports send edges to
+//    one port of the next layer from places that are not one after another.
+// 76. In `CrossingMatrixFiller::new` (src/p3order/sweep.rs), never count one side only
+//    (`one_sided: false`): 151 cases, 149 of random-one-sided, such as random-one-sided/r000,
+//    and the two cases above.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
