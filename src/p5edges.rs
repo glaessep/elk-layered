@@ -128,12 +128,12 @@ fn horizontal_alignment_ratio(graph: &LGraph, node: NodeId) -> f64 {
             let inports = lnode
                 .ports
                 .iter()
-                .filter(|port| !port.incoming_edges.is_empty())
+                .filter(|port| !port.incoming_edges().is_empty())
                 .count();
             let outports = lnode
                 .ports
                 .iter()
-                .filter(|port| !port.outgoing_edges.is_empty())
+                .filter(|port| !port.outgoing_edges().is_empty())
                 .count();
             if inports + outports == 0 {
                 0.5
@@ -198,24 +198,12 @@ mod tests {
                 LPoint { x: 0.0, y: 10.0 },
             )
             .unwrap();
-        graph.add_edge(LayeredEdge {
-            id: "A-B".to_string(),
-            source: source_port,
-            target: target_port,
-            source_node_id: "A".to_string(),
-            target_node_id: "B".to_string(),
-            labels: Vec::new(),
-            minlen: 1,
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order: Some(0),
-            priority_direction: 0,
-            priority_shortness: 0,
-            priority_straightness: 0,
-            thickness: 0.0,
-            original_opposite_port: None,
-            compound_segment: None,
+        graph.add_edge({
+            let mut built_edge = LayeredEdge::new("A-B".to_string(), source_port, target_port);
+            built_edge.source_node_id = "A".to_string();
+            built_edge.target_node_id = "B".to_string();
+            built_edge.model_order = Some(0);
+            built_edge
         });
 
         route_edges_orthogonal(&mut graph);

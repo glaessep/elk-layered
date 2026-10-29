@@ -146,25 +146,7 @@ mod tests {
             node: NodeId::new(0),
             port: PortId::new(0),
         };
-        LayeredEdge {
-            id: id.to_string(),
-            source: end,
-            target: end,
-            source_node_id: String::new(),
-            target_node_id: String::new(),
-            labels: Vec::new(),
-            minlen: 1,
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order: None,
-            priority_direction: 0,
-            priority_shortness: 0,
-            priority_straightness: 0,
-            thickness: 0.0,
-            original_opposite_port: None,
-            compound_segment: None,
-        }
+        LayeredEdge::new(id.to_string(), end, end)
     }
 
     fn three_edges() -> LGraph {

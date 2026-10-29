@@ -56,7 +56,7 @@ impl<'a> LayeringInput<'a> {
                 graph
                     .node_incoming_edges(node)
                     .into_iter()
-                    .filter(|&edge| !graph.layerless_nodes[graph.edges[edge].source.node].hidden)
+                    .filter(|&edge| !graph.layerless_nodes[graph.edges[edge].source().node].hidden)
                     .collect()
             })
             .collect();
@@ -66,7 +66,7 @@ impl<'a> LayeringInput<'a> {
                 graph
                     .node_outgoing_edges(node)
                     .into_iter()
-                    .filter(|&edge| !graph.layerless_nodes[graph.edges[edge].target.node].hidden)
+                    .filter(|&edge| !graph.layerless_nodes[graph.edges[edge].target().node].hidden)
                     .collect()
             })
             .collect();
@@ -79,10 +79,10 @@ impl<'a> LayeringInput<'a> {
     }
 
     fn source(&self, edge: EdgeId) -> NodeId {
-        self.graph.edges[edge].source.node
+        self.graph.edges[edge].source().node
     }
     fn target(&self, edge: EdgeId) -> NodeId {
-        self.graph.edges[edge].target.node
+        self.graph.edges[edge].target().node
     }
     fn len(&self) -> usize {
         self.graph.layerless_nodes.len()
@@ -226,14 +226,14 @@ fn initialize(graph: &LGraph, nodes: &[NodeId]) -> NGraph {
     for l_node in nodes {
         for edge_index in graph.node_outgoing_edges(*l_node) {
             let edge = &graph.edges[edge_index];
-            if edge.source.node == edge.target.node {
+            if edge.source().node == edge.target().node {
                 continue;
             }
 
-            let Some(source) = node_map.get(&edge.source.node).copied() else {
+            let Some(source) = node_map.get(&edge.source().node).copied() else {
                 continue;
             };
-            let Some(target) = node_map.get(&edge.target.node).copied() else {
+            let Some(target) = node_map.get(&edge.target().node).copied() else {
                 continue;
             };
             ngraph.add_edge(
@@ -251,10 +251,10 @@ fn initialize(graph: &LGraph, nodes: &[NodeId]) -> NGraph {
 
 fn opposite_node(graph: &LGraph, node: NodeId, edge_index: EdgeId) -> Option<NodeId> {
     let edge = graph.edges.get(edge_index)?;
-    if edge.source.node == node {
-        Some(edge.target.node)
-    } else if edge.target.node == node {
-        Some(edge.source.node)
+    if edge.source().node == node {
+        Some(edge.target().node)
+    } else if edge.target().node == node {
+        Some(edge.source().node)
     } else {
         None
     }
@@ -392,13 +392,13 @@ mod tests {
         layer_network_simplex(&mut graph).unwrap();
 
         for edge in &graph.edges {
-            if edge.source.node == edge.target.node {
+            if edge.source().node == edge.target().node {
                 continue;
             }
-            let source_layer = graph.layerless_nodes[edge.source.node]
+            let source_layer = graph.layerless_nodes[edge.source().node]
                 .layer_index()
                 .unwrap();
-            let target_layer = graph.layerless_nodes[edge.target.node]
+            let target_layer = graph.layerless_nodes[edge.target().node]
                 .layer_index()
                 .unwrap();
             assert!(

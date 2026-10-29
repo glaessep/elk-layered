@@ -499,7 +499,7 @@ impl CrossingsCounter {
             for edge in connected_edges(graph, port) {
                 let data = &graph.edges[edge];
                 // A self-loop of a port.
-                if data.source == data.target {
+                if data.source() == data.target() {
                     continue;
                 }
                 if let Some(other_end) = other_end_of(graph, edge, port) {
@@ -675,9 +675,9 @@ impl CrossingsCounter {
         for node in left_layer {
             for (port_index, port) in graph.layerless_nodes[*node].ports.iter_with_ids() {
                 let has_edge = port
-                    .outgoing_edges
+                    .outgoing_edges()
                     .iter()
-                    .any(|edge| layer_of(graph.edges[*edge].target.node) != layer_of(*node));
+                    .any(|edge| layer_of(graph.edges[*edge].target().node) != layer_of(*node));
                 if has_edge {
                     self.set_position(
                         graph,
@@ -697,9 +697,9 @@ impl CrossingsCounter {
         for node in right_layer {
             let ports = &graph.layerless_nodes[*node].ports;
             let enters_from_other_layer = |port: &crate::graph::LPort| {
-                port.incoming_edges
+                port.incoming_edges()
                     .iter()
-                    .any(|edge| layer_of(graph.edges[*edge].source.node) != layer_of(*node))
+                    .any(|edge| layer_of(graph.edges[*edge].source().node) != layer_of(*node))
             };
             // The leading north ports with an incoming edge.
             let north_input_ports = ports
@@ -741,8 +741,8 @@ impl CrossingsCounter {
                     node: *node,
                     port: port_index,
                 };
-                for edge in &port.outgoing_edges {
-                    let target_port = graph.edges[*edge].target;
+                for edge in port.outgoing_edges() {
+                    let target_port = graph.edges[*edge].target();
                     if layer_of(*node) == layer_of(target_port.node) {
                         continue;
                     }
@@ -896,7 +896,7 @@ pub(crate) fn port_degree(graph: &LGraph, port: PortRef) -> usize {
     else {
         return 0;
     };
-    port.incoming_edges.len() + port.outgoing_edges.len()
+    port.incoming_edges().len() + port.outgoing_edges().len()
 }
 
 /// `CrossingsCounter.isLayoutUnitChanged`.
@@ -942,7 +942,7 @@ fn has_hyperedges_east_of_index(graph: &LGraph, order: &[Vec<NodeId>]) -> Vec<bo
     for (layer_index, layer) in order.iter().enumerate() {
         for node in layer {
             for port in &graph.layerless_nodes[*node].ports {
-                if port.outgoing_edges.len() + port.incoming_edges.len() <= 1 {
+                if port.outgoing_edges().len() + port.incoming_edges().len() <= 1 {
                     continue;
                 }
                 if port.side == PortSide::East {
@@ -1039,17 +1039,17 @@ fn is_in_layer_edge(graph: &LGraph, edge: EdgeId) -> bool {
     let Some(edge) = graph.edges.get(edge) else {
         return false;
     };
-    graph.layerless_nodes[edge.source.node].layer_index()
-        == graph.layerless_nodes[edge.target.node].layer_index()
+    graph.layerless_nodes[edge.source().node].layer_index()
+        == graph.layerless_nodes[edge.target().node].layer_index()
 }
 
 fn connected_edges(graph: &LGraph, port: PortRef) -> impl Iterator<Item = EdgeId> + '_ {
     graph.layerless_nodes[port.node].ports[port.port]
-        .incoming_edges
+        .incoming_edges()
         .iter()
         .chain(
             graph.layerless_nodes[port.node].ports[port.port]
-                .outgoing_edges
+                .outgoing_edges()
                 .iter(),
         )
         .copied()
@@ -1057,10 +1057,10 @@ fn connected_edges(graph: &LGraph, port: PortRef) -> impl Iterator<Item = EdgeId
 
 fn other_end_of(graph: &LGraph, edge: EdgeId, port: PortRef) -> Option<PortRef> {
     let edge = graph.edges.get(edge)?;
-    if edge.source == port {
-        Some(edge.target)
-    } else if edge.target == port {
-        Some(edge.source)
+    if edge.source() == port {
+        Some(edge.target())
+    } else if edge.target() == port {
+        Some(edge.source())
     } else {
         None
     }
@@ -1134,24 +1134,10 @@ mod tests {
     }
 
     fn layered_edge(id: &str, source: PortRef, target: PortRef) -> LayeredEdge {
-        LayeredEdge {
-            id: id.to_string(),
-            source,
-            target,
-            source_node_id: String::new(),
-            target_node_id: String::new(),
-            labels: Vec::new(),
-            minlen: 1,
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order: None,
-            priority_direction: 0,
-            priority_shortness: 0,
-            priority_straightness: 0,
-            thickness: 1.0,
-            original_opposite_port: None,
-            compound_segment: None,
+        {
+            let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
+            built_edge.thickness = 1.0;
+            built_edge
         }
     }
 

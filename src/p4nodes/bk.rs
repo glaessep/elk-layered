@@ -186,7 +186,7 @@ impl NeighborhoodInformation {
                 }
                 if edge_priority == max_priority {
                     result.push(Neighbor {
-                        node: graph.edges[edge].source.node,
+                        node: graph.edges[edge].source().node,
                         edge,
                     });
                 }
@@ -215,7 +215,7 @@ impl NeighborhoodInformation {
                 }
                 if edge_priority == max_priority {
                     result.push(Neighbor {
-                        node: graph.edges[edge].target.node,
+                        node: graph.edges[edge].target().node,
                         edge,
                     });
                 }
@@ -324,7 +324,7 @@ fn incident_to_inner_segment(
     }
 
     for edge in graph.node_incoming_edges(node) {
-        let source = graph.edges[edge].source.node;
+        let source = graph.edges[edge].source().node;
         if graph.layerless_nodes[source].kind == LNodeKind::LongEdge
             && graph.layerless_nodes[source].layer_index() == Some(layer2)
             && graph.layerless_nodes[node].layer_index() == Some(layer1)
@@ -749,8 +749,8 @@ impl SimpleThresholdStrategy {
                 invalid
             }
             Some(edge) => {
-                let left = graph.edges[edge].source;
-                let right = graph.edges[edge].target;
+                let left = graph.edges[edge].source();
+                let right = graph.edges[edge].target();
                 let threshold = if is_root {
                     let root_port = if layout.hdir == HDirection::Right {
                         right
@@ -895,10 +895,10 @@ impl SimpleThresholdStrategy {
         };
         let free_node = ni.id_to_node[pp.free];
         let edge_data = &graph.edges[edge];
-        let (fix, block) = if edge_data.source.node == free_node {
-            (edge_data.target, edge_data.source)
+        let (fix, block) = if edge_data.source().node == free_node {
+            (edge_data.target(), edge_data.source())
         } else {
-            (edge_data.source, edge_data.target)
+            (edge_data.source(), edge_data.target())
         };
 
         let delta = calculate_delta(graph, ni, layout, fix, block);
@@ -1180,10 +1180,10 @@ fn get_edge(graph: &LGraph, source: NodeId, target: NodeId) -> Option<EdgeId> {
 }
 
 fn edge_opposite_node(edge: &LayeredEdge, node: NodeId) -> Option<NodeId> {
-    if edge.source.node == node {
-        Some(edge.target.node)
-    } else if edge.target.node == node {
-        Some(edge.source.node)
+    if edge.source().node == node {
+        Some(edge.target().node)
+    } else if edge.target().node == node {
+        Some(edge.source().node)
     } else {
         None
     }
@@ -1193,10 +1193,10 @@ fn edge_opposite_node(edge: &LayeredEdge, node: NodeId) -> Option<NodeId> {
 // `t.pos + t.anchor - s.pos - s.anchor`. Subtracting the sum `s.pos + s.anchor` instead can
 // round differently in the last bit, so the four terms stay separate here.
 fn edge_port_position_difference(graph: &LGraph, edge: EdgeId, hdir: HDirection) -> f64 {
-    let source =
-        &graph.layerless_nodes[graph.edges[edge].source.node].ports[graph.edges[edge].source.port];
-    let target =
-        &graph.layerless_nodes[graph.edges[edge].target.node].ports[graph.edges[edge].target.port];
+    let source = &graph.layerless_nodes[graph.edges[edge].source().node].ports
+        [graph.edges[edge].source().port];
+    let target = &graph.layerless_nodes[graph.edges[edge].target().node].ports
+        [graph.edges[edge].target().port];
     match hdir {
         HDirection::Left => {
             target.position.y + target.anchor.y - source.position.y - source.anchor.y
@@ -1363,12 +1363,12 @@ fn port_anchor_y(graph: &LGraph, port_ref: PortRef) -> f64 {
 
 fn is_self_loop_or_in_layer_edge(graph: &LGraph, edge: EdgeId) -> bool {
     let edge = &graph.edges[edge];
-    edge.source.node == edge.target.node || is_in_layer_edge(graph, edge)
+    edge.source().node == edge.target().node || is_in_layer_edge(graph, edge)
 }
 
 fn is_in_layer_edge(graph: &LGraph, edge: &LayeredEdge) -> bool {
-    graph.layerless_nodes[edge.source.node].layer_index()
-        == graph.layerless_nodes[edge.target.node].layer_index()
+    graph.layerless_nodes[edge.source().node].layer_index()
+        == graph.layerless_nodes[edge.target().node].layer_index()
 }
 
 fn is_in_layer_edge_index(graph: &LGraph, edge: EdgeId) -> bool {

@@ -2706,8 +2706,8 @@ mod tests {
         assert!(graph.edge_source_attached(EdgeId::new(0)));
         assert!(graph.edge_target_attached(EdgeId::new(0)));
         assert_eq!(
-            graph.edges[EdgeId::new(0)].source.node,
-            graph.edges[EdgeId::new(0)].target.node
+            graph.edges[EdgeId::new(0)].source().node,
+            graph.edges[EdgeId::new(0)].target().node
         );
         assert!(graph.edges[EdgeId::new(0)].bend_points.len() >= 2);
         assert!(
@@ -2925,7 +2925,10 @@ mod tests {
             );
         }
         let edge = &graph.edges[EdgeId::new(2)];
-        for (port_ref, expected) in [(edge.source, (69.5, 157.0)), (edge.target, (69.5, 197.0))] {
+        for (port_ref, expected) in [
+            (edge.source(), (69.5, 157.0)),
+            (edge.target(), (69.5, 197.0)),
+        ] {
             let node = &graph.layerless_nodes[port_ref.node];
             let port = &node.ports[port_ref.port];
             assert_eq!(
@@ -3005,19 +3008,19 @@ mod tests {
         }
         for (index, node) in graph.nodes_with_ids() {
             for (port_index, port) in node.ports.iter_with_ids() {
-                assert_eq!(port.node, index);
-                for &edge in &port.incoming_edges {
+                assert_eq!(port.node(), index);
+                for &edge in port.incoming_edges() {
                     assert_eq!(
-                        graph.edges[edge].target,
+                        graph.edges[edge].target(),
                         crate::graph::PortRef {
                             node: index,
                             port: port_index
                         }
                     );
                 }
-                for &edge in &port.outgoing_edges {
+                for &edge in port.outgoing_edges() {
                     assert_eq!(
-                        graph.edges[edge].source,
+                        graph.edges[edge].source(),
                         crate::graph::PortRef {
                             node: index,
                             port: port_index
@@ -3027,7 +3030,7 @@ mod tests {
             }
         }
         for edge in &graph.edges {
-            for endpoint in [edge.source, edge.target] {
+            for endpoint in [edge.source(), edge.target()] {
                 assert!(
                     graph.layerless_nodes[endpoint.node]
                         .ports

@@ -1111,24 +1111,18 @@ fn transform_inside_self_loop(
     }
 
     let edge_index = graph
-        .add_edge(LayeredEdge {
-            id: edge.id.clone(),
-            source,
-            target,
-            source_node_id: edge.source.clone(),
-            target_node_id: edge.target.clone(),
-            labels,
-            minlen: edge.minlen.max(1),
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order,
-            priority_direction: edge.priority_direction,
-            priority_shortness: edge.priority_shortness,
-            priority_straightness: edge.priority_straightness,
-            thickness: ELK_DEFAULT_EDGE_THICKNESS,
-            original_opposite_port: None,
-            compound_segment: None,
+        .add_edge({
+            let mut built_edge = LayeredEdge::new(edge.id.clone(), source, target);
+            built_edge.source_node_id = edge.source.clone();
+            built_edge.target_node_id = edge.target.clone();
+            built_edge.labels = labels;
+            built_edge.minlen = edge.minlen.max(1);
+            built_edge.model_order = model_order;
+            built_edge.priority_direction = edge.priority_direction;
+            built_edge.priority_shortness = edge.priority_shortness;
+            built_edge.priority_straightness = edge.priority_straightness;
+            built_edge.thickness = ELK_DEFAULT_EDGE_THICKNESS;
+            built_edge
         })
         .expect("inside self-loop dummies were created before adding edge");
 
@@ -1571,24 +1565,18 @@ fn transform_edge(
     }
 
     let edge_index = graph
-        .add_edge(LayeredEdge {
-            id: edge.id.clone(),
-            source,
-            target,
-            source_node_id: edge.source.clone(),
-            target_node_id: edge.target.clone(),
-            labels,
-            minlen: edge.minlen.max(1),
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order,
-            priority_direction: edge.priority_direction,
-            priority_shortness: edge.priority_shortness,
-            priority_straightness: edge.priority_straightness,
-            thickness: ELK_DEFAULT_EDGE_THICKNESS,
-            original_opposite_port: None,
-            compound_segment: None,
+        .add_edge({
+            let mut built_edge = LayeredEdge::new(edge.id.clone(), source, target);
+            built_edge.source_node_id = edge.source.clone();
+            built_edge.target_node_id = edge.target.clone();
+            built_edge.labels = labels;
+            built_edge.minlen = edge.minlen.max(1);
+            built_edge.model_order = model_order;
+            built_edge.priority_direction = edge.priority_direction;
+            built_edge.priority_shortness = edge.priority_shortness;
+            built_edge.priority_straightness = edge.priority_straightness;
+            built_edge.thickness = ELK_DEFAULT_EDGE_THICKNESS;
+            built_edge
         })
         .expect("ports were created before adding edge");
 
@@ -1598,7 +1586,7 @@ fn transform_edge(
         let node = &graph.layerless_nodes[end.node];
         let port = &node.ports[end.port];
         let (incoming, outgoing) = port_index.crossing_at(&node.id, &port.id, port.named);
-        port.incoming_edges.len() + incoming > 1 || port.outgoing_edges.len() + outgoing > 1
+        port.incoming_edges().len() + incoming > 1 || port.outgoing_edges().len() + outgoing > 1
     };
     if parallel_at(graph, source) || parallel_at(graph, target) {
         graph.graph_properties.hyperedges = true;
@@ -1863,7 +1851,7 @@ fn hierarchy_edge_end(
             node_id: dummy.id.clone(),
             port_key: port.id.clone(),
             named: port.named,
-            attached: (port.incoming_edges.len(), port.outgoing_edges.len()),
+            attached: (port.incoming_edges().len(), port.outgoing_edges().len()),
         });
     }
     let slot = arena.graph_slot_for_parent(index, graph_parent);
@@ -1873,7 +1861,10 @@ fn hierarchy_edge_end(
             node_id: node_id.to_string(),
             port_key: port_id.to_string(),
             named: true,
-            attached: (attached.incoming_edges.len(), attached.outgoing_edges.len()),
+            attached: (
+                attached.incoming_edges().len(),
+                attached.outgoing_edges().len(),
+            ),
         });
     }
     let port_key = hierarchy_port_key(node_id, edge_order, role, merge_edges, port_type);
@@ -1888,7 +1879,7 @@ fn hierarchy_edge_end(
     )
     .ok_or_else(missing_endpoint)?;
     let port = &arena.graphs[slot].layerless_nodes[end.node].ports[end.port];
-    let attached = (port.incoming_edges.len(), port.outgoing_edges.len());
+    let attached = (port.incoming_edges().len(), port.outgoing_edges().len());
     Ok(HierarchyEdgeEnd {
         node_id: node_id.to_string(),
         port_key,
@@ -2007,7 +1998,7 @@ fn ensure_port_at_node(
 /// `ElkGraphImporter.transformEdge` marks hyperedges when a port has more than one incoming
 /// or more than one outgoing edge. One of each is not a hyperedge.
 fn has_parallel_port_edges(port: &LPort) -> bool {
-    port.incoming_edges.len() > 1 || port.outgoing_edges.len() > 1
+    port.incoming_edges().len() > 1 || port.outgoing_edges().len() > 1
 }
 
 fn label_to_lgraph(label: &ElkInputLabel) -> LLabel {
@@ -3073,8 +3064,8 @@ mod tests {
             .iter()
             .find(|dummy| dummy.parent_port_type == Some(PortType::Output))
             .expect("inside self-loop output dummy should exist");
-        assert_eq!(input_dummy.ports[PortId::new(0)].incoming_edges.len(), 2);
-        assert_eq!(output_dummy.ports[PortId::new(0)].outgoing_edges.len(), 2);
+        assert_eq!(input_dummy.ports[PortId::new(0)].incoming_edges().len(), 2);
+        assert_eq!(output_dummy.ports[PortId::new(0)].outgoing_edges().len(), 2);
     }
 
     // Mutation: in `transform_inside_self_loop`, drop `graph_properties.self_loops = true`.
@@ -3360,7 +3351,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["A:0:source", "A:1"]
         );
-        assert_eq!(nested.edges[EdgeId::new(0)].source.port, PortId::new(1));
+        assert_eq!(nested.edges[EdgeId::new(0)].source().port, PortId::new(1));
         assert_eq!(lgraph.hierarchy_edges[0].source_port_key, "A:0:source");
     }
 
@@ -3442,7 +3433,7 @@ mod tests {
         let (dummy_node, external_dummy) = external_dummies[0];
         let dummy_port = external_dummy.ports.first().unwrap();
         assert_eq!(
-            dummy_port.incoming_edges.len() + dummy_port.outgoing_edges.len(),
+            dummy_port.incoming_edges().len() + dummy_port.outgoing_edges().len(),
             1
         );
         assert_eq!(cluster.ports.len(), 1);
@@ -3524,10 +3515,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            nested.layerless_nodes[segment.source.node].kind,
+            nested.layerless_nodes[segment.source().node].kind,
             LNodeKind::ExternalPort
         );
-        assert_eq!(nested.layerless_nodes[segment.target.node].id, "A");
+        assert_eq!(nested.layerless_nodes[segment.target().node].id, "A");
     }
 
     // Mutation: in `source_ported_cross_hierarchy_segments`, give the segment between the two paths
@@ -3710,9 +3701,11 @@ mod tests {
             vec![EdgeId::new(0), EdgeId::new(1)]
         );
         assert!(
-            nested.edges.iter().all(
-                |edge| nested.layerless_nodes[edge.source.node].kind == LNodeKind::ExternalPort
-            )
+            nested
+                .edges
+                .iter()
+                .all(|edge| nested.layerless_nodes[edge.source().node].kind
+                    == LNodeKind::ExternalPort)
         );
     }
 
@@ -3733,7 +3726,7 @@ mod tests {
             Some(PortType::Output)
         );
         assert_eq!(
-            lgraph.layerless_nodes[a].ports[PortId::new(0)].outgoing_edges,
+            lgraph.layerless_nodes[a].ports[PortId::new(0)].outgoing_edges(),
             vec![EdgeId::new(0), EdgeId::new(1)]
         );
         assert!(lgraph.graph_properties.hyperedges);
@@ -3832,8 +3825,14 @@ mod tests {
                 let port = PortId::new(index);
                 assert_eq!(source.ports[port].side, output_side, "{direction:?}");
                 assert_eq!(target.ports[port].side, input_side, "{direction:?}");
-                assert_eq!(source.ports[port].outgoing_edges, vec![EdgeId::new(index)]);
-                assert_eq!(target.ports[port].incoming_edges, vec![EdgeId::new(index)]);
+                assert_eq!(
+                    source.ports[port].outgoing_edges(),
+                    vec![EdgeId::new(index)]
+                );
+                assert_eq!(
+                    target.ports[port].incoming_edges(),
+                    vec![EdgeId::new(index)]
+                );
             }
         }
     }
@@ -4336,15 +4335,15 @@ mod tests {
         assert_eq!(layered_node(&lgraph, "B").ports.len(), 1);
         assert!(
             layered_node(&lgraph, "A").ports[PortId::new(0)]
-                .outgoing_edges
+                .outgoing_edges()
                 .is_empty()
         );
         assert_eq!(
-            layered_node(&lgraph, "A").ports[PortId::new(1)].outgoing_edges,
+            layered_node(&lgraph, "A").ports[PortId::new(1)].outgoing_edges(),
             vec![EdgeId::new(0)]
         );
         assert_eq!(
-            layered_node(&lgraph, "B").ports[PortId::new(0)].incoming_edges,
+            layered_node(&lgraph, "B").ports[PortId::new(0)].incoming_edges(),
             vec![EdgeId::new(0)]
         );
     }

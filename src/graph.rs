@@ -291,7 +291,8 @@ pub enum InLayerConstraint {
 pub struct LPort {
     pub id: String,
     pub crossing_minimization_id: Option<usize>,
-    pub node: NodeId,
+    /// The node that owns the port. Private: `LGraph::push_node_with` sets it.
+    node: NodeId,
     pub port_type: PortType,
     pub side: PortSide,
     pub size: LSize,
@@ -323,8 +324,11 @@ pub struct LPort {
     pub inside_connections: bool,
     pub collector_type: Option<PortType>,
     pub end_label_cell: Option<LabelCellLayout>,
-    pub incoming_edges: Vec<EdgeId>,
-    pub outgoing_edges: Vec<EdgeId>,
+    /// The edges that enter the port. Private: it must match each edge's `target`, so
+    /// `LGraph` changes it together with the edge.
+    incoming_edges: Vec<EdgeId>,
+    /// The edges that leave the port. Private for the same reason, against `source`.
+    outgoing_edges: Vec<EdgeId>,
 }
 
 impl LPort {
@@ -383,6 +387,49 @@ impl LPort {
         };
     }
 
+    /// A copy of the port that no edge is attached to.
+    #[cfg(test)]
+    pub(crate) fn clone_without_edges(&self) -> Self {
+        Self {
+            incoming_edges: Vec::new(),
+            outgoing_edges: Vec::new(),
+            ..self.clone()
+        }
+    }
+
+    /// Renames the port's owner and its edges in place, keeping the order. Used when graphs
+    /// merge and their ids change.
+    pub(crate) fn map_ids<E>(
+        &mut self,
+        map_node: impl FnOnce(NodeId) -> Result<NodeId, E>,
+        mut map_incoming: impl FnMut(EdgeId) -> Result<EdgeId, E>,
+        mut map_outgoing: impl FnMut(EdgeId) -> Result<EdgeId, E>,
+    ) -> Result<(), E> {
+        self.node = map_node(self.node)?;
+        for edge in &mut self.incoming_edges {
+            *edge = map_incoming(*edge)?;
+        }
+        for edge in &mut self.outgoing_edges {
+            *edge = map_outgoing(*edge)?;
+        }
+        Ok(())
+    }
+
+    /// The node that owns the port.
+    pub fn node(&self) -> NodeId {
+        self.node
+    }
+
+    /// The edges that enter the port, in the port's order.
+    pub fn incoming_edges(&self) -> &[EdgeId] {
+        &self.incoming_edges
+    }
+
+    /// The edges that leave the port, in the port's order.
+    pub fn outgoing_edges(&self) -> &[EdgeId] {
+        &self.outgoing_edges
+    }
+
     pub fn net_flow(&self) -> isize {
         self.incoming_edges.len() as isize - self.outgoing_edges.len() as isize
     }
@@ -391,8 +438,11 @@ impl LPort {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayeredEdge {
     pub id: String,
-    pub source: PortRef,
-    pub target: PortRef,
+    /// The source port. Private: it must match the `outgoing_edges` of that port, so
+    /// `LGraph::set_edge_source` is the only way to change it, as `LEdge#setSource` is in ELK.
+    source: PortRef,
+    /// The target port. Private for the same reason, against `incoming_edges`.
+    target: PortRef,
     pub source_node_id: String,
     pub target_node_id: String,
     pub labels: Vec<LLabel>,
@@ -409,6 +459,50 @@ pub struct LayeredEdge {
     pub thickness: f64,
     pub original_opposite_port: Option<PortRef>,
     pub compound_segment: Option<CompoundEdgeSegment>,
+}
+
+impl LayeredEdge {
+    /// An edge between two ports with ELK's defaults. `LGraph::add_edge` attaches it to them.
+    pub fn new(id: impl Into<String>, source: PortRef, target: PortRef) -> Self {
+        Self {
+            id: id.into(),
+            source,
+            target,
+            source_node_id: String::new(),
+            target_node_id: String::new(),
+            labels: Vec::new(),
+            minlen: 1,
+            reversed: false,
+            bend_points: Vec::new(),
+            junction_points: Vec::new(),
+            model_order: None,
+            priority_direction: 0,
+            priority_shortness: 0,
+            priority_straightness: 0,
+            thickness: 0.0,
+            original_opposite_port: None,
+            compound_segment: None,
+        }
+    }
+
+    /// Renames the ports' nodes in place. Used when graphs merge and their ids change.
+    pub(crate) fn map_ports<E>(
+        &mut self,
+        mut map: impl FnMut(&mut PortRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        map(&mut self.source)?;
+        map(&mut self.target)
+    }
+
+    /// The port the edge leaves.
+    pub fn source(&self) -> PortRef {
+        self.source
+    }
+
+    /// The port the edge enters.
+    pub fn target(&self) -> PortRef {
+        self.target
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1084,6 +1178,74 @@ impl LGraph {
         true
     }
 
+    /// Puts `edge` into incoming-edge slot `position` of `port`, in place of the edge there, and
+    /// makes `port` the target of `edge`. ELK does this with a `ListIterator#set` in
+    /// `LongEdgeJoiner#joinAt`, so the edge keeps the exact slot and the other edges do not shift.
+    ///
+    /// The replaced edge still names `port` as its target but is no longer in its list. Drop it.
+    pub(crate) fn replace_incoming_edge_at(
+        &mut self,
+        port: PortRef,
+        position: usize,
+        edge: EdgeId,
+    ) {
+        self.layerless_nodes[port.node].ports[port.port].incoming_edges[position] = edge;
+        self.edges[edge].target = port;
+    }
+
+    /// Removes the first `count` incoming edges of `port`, as `LongEdgeJoiner#joinAt` does with
+    /// the edges it has moved to another target.
+    ///
+    /// Each removed edge must name another target already, or be dropped by the caller.
+    pub(crate) fn remove_leading_incoming_edges(&mut self, port: PortRef, count: usize) {
+        self.layerless_nodes[port.node].ports[port.port]
+            .incoming_edges
+            .drain(..count);
+    }
+
+    /// Removes the first `count` outgoing edges of `port`. The same rule holds as for
+    /// [`Self::remove_leading_incoming_edges`]: the caller drops each removed edge.
+    pub(crate) fn remove_leading_outgoing_edges(&mut self, port: PortRef, count: usize) {
+        self.layerless_nodes[port.node].ports[port.port]
+            .outgoing_edges
+            .drain(..count);
+    }
+
+    /// Puts the incoming edges of `port` in this order, as sorting `LPort#getIncomingEdges()`
+    /// does in ELK. Returns `false` and changes nothing unless `order` names each edge of the
+    /// port exactly once.
+    #[cfg(test)]
+    pub fn reorder_incoming_edges(&mut self, port: PortRef, order: Vec<EdgeId>) -> bool {
+        match self
+            .layerless_nodes
+            .get_mut(port.node)
+            .and_then(|node| node.ports.get_mut(port.port))
+        {
+            Some(port) if same_edges(&port.incoming_edges, &order) => {
+                port.incoming_edges = order;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Puts the outgoing edges of `port` in this order. The rule is the one of
+    /// [`Self::reorder_incoming_edges`].
+    #[cfg(test)]
+    pub fn reorder_outgoing_edges(&mut self, port: PortRef, order: Vec<EdgeId>) -> bool {
+        match self
+            .layerless_nodes
+            .get_mut(port.node)
+            .and_then(|node| node.ports.get_mut(port.port))
+        {
+            Some(port) if same_edges(&port.outgoing_edges, &order) => {
+                port.outgoing_edges = order;
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn detach_edge_source(&mut self, edge_index: EdgeId) -> Option<PortRef> {
         let source = self.edges.get(edge_index)?.source;
         if port_exists(self, source) {
@@ -1319,6 +1481,16 @@ fn centered_port_position(node_size: LSize, side: PortSide) -> LPoint {
         },
         PortSide::Undefined => LPoint::default(),
     }
+}
+
+/// Whether two lists hold the same edges, in any order, each as often as the other.
+#[cfg(test)]
+fn same_edges(left: &[EdgeId], right: &[EdgeId]) -> bool {
+    let mut left = left.to_vec();
+    let mut right = right.to_vec();
+    left.sort_unstable();
+    right.sort_unstable();
+    left == right
 }
 
 fn remove_edge(edges: &mut Vec<EdgeId>, edge_index: EdgeId) {
@@ -1696,6 +1868,234 @@ mod tests {
         assert_eq!(graph.layers[0].nodes(), [all[1]]);
         assert_eq!(graph.layerless_nodes[all[0]].layer_index, None);
         assert_layers_agree_with_nodes(&graph);
+    }
+
+    /// Two nodes, `a` with two output ports and `b` with two input ports.
+    struct EdgeFixture {
+        graph: LGraph,
+        a: [PortRef; 2],
+        b: [PortRef; 2],
+    }
+
+    fn edge_fixture() -> EdgeFixture {
+        let mut graph = graph_with_nodes(2);
+        let nodes = ids(&graph, &[0, 1]);
+        let mut port = |node: NodeId, port_type, side| {
+            graph
+                .add_port(node, port_type, side, LPoint::default())
+                .unwrap()
+        };
+        let a = [
+            port(nodes[0], PortType::Output, PortSide::East),
+            port(nodes[0], PortType::Output, PortSide::East),
+        ];
+        let b = [
+            port(nodes[1], PortType::Input, PortSide::West),
+            port(nodes[1], PortType::Input, PortSide::West),
+        ];
+        EdgeFixture { graph, a, b }
+    }
+
+    /// Every edge sits once in the list of the port it names, and every port lists only edges
+    /// that name it.
+    fn assert_edges_agree_with_ports(graph: &LGraph) {
+        for (id, edge) in graph.edges_with_ids() {
+            let source = &graph.layerless_nodes[edge.source().node].ports[edge.source().port];
+            let target = &graph.layerless_nodes[edge.target().node].ports[edge.target().port];
+            let at_source = source.outgoing_edges().iter().filter(|e| **e == id).count();
+            let at_target = target.incoming_edges().iter().filter(|e| **e == id).count();
+            assert_eq!((at_source, at_target), (1, 1), "edge {}", edge.id);
+        }
+        for node in graph.node_ids() {
+            for (port, data) in graph.layerless_nodes[node].ports.iter_with_ids() {
+                let this = PortRef { node, port };
+                for edge in data.outgoing_edges() {
+                    assert_eq!(graph.edges[*edge].source(), this);
+                }
+                for edge in data.incoming_edges() {
+                    assert_eq!(graph.edges[*edge].target(), this);
+                }
+            }
+        }
+    }
+
+    fn outgoing(graph: &LGraph, port: PortRef) -> Vec<EdgeId> {
+        graph.layerless_nodes[port.node].ports[port.port]
+            .outgoing_edges()
+            .to_vec()
+    }
+
+    fn incoming(graph: &LGraph, port: PortRef) -> Vec<EdgeId> {
+        graph.layerless_nodes[port.node].ports[port.port]
+            .incoming_edges()
+            .to_vec()
+    }
+
+    // Mutation: in `add_edge`, skip pushing the edge to the incoming list of its target.
+    #[test]
+    fn add_edge_attaches_the_edge_to_both_ports() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+
+        let first = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let second = graph.add_edge(LayeredEdge::new("e1", a[0], b[0])).unwrap();
+
+        assert_eq!(outgoing(&graph, a[0]), [first, second]);
+        assert_eq!(incoming(&graph, b[0]), [first, second]);
+        assert_edges_agree_with_ports(&graph);
+    }
+
+    // Mutation: in `add_edge`, check only the source port and push to a target port that is
+    // missing. The call then panics.
+    #[test]
+    fn add_edge_refuses_an_edge_whose_port_is_missing() {
+        let EdgeFixture { mut graph, a, .. } = edge_fixture();
+        let missing = PortRef {
+            node: a[0].node,
+            port: PortId::new(99),
+        };
+
+        assert_eq!(graph.add_edge(LayeredEdge::new("e0", a[0], missing)), None);
+        assert_eq!(graph.add_edge(LayeredEdge::new("e1", missing, a[0])), None);
+
+        assert!(graph.edges.is_empty());
+        assert!(outgoing(&graph, a[0]).is_empty());
+        assert!(incoming(&graph, a[0]).is_empty());
+    }
+
+    // Mutation: in `set_edge_source`, skip removing the edge from the old source port.
+    #[test]
+    fn set_edge_source_moves_the_edge_to_the_end_of_the_new_port() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let moved = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let stays = graph.add_edge(LayeredEdge::new("e1", a[1], b[0])).unwrap();
+
+        assert!(graph.set_edge_source(moved, a[1]));
+
+        assert!(outgoing(&graph, a[0]).is_empty());
+        assert_eq!(outgoing(&graph, a[1]), [stays, moved]);
+        assert_eq!(graph.edges[moved].source(), a[1]);
+        assert_edges_agree_with_ports(&graph);
+    }
+
+    // Mutation: in `set_edge_source`, skip the check that the new port exists.
+    #[test]
+    fn set_edge_source_changes_nothing_for_a_missing_port_or_edge() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let edge = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let missing = PortRef {
+            node: a[0].node,
+            port: PortId::new(99),
+        };
+        let before = graph.clone();
+
+        assert!(!graph.set_edge_source(edge, missing));
+        assert!(!graph.set_edge_source(EdgeId::new(99), a[1]));
+
+        assert_eq!(graph, before);
+    }
+
+    // Mutation: in `set_edge_target_at`, ignore `insert_at` and always push.
+    #[test]
+    fn set_edge_target_at_inserts_at_the_position_and_caps_it() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let first = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let second = graph.add_edge(LayeredEdge::new("e1", a[0], b[0])).unwrap();
+        let moved = graph.add_edge(LayeredEdge::new("e2", a[1], b[1])).unwrap();
+        let capped = graph.add_edge(LayeredEdge::new("e3", a[1], b[1])).unwrap();
+
+        assert!(graph.set_edge_target_at(moved, b[0], Some(1)));
+        assert!(graph.set_edge_target_at(capped, b[0], Some(99)));
+
+        assert_eq!(incoming(&graph, b[0]), [first, moved, second, capped]);
+        assert!(incoming(&graph, b[1]).is_empty());
+        assert_edges_agree_with_ports(&graph);
+    }
+
+    // Mutation: in `set_edge_target`, skip removing the edge from the old target port.
+    #[test]
+    fn set_edge_target_moves_the_edge_to_the_end_of_the_new_port() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let moved = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let stays = graph.add_edge(LayeredEdge::new("e1", a[0], b[1])).unwrap();
+
+        assert!(graph.set_edge_target(moved, b[1]));
+
+        assert!(incoming(&graph, b[0]).is_empty());
+        assert_eq!(incoming(&graph, b[1]), [stays, moved]);
+        assert_edges_agree_with_ports(&graph);
+    }
+
+    // Mutation: in `detach_edge_target`, leave the edge in the incoming list of its target.
+    #[test]
+    fn detach_edge_removes_the_edge_from_both_ports_and_keeps_its_ends() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let edge = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+
+        assert_eq!(graph.detach_edge(edge), Some((a[0], b[0])));
+
+        assert!(outgoing(&graph, a[0]).is_empty());
+        assert!(incoming(&graph, b[0]).is_empty());
+        assert!(!graph.edge_source_attached(edge));
+        assert!(!graph.edge_target_attached(edge));
+        assert_eq!(graph.edges[edge].source(), a[0]);
+        assert_eq!(graph.detach_edge(EdgeId::new(99)), None);
+    }
+
+    // Mutation: in `replace_incoming_edge_at`, leave the target of the new edge unchanged.
+    #[test]
+    fn replace_incoming_edge_at_gives_the_edge_the_exact_slot() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let first = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let replaced = graph.add_edge(LayeredEdge::new("e1", a[0], b[0])).unwrap();
+        let last = graph.add_edge(LayeredEdge::new("e2", a[0], b[0])).unwrap();
+        let newcomer = graph.add_edge(LayeredEdge::new("e3", a[1], b[1])).unwrap();
+        graph.remove_leading_incoming_edges(b[1], 1);
+
+        graph.replace_incoming_edge_at(b[0], 1, newcomer);
+
+        assert_eq!(incoming(&graph, b[0]), [first, newcomer, last]);
+        assert_eq!(graph.edges[newcomer].target(), b[0]);
+        // The replaced edge is left for the caller to drop.
+        assert_eq!(graph.edges[replaced].target(), b[0]);
+        assert!(!graph.edge_target_attached(replaced));
+    }
+
+    // Mutation: in `remove_leading_incoming_edges`, drain no edge.
+    #[test]
+    fn remove_leading_edges_removes_the_first_ones_of_a_port() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let edges = (0..3)
+            .map(|index| {
+                graph
+                    .add_edge(LayeredEdge::new(format!("e{index}"), a[0], b[0]))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        graph.remove_leading_incoming_edges(b[0], 2);
+        graph.remove_leading_outgoing_edges(a[0], 1);
+
+        assert_eq!(incoming(&graph, b[0]), [edges[2]]);
+        assert_eq!(outgoing(&graph, a[0]), [edges[1], edges[2]]);
+    }
+
+    // Mutation: in `reorder_incoming_edges`, skip the check that the order names each edge once.
+    #[test]
+    fn reorder_edges_accepts_only_a_permutation_of_the_ports_edges() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let first = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let second = graph.add_edge(LayeredEdge::new("e1", a[0], b[0])).unwrap();
+
+        assert!(graph.reorder_incoming_edges(b[0], vec![second, first]));
+        assert!(graph.reorder_outgoing_edges(a[0], vec![second, first]));
+        assert_eq!(incoming(&graph, b[0]), [second, first]);
+        assert_eq!(outgoing(&graph, a[0]), [second, first]);
+
+        assert!(!graph.reorder_incoming_edges(b[0], vec![first]));
+        assert!(!graph.reorder_incoming_edges(b[0], vec![first, first]));
+        assert!(!graph.reorder_outgoing_edges(a[0], vec![first, EdgeId::new(99)]));
+        assert_eq!(incoming(&graph, b[0]), [second, first]);
+        assert_eq!(outgoing(&graph, a[0]), [second, first]);
     }
 
     // Mutation: swap `x` and `y`, or `width` and `height`, in `port_box`.

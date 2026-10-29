@@ -1022,8 +1022,8 @@ impl CompoundEndpointPlan {
                 continue;
             };
             let port = match segment {
-                CompoundEdgeSegment::Output { .. } => edge.source,
-                CompoundEdgeSegment::Input { .. } => edge.target,
+                CompoundEdgeSegment::Output { .. } => edge.source(),
+                CompoundEdgeSegment::Input { .. } => edge.target(),
             };
             if graph
                 .layerless_nodes
@@ -1074,9 +1074,9 @@ impl NestedExternalDummyIndex {
             };
             for port in &node.ports {
                 for edge_index in port
-                    .incoming_edges
+                    .incoming_edges()
                     .iter()
-                    .chain(port.outgoing_edges.iter())
+                    .chain(port.outgoing_edges().iter())
                     .copied()
                 {
                     observer.visit_endpoint_incident_edge();
@@ -1173,25 +1173,20 @@ fn introduce_hierarchical_edge_segment(
     apply_label_graph_properties(graph, &labels);
 
     let edge_index = graph
-        .add_edge(LayeredEdge {
-            id: edge.id.clone(),
-            source,
-            target,
-            source_node_id: edge.source_node_id.clone(),
-            target_node_id: edge.target_node_id.clone(),
-            labels,
-            minlen: edge.minlen,
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order: edge.model_order,
-            priority_direction: edge.priority_direction,
-            priority_shortness: edge.priority_shortness,
-            priority_straightness: edge.priority_straightness,
+        .add_edge({
+            let mut built_edge = LayeredEdge::new(edge.id.clone(), source, target);
+            built_edge.source_node_id = edge.source_node_id.clone();
+            built_edge.target_node_id = edge.target_node_id.clone();
+            built_edge.labels = labels;
+            built_edge.minlen = edge.minlen;
+            built_edge.model_order = edge.model_order;
+            built_edge.priority_direction = edge.priority_direction;
+            built_edge.priority_shortness = edge.priority_shortness;
+            built_edge.priority_straightness = edge.priority_straightness;
             // `createDummyEdge` copies the original edge's properties, so the thickness is ELK's default.
-            thickness: 1.0,
-            original_opposite_port: None,
-            compound_segment: Some(pending.segment),
+            built_edge.thickness = 1.0;
+            built_edge.compound_segment = Some(pending.segment);
+            built_edge
         })
         .expect("ports were created before adding hierarchy edge segment");
 
@@ -2440,24 +2435,23 @@ mod tests {
                 .iter()
                 .position(|edge| {
                     edge.compound_segment.is_some()
-                        && (edge.source.node == group || edge.target.node == group)
+                        && (edge.source().node == group || edge.target().node == group)
                 })
                 .expect("root compound segment"),
         );
-        let original_port = if graph.edges[edge_index].source.node == group {
-            graph.edges[edge_index].source
+        let original_port = if graph.edges[edge_index].source().node == group {
+            graph.edges[edge_index].source()
         } else {
-            graph.edges[edge_index].target
+            graph.edges[edge_index].target()
         };
-        let mut duplicate = graph.layerless_nodes[group].ports[original_port.port].clone();
-        duplicate.incoming_edges.clear();
-        duplicate.outgoing_edges.clear();
+        let mut duplicate =
+            graph.layerless_nodes[group].ports[original_port.port].clone_without_edges();
         duplicate.port_dummy = None;
         let duplicate_port = PortRef {
             node: group,
             port: graph.layerless_nodes[group].ports.push(duplicate),
         };
-        if graph.edges[edge_index].source == original_port {
+        if graph.edges[edge_index].source() == original_port {
             assert!(graph.set_edge_source(edge_index, duplicate_port));
         } else {
             assert!(graph.set_edge_target(edge_index, duplicate_port));
@@ -2474,9 +2468,9 @@ mod tests {
             .find(|(_, node)| {
                 node.kind == LNodeKind::ExternalPort
                     && node.ports.iter().any(|port| {
-                        port.incoming_edges
+                        port.incoming_edges()
                             .iter()
-                            .chain(port.outgoing_edges.iter())
+                            .chain(port.outgoing_edges().iter())
                             .any(|edge| nested.edges[*edge].id == "edge-0")
                     })
             })
@@ -2554,9 +2548,9 @@ mod tests {
                     .unwrap();
                 let incident = |port: &LPort| {
                     if reverse {
-                        &port.incoming_edges
+                        port.incoming_edges()
                     } else {
-                        &port.outgoing_edges
+                        port.outgoing_edges()
                     }
                     .first()
                     .copied()
@@ -2577,9 +2571,9 @@ mod tests {
                     .filter_map(|node| {
                         let port = &node.ports[PortId::new(0)];
                         let edge = if reverse {
-                            port.outgoing_edges.first()
+                            port.outgoing_edges().first()
                         } else {
-                            port.incoming_edges.first()
+                            port.incoming_edges().first()
                         }?;
                         assert_eq!(port.border_offset, Some(spacing / 2.0));
                         let origin = node.origin_port.as_ref().unwrap().port;
@@ -2638,7 +2632,7 @@ mod tests {
         let publication = outer
             .ports
             .iter()
-            .filter_map(|port| port.outgoing_edges.first())
+            .filter_map(|port| port.outgoing_edges().first())
             .map(|edge| graph.edges[*edge].id.as_str())
             .collect::<Vec<_>>();
         // All child exports precede direct nodes, including First which occurs before Inner.
@@ -2674,9 +2668,9 @@ mod tests {
                 .iter()
                 .map(|port| {
                     let edge = port
-                        .outgoing_edges
+                        .outgoing_edges()
                         .first()
-                        .or_else(|| port.incoming_edges.first())
+                        .or_else(|| port.incoming_edges().first())
                         .unwrap();
                     graph.edges[*edge].id.as_str()
                 })
@@ -2874,9 +2868,9 @@ mod tests {
                         .find(|edge| edge.id == "crossing")
                         .unwrap();
                     let boundary = if reverse {
-                        crossing.target
+                        crossing.target()
                     } else {
-                        crossing.source
+                        crossing.source()
                     };
                     let crossing_dummy = &nested.layerless_nodes[boundary.node];
                     assert_eq!(crossing_dummy.kind, LNodeKind::ExternalPort);

@@ -101,7 +101,7 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
             // LPort.getConnectedPorts visits incoming then outgoing edges; reverse the
             // pushes so this iterative traversal retains the source recursive DFS order.
             for port in node.ports.iter().rev() {
-                for &edge in port.outgoing_edges.iter().rev() {
+                for &edge in port.outgoing_edges().iter().rev() {
                     let edge = graph
                         .edges
                         .get(edge)
@@ -109,9 +109,9 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
                             kind: "edge",
                             index: edge.index(),
                         })?;
-                    stack.push(edge.target.node);
+                    stack.push(edge.target().node);
                 }
-                for &edge in port.incoming_edges.iter().rev() {
+                for &edge in port.incoming_edges().iter().rev() {
                     let edge = graph
                         .edges
                         .get(edge)
@@ -119,7 +119,7 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
                             kind: "edge",
                             index: edge.index(),
                         })?;
-                    stack.push(edge.source.node);
+                    stack.push(edge.source().node);
                 }
             }
         }
@@ -157,15 +157,15 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
         .collect::<Vec<_>>();
     for (index, edge) in graph.edges_with_ids() {
         let owner = *owners
-            .get(edge.source.node)
+            .get(edge.source().node)
             .ok_or(ComponentError::InvalidReference {
                 kind: "source node",
-                index: edge.source.node.index(),
+                index: edge.source().node.index(),
             })?;
-        if owners.get(edge.target.node) != Some(&owner) {
+        if owners.get(edge.target().node) != Some(&owner) {
             return Err(ComponentError::InvalidReference {
                 kind: "target node",
-                index: edge.target.node.index(),
+                index: edge.target().node.index(),
             }
             .into());
         }
@@ -326,19 +326,20 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
         map_labels(&mut node.labels, edges)?;
         map_labels(&mut node.represented_labels, edges)?;
         for port in node.ports.slots_mut() {
-            port.node = map_id(nodes, port.node, "port owner")?;
+            port.map_ids(
+                |node| map_id(nodes, node, "port owner"),
+                |edge| map_id(edges, edge, "incoming edge"),
+                |edge| map_id(edges, edge, "outgoing edge"),
+            )?;
             map_optional(&mut port.long_edge_target_node, nodes, "long edge target")?;
             if let Some(origin) = &mut port.origin_port {
                 map_port(origin, nodes)?;
             }
-            map_list(&mut port.incoming_edges, edges, "incoming edge")?;
-            map_list(&mut port.outgoing_edges, edges, "outgoing edge")?;
             map_labels(&mut port.labels, edges)?;
         }
     }
     for edge in &mut graph.edges {
-        map_port(&mut edge.source, nodes)?;
-        map_port(&mut edge.target, nodes)?;
+        edge.map_ports(|port| map_port(port, nodes))?;
         if let Some(port) = &mut edge.original_opposite_port {
             map_port(port, nodes)?;
         }
@@ -424,7 +425,7 @@ fn offset_graph(graph: &mut LGraph, delta: LPoint) {
         node.position.x += delta.x;
         node.position.y += delta.y;
         for port in &node.ports {
-            for &edge in &port.outgoing_edges {
+            for &edge in port.outgoing_edges() {
                 let edge = &mut graph.edges[edge];
                 for point in &mut edge.bend_points {
                     point.x += delta.x;
@@ -670,24 +671,10 @@ mod tests {
             node: NodeId::new(2),
         });
         graph
-            .add_edge(LayeredEdge {
-                id: "e".to_string(),
-                source: out,
-                target: west,
-                source_node_id: String::new(),
-                target_node_id: String::new(),
-                labels: Vec::new(),
-                minlen: 1,
-                reversed: false,
-                bend_points: Vec::new(),
-                junction_points: Vec::new(),
-                model_order: None,
-                priority_direction: 0,
-                priority_shortness: 0,
-                priority_straightness: 0,
-                thickness: 1.0,
-                original_opposite_port: None,
-                compound_segment: None,
+            .add_edge({
+                let mut built_edge = LayeredEdge::new("e".to_string(), out, west);
+                built_edge.thickness = 1.0;
+                built_edge
             })
             .unwrap();
 
@@ -714,24 +701,10 @@ mod tests {
     }
 
     fn edge_between(id: &str, source: PortRef, target: PortRef) -> LayeredEdge {
-        LayeredEdge {
-            id: id.to_string(),
-            source,
-            target,
-            source_node_id: String::new(),
-            target_node_id: String::new(),
-            labels: Vec::new(),
-            minlen: 1,
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order: None,
-            priority_direction: 0,
-            priority_shortness: 0,
-            priority_straightness: 0,
-            thickness: 1.0,
-            original_opposite_port: None,
-            compound_segment: None,
+        {
+            let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
+            built_edge.thickness = 1.0;
+            built_edge
         }
     }
 

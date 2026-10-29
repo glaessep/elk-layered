@@ -137,8 +137,8 @@ fn sort_port_list(graph: &mut LGraph, node: NodeId) {
         let id = match port.side {
             PortSide::East | PortSide::West => -1,
             PortSide::North | PortSide::South => {
-                let incoming = !port.incoming_edges.is_empty();
-                let outgoing = !port.outgoing_edges.is_empty();
+                let incoming = !port.incoming_edges().is_empty();
+                let outgoing = !port.outgoing_edges().is_empty();
                 let next = if incoming && outgoing {
                     &mut in_out_ports
                 } else if outgoing {
@@ -198,8 +198,8 @@ fn create_dummy_nodes(
     let mut in_out_ports = Vec::new();
     for &port in ports {
         let data = &graph.layerless_nodes[port.node].ports[port.port];
-        let incoming = !data.incoming_edges.is_empty();
-        let outgoing = !data.outgoing_edges.is_empty();
+        let incoming = !data.incoming_edges().is_empty();
+        let outgoing = !data.outgoing_edges().is_empty();
         if incoming && outgoing {
             in_out_ports.push(port);
         } else if incoming {
@@ -253,8 +253,8 @@ fn create_dummy_node(
         graph.layerless_nodes[dummy_index].ports[dummy_port.port].origin_port = Some(in_port);
 
         let edges = graph.layerless_nodes[in_port.node].ports[in_port.port]
-            .incoming_edges
-            .clone();
+            .incoming_edges()
+            .to_vec();
         for edge in edges {
             graph.set_edge_target(edge, dummy_port);
         }
@@ -266,8 +266,8 @@ fn create_dummy_node(
         graph.layerless_nodes[dummy_index].ports[dummy_port.port].origin_port = Some(out_port);
 
         let edges = graph.layerless_nodes[out_port.node].ports[out_port.port]
-            .outgoing_edges
-            .clone();
+            .outgoing_edges()
+            .to_vec();
         for edge in edges {
             graph.set_edge_source(edge, dummy_port);
         }
@@ -323,13 +323,13 @@ pub fn postprocess_north_south_ports(graph: &mut LGraph) {
                 };
                 let dummy_port = PortRef { node, port };
                 if !graph.layerless_nodes[node].ports[port]
-                    .incoming_edges
+                    .incoming_edges()
                     .is_empty()
                 {
                     process_input_port(graph, dummy_port, same_origin_port);
                 }
                 if !graph.layerless_nodes[node].ports[port]
-                    .outgoing_edges
+                    .outgoing_edges()
                     .is_empty()
                 {
                     process_output_port(graph, dummy_port, same_origin_port);
@@ -356,8 +356,8 @@ fn process_input_port(graph: &mut LGraph, input_port: PortRef, add_junction_poin
     let y = graph.layerless_nodes[input_port.node].position.y;
 
     let edges = graph.layerless_nodes[input_port.node].ports[input_port.port]
-        .incoming_edges
-        .clone();
+        .incoming_edges()
+        .to_vec();
     for edge in edges {
         graph.set_edge_target(edge, origin_port);
         graph.edges[edge].bend_points.push(LPoint { x, y });
@@ -379,8 +379,8 @@ fn process_output_port(graph: &mut LGraph, output_port: PortRef, add_junction_po
     let y = graph.layerless_nodes[output_port.node].position.y;
 
     let edges = graph.layerless_nodes[output_port.node].ports[output_port.port]
-        .outgoing_edges
-        .clone();
+        .outgoing_edges()
+        .to_vec();
     for edge in edges {
         graph.set_edge_source(edge, origin_port);
         graph.edges[edge].bend_points.insert(0, LPoint { x, y });
@@ -446,25 +446,7 @@ mod tests {
     fn connect(graph: &mut LGraph, source: PortRef, target: PortRef) -> EdgeId {
         let id = format!("e{}", graph.edges.len());
         graph
-            .add_edge(LayeredEdge {
-                id,
-                source,
-                target,
-                source_node_id: String::new(),
-                target_node_id: String::new(),
-                labels: Vec::new(),
-                minlen: 1,
-                reversed: false,
-                bend_points: Vec::new(),
-                junction_points: Vec::new(),
-                model_order: None,
-                priority_direction: 0,
-                priority_shortness: 0,
-                priority_straightness: 0,
-                thickness: 0.0,
-                original_opposite_port: None,
-                compound_segment: None,
-            })
+            .add_edge(LayeredEdge::new(id, source, target))
             .expect("both ports exist")
     }
 
@@ -519,11 +501,14 @@ mod tests {
             dummy_node.ports[PortId::new(0)].origin_port,
             Some(port(node, 0))
         );
-        assert_eq!(graph.edges[edge].target, port(dummy, 0));
-        assert_eq!(dummy_node.ports[PortId::new(0)].incoming_edges, vec![edge]);
+        assert_eq!(graph.edges[edge].target(), port(dummy, 0));
+        assert_eq!(
+            dummy_node.ports[PortId::new(0)].incoming_edges(),
+            vec![edge]
+        );
         assert!(
             graph.layerless_nodes[node].ports[PortId::new(0)]
-                .incoming_edges
+                .incoming_edges()
                 .is_empty()
         );
         // The dummy and the node form one layout unit. The dummy must stay above the node.
@@ -558,10 +543,10 @@ mod tests {
         assert_eq!(dummy_node.ports.len(), 1);
         assert_eq!(dummy_node.ports[PortId::new(0)].side, PortSide::East);
         assert_eq!(dummy_node.ports[PortId::new(0)].port_type, PortType::Output);
-        assert_eq!(graph.edges[edge].source, port(dummy, 0));
+        assert_eq!(graph.edges[edge].source(), port(dummy, 0));
         assert!(
             graph.layerless_nodes[node].ports[PortId::new(0)]
-                .outgoing_edges
+                .outgoing_edges()
                 .is_empty()
         );
     }
@@ -632,8 +617,8 @@ mod tests {
         );
         assert_eq!(ports[PortId::new(0)].origin_port, Some(port(node, 0)));
         assert_eq!(ports[PortId::new(1)].origin_port, Some(port(node, 0)));
-        assert_eq!(graph.edges[incoming].target, port(dummy, 0));
-        assert_eq!(graph.edges[outgoing].source, port(dummy, 1));
+        assert_eq!(graph.edges[incoming].target(), port(dummy, 0));
+        assert_eq!(graph.edges[outgoing].source(), port(dummy, 1));
         assert_eq!(layer(&graph, 1), vec![dummy, node]);
     }
 
@@ -918,7 +903,7 @@ mod tests {
         postprocess_north_south_ports(&mut graph);
 
         let edge = &graph.edges[edges[0]];
-        assert_eq!(edge.target, port(node, 0));
+        assert_eq!(edge.target(), port(node, 0));
         // x is the middle of the port, y the height of the dummy; the new point comes last.
         assert_eq!(
             edge.bend_points,
@@ -926,7 +911,7 @@ mod tests {
         );
         assert!(edge.junction_points.is_empty());
         assert_eq!(
-            graph.layerless_nodes[node].ports[PortId::new(0)].incoming_edges,
+            graph.layerless_nodes[node].ports[PortId::new(0)].incoming_edges(),
             edges
         );
         assert_eq!(layer(&graph, 1), vec![node]);
@@ -942,14 +927,14 @@ mod tests {
         postprocess_north_south_ports(&mut graph);
 
         let edge = &graph.edges[edges[0]];
-        assert_eq!(edge.source, port(node, 0));
+        assert_eq!(edge.source(), port(node, 0));
         assert_eq!(
             edge.bend_points,
             vec![LPoint { x: 108.5, y: 12.0 }, LPoint { x: 50.0, y: 40.0 }]
         );
         assert!(edge.junction_points.is_empty());
         assert_eq!(
-            graph.layerless_nodes[node].ports[PortId::new(0)].outgoing_edges,
+            graph.layerless_nodes[node].ports[PortId::new(0)].outgoing_edges(),
             edges
         );
     }
@@ -971,8 +956,8 @@ mod tests {
                 vec![LPoint { x: 108.5, y: 12.0 }]
             );
         }
-        assert_eq!(graph.edges[edges[0]].target, port(node, 0));
-        assert_eq!(graph.edges[edges[1]].source, port(node, 0));
+        assert_eq!(graph.edges[edges[0]].target(), port(node, 0));
+        assert_eq!(graph.edges[edges[1]].source(), port(node, 0));
     }
 
     // Mutation: replace the junction points the router made instead of adding to them.
@@ -1002,8 +987,8 @@ mod tests {
 
         postprocess_north_south_ports(&mut graph);
 
-        assert_eq!(graph.edges[edges[0]].target, port(node, 0));
-        assert_eq!(graph.edges[second].source, port(neighbour, 0));
+        assert_eq!(graph.edges[edges[0]].target(), port(node, 0));
+        assert_eq!(graph.edges[second].source(), port(neighbour, 0));
         assert!(graph.edges[edges[0]].junction_points.is_empty());
         assert!(graph.edges[second].junction_points.is_empty());
         assert_eq!(graph.edges[second].bend_points.len(), 1);

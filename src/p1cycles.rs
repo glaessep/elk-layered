@@ -54,7 +54,7 @@ pub fn break_cycles_interactive(graph: &mut LGraph) {
     for source in graph.node_ids() {
         let source_x = interactive_reference_x(graph, source);
         for edge_index in graph.node_outgoing_edges(source) {
-            let target = graph.edges[edge_index].target.node;
+            let target = graph.edges[edge_index].target().node;
             if target == source {
                 continue;
             }
@@ -100,8 +100,8 @@ fn model_order_feedback_edges(graph: &LGraph) -> Vec<EdgeId> {
     for source in graph.node_ids() {
         let model_order_source = context.compute_constraint_model_order(graph, source, offset);
         for port in &graph.layerless_nodes[source].ports {
-            for &edge_index in &port.outgoing_edges {
-                let target = graph.edges[edge_index].target.node;
+            for &edge_index in port.outgoing_edges() {
+                let target = graph.edges[edge_index].target().node;
                 if target == source {
                     continue;
                 }
@@ -140,17 +140,17 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
 
     for node_index in graph.node_ids() {
         for port in &graph.layerless_nodes[node_index].ports {
-            for edge_index in &port.incoming_edges {
+            for edge_index in port.incoming_edges() {
                 let edge = &graph.edges[*edge_index];
-                if edge.source.node == node_index {
+                if edge.source().node == node_index {
                     continue;
                 }
                 indeg[node_index] += positive_priority_weight(edge.priority_direction);
             }
 
-            for edge_index in &port.outgoing_edges {
+            for edge_index in port.outgoing_edges() {
                 let edge = &graph.edges[*edge_index];
-                if edge.target.node == node_index {
+                if edge.target().node == node_index {
                     continue;
                 }
                 outdeg[node_index] += positive_priority_weight(edge.priority_direction);
@@ -251,10 +251,10 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
             .collect::<Vec<_>>();
         for port_index in port_ids {
             let outgoing_edges = graph.layerless_nodes[node_index].ports[port_index]
-                .outgoing_edges
-                .clone();
+                .outgoing_edges()
+                .to_vec();
             for edge_index in outgoing_edges {
-                let target_index = graph.edges[edge_index].target.node;
+                let target_index = graph.edges[edge_index].target().node;
                 if mark[node_index] > mark[target_index] && reverse_edge(graph, edge_index, true) {
                     graph.cyclic = true;
                 }
@@ -278,7 +278,7 @@ fn collect_depth_first_back_edges(
     active[node] = true;
 
     for edge_index in graph.node_outgoing_edges(node) {
-        let target = graph.edges[edge_index].target.node;
+        let target = graph.edges[edge_index].target().node;
         if target == node {
             continue;
         }
@@ -306,7 +306,7 @@ fn collect_interactive_back_edges(
     state[node] = InteractiveVisitState::Active;
 
     for edge_index in graph.node_outgoing_edges(node) {
-        let target = graph.edges[edge_index].target.node;
+        let target = graph.edges[edge_index].target().node;
         if target == node {
             continue;
         }
@@ -409,18 +409,18 @@ fn update_neighbors(
             port: port_index,
         };
         let connected_edges = port
-            .incoming_edges
+            .incoming_edges()
             .iter()
-            .chain(port.outgoing_edges.iter())
+            .chain(port.outgoing_edges().iter())
             .copied()
             .collect::<Vec<_>>();
 
         for edge_index in connected_edges {
             let edge = &graph.edges[edge_index];
-            let connected_port = if edge.source == port_ref {
-                edge.target
+            let connected_port = if edge.source() == port_ref {
+                edge.target()
             } else {
-                edge.source
+                edge.source()
             };
             let endpoint_index = connected_port.node;
 
@@ -430,7 +430,7 @@ fn update_neighbors(
 
             if mark[endpoint_index] == 0 {
                 let weight = non_negative_priority_weight(edge.priority_direction);
-                if edge.target == connected_port {
+                if edge.target() == connected_port {
                     indeg[endpoint_index] -= weight;
                     if indeg[endpoint_index] <= 0 && outdeg[endpoint_index] > 0 {
                         sources.push_back(endpoint_index);
@@ -692,7 +692,7 @@ mod tests {
         let original_endpoints = graph
             .edges
             .iter()
-            .map(|edge| (edge.source, edge.target))
+            .map(|edge| (edge.source(), edge.target()))
             .collect::<Vec<_>>();
 
         break_cycles_greedy(&mut graph);
@@ -705,7 +705,7 @@ mod tests {
             graph
                 .edges
                 .iter()
-                .map(|edge| (edge.source, edge.target))
+                .map(|edge| (edge.source(), edge.target()))
                 .collect::<Vec<_>>(),
             original_endpoints
         );
@@ -726,24 +726,24 @@ mod tests {
         let mut graph = graph(vec![node("A"), node("B")], vec![ab]);
         graph.edges[EdgeId::new(0)].bend_points =
             vec![LPoint { x: 1.0, y: 2.0 }, LPoint { x: 3.0, y: 4.0 }];
-        let old_source = graph.edges[EdgeId::new(0)].source;
-        let old_target = graph.edges[EdgeId::new(0)].target;
+        let old_source = graph.edges[EdgeId::new(0)].source();
+        let old_target = graph.edges[EdgeId::new(0)].target();
 
         assert!(crate::graph::reverse_edge(&mut graph, EdgeId::new(0), true));
 
-        assert_eq!(graph.edges[EdgeId::new(0)].source, old_target);
-        assert_eq!(graph.edges[EdgeId::new(0)].target, old_source);
+        assert_eq!(graph.edges[EdgeId::new(0)].source(), old_target);
+        assert_eq!(graph.edges[EdgeId::new(0)].target(), old_source);
         assert!(
             graph.layerless_nodes[old_source.node].ports[old_source.port]
-                .outgoing_edges
+                .outgoing_edges()
                 .is_empty()
         );
         assert_eq!(
-            graph.layerless_nodes[old_source.node].ports[old_source.port].incoming_edges,
+            graph.layerless_nodes[old_source.node].ports[old_source.port].incoming_edges(),
             vec![EdgeId::new(0)]
         );
         assert_eq!(
-            graph.layerless_nodes[old_target.node].ports[old_target.port].outgoing_edges,
+            graph.layerless_nodes[old_target.node].ports[old_target.port].outgoing_edges(),
             vec![EdgeId::new(0)]
         );
         assert_eq!(
@@ -767,8 +767,8 @@ mod tests {
         };
         input.options.merge_edges = true;
         let mut graph = import_graph(&input).unwrap();
-        let old_source = graph.edges[EdgeId::new(0)].source;
-        let old_target = graph.edges[EdgeId::new(0)].target;
+        let old_source = graph.edges[EdgeId::new(0)].source();
+        let old_target = graph.edges[EdgeId::new(0)].target();
 
         assert_eq!(
             graph.layerless_nodes[old_source.node].ports[old_source.port].collector_type,
@@ -781,8 +781,8 @@ mod tests {
 
         assert!(crate::graph::reverse_edge(&mut graph, EdgeId::new(0), true));
 
-        let new_source = graph.edges[EdgeId::new(0)].source;
-        let new_target = graph.edges[EdgeId::new(0)].target;
+        let new_source = graph.edges[EdgeId::new(0)].source();
+        let new_target = graph.edges[EdgeId::new(0)].target();
         assert_eq!(new_source.node, old_target.node);
         assert_eq!(new_target.node, old_source.node);
         assert_ne!(new_source.port, old_target.port);
@@ -805,20 +805,20 @@ mod tests {
         );
         assert!(
             graph.layerless_nodes[old_source.node].ports[old_source.port]
-                .outgoing_edges
+                .outgoing_edges()
                 .is_empty()
         );
         assert!(
             graph.layerless_nodes[old_target.node].ports[old_target.port]
-                .incoming_edges
+                .incoming_edges()
                 .is_empty()
         );
         assert_eq!(
-            graph.layerless_nodes[new_source.node].ports[new_source.port].outgoing_edges,
+            graph.layerless_nodes[new_source.node].ports[new_source.port].outgoing_edges(),
             vec![EdgeId::new(0)]
         );
         assert_eq!(
-            graph.layerless_nodes[new_target.node].ports[new_target.port].incoming_edges,
+            graph.layerless_nodes[new_target.node].ports[new_target.port].incoming_edges(),
             vec![EdgeId::new(0)]
         );
     }
@@ -837,12 +837,12 @@ mod tests {
 
         state[node] = VisitState::Active;
         for port in &graph.layerless_nodes[node].ports {
-            for edge_index in &port.outgoing_edges {
+            for edge_index in port.outgoing_edges() {
                 let edge = &graph.edges[*edge_index];
-                if edge.source.node == edge.target.node {
+                if edge.source().node == edge.target().node {
                     continue;
                 }
-                if visit(graph, edge.target.node, state) {
+                if visit(graph, edge.target().node, state) {
                     return true;
                 }
             }

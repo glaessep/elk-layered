@@ -506,7 +506,7 @@ fn port_degree_east_west_key(
 
 fn real_in_degree(graph: &LGraph, node: NodeId, port: PortId) -> usize {
     graph.layerless_nodes[node].ports[port]
-        .incoming_edges
+        .incoming_edges()
         .iter()
         .filter(|edge| !graph.edges[**edge].reversed)
         .count()
@@ -514,7 +514,7 @@ fn real_in_degree(graph: &LGraph, node: NodeId, port: PortId) -> usize {
 
 fn real_out_degree(graph: &LGraph, node: NodeId, port: PortId) -> usize {
     graph.layerless_nodes[node].ports[port]
-        .outgoing_edges
+        .outgoing_edges()
         .iter()
         .filter(|edge| !graph.edges[**edge].reversed)
         .count()
@@ -636,7 +636,7 @@ pub fn long_edge_target_node_preprocessing(
             continue;
         };
         if graph.layerless_nodes[node].ports[port]
-            .outgoing_edges
+            .outgoing_edges()
             .is_empty()
         {
             continue;
@@ -646,7 +646,7 @@ pub fn long_edge_target_node_preprocessing(
             continue;
         };
         graph.layerless_nodes[node].ports[port].long_edge_target_node = Some(target_node);
-        let edge_index = graph.layerless_nodes[node].ports[port].outgoing_edges[0];
+        let edge_index = graph.layerless_nodes[node].ports[port].outgoing_edges()[0];
         let edge = &graph.edges[edge_index];
         if !edge.reversed {
             let edge_order = edge.model_order.unwrap_or(0);
@@ -666,7 +666,7 @@ fn cached_long_edge_target_node_orders(graph: &LGraph, node: NodeId) -> HashMap<
         let Some(target_node) = port.long_edge_target_node else {
             continue;
         };
-        let Some(edge_index) = port.outgoing_edges.first().copied() else {
+        let Some(edge_index) = port.outgoing_edges().first().copied() else {
             continue;
         };
         let edge = &graph.edges[edge_index];
@@ -686,13 +686,13 @@ pub fn target_node(graph: &LGraph, port: PortRef) -> Option<NodeId> {
         .layerless_nodes
         .get(port.node)
         .and_then(|node| node.ports.get(port.port))
-        .and_then(|port| port.outgoing_edges.first())
+        .and_then(|port| port.outgoing_edges().first())
         .copied()?;
     let mut remaining_hops = graph.edges.len().saturating_add(1);
     while remaining_hops > 0 {
         remaining_hops -= 1;
         let edge_data = graph.edges.get(edge)?;
-        let node = edge_data.target.node;
+        let node = edge_data.target().node;
         if let Some(target) = graph.layerless_nodes[node]
             .long_edge_target
             .map(|port_ref| port_ref.node)
@@ -705,7 +705,7 @@ pub fn target_node(graph: &LGraph, port: PortRef) -> Option<NodeId> {
         edge = graph.layerless_nodes[node]
             .ports
             .iter()
-            .find_map(|port| port.outgoing_edges.first().copied())?;
+            .find_map(|port| port.outgoing_edges().first().copied())?;
     }
     None
 }
@@ -868,7 +868,7 @@ impl<'a> ModelOrderNodeComparator<'a> {
 
     fn model_order_from_connected_edges(&self, node: NodeId) -> i64 {
         for port in &self.graph.layerless_nodes[node].ports {
-            if let Some(edge) = port.incoming_edges.first() {
+            if let Some(edge) = port.incoming_edges().first() {
                 return self.graph.edges[*edge].model_order.unwrap_or(0) as i64;
             }
         }
@@ -972,10 +972,10 @@ impl<'a> ModelOrderPortComparator<'a> {
         }
 
         if !self.graph.layerless_nodes[self.node].ports[p1]
-            .incoming_edges
+            .incoming_edges()
             .is_empty()
             && !self.graph.layerless_nodes[self.node].ports[p2]
-                .incoming_edges
+                .incoming_edges()
                 .is_empty()
         {
             if self.port_model_order {
@@ -1007,10 +1007,10 @@ impl<'a> ModelOrderPortComparator<'a> {
         }
 
         if !self.graph.layerless_nodes[self.node].ports[p1]
-            .outgoing_edges
+            .outgoing_edges()
             .is_empty()
             && !self.graph.layerless_nodes[self.node].ports[p2]
-                .outgoing_edges
+                .outgoing_edges()
                 .is_empty()
         {
             let p1_target = self.graph.layerless_nodes[self.node].ports[p1].long_edge_target_node;
@@ -1065,16 +1065,16 @@ impl<'a> ModelOrderPortComparator<'a> {
         }
 
         let p1_incoming = !self.graph.layerless_nodes[self.node].ports[p1]
-            .incoming_edges
+            .incoming_edges()
             .is_empty();
         let p1_outgoing = !self.graph.layerless_nodes[self.node].ports[p1]
-            .outgoing_edges
+            .outgoing_edges()
             .is_empty();
         let p2_incoming = !self.graph.layerless_nodes[self.node].ports[p2]
-            .incoming_edges
+            .incoming_edges()
             .is_empty();
         let p2_outgoing = !self.graph.layerless_nodes[self.node].ports[p2]
-            .outgoing_edges
+            .outgoing_edges()
             .is_empty();
 
         if p1_incoming && p2_outgoing {
@@ -1106,14 +1106,14 @@ impl<'a> ModelOrderPortComparator<'a> {
 
     fn incoming_source_node(&self, port: PortId) -> Option<NodeId> {
         self.graph.layerless_nodes[self.node].ports[port]
-            .incoming_edges
+            .incoming_edges()
             .first()
-            .map(|edge| self.graph.edges[*edge].source.node)
+            .map(|edge| self.graph.edges[*edge].source().node)
     }
 
     fn incoming_edge_order(&self, port: PortId) -> usize {
         self.graph.layerless_nodes[self.node].ports[port]
-            .incoming_edges
+            .incoming_edges()
             .first()
             .and_then(|edge| self.graph.edges[*edge].model_order)
             .unwrap_or(0)
@@ -1121,7 +1121,7 @@ impl<'a> ModelOrderPortComparator<'a> {
 
     fn outgoing_edge_order(&self, port: PortId) -> usize {
         self.graph.layerless_nodes[self.node].ports[port]
-            .outgoing_edges
+            .outgoing_edges()
             .first()
             .and_then(|edge| self.graph.edges[*edge].model_order)
             .unwrap_or(0)
@@ -1135,7 +1135,7 @@ impl<'a> ModelOrderPortComparator<'a> {
         // This asymmetric lookup is source behavior: ELK checks whether p2 has model order, then
         // reads p1's value. It looks like a typo, but correcting it changes stable-sort decisions.
         if self.graph.layerless_nodes[self.node].ports[second_port]
-            .outgoing_edges
+            .outgoing_edges()
             .first()
             .and_then(|edge| self.graph.edges[*edge].model_order)
             .is_some()
@@ -1148,7 +1148,7 @@ impl<'a> ModelOrderPortComparator<'a> {
 
     fn outgoing_edge_reversed(&self, port: PortId) -> bool {
         self.graph.layerless_nodes[self.node].ports[port]
-            .outgoing_edges
+            .outgoing_edges()
             .first()
             .map(|edge| self.graph.edges[*edge].reversed)
             .unwrap_or(false)
@@ -1213,8 +1213,8 @@ impl<'a> ModelOrderPortComparator<'a> {
 fn last_previous_layer_source_port(graph: &LGraph, node: NodeId) -> Option<PortRef> {
     let mut selected = None;
     for port in &graph.layerless_nodes[node].ports {
-        if let Some(edge) = port.incoming_edges.first() {
-            let source = graph.edges[*edge].source;
+        if let Some(edge) = port.incoming_edges().first() {
+            let source = graph.edges[*edge].source();
             if graph.layerless_nodes[source.node].layer_index()
                 != graph.layerless_nodes[node].layer_index()
             {
@@ -1329,24 +1329,11 @@ mod tests {
     }
 
     fn layered_edge(id: &str, source: PortRef, target: PortRef) -> LayeredEdge {
-        LayeredEdge {
-            id: id.to_string(),
-            source,
-            target,
-            source_node_id: format!("node-{}", source.node.index()),
-            target_node_id: format!("node-{}", target.node.index()),
-            labels: Vec::new(),
-            minlen: 1,
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order: None,
-            priority_direction: 0,
-            priority_shortness: 0,
-            priority_straightness: 0,
-            thickness: 0.0,
-            original_opposite_port: None,
-            compound_segment: None,
+        {
+            let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
+            built_edge.source_node_id = format!("node-{}", source.node.index());
+            built_edge.target_node_id = format!("node-{}", target.node.index());
+            built_edge
         }
     }
 
@@ -1465,21 +1452,21 @@ mod tests {
         );
         crate::pipeline::execute_ported_compound_processors(&mut graph).unwrap();
         let loop_edge = graph.edges.iter().find(|edge| edge.id == "edge1").unwrap();
-        let parent_index = loop_edge.target.node;
+        let parent_index = loop_edge.target().node;
         let parent = &graph.layerless_nodes[parent_index];
         let cross_edge = graph
             .edges
             .iter()
-            .find(|edge| edge.id == "edge0" && edge.target.node == parent_index)
+            .find(|edge| edge.id == "edge0" && edge.target().node == parent_index)
             .unwrap();
         // The graph flows downward, so the finished layout has turned east into south and west
         // into north.
-        assert_eq!(parent.ports[loop_edge.source.port].side, PortSide::South);
-        assert_eq!(parent.ports[loop_edge.target.port].side, PortSide::North);
-        assert_eq!(parent.ports[cross_edge.target.port].side, PortSide::North);
+        assert_eq!(parent.ports[loop_edge.source().port].side, PortSide::South);
+        assert_eq!(parent.ports[loop_edge.target().port].side, PortSide::North);
+        assert_eq!(parent.ports[cross_edge.target().port].side, PortSide::North);
         // Both ports must be in the list: `None` would sort below any place.
-        let loop_place = parent.ports.position(loop_edge.target.port).unwrap();
-        let cross_place = parent.ports.position(cross_edge.target.port).unwrap();
+        let loop_place = parent.ports.position(loop_edge.target().port).unwrap();
+        let cross_place = parent.ports.position(cross_edge.target().port).unwrap();
         assert!(loop_place < cross_place);
         // Reordering must also keep each child external port's origin linked
         // to its corresponding parent port, including detached self-loop ports.
@@ -1596,9 +1583,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["north", "south", "A:0"]
         );
-        assert_eq!(graph.edges[EdgeId::new(0)].source.node, a);
+        assert_eq!(graph.edges[EdgeId::new(0)].source().node, a);
         assert_eq!(
-            graph.layerless_nodes[a].ports[graph.edges[EdgeId::new(0)].source.port].id,
+            graph.layerless_nodes[a].ports[graph.edges[EdgeId::new(0)].source().port].id,
             "A:0"
         );
     }
@@ -1688,9 +1675,9 @@ mod tests {
             for (position, &original) in expected.iter().enumerate() {
                 let edge = &graph.edges[EdgeId::new(original)];
                 let (local, remote) = if original % 2 == 0 {
-                    (edge.source, edge.target)
+                    (edge.source(), edge.target())
                 } else {
-                    (edge.target, edge.source)
+                    (edge.target(), edge.source())
                 };
                 // The sort moved the port in the list. The edge still ends at the same port.
                 assert_eq!(
@@ -1715,11 +1702,11 @@ mod tests {
                 );
                 let port = &graph.layerless_nodes[NodeId::new(0)].ports[PortId::new(original)];
                 if original % 2 == 0 {
-                    assert_eq!(port.outgoing_edges, vec![EdgeId::new(original)]);
-                    assert!(port.incoming_edges.is_empty());
+                    assert_eq!(port.outgoing_edges(), vec![EdgeId::new(original)]);
+                    assert!(port.incoming_edges().is_empty());
                 } else {
-                    assert_eq!(port.incoming_edges, vec![EdgeId::new(original)]);
-                    assert!(port.outgoing_edges.is_empty());
+                    assert_eq!(port.incoming_edges(), vec![EdgeId::new(original)]);
+                    assert!(port.outgoing_edges().is_empty());
                 }
                 assert!(graph.edge_source_attached(EdgeId::new(original)));
                 assert!(graph.edge_target_attached(EdgeId::new(original)));
@@ -1943,45 +1930,23 @@ mod tests {
             )
             .unwrap();
         graph
-            .add_edge(crate::graph::LayeredEdge {
-                id: "A-dummy-1".to_string(),
-                source: first,
-                target: first_target,
-                source_node_id: "A".to_string(),
-                target_node_id: "dummy-1".to_string(),
-                labels: Vec::new(),
-                minlen: 1,
-                reversed: false,
-                bend_points: Vec::new(),
-                junction_points: Vec::new(),
-                model_order: Some(1),
-                priority_direction: 0,
-                priority_shortness: 0,
-                priority_straightness: 0,
-                thickness: 0.0,
-                original_opposite_port: None,
-                compound_segment: None,
+            .add_edge({
+                let mut built_edge =
+                    crate::graph::LayeredEdge::new("A-dummy-1".to_string(), first, first_target);
+                built_edge.source_node_id = "A".to_string();
+                built_edge.target_node_id = "dummy-1".to_string();
+                built_edge.model_order = Some(1);
+                built_edge
             })
             .unwrap();
         graph
-            .add_edge(crate::graph::LayeredEdge {
-                id: "A-dummy-2".to_string(),
-                source: second,
-                target: second_target,
-                source_node_id: "A".to_string(),
-                target_node_id: "dummy-2".to_string(),
-                labels: Vec::new(),
-                minlen: 1,
-                reversed: false,
-                bend_points: Vec::new(),
-                junction_points: Vec::new(),
-                model_order: Some(0),
-                priority_direction: 0,
-                priority_shortness: 0,
-                priority_straightness: 0,
-                thickness: 0.0,
-                original_opposite_port: None,
-                compound_segment: None,
+            .add_edge({
+                let mut built_edge =
+                    crate::graph::LayeredEdge::new("A-dummy-2".to_string(), second, second_target);
+                built_edge.source_node_id = "A".to_string();
+                built_edge.target_node_id = "dummy-2".to_string();
+                built_edge.model_order = Some(0);
+                built_edge
             })
             .unwrap();
 
@@ -2372,22 +2337,22 @@ mod tests {
             .map(|port| {
                 (
                     port.side,
-                    port.incoming_edges.len(),
-                    port.outgoing_edges.len(),
+                    port.incoming_edges().len(),
+                    port.outgoing_edges().len(),
                 )
             })
             .collect::<Vec<_>>();
         assert_eq!(after, [(PortSide::East, 0, 1), (PortSide::West, 1, 0)]);
         // The edges name the same ports as before: the west port is port 0, the east port 1.
         assert_eq!(
-            graph.edges[EdgeId::new(0)].target,
+            graph.edges[EdgeId::new(0)].target(),
             PortRef {
                 node: dummy,
                 port: PortId::new(0)
             }
         );
         assert_eq!(
-            graph.edges[EdgeId::new(1)].source,
+            graph.edges[EdgeId::new(1)].source(),
             PortRef {
                 node: dummy,
                 port: PortId::new(1)

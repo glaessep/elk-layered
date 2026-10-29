@@ -1125,13 +1125,15 @@ mod tests {
             PortSide::West,
             LPoint { x: 0.0, y: 5.0 },
         );
-        let edge = LayeredEdge {
-            id: "A-B".to_string(),
-            source: source_port.unwrap(),
-            target: target_port.unwrap(),
-            source_node_id: "A".to_string(),
-            target_node_id: "B".to_string(),
-            labels: vec![LLabel {
+        let edge = {
+            let mut built_edge = LayeredEdge::new(
+                "A-B".to_string(),
+                source_port.unwrap(),
+                target_port.unwrap(),
+            );
+            built_edge.source_node_id = "A".to_string();
+            built_edge.target_node_id = "B".to_string();
+            built_edge.labels = vec![LLabel {
                 text: "label".to_string(),
                 size: LSize {
                     width: 12.0,
@@ -1145,18 +1147,10 @@ mod tests {
                 original_label_edge: None,
                 source_index: None,
                 node_label_placement: None,
-            }],
-            minlen: 1,
-            reversed: false,
-            bend_points: vec![LPoint { x: 1.0, y: 2.0 }],
-            junction_points: vec![LPoint { x: 3.0, y: 4.0 }],
-            model_order: None,
-            priority_direction: 0,
-            priority_shortness: 0,
-            priority_straightness: 0,
-            thickness: 0.0,
-            original_opposite_port: None,
-            compound_segment: None,
+            }];
+            built_edge.bend_points = vec![LPoint { x: 1.0, y: 2.0 }];
+            built_edge.junction_points = vec![LPoint { x: 3.0, y: 4.0 }];
+            built_edge
         };
         graph.add_edge(edge);
 
@@ -1213,24 +1207,14 @@ mod tests {
                         LPoint { x: 0.0, y: 5.0 },
                     );
                     let point = LPoint { x: 30.0, y: 20.0 };
-                    graph.add_edge(LayeredEdge {
-                        id: "e".to_string(),
-                        source: from.unwrap(),
-                        target: to.unwrap(),
-                        source_node_id: "A".to_string(),
-                        target_node_id: "B".to_string(),
-                        labels: Vec::new(),
-                        minlen: 1,
-                        reversed: false,
-                        bend_points: vec![point],
-                        junction_points: vec![point],
-                        model_order: None,
-                        priority_direction: 0,
-                        priority_shortness: 0,
-                        priority_straightness: 0,
-                        thickness: 0.0,
-                        original_opposite_port: None,
-                        compound_segment: None,
+                    graph.add_edge({
+                        let mut built_edge =
+                            LayeredEdge::new("e".to_string(), from.unwrap(), to.unwrap());
+                        built_edge.source_node_id = "A".to_string();
+                        built_edge.target_node_id = "B".to_string();
+                        built_edge.bend_points = vec![point];
+                        built_edge.junction_points = vec![point];
+                        built_edge
                     });
 
                     transform_graph_direction(&mut graph, mode);

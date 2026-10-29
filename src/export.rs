@@ -284,8 +284,8 @@ fn join_cross_hierarchy_edges(
         };
         let (first_graph, first_edge) = edge_of(&list[0])?;
         let (last_graph, last_edge) = edge_of(&list[list.len() - 1])?;
-        let source = hierarchy.actual_end(first_graph, first_edge.source)?;
-        let target = hierarchy.actual_end(last_graph, last_edge.target)?;
+        let source = hierarchy.actual_end(first_graph, first_edge.source())?;
+        let target = hierarchy.actual_end(last_graph, last_edge.target())?;
 
         let reference_node = (source.graph, source.port.node);
         let target_node = (target.graph, target.port.node);
@@ -315,13 +315,13 @@ fn join_cross_hierarchy_edges(
                 .collect();
             let mut source_point = hierarchy.absolute_anchor(PortAt {
                 graph,
-                port: edge.source,
+                port: edge.source(),
             });
             source_point.x += offset.x;
             source_point.y += offset.y;
             let mut target_point = hierarchy.absolute_anchor(PortAt {
                 graph,
-                port: edge.target,
+                port: edge.target(),
             });
             target_point.x += offset.x;
             target_point.y += offset.y;
@@ -345,7 +345,7 @@ fn join_cross_hierarchy_edges(
                 y: p.y + offset.y,
             }));
 
-            if hierarchy.actual_end(graph, edge.target)? == target {
+            if hierarchy.actual_end(graph, edge.target())? == target {
                 let target_graph = target.graph;
                 if target_graph != graph {
                     offset = LPoint::default();
@@ -439,11 +439,11 @@ pub(crate) fn apply_layout(
                 id: edge.id.as_str(),
                 source: PortAt {
                     graph: graph_id,
-                    port: edge.source,
+                    port: edge.source(),
                 },
                 target: PortAt {
                     graph: graph_id,
-                    port: edge.target,
+                    port: edge.target(),
                 },
                 bend_points: edge.bend_points.clone(),
                 junction_points: edge.junction_points.clone(),
@@ -504,17 +504,17 @@ fn is_original_edge(graph: &LGraph, index: EdgeId, input: &TransferInput<'_>) ->
             .and_then(|node| node.ports.get(port.port))
             .is_some_and(|data| {
                 let list = if outgoing {
-                    &data.outgoing_edges
+                    data.outgoing_edges()
                 } else {
-                    &data.incoming_edges
+                    data.incoming_edges()
                 };
                 list.contains(&index)
             })
     };
-    attached(edge.source, true)
-        && attached(edge.target, false)
-        && is_input_end(&graph.layerless_nodes[edge.source.node])
-        && is_input_end(&graph.layerless_nodes[edge.target.node])
+    attached(edge.source(), true)
+        && attached(edge.target(), false)
+        && is_input_end(&graph.layerless_nodes[edge.source().node])
+        && is_input_end(&graph.layerless_nodes[edge.target().node])
 }
 
 /// Whether a node stands for something the input has: a node, or a port of the graph's own node.
@@ -870,8 +870,11 @@ mod tests {
             .collect();
         for (graph_id, edge) in records {
             let edge = &mut graph[graph_id].edges[edge];
-            edge.source.node = crate::graph::NodeId::new(99);
-            edge.target.node = crate::graph::NodeId::new(99);
+            edge.map_ports(|port| {
+                port.node = crate::graph::NodeId::new(99);
+                Ok::<(), std::convert::Infallible>(())
+            })
+            .unwrap();
         }
 
         let error = apply_to_edge_e(&mut graph).expect_err("an error");
