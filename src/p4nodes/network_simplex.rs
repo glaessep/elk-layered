@@ -68,9 +68,9 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
             if graph.layerless_nodes[node].hidden {
                 continue;
             }
-            let head = aux.graph.add_node(Some(node.index()));
+            let head = aux.graph.add_node(Some(node));
             let rep = if flexible[node.index()] {
-                let tail = aux.graph.add_node(Some(node.index()));
+                let tail = aux.graph.add_node(Some(node));
                 aux.graph.add_edge(
                     None,
                     head,
@@ -149,7 +149,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
             let left = aux
                 .graph
                 .add_edge(
-                    Some(edge.index()),
+                    Some(edge),
                     dummy,
                     source,
                     weight,
@@ -159,7 +159,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
             let right = aux
                 .graph
                 .add_edge(
-                    Some(edge.index()),
+                    Some(edge),
                     dummy,
                     target,
                     weight,

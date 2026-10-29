@@ -159,7 +159,7 @@ pub fn layer_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexErr
             let Some(l_node) = ngraph.nodes[n_node].origin else {
                 continue;
             };
-            graph.set_node_layer(NodeId::new(l_node), ngraph.nodes[n_node].layer as usize);
+            graph.set_node_layer(l_node, ngraph.nodes[n_node].layer as usize);
         }
 
         if connected_components.len() > 1 {
@@ -219,7 +219,7 @@ fn initialize(graph: &LGraph, nodes: &[NodeId]) -> NGraph {
     let mut node_map = HashMap::new();
 
     for l_node in nodes {
-        let n_node = ngraph.add_node(Some(l_node.index()));
+        let n_node = ngraph.add_node(Some(*l_node));
         node_map.insert(*l_node, n_node);
     }
 
@@ -237,7 +237,7 @@ fn initialize(graph: &LGraph, nodes: &[NodeId]) -> NGraph {
                 continue;
             };
             ngraph.add_edge(
-                Some(edge_index.index()),
+                Some(edge_index),
                 source,
                 target,
                 priority_shortness_weight(edge),

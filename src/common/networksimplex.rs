@@ -8,6 +8,8 @@
 
 use std::collections::VecDeque;
 
+use crate::graph::{EdgeId, NodeId};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum NetworkSimplexError {
     #[error("network simplex coordinate is outside the supported i32 range")]
@@ -37,7 +39,7 @@ impl NGraph {
         Self::default()
     }
 
-    pub fn add_node(&mut self, origin: Option<usize>) -> usize {
+    pub fn add_node(&mut self, origin: Option<NodeId>) -> usize {
         let node_index = self.nodes.len();
         self.nodes.push(NNode {
             origin,
@@ -49,7 +51,7 @@ impl NGraph {
 
     pub fn add_edge(
         &mut self,
-        origin: Option<usize>,
+        origin: Option<EdgeId>,
         source: usize,
         target: usize,
         weight: f64,
@@ -106,7 +108,7 @@ impl NGraph {
 pub struct NNode {
     pub id: usize,
     pub internal_id: usize,
-    pub origin: Option<usize>,
+    pub origin: Option<NodeId>,
     pub layer: i32,
     pub incoming_edges: Vec<usize>,
     pub outgoing_edges: Vec<usize>,
@@ -118,7 +120,7 @@ pub struct NNode {
 pub struct NEdge {
     pub id: usize,
     pub internal_id: usize,
-    pub origin: Option<usize>,
+    pub origin: Option<EdgeId>,
     pub source: usize,
     pub target: usize,
     pub weight: f64,
@@ -765,14 +767,27 @@ mod tests {
         );
     }
 
+    // Mutation: add_node drops the origin it is given (stores None).
+    #[test]
+    fn nodes_and_edges_keep_the_origin_ids_they_are_given() {
+        let mut graph = NGraph::new();
+        let a = graph.add_node(Some(NodeId::new(7)));
+        let b = graph.add_node(None);
+        let edge = graph.add_edge(Some(EdgeId::new(3)), a, b, 1.0, 1).unwrap();
+
+        assert_eq!(graph.nodes[a].origin, Some(NodeId::new(7)));
+        assert_eq!(graph.nodes[b].origin, None);
+        assert_eq!(graph.edges[edge].origin, Some(EdgeId::new(3)));
+    }
+
     #[test]
     fn network_simplex_assigns_layers_to_dag() {
         let mut graph = NGraph::new();
-        let a = graph.add_node(Some(0));
-        let b = graph.add_node(Some(1));
-        let c = graph.add_node(Some(2));
-        graph.add_edge(Some(0), a, b, 1.0, 1).unwrap();
-        graph.add_edge(Some(1), b, c, 1.0, 1).unwrap();
+        let a = graph.add_node(None);
+        let b = graph.add_node(None);
+        let c = graph.add_node(None);
+        graph.add_edge(None, a, b, 1.0, 1).unwrap();
+        graph.add_edge(None, b, c, 1.0, 1).unwrap();
 
         NetworkSimplex::for_graph(&mut graph)
             .with_iteration_limit(28)
@@ -788,11 +803,11 @@ mod tests {
     #[test]
     fn network_simplex_balances_equal_degree_node() {
         let mut graph = NGraph::new();
-        let a = graph.add_node(Some(0));
-        let b = graph.add_node(Some(1));
-        let c = graph.add_node(Some(2));
-        graph.add_edge(Some(0), a, c, 1.0, 1).unwrap();
-        graph.add_edge(Some(1), b, c, 1.0, 1).unwrap();
+        let a = graph.add_node(None);
+        let b = graph.add_node(None);
+        let c = graph.add_node(None);
+        graph.add_edge(None, a, c, 1.0, 1).unwrap();
+        graph.add_edge(None, b, c, 1.0, 1).unwrap();
 
         NetworkSimplex::for_graph(&mut graph)
             .with_iteration_limit(28)
@@ -809,12 +824,12 @@ mod tests {
     fn network_simplex_reattaches_removed_subtrees() {
         let mut graph = NGraph::new();
         let mut nodes = Vec::new();
-        for index in 0..41 {
-            nodes.push(graph.add_node(Some(index)));
+        for _ in 0..41 {
+            nodes.push(graph.add_node(None));
         }
         for index in 0..40 {
             graph
-                .add_edge(Some(index), nodes[index], nodes[index + 1], 1.0, 1)
+                .add_edge(None, nodes[index], nodes[index + 1], 1.0, 1)
                 .unwrap();
         }
 
