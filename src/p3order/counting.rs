@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::graph::{EdgeId, EdgeSlice, LGraph, LNodeKind, NodeId, NodeSlice, PortRef, PortSide};
+use crate::graph::{EdgeId, LGraph, LNodeKind, NodeId, PortRef, PortSide};
 
 /// `BinaryIndexedTree`.
 ///
@@ -891,7 +891,7 @@ pub(crate) fn first_port_on_side(graph: &LGraph, node: NodeId, side: PortSide) -
 pub(crate) fn port_degree(graph: &LGraph, port: PortRef) -> usize {
     let Some(port) = graph
         .layerless_nodes
-        .get_node(port.node)
+        .get(port.node)
         .and_then(|node| node.ports.get(port.port))
     else {
         return 0;
@@ -1036,7 +1036,7 @@ fn ports_for_side(graph: &LGraph, node: NodeId, side: PortSide, top_down: bool) 
 }
 
 fn is_in_layer_edge(graph: &LGraph, edge: EdgeId) -> bool {
-    let Some(edge) = graph.edges.get_edge(edge) else {
+    let Some(edge) = graph.edges.get(edge) else {
         return false;
     };
     graph.layerless_nodes[edge.source.node].layer_index
@@ -1056,7 +1056,7 @@ fn connected_edges(graph: &LGraph, port: PortRef) -> impl Iterator<Item = EdgeId
 }
 
 fn other_end_of(graph: &LGraph, edge: EdgeId, port: PortRef) -> Option<PortRef> {
-    let edge = graph.edges.get_edge(edge)?;
+    let edge = graph.edges.get(edge)?;
     if edge.source == port {
         Some(edge.target)
     } else if edge.target == port {
@@ -1489,7 +1489,7 @@ mod tests {
         assert_eq!(counter.has_north_south_ports, Some(vec![false]));
 
         // A dummy that shows up later is seen by a new counter at once.
-        graph.layerless_nodes[0].kind = LNodeKind::NorthSouthPort;
+        graph.layerless_nodes[NodeId::new(0)].kind = LNodeKind::NorthSouthPort;
         let mut fresh = CrossingsCounter::default();
         fresh.count_all_crossings_in_order(&graph, &order);
         assert_eq!(fresh.has_north_south_ports, Some(vec![true]));

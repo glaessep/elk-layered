@@ -2,7 +2,7 @@
 //! https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/MinWidthLayerer.java
 
 use super::{LayeringError, LayeringInput, LayeringResult};
-use crate::graph::{LNodeKind, NodeId};
+use crate::graph::{IdVec, LNodeKind, NodeId};
 use std::cmp::Reverse;
 
 pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>>> {
@@ -18,26 +18,26 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
         })
         .fold(f64::INFINITY, f64::min)
         .max(1.0);
-    let mut incoming = vec![0; input.len()];
-    let mut outgoing = vec![0; input.len()];
-    let mut sizes = vec![0.0; input.len()];
+    let mut incoming = IdVec::filled(input.len(), 0);
+    let mut outgoing = IdVec::filled(input.len(), 0);
+    let mut sizes = IdVec::filled(input.len(), 0.0);
     let mut average = 0.0;
     for &node in &input.nodes {
-        incoming[node.index()] = input.incoming[node.index()]
+        incoming[node] = input.incoming[node]
             .iter()
             .filter(|&&edge| input.source(edge) != node)
             .count();
-        outgoing[node.index()] = input.outgoing[node.index()]
+        outgoing[node] = input.outgoing[node]
             .iter()
             .filter(|&&edge| input.target(edge) != node)
             .count();
-        sizes[node.index()] = input.graph.layerless_nodes[node].size.height / minimum;
-        average += sizes[node.index()];
+        sizes[node] = input.graph.layerless_nodes[node].size.height / minimum;
+        average += sizes[node];
     }
     average /= input.nodes.len() as f64;
     let dummy_size = input.graph.options.spacing.edge_edge / minimum;
     let mut nodes = input.nodes.clone();
-    nodes.sort_by_key(|&node| Reverse(outgoing[node.index()]));
+    nodes.sort_by_key(|&node| Reverse(outgoing[node]));
     let width = input.graph.options.layering_min_width_upper_bound;
     let compensator = input
         .graph
@@ -81,15 +81,15 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
 fn attempt(
     input: &LayeringInput<'_>,
     nodes: &[NodeId],
-    incoming: &[usize],
-    outgoing: &[usize],
-    sizes: &[f64],
+    incoming: &IdVec<NodeId, usize>,
+    outgoing: &IdVec<NodeId, usize>,
+    sizes: &IdVec<NodeId, f64>,
     dummy_size: f64,
     width_bound: f64,
     compensator: f64,
 ) -> LayeringResult<(f64, Vec<Vec<NodeId>>)> {
     let mut remaining = nodes.to_vec();
-    let mut placed = vec![false; input.len()];
+    let mut placed = IdVec::filled(input.len(), false);
     let mut layers = Vec::new();
     let mut current = Vec::new();
     let mut width_current = 0.0;
@@ -101,9 +101,9 @@ fn attempt(
     while !remaining.is_empty() {
         let mut selected = None;
         for (index, &node) in remaining.iter().enumerate() {
-            if input.outgoing[node.index()]
+            if input.outgoing[node]
                 .iter()
-                .all(|&edge| input.target(edge) == node || placed[input.target(edge).index()])
+                .all(|&edge| input.target(edge) == node || placed[input.target(edge)])
             {
                 selected = Some(index);
                 break;
@@ -112,10 +112,10 @@ fn attempt(
         let node = if let Some(index) = selected {
             let node = remaining.remove(index);
             current.push(node);
-            width_current += sizes[node.index()] - outgoing[node.index()] as f64 * dummy_size;
-            width_up += incoming[node.index()] as f64 * dummy_size;
-            going_out += outgoing[node.index()] as f64 * dummy_size;
-            real_width += sizes[node.index()];
+            width_current += sizes[node] - outgoing[node] as f64 * dummy_size;
+            width_up += incoming[node] as f64 * dummy_size;
+            going_out += outgoing[node] as f64 * dummy_size;
+            real_width += sizes[node];
             Some(node)
         } else {
             None
@@ -126,13 +126,12 @@ fn attempt(
         if node.is_none()
             || remaining.is_empty()
             || node.is_some_and(|node| {
-                width_current >= width_bound
-                    && sizes[node.index()] > outgoing[node.index()] as f64 * dummy_size
+                width_current >= width_bound && sizes[node] > outgoing[node] as f64 * dummy_size
             })
             || width_up >= compensator * width_bound
         {
             for &node in &current {
-                placed[node.index()] = true;
+                placed[node] = true;
             }
             layers.push(std::mem::take(&mut current));
             spanning_edges -= going_out;

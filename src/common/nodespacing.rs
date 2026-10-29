@@ -426,13 +426,16 @@ mod tests {
         calculate_node_margins(&mut graph, [NodeId::new(0)]);
 
         assert_eq!(
-            graph.layerless_nodes[0].labels[0].position,
+            graph.layerless_nodes[NodeId::new(0)].labels[0].position,
             LPoint {
                 x: 30.7734375,
                 y: 5.0,
             }
         );
-        assert_eq!(graph.layerless_nodes[0].margin, LMargin::default());
+        assert_eq!(
+            graph.layerless_nodes[NodeId::new(0)].margin,
+            LMargin::default()
+        );
     }
 
     #[test]
@@ -450,11 +453,11 @@ mod tests {
         calculate_label_and_node_sizes(&mut graph, [NodeId::new(0)]);
 
         assert_eq!(
-            graph.layerless_nodes[0].labels[0].position,
+            graph.layerless_nodes[NodeId::new(0)].labels[0].position,
             LPoint { x: 40.0, y: 5.0 }
         );
         assert_eq!(
-            graph.layerless_nodes[0].labels[1].position,
+            graph.layerless_nodes[NodeId::new(0)].labels[1].position,
             LPoint { x: 35.0, y: 18.0 }
         );
     }
@@ -474,11 +477,11 @@ mod tests {
         calculate_label_and_node_sizes(&mut graph, [NodeId::new(0)]);
 
         assert_eq!(
-            graph.layerless_nodes[0].labels[0].position,
+            graph.layerless_nodes[NodeId::new(0)].labels[0].position,
             LPoint { x: 5.0, y: 40.0 }
         );
         assert_eq!(
-            graph.layerless_nodes[0].labels[1].position,
+            graph.layerless_nodes[NodeId::new(0)].labels[1].position,
             LPoint { x: 18.0, y: 35.0 }
         );
     }

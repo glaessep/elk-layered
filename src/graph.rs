@@ -13,10 +13,12 @@ use super::options::{
 use crate::random::JavaRandom;
 
 mod arena;
+mod id_vec;
 mod ids;
 mod ports;
 pub use arena::{GraphArena, GraphId, GraphParent, OtherGraphs};
-pub use ids::{EdgeId, EdgeSlice, NodeId, NodeSlice};
+pub use id_vec::{IdVec, VecId};
+pub use ids::{EdgeId, NodeId};
 #[cfg(test)]
 pub(crate) use ports::port_ids;
 pub use ports::{NodePorts, PortId};
@@ -32,9 +34,9 @@ pub struct LGraph {
     pub size: LSize,
     pub padding: LPadding,
     pub offset: LPoint,
-    pub layerless_nodes: Vec<LNode>,
+    pub layerless_nodes: IdVec<NodeId, LNode>,
     pub layers: Vec<Layer>,
-    pub edges: Vec<LayeredEdge>,
+    pub edges: IdVec<EdgeId, LayeredEdge>,
     pub graph_properties: GraphProperties,
     pub cyclic: bool,
     pub(crate) random: JavaRandom,
@@ -73,9 +75,9 @@ impl LGraph {
             size: LSize::default(),
             padding: LPadding::default(),
             offset: LPoint::default(),
-            layerless_nodes: Vec::new(),
+            layerless_nodes: IdVec::new(),
             layers: Vec::new(),
-            edges: Vec::new(),
+            edges: IdVec::new(),
             graph_properties: GraphProperties::default(),
             cyclic: false,
             // `configure_graph_properties` replaces this with the stream seeded from
@@ -567,6 +569,12 @@ pub struct LSize {
     pub height: f64,
 }
 
+/// The top left corner and the size of a port, from the four numbers a port carries in the input.
+/// `ElkPort` and `ElkInputPort` both read their geometry through it.
+pub(crate) fn port_box(x: f64, y: f64, width: f64, height: f64) -> (LPoint, LSize) {
+    (LPoint { x, y }, LSize { width, height })
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct LPadding {
     pub top: f64,
@@ -740,43 +748,52 @@ impl LGraph {
     /// The ids of all nodes, in the order they stand in `layerless_nodes`. The iterator does not
     /// borrow the graph, so the loop body may change it.
     pub fn node_ids(&self) -> impl DoubleEndedIterator<Item = NodeId> + ExactSizeIterator + use<> {
-        (0..self.layerless_nodes.len()).map(NodeId::new)
+        self.layerless_nodes.ids()
     }
 
     /// Every node with its id, in the order of `layerless_nodes`.
     pub fn nodes_with_ids(
         &self,
     ) -> impl DoubleEndedIterator<Item = (NodeId, &LNode)> + ExactSizeIterator {
-        self.layerless_nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| (NodeId::new(index), node))
+        self.layerless_nodes.iter_with_ids()
     }
 
     /// The ids of all edges, in the order they stand in `edges`. The iterator does not borrow the
     /// graph, so the loop body may change it.
     pub fn edge_ids(&self) -> impl DoubleEndedIterator<Item = EdgeId> + ExactSizeIterator + use<> {
-        (0..self.edges.len()).map(EdgeId::new)
+        self.edges.ids()
     }
 
     /// Every edge with its id, in the order of `edges`.
     pub fn edges_with_ids(
         &self,
     ) -> impl DoubleEndedIterator<Item = (EdgeId, &LayeredEdge)> + ExactSizeIterator {
-        self.edges
-            .iter()
-            .enumerate()
-            .map(|(index, edge)| (EdgeId::new(index), edge))
+        self.edges.iter_with_ids()
     }
 
     /// The id the next edge pushed onto `edges` gets.
     pub fn next_edge_id(&self) -> EdgeId {
-        EdgeId::new(self.edges.len())
+        self.edges.next_id()
     }
 
     /// The id the next node pushed onto `layerless_nodes` gets.
     pub fn next_node_id(&self) -> NodeId {
-        NodeId::new(self.layerless_nodes.len())
+        self.layerless_nodes.next_id()
+    }
+
+    /// Builds a node and pushes it onto `layerless_nodes`. `build` gets the id the node will have,
+    /// so it can put the id in the node's name. Whatever owner `build` gives the node's ports, the
+    /// method sets every port's owner to that id. The method returns the id.
+    ///
+    /// Use it instead of `next_node_id` followed by `push`: that pair leaves a gap where a node
+    /// can get another id than the one its ports name.
+    pub fn push_node_with(&mut self, build: impl FnOnce(NodeId) -> LNode) -> NodeId {
+        let id = self.next_node_id();
+        let mut node = build(id);
+        for port in node.ports.slots_mut() {
+            port.node = id;
+        }
+        self.layerless_nodes.push(node)
     }
 
     pub fn clear_layers(&mut self) {
@@ -847,7 +864,7 @@ impl LGraph {
         side: PortSide,
         position: LPoint,
     ) -> Option<PortRef> {
-        let node = self.layerless_nodes.get_node_mut(node_index)?;
+        let node = self.layerless_nodes.get_mut(node_index)?;
         let mut port = LPort::new(
             format!("{}:{}", node.id, node.ports.slot_count()),
             node_index,
@@ -872,7 +889,7 @@ impl LGraph {
         port_type: PortType,
         side: PortSide,
     ) -> Option<PortRef> {
-        let node = self.layerless_nodes.get_node_mut(node_index)?;
+        let node = self.layerless_nodes.get_mut(node_index)?;
         if let Some((port, _)) = node
             .ports
             .iter_with_ids()
@@ -900,7 +917,7 @@ impl LGraph {
     }
 
     pub fn set_edge_source(&mut self, edge_index: EdgeId, source: PortRef) -> bool {
-        if self.edges.get_edge(edge_index).is_none() || !port_exists(self, source) {
+        if self.edges.get(edge_index).is_none() || !port_exists(self, source) {
             return false;
         }
 
@@ -929,7 +946,7 @@ impl LGraph {
         target: PortRef,
         insert_at: Option<usize>,
     ) -> bool {
-        if self.edges.get_edge(edge_index).is_none() || !port_exists(self, target) {
+        if self.edges.get(edge_index).is_none() || !port_exists(self, target) {
             return false;
         }
 
@@ -953,7 +970,7 @@ impl LGraph {
     }
 
     pub fn detach_edge_source(&mut self, edge_index: EdgeId) -> Option<PortRef> {
-        let source = self.edges.get_edge(edge_index)?.source;
+        let source = self.edges.get(edge_index)?.source;
         if port_exists(self, source) {
             remove_edge(
                 &mut self.layerless_nodes[source.node].ports[source.port].outgoing_edges,
@@ -964,7 +981,7 @@ impl LGraph {
     }
 
     pub fn detach_edge_target(&mut self, edge_index: EdgeId) -> Option<PortRef> {
-        let target = self.edges.get_edge(edge_index)?.target;
+        let target = self.edges.get(edge_index)?.target;
         if port_exists(self, target) {
             remove_edge(
                 &mut self.layerless_nodes[target.node].ports[target.port].incoming_edges,
@@ -981,22 +998,22 @@ impl LGraph {
     }
 
     pub fn edge_source_attached(&self, edge_index: EdgeId) -> bool {
-        let Some(edge) = self.edges.get_edge(edge_index) else {
+        let Some(edge) = self.edges.get(edge_index) else {
             return false;
         };
         self.layerless_nodes
-            .get_node(edge.source.node)
+            .get(edge.source.node)
             .and_then(|node| node.ports.get(edge.source.port))
             .map(|port| port.outgoing_edges.contains(&edge_index))
             .unwrap_or(false)
     }
 
     pub fn edge_target_attached(&self, edge_index: EdgeId) -> bool {
-        let Some(edge) = self.edges.get_edge(edge_index) else {
+        let Some(edge) = self.edges.get(edge_index) else {
             return false;
         };
         self.layerless_nodes
-            .get_node(edge.target.node)
+            .get(edge.target.node)
             .and_then(|node| node.ports.get(edge.target.port))
             .map(|port| port.incoming_edges.contains(&edge_index))
             .unwrap_or(false)
@@ -1062,7 +1079,7 @@ impl LGraph {
     /// ELK's `LNode#getPorts(PortType.OUTPUT)` is based on actual outgoing edge incidence.
     pub fn port_has_output_type(&self, port_ref: PortRef) -> bool {
         self.layerless_nodes
-            .get_node(port_ref.node)
+            .get(port_ref.node)
             .and_then(|node| node.ports.get(port_ref.port))
             .map(|port| !port.outgoing_edges.is_empty())
             .unwrap_or(false)
@@ -1080,7 +1097,7 @@ impl LGraph {
     ) -> bool {
         let new_order = new_order.into_iter().collect::<Vec<_>>();
         self.layerless_nodes
-            .get_node_mut(node_index)
+            .get_mut(node_index)
             .is_some_and(|node| node.ports.set_order(new_order))
     }
 }
@@ -1094,7 +1111,7 @@ impl LGraph {
 /// an input collector is moved to the same node's output collector, and a reversed edge that
 /// previously sourced an output collector is moved to the same node's input collector.
 pub fn reverse_edge(graph: &mut LGraph, edge_index: EdgeId, adapt_ports: bool) -> bool {
-    let Some(edge) = graph.edges.get_edge(edge_index) else {
+    let Some(edge) = graph.edges.get(edge_index) else {
         return false;
     };
     let old_source = edge.source;
@@ -1162,7 +1179,7 @@ pub fn reverse_edge(graph: &mut LGraph, edge_index: EdgeId, adapt_ports: bool) -
 fn port_exists(graph: &LGraph, port_ref: PortRef) -> bool {
     graph
         .layerless_nodes
-        .get_node(port_ref.node)
+        .get(port_ref.node)
         .and_then(|node| node.ports.get(port_ref.port))
         .is_some()
 }
@@ -1205,8 +1222,11 @@ fn remove_node(nodes: &mut Vec<NodeId>, node_index: NodeId) {
 ///
 /// Source:
 /// https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/graph/LGraphUtil.java
+///
+/// `node` is the id the dummy will have in its graph. The dummy's one port names it as its owner.
 #[allow(clippy::too_many_arguments)]
 pub fn create_external_port_dummy(
+    node: NodeId,
     id: impl Into<String>,
     port_id: impl Into<String>,
     port_type: PortType,
@@ -1285,7 +1305,7 @@ pub fn create_external_port_dummy(
         }
     }
 
-    let mut port = LPort::new(port_id, NodeId::new(0), port_type);
+    let mut port = LPort::new(port_id, node, port_type);
     port.side = dummy_port_side;
     port.position = position;
     port.set_side(dummy_port_side);
@@ -1380,6 +1400,20 @@ fn port_ratio_or_position(
 mod tests {
     use super::*;
 
+    // Mutation: swap `x` and `y`, or `width` and `height`, in `port_box`.
+    #[test]
+    fn port_box_reads_the_position_and_size_from_its_four_numbers() {
+        let (position, size) = port_box(1.0, 2.0, 3.0, 4.0);
+        assert_eq!(position, LPoint { x: 1.0, y: 2.0 });
+        assert_eq!(
+            size,
+            LSize {
+                width: 3.0,
+                height: 4.0
+            }
+        );
+    }
+
     // Mutation: swap the two arms of `is_across_flow`, or give an undefined direction the
     // horizontal arm. A case of the table then fails.
     #[test]
@@ -1412,6 +1446,7 @@ mod tests {
     #[test]
     fn external_port_dummy_uses_direction_and_net_flow_for_free_ports() {
         let dummy = create_external_port_dummy(
+            NodeId::new(0),
             "external:A",
             "external:A:0",
             PortType::Input,
@@ -1438,9 +1473,61 @@ mod tests {
         );
     }
 
+    // Mutation: drop the loop in `push_node_with` that sets the owner of each port, or
+    // set it to `NodeId::new(0)`.
+    #[test]
+    fn pushed_node_gets_the_id_its_port_names() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        graph.layerless_nodes.push(LNode::new("a", 1.0, 1.0, None));
+        graph.layerless_nodes.push(LNode::new("b", 1.0, 1.0, None));
+        let id = graph.push_node_with(|_| {
+            // A wrong owner on purpose: the method must repair it.
+            create_external_port_dummy(
+                NodeId::new(0),
+                "external:A",
+                "external:A:0",
+                PortType::Output,
+                PortConstraints::Free,
+                PortSide::Undefined,
+                -1,
+                LPoint::default(),
+                LSize::default(),
+                LSize::default(),
+                0.0,
+                ElkDirection::Right,
+            )
+        });
+        assert_eq!(id, NodeId::new(2));
+        assert_eq!(graph.layerless_nodes.len(), 3);
+        assert_eq!(graph.layerless_nodes[id].kind, LNodeKind::ExternalPort);
+        assert_eq!(graph.layerless_nodes[id].ports[PortId::new(0)].node, id);
+    }
+
+    // Mutation: build the dummy's port with `NodeId::new(0)` instead of the `node` argument.
+    #[test]
+    fn external_port_dummy_port_names_the_given_node_as_owner() {
+        let dummy = create_external_port_dummy(
+            NodeId::new(5),
+            "external:A",
+            "external:A:0",
+            PortType::Output,
+            PortConstraints::Free,
+            PortSide::Undefined,
+            -1,
+            LPoint::default(),
+            LSize::default(),
+            LSize::default(),
+            0.0,
+            ElkDirection::Right,
+        );
+
+        assert_eq!(dummy.ports[PortId::new(0)].node, NodeId::new(5));
+    }
+
     #[test]
     fn external_port_dummy_keeps_fixed_side_and_order_metadata() {
         let dummy = create_external_port_dummy(
+            NodeId::new(0),
             "external:A",
             "external:A:0",
             PortType::Output,
@@ -1520,9 +1607,12 @@ mod tests {
 
         let nested = &graphs[nested_id];
         let parent = graphs.root();
-        assert_eq!(nested.layerless_nodes[0].origin_port, Some(origin));
+        assert_eq!(
+            nested.layerless_nodes[NodeId::new(0)].origin_port,
+            Some(origin)
+        );
         // The origin still names the port "p1", which now comes first.
-        let compound = &parent.layerless_nodes[0];
+        let compound = &parent.layerless_nodes[NodeId::new(0)];
         assert_eq!(compound.ports[PortId::new(1)].id, "p1");
         assert_eq!(compound.ports.position(PortId::new(1)), Some(0));
     }
@@ -1587,7 +1677,7 @@ mod tests {
 
         assert!(graph.reorder_node_ports(NodeId::new(0), port_ids([2, 0, 1])));
 
-        let ports = &graph.layerless_nodes[0].ports;
+        let ports = &graph.layerless_nodes[NodeId::new(0)].ports;
         assert_eq!(
             ports
                 .iter()
@@ -1608,14 +1698,14 @@ mod tests {
                 .push(LPort::new(id, NodeId::new(0), PortType::Output));
         }
         graph.layerless_nodes.push(node);
-        let before = graph.layerless_nodes[0].ports.clone();
+        let before = graph.layerless_nodes[NodeId::new(0)].ports.clone();
 
         assert!(!graph.reorder_node_ports(NodeId::new(0), port_ids([0, 1])));
         assert!(!graph.reorder_node_ports(NodeId::new(0), port_ids([0, 1, 1])));
         assert!(!graph.reorder_node_ports(NodeId::new(0), port_ids([0, 1, 3])));
         assert!(!graph.reorder_node_ports(NodeId::new(0), port_ids([0, 1, 2, 2])));
         assert!(!graph.reorder_node_ports(NodeId::new(7), port_ids([0, 1, 2])));
-        assert_eq!(graph.layerless_nodes[0].ports, before);
+        assert_eq!(graph.layerless_nodes[NodeId::new(0)].ports, before);
     }
 
     // Mutation: look a port up by its place in the node's list instead of by its slot. The edges
@@ -1665,28 +1755,28 @@ mod tests {
         graph.add_edge(edge("e0", a[0], b));
         graph.add_edge(edge("e1", a[2], b));
         graph.add_edge(edge("e2", a[1], a[2]));
-        graph.layerless_nodes[1].long_edge_source = Some(a[0]);
-        graph.layerless_nodes[1].long_edge_target = Some(a[2]);
-        graph.layerless_nodes[1].origin_port = Some(GraphPortRef {
+        graph.layerless_nodes[NodeId::new(1)].long_edge_source = Some(a[0]);
+        graph.layerless_nodes[NodeId::new(1)].long_edge_target = Some(a[2]);
+        graph.layerless_nodes[NodeId::new(1)].origin_port = Some(GraphPortRef {
             graph_id: GraphId::ROOT,
             port: a[1],
         });
         let edges_before = graph.edges.clone();
-        let nodes_before = graph.layerless_nodes[1].clone();
+        let nodes_before = graph.layerless_nodes[NodeId::new(1)].clone();
 
         assert!(graph.reorder_node_ports(NodeId::new(0), [a[2].port, a[0].port, a[1].port]));
 
         // No edge and no reference of the other node changed.
         assert_eq!(graph.edges, edges_before);
-        assert_eq!(graph.layerless_nodes[1], nodes_before);
+        assert_eq!(graph.layerless_nodes[NodeId::new(1)], nodes_before);
         // Each port still holds the edges it held, under the same id.
         for (port, outgoing) in [(a[0], "e0"), (a[2], "e1"), (a[1], "e2")] {
-            let data = &graph.layerless_nodes[0].ports[port.port];
+            let data = &graph.layerless_nodes[NodeId::new(0)].ports[port.port];
             assert_eq!(data.outgoing_edges.len(), 1, "{outgoing}");
             assert_eq!(graph.edges[data.outgoing_edges[0]].id, outgoing);
         }
         // Only the list changed: the sides follow the ports, not the places.
-        let listed = graph.layerless_nodes[0]
+        let listed = graph.layerless_nodes[NodeId::new(0)]
             .ports
             .iter()
             .map(|port| port.side)

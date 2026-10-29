@@ -1,8 +1,5 @@
 //! The ids that name a node or an edge inside one graph.
 
-use super::{LNode, LayeredEdge};
-use std::ops::{Index, IndexMut};
-
 /// Names one node of one graph: its place in `LGraph::layerless_nodes`. An id is valid until the
 /// graph is split into components or combined again, which renumber every node. An id is not a
 /// layer index and not a count.
@@ -39,75 +36,10 @@ impl EdgeId {
     }
 }
 
-/// Looks a node up by id and says `None` for an id the graph does not hold. `Vec::get` takes a
-/// number, so this stands in for it.
-pub trait NodeSlice {
-    /// The node with this id, if the graph holds one.
-    fn get_node(&self, id: NodeId) -> Option<&LNode>;
-    /// The node with this id, for changing, if the graph holds one.
-    fn get_node_mut(&mut self, id: NodeId) -> Option<&mut LNode>;
-}
-
-impl NodeSlice for [LNode] {
-    fn get_node(&self, id: NodeId) -> Option<&LNode> {
-        self.get(id.0)
-    }
-
-    fn get_node_mut(&mut self, id: NodeId) -> Option<&mut LNode> {
-        self.get_mut(id.0)
-    }
-}
-
-/// Looks an edge up by id and says `None` for an id the graph does not hold.
-pub trait EdgeSlice {
-    /// The edge with this id, if the graph holds one.
-    fn get_edge(&self, id: EdgeId) -> Option<&LayeredEdge>;
-    /// The edge with this id, for changing, if the graph holds one.
-    fn get_edge_mut(&mut self, id: EdgeId) -> Option<&mut LayeredEdge>;
-}
-
-impl EdgeSlice for [LayeredEdge] {
-    fn get_edge(&self, id: EdgeId) -> Option<&LayeredEdge> {
-        self.get(id.0)
-    }
-
-    fn get_edge_mut(&mut self, id: EdgeId) -> Option<&mut LayeredEdge> {
-        self.get_mut(id.0)
-    }
-}
-
-impl Index<EdgeId> for Vec<LayeredEdge> {
-    type Output = LayeredEdge;
-
-    fn index(&self, id: EdgeId) -> &LayeredEdge {
-        &self[id.0]
-    }
-}
-
-impl IndexMut<EdgeId> for Vec<LayeredEdge> {
-    fn index_mut(&mut self, id: EdgeId) -> &mut LayeredEdge {
-        &mut self[id.0]
-    }
-}
-
-impl Index<NodeId> for Vec<LNode> {
-    type Output = LNode;
-
-    fn index(&self, id: NodeId) -> &LNode {
-        &self[id.0]
-    }
-}
-
-impl IndexMut<NodeId> for Vec<LNode> {
-    fn index_mut(&mut self, id: NodeId) -> &mut LNode {
-        &mut self[id.0]
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{LGraph, PortId, PortRef};
+    use crate::graph::{LGraph, LNode, LayeredEdge, PortId, PortRef};
     use crate::options::LayeredOptions;
 
     fn three_nodes() -> LGraph {
@@ -126,7 +58,7 @@ mod tests {
         assert_eq!(NodeId::new(usize::MAX).index(), usize::MAX);
     }
 
-    // Mutation: make `Vec<LNode>[NodeId]` read slot 0 whatever the id is.
+    // Mutation: make `IdVec<NodeId, LNode>[NodeId]` read slot 0 whatever the id is.
     #[test]
     fn indexing_by_id_reads_that_node() {
         let graph = three_nodes();
@@ -145,48 +77,6 @@ mod tests {
             .map(|node| node.size.width)
             .collect::<Vec<_>>();
         assert_eq!(widths, [10.0, 99.0, 10.0]);
-    }
-
-    // Mutation: make `get_node` answer `Some` for an id one past the end, or `get(id.0 + 1)`.
-    #[test]
-    fn get_node_says_none_for_an_id_the_graph_does_not_hold() {
-        let graph = three_nodes();
-        assert_eq!(
-            graph.layerless_nodes.get_node(NodeId::new(0)).unwrap().id,
-            "a"
-        );
-        assert_eq!(
-            graph.layerless_nodes.get_node(NodeId::new(2)).unwrap().id,
-            "c"
-        );
-        assert!(graph.layerless_nodes.get_node(NodeId::new(3)).is_none());
-        assert!(
-            graph
-                .layerless_nodes
-                .get_node(NodeId::new(usize::MAX))
-                .is_none()
-        );
-        assert!(
-            LGraph::new("empty", LayeredOptions::default())
-                .layerless_nodes
-                .get_node(NodeId::new(0))
-                .is_none()
-        );
-    }
-
-    // Mutation: make `get_node_mut` hand out slot `id + 1`.
-    #[test]
-    fn get_node_mut_reaches_that_node_and_refuses_an_unknown_id() {
-        let mut graph = three_nodes();
-        graph
-            .layerless_nodes
-            .get_node_mut(NodeId::new(1))
-            .unwrap()
-            .size
-            .height = 5.0;
-        assert_eq!(graph.layerless_nodes[NodeId::new(1)].size.height, 5.0);
-        assert_eq!(graph.layerless_nodes[NodeId::new(0)].size.height, 10.0);
-        assert!(graph.layerless_nodes.get_node_mut(NodeId::new(3)).is_none());
     }
 
     // Mutation: return `len + 1` from `next_node_id`, or `len - 1`.
@@ -293,7 +183,7 @@ mod tests {
         assert_eq!(EdgeId::new(usize::MAX).index(), usize::MAX);
     }
 
-    // Mutation: make `Vec<LayeredEdge>[EdgeId]` read slot 0 whatever the id is.
+    // Mutation: make `IdVec<EdgeId, LayeredEdge>[EdgeId]` read slot 0 whatever the id is.
     #[test]
     fn indexing_by_edge_id_reads_that_edge() {
         let graph = three_edges();
@@ -312,32 +202,6 @@ mod tests {
             .map(|edge| edge.minlen)
             .collect::<Vec<_>>();
         assert_eq!(lengths, [1, 9, 1]);
-    }
-
-    // Mutation: make `get_edge` use `get(id.0 + 1)`.
-    #[test]
-    fn get_edge_says_none_for_an_id_the_graph_does_not_hold() {
-        let graph = three_edges();
-        assert_eq!(graph.edges.get_edge(EdgeId::new(0)).unwrap().id, "x");
-        assert_eq!(graph.edges.get_edge(EdgeId::new(2)).unwrap().id, "z");
-        assert!(graph.edges.get_edge(EdgeId::new(3)).is_none());
-        assert!(graph.edges.get_edge(EdgeId::new(usize::MAX)).is_none());
-        assert!(
-            LGraph::new("empty", LayeredOptions::default())
-                .edges
-                .get_edge(EdgeId::new(0))
-                .is_none()
-        );
-    }
-
-    // Mutation: make `get_edge_mut` use `get_mut(id.0 + 1)`.
-    #[test]
-    fn get_edge_mut_reaches_that_edge_and_refuses_an_unknown_id() {
-        let mut graph = three_edges();
-        graph.edges.get_edge_mut(EdgeId::new(1)).unwrap().minlen = 5;
-        assert_eq!(graph.edges[EdgeId::new(1)].minlen, 5);
-        assert_eq!(graph.edges[EdgeId::new(0)].minlen, 1);
-        assert!(graph.edges.get_edge_mut(EdgeId::new(3)).is_none());
     }
 
     // Mutation: return `len + 1` from `next_edge_id`.

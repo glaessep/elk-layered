@@ -2,7 +2,7 @@
 //! https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/InteractiveLayerer.java
 
 use super::{LayeringInput, LayeringResult};
-use crate::graph::NodeId;
+use crate::graph::{IdVec, NodeId};
 use std::collections::VecDeque;
 
 struct Span {
@@ -53,39 +53,39 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
         }
     }
     let mut layers = spans.into_iter().map(|span| span.nodes).collect::<Vec<_>>();
-    let mut assigned = vec![0; input.len()];
+    let mut assigned = IdVec::filled(input.len(), 0);
     for (index, nodes) in layers.iter().enumerate() {
         for &node in nodes {
-            assigned[node.index()] = index;
+            assigned[node] = index;
         }
     }
-    let mut checked = vec![false; input.len()];
-    let mut queued = vec![false; input.len()];
+    let mut checked = IdVec::filled(input.len(), false);
+    let mut queued = IdVec::filled(input.len(), false);
     let mut queue = VecDeque::new();
     for &root in &input.nodes {
-        if checked[root.index()] {
+        if checked[root] {
             continue;
         }
         queue.push_back(root);
-        queued[root.index()] = true;
+        queued[root] = true;
         while let Some(node) = queue.pop_front() {
-            queued[node.index()] = false;
-            checked[node.index()] = true;
-            let layer = assigned[node.index()];
-            for &edge in &input.outgoing[node.index()] {
+            queued[node] = false;
+            checked[node] = true;
+            let layer = assigned[node];
+            for &edge in &input.outgoing[node] {
                 let next = input.target(edge);
-                if next == node || assigned[next.index()] > layer {
+                if next == node || assigned[next] > layer {
                     continue;
                 }
-                layers[assigned[next.index()]].retain(|&entry| entry != next);
+                layers[assigned[next]].retain(|&entry| entry != next);
                 if layers.len() == layer + 1 {
                     layers.push(Vec::new());
                 }
                 layers[layer + 1].push(next);
-                assigned[next.index()] = layer + 1;
-                if !queued[next.index()] {
+                assigned[next] = layer + 1;
+                if !queued[next] {
                     queue.push_back(next);
-                    queued[next.index()] = true;
+                    queued[next] = true;
                 }
             }
         }

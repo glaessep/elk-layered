@@ -11,10 +11,9 @@ use std::collections::VecDeque;
 
 use crate::common::cells::grow_label_cell;
 use crate::graph::{
-    EdgeId, EdgeSlice, GraphId, LGraph, LMargin, LNodeKind, LPoint, LSize, NodeId, NodePorts,
-    NodeSlice, OtherGraphs, PortId, PortRef, PortSide, SelfHyperLoop, SelfHyperLoopLabels,
-    SelfLoopEdge, SelfLoopHolder, SelfLoopLabelAlignment, SelfLoopLabelRef, SelfLoopPort,
-    SelfLoopType,
+    EdgeId, GraphId, LGraph, LMargin, LNodeKind, LPoint, LSize, NodeId, NodePorts, OtherGraphs,
+    PortId, PortRef, PortSide, SelfHyperLoop, SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder,
+    SelfLoopLabelAlignment, SelfLoopLabelRef, SelfLoopPort, SelfLoopType,
 };
 use crate::options::{SelfLoopDistributionStrategy, SelfLoopOrderingStrategy};
 use crate::p5edges::orthogonal::{HyperEdgeGraph, HyperEdgeSegment, break_non_critical_cycles};
@@ -1025,7 +1024,7 @@ fn north_south_port_connection_sides(
     let Some(dummy_graph) = graph_by_id(graph, others, dummy_ref.graph_id) else {
         return Vec::new();
     };
-    let Some(dummy_node) = dummy_graph.layerless_nodes.get_node(dummy_ref.node) else {
+    let Some(dummy_node) = dummy_graph.layerless_nodes.get(dummy_ref.node) else {
         return Vec::new();
     };
 
@@ -2077,7 +2076,7 @@ fn shift_slots_towards_node_on_side(
 fn port_range_on_side(graph: &LGraph, node: NodeId, side: PortSide) -> Option<(usize, usize)> {
     graph
         .layerless_nodes
-        .get_node(node)?
+        .get(node)?
         .ports
         .iter()
         .enumerate()
@@ -2466,7 +2465,7 @@ fn write_self_loop_label_positions_for_horizontal_layout(
     for label_ref in &labels.label_refs {
         let Some(label) = graph
             .edges
-            .get_edge_mut(label_ref.edge)
+            .get_mut(label_ref.edge)
             .and_then(|edge| edge.labels.get_mut(label_ref.label))
         else {
             continue;
@@ -2496,7 +2495,7 @@ fn write_self_loop_label_positions_for_vertical_layout(
     for label_ref in &labels.label_refs {
         let Some(label) = graph
             .edges
-            .get_edge_mut(label_ref.edge)
+            .get_mut(label_ref.edge)
             .and_then(|edge| edge.labels.get_mut(label_ref.label))
         else {
             continue;
@@ -2552,7 +2551,7 @@ fn offset_self_loop_label_positions(
     for label_ref in &labels.label_refs {
         if let Some(label) = graph
             .edges
-            .get_edge_mut(label_ref.edge)
+            .get_mut(label_ref.edge)
             .and_then(|edge| edge.labels.get_mut(label_ref.label))
         {
             label.position.x += offset.x;
@@ -2832,7 +2831,7 @@ mod tests {
         restore_self_loop_ports(&mut graph, crate::graph::OtherGraphs::none());
 
         assert!(
-            graph.layerless_nodes[0]
+            graph.layerless_nodes[NodeId::new(0)]
                 .ports
                 .iter()
                 .all(|port| port.side == PortSide::North)
@@ -2941,15 +2940,15 @@ mod tests {
         restore_self_loop_ports(&mut graph, crate::graph::OtherGraphs::none());
 
         assert_eq!(
-            graph.layerless_nodes[node].ports[graph.edges[0].source.port].side,
+            graph.layerless_nodes[node].ports[graph.edges[EdgeId::new(0)].source.port].side,
             PortSide::South
         );
         assert_eq!(
-            graph.layerless_nodes[node].ports[graph.edges[1].source.port].side,
+            graph.layerless_nodes[node].ports[graph.edges[EdgeId::new(1)].source.port].side,
             PortSide::North
         );
         assert_eq!(
-            graph.layerless_nodes[node].ports[graph.edges[1].target.port].side,
+            graph.layerless_nodes[node].ports[graph.edges[EdgeId::new(1)].target.port].side,
             PortSide::North
         );
     }
@@ -3246,7 +3245,7 @@ mod tests {
         restore_self_loop_ports(&mut graph, crate::graph::OtherGraphs::none());
         route_self_loops(&mut graph);
 
-        let label = &graph.edges[0].labels[0];
+        let label = &graph.edges[EdgeId::new(0)].labels[0];
         assert_eq!(label.position.x, 10.0);
         assert_eq!(label.position.y, -36.0);
         assert!(graph.layerless_nodes[node].margin.top >= 36.0);

@@ -31,6 +31,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::graph::{LPoint, LSize, port_box};
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -135,6 +137,14 @@ pub struct ElkPort {
         )
     )]
     pub layout_options: BTreeMap<String, String>,
+}
+
+impl ElkPort {
+    /// Where the port's top left corner lies, relative to its node, and the port's width and
+    /// height.
+    pub(crate) fn bounds(&self) -> (LPoint, LSize) {
+        port_box(self.x, self.y, self.width, self.height)
+    }
 }
 
 /// An edge.

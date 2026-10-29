@@ -444,7 +444,7 @@ impl PaddingTransform for ElkPadding {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{EdgeLabelPlacement, LayeredEdge, PortType};
+    use crate::graph::{EdgeId, EdgeLabelPlacement, LayeredEdge, PortType};
     use crate::graph::{NodeId, PortId};
     use crate::options::{
         Alignment, ElkPadding, LayeredOptions, NodeLabelPlacement, PortConstraints,
@@ -740,27 +740,31 @@ mod tests {
 
         assert_eq!(graph.options.node_labels_padding, expectation.padding);
         assert_eq!(
-            graph.layerless_nodes[0].node_label_placement.location(),
+            graph.layerless_nodes[NodeId::new(0)]
+                .node_label_placement
+                .location(),
             expectation.top_left_placement.location()
         );
         assert_eq!(
-            graph.layerless_nodes[1].node_label_placement.location(),
+            graph.layerless_nodes[NodeId::new(1)]
+                .node_label_placement
+                .location(),
             expectation.bottom_right_placement.location()
         );
         assert_eq!(
-            graph.layerless_nodes[0].node_alignment,
+            graph.layerless_nodes[NodeId::new(0)].node_alignment,
             expectation.top_left_alignment
         );
         assert_eq!(
-            graph.layerless_nodes[1].node_alignment,
+            graph.layerless_nodes[NodeId::new(1)].node_alignment,
             expectation.bottom_right_alignment
         );
         assert_eq!(
-            graph.layerless_nodes[0].labels[0].position,
+            graph.layerless_nodes[NodeId::new(0)].labels[0].position,
             expectation.top_left_label_position
         );
         assert_eq!(
-            graph.layerless_nodes[0].labels[0].size,
+            graph.layerless_nodes[NodeId::new(0)].labels[0].size,
             expectation.top_left_label_size
         );
 
@@ -1158,16 +1162,19 @@ mod tests {
 
         transform_graph_direction(&mut graph, GraphTransformMode::ToInputDirection);
 
-        assert_eq!(graph.edges[0].bend_points[0], LPoint { x: 2.0, y: 1.0 });
         assert_eq!(
-            graph.edges[0].labels[0].size,
+            graph.edges[EdgeId::new(0)].bend_points[0],
+            LPoint { x: 2.0, y: 1.0 }
+        );
+        assert_eq!(
+            graph.edges[EdgeId::new(0)].labels[0].size,
             LSize {
                 width: 4.0,
                 height: 12.0
             }
         );
         assert_eq!(
-            graph.edges[0].labels[0].position,
+            graph.edges[EdgeId::new(0)].labels[0].position,
             LPoint { x: 40.0, y: 30.0 }
         );
     }
@@ -1228,7 +1235,7 @@ mod tests {
 
                     transform_graph_direction(&mut graph, mode);
 
-                    let edge = &graph.edges[0];
+                    let edge = &graph.edges[EdgeId::new(0)];
                     assert_eq!(
                         edge.junction_points, edge.bend_points,
                         "{direction:?} {congruency:?} {mode:?}"

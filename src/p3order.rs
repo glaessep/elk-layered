@@ -11,8 +11,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
-    EdgeSlice, GraphArena, GraphId, LGraph, LNodeKind, NodeId, NodeSlice, OtherGraphs, PortId,
-    PortRef, PortSide,
+    GraphArena, GraphId, IdVec, LGraph, LNodeKind, NodeId, OtherGraphs, PortId, PortRef, PortSide,
 };
 use crate::options::{OrderingStrategy, PortConstraints, PortSortingStrategy};
 
@@ -48,7 +47,7 @@ fn assign_crossing_minimization_port_ids(graph: &mut LGraph, order: &[Vec<NodeId
     let mut next_port_id = 0usize;
     for layer in order {
         for node in layer {
-            let Some(node_data) = graph.layerless_nodes.get_node_mut(*node) else {
+            let Some(node_data) = graph.layerless_nodes.get_mut(*node) else {
                 continue;
             };
             node_data.ports.for_each_listed_mut(|port| {
@@ -137,12 +136,12 @@ impl SweepCopy {
 fn correct_north_south_port_sides(graph: &mut LGraph) {
     let mut to_sort: Vec<NodeId> = Vec::new();
     // Which nodes are in `to_sort` already, and where a node sits in the layer being read.
-    let mut queued = vec![false; graph.layerless_nodes.len()];
-    let mut position_in_layer = vec![usize::MAX; graph.layerless_nodes.len()];
+    let mut queued = IdVec::filled(graph.layerless_nodes.len(), false);
+    let mut position_in_layer = IdVec::filled(graph.layerless_nodes.len(), usize::MAX);
     for layer_index in 0..graph.layers.len() {
         let layer = graph.layers[layer_index].nodes.clone();
         for (position, node) in layer.iter().copied().enumerate() {
-            position_in_layer[node.index()] = position;
+            position_in_layer[node] = position;
         }
         for (position, dummy) in layer.iter().copied().enumerate() {
             if graph.layerless_nodes[dummy].kind != LNodeKind::NorthSouthPort {
@@ -156,7 +155,7 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
             // the same numbers: `transferNodeAndPortOrdersToGraph` sets `node.id = j` for every
             // node of the layer first, and only then `assertCorrectPortSides` compares
             // `dummy.id > origin.id`. The ids from before the sweep play no part.
-            let origin_position = position_in_layer[origin.index()];
+            let origin_position = position_in_layer[origin];
             if origin_position == usize::MAX {
                 continue;
             }
@@ -173,14 +172,14 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
                 }
             }
             for node in [origin, dummy] {
-                if !queued[node.index()] {
-                    queued[node.index()] = true;
+                if !queued[node] {
+                    queued[node] = true;
                     to_sort.push(node);
                 }
             }
         }
         for node in layer {
-            position_in_layer[node.index()] = usize::MAX;
+            position_in_layer[node] = usize::MAX;
         }
     }
 
@@ -316,7 +315,7 @@ fn external_port_dummy_side(
     if dummy_graph_id == graph.id {
         return graph
             .layerless_nodes
-            .get_node(dummy_node)
+            .get(dummy_node)
             .map(|node| node.external_port_side)
             .unwrap_or(PortSide::Undefined);
     }
@@ -324,11 +323,11 @@ fn external_port_dummy_side(
     // The dummy is in the graph inside the port's node, and no other graph.
     graph
         .layerless_nodes
-        .get_node(port_node)
+        .get(port_node)
         .and_then(|node| node.nested_graph)
         .filter(|&nested| nested == dummy_graph_id)
         .and_then(|nested| others.get(nested))
-        .and_then(|nested| nested.layerless_nodes.get_node(dummy_node))
+        .and_then(|nested| nested.layerless_nodes.get(dummy_node))
         .map(|node| node.external_port_side)
         .unwrap_or(PortSide::Undefined)
 }
@@ -683,14 +682,14 @@ fn cached_long_edge_target_node_orders(graph: &LGraph, node: NodeId) -> HashMap<
 pub fn target_node(graph: &LGraph, port: PortRef) -> Option<NodeId> {
     let mut edge = graph
         .layerless_nodes
-        .get_node(port.node)
+        .get(port.node)
         .and_then(|node| node.ports.get(port.port))
         .and_then(|port| port.outgoing_edges.first())
         .copied()?;
     let mut remaining_hops = graph.edges.len().saturating_add(1);
     while remaining_hops > 0 {
         remaining_hops -= 1;
-        let edge_data = graph.edges.get_edge(edge)?;
+        let edge_data = graph.edges.get(edge)?;
         let node = edge_data.target.node;
         if let Some(target) = graph.layerless_nodes[node]
             .long_edge_target
@@ -1595,9 +1594,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["north", "south", "A:0"]
         );
-        assert_eq!(graph.edges[0].source.node, a);
+        assert_eq!(graph.edges[EdgeId::new(0)].source.node, a);
         assert_eq!(
-            graph.layerless_nodes[a].ports[graph.edges[0].source.port].id,
+            graph.layerless_nodes[a].ports[graph.edges[EdgeId::new(0)].source.port].id,
             "A:0"
         );
     }
@@ -1637,7 +1636,7 @@ mod tests {
         ];
         for &(sides, expected) in cases {
             let mut graph = graph(vec![node("A"), node("B")], vec![]);
-            graph.layerless_nodes[0].port_constraints = PortConstraints::FixedSide;
+            graph.layerless_nodes[NodeId::new(0)].port_constraints = PortConstraints::FixedSide;
             graph.set_node_layer(NodeId::new(0), 0);
             for (index, side) in sides.iter().copied().enumerate() {
                 let outgoing = index % 2 == 0;
@@ -1665,7 +1664,7 @@ mod tests {
                         LPoint { x: 0.0, y: 0.0 },
                     )
                     .unwrap();
-                graph.layerless_nodes[0].ports[local.port].id = index.to_string();
+                graph.layerless_nodes[NodeId::new(0)].ports[local.port].id = index.to_string();
                 let (source, target) = if outgoing {
                     (local, remote)
                 } else {
@@ -1678,14 +1677,14 @@ mod tests {
 
             sort_port_lists(&mut graph);
 
-            let actual = graph.layerless_nodes[0]
+            let actual = graph.layerless_nodes[NodeId::new(0)]
                 .ports
                 .iter()
                 .map(|port| port.id.parse::<usize>().unwrap())
                 .collect::<Vec<_>>();
             assert_eq!(actual, expected, "source range behavior for {sides:?}");
             for (position, &original) in expected.iter().enumerate() {
-                let edge = &graph.edges[original];
+                let edge = &graph.edges[EdgeId::new(original)];
                 let (local, remote) = if original % 2 == 0 {
                     (edge.source, edge.target)
                 } else {
@@ -1700,7 +1699,7 @@ mod tests {
                     }
                 );
                 assert_eq!(
-                    graph.layerless_nodes[0]
+                    graph.layerless_nodes[NodeId::new(0)]
                         .ports
                         .position(PortId::new(original)),
                     Some(position)
@@ -1712,7 +1711,7 @@ mod tests {
                         port: PortId::new(original)
                     }
                 );
-                let port = &graph.layerless_nodes[0].ports[PortId::new(original)];
+                let port = &graph.layerless_nodes[NodeId::new(0)].ports[PortId::new(original)];
                 if original % 2 == 0 {
                     assert_eq!(port.outgoing_edges, vec![EdgeId::new(original)]);
                     assert!(port.incoming_edges.is_empty());
@@ -1749,10 +1748,10 @@ mod tests {
                     LPoint { x: 0.0, y: 0.0 },
                 )
                 .unwrap();
-            graph.layerless_nodes[0].ports[port.port].id = index.to_string();
+            graph.layerless_nodes[NodeId::new(0)].ports[port.port].id = index.to_string();
         }
         reverse_side_range(&mut graph, NodeId::new(0), PortSide::South);
-        let after_south = graph.layerless_nodes[0]
+        let after_south = graph.layerless_nodes[NodeId::new(0)]
             .ports
             .iter()
             .map(|port| port.id.as_str())
@@ -1760,7 +1759,7 @@ mod tests {
         assert_eq!(after_south, vec!["0", "1", "5", "4", "3", "2", "6"]);
 
         reverse_side_range(&mut graph, NodeId::new(0), PortSide::West);
-        let after_west = graph.layerless_nodes[0]
+        let after_west = graph.layerless_nodes[NodeId::new(0)]
             .ports
             .iter()
             .map(|port| port.id.as_str())
@@ -1904,8 +1903,8 @@ mod tests {
         graph
             .layerless_nodes
             .push(LNode::new("dummy-2", 0.0, 0.0, None));
-        graph.layerless_nodes[1].kind = LNodeKind::LongEdge;
-        graph.layerless_nodes[2].kind = LNodeKind::LongEdge;
+        graph.layerless_nodes[NodeId::new(1)].kind = LNodeKind::LongEdge;
+        graph.layerless_nodes[NodeId::new(2)].kind = LNodeKind::LongEdge;
         graph.set_node_layer(NodeId::new(0), 0);
         graph.set_node_layer(NodeId::new(1), 1);
         graph.set_node_layer(NodeId::new(2), 1);
@@ -1985,7 +1984,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            graph.layerless_nodes[0]
+            graph.layerless_nodes[NodeId::new(0)]
                 .ports
                 .iter()
                 .map(|port| port.id.as_str())
@@ -1996,7 +1995,7 @@ mod tests {
         sort_by_input_model(&mut graph);
 
         assert_eq!(
-            graph.layerless_nodes[0]
+            graph.layerless_nodes[NodeId::new(0)]
                 .ports
                 .iter()
                 .map(|port| port.id.as_str())
@@ -2043,8 +2042,8 @@ mod tests {
                 Some(index),
             ));
         }
-        graph.layerless_nodes[1].kind = LNodeKind::LongEdge;
-        graph.layerless_nodes[2].kind = LNodeKind::LongEdge;
+        graph.layerless_nodes[NodeId::new(1)].kind = LNodeKind::LongEdge;
+        graph.layerless_nodes[NodeId::new(2)].kind = LNodeKind::LongEdge;
 
         let source = graph
             .add_port(
@@ -2379,14 +2378,14 @@ mod tests {
         assert_eq!(after, [(PortSide::East, 0, 1), (PortSide::West, 1, 0)]);
         // The edges name the same ports as before: the west port is port 0, the east port 1.
         assert_eq!(
-            graph.edges[0].target,
+            graph.edges[EdgeId::new(0)].target,
             PortRef {
                 node: dummy,
                 port: PortId::new(0)
             }
         );
         assert_eq!(
-            graph.edges[1].source,
+            graph.edges[EdgeId::new(1)].source,
             PortRef {
                 node: dummy,
                 port: PortId::new(1)

@@ -1651,7 +1651,7 @@ mod tests {
         run_processors_until_phase(&mut graphs, LayeredPhase::P1CycleBreaking).unwrap();
 
         assert_eq!(graphs.len(), 2);
-        let nested = graphs.root().layerless_nodes[0]
+        let nested = graphs.root().layerless_nodes[NodeId::new(0)]
             .nested_graph
             .expect("group still holds its graph");
         assert_eq!(graphs[nested].layerless_nodes.len(), 1);
@@ -1817,7 +1817,10 @@ mod tests {
                 kind: ProcessorKind::CommentPreprocessor,
             })
         );
-        assert_eq!(graphs.root().layerless_nodes[0].nested_graph, Some(child));
+        assert_eq!(
+            graphs.root().layerless_nodes[NodeId::new(0)].nested_graph,
+            Some(child)
+        );
         assert_eq!(graphs[child].name, "child");
     }
 
@@ -1896,7 +1899,7 @@ mod tests {
     #[test]
     fn compound_full_runner_rejects_child_unported_processor_before_mutation() {
         let mut graph = deep_compound_chain(2);
-        let child = graph.layerless_nodes[0]
+        let child = graph.layerless_nodes[NodeId::new(0)]
             .nested_graph
             .expect("the fixture should contain one child graph");
         graph[child].options.layering_strategy = LayeringStrategy::BreadthFirstModelOrder;
@@ -1918,7 +1921,7 @@ mod tests {
         let mut graph = deep_compound_chain(2);
         graph.options.direction = ElkDirection::Undefined;
         graph.options.spacing.edge_edge = 0.0;
-        let child = graph.layerless_nodes[0]
+        let child = graph.layerless_nodes[NodeId::new(0)]
             .nested_graph
             .expect("the fixture should contain one child graph");
         graph[child].options.random_seed = 0;
@@ -2235,7 +2238,7 @@ mod tests {
             "Mermaid flowchart compound root graph",
             graph_kinds(&compound_graph),
         );
-        let nested_graph = &compound_graph[compound_graph.layerless_nodes[0]
+        let nested_graph = &compound_graph[compound_graph.layerless_nodes[NodeId::new(0)]
             .nested_graph
             .expect("compound fixture should create a nested graph")];
         assert_processors_are_source_ported(
@@ -2396,7 +2399,7 @@ mod tests {
         .unwrap();
         preprocess_source_ported_compound_graph(&mut graph);
 
-        let nested = &graph[graph.layerless_nodes[0].nested_graph.unwrap()];
+        let nested = &graph[graph.layerless_nodes[NodeId::new(0)].nested_graph.unwrap()];
         let processors = graph_kinds(nested);
         assert!(processors.contains(&ProcessorKind::HierarchicalPortConstraintProcessor));
         assert!(processors.contains(&ProcessorKind::HierarchicalPortDummySizeProcessor));
@@ -2458,7 +2461,7 @@ mod tests {
 
         preprocess_source_ported_compound_graph(&mut graph);
 
-        let nested = &graph[graph.layerless_nodes[0]
+        let nested = &graph[graph.layerless_nodes[NodeId::new(0)]
             .nested_graph
             .expect("inside self-loop should create a nested graph")];
         let processors = graph_kinds(nested);
@@ -2710,15 +2713,18 @@ mod tests {
         assert!(executed.contains(&ProcessorKind::SelfLoopPostProcessor));
         assert!(graph.edge_source_attached(EdgeId::new(0)));
         assert!(graph.edge_target_attached(EdgeId::new(0)));
-        assert_eq!(graph.edges[0].source.node, graph.edges[0].target.node);
-        assert!(graph.edges[0].bend_points.len() >= 2);
+        assert_eq!(
+            graph.edges[EdgeId::new(0)].source.node,
+            graph.edges[EdgeId::new(0)].target.node
+        );
+        assert!(graph.edges[EdgeId::new(0)].bend_points.len() >= 2);
         assert!(
-            graph.edges[0]
+            graph.edges[EdgeId::new(0)]
                 .bend_points
                 .iter()
                 .all(|point| point.x.is_finite() && point.y.is_finite())
         );
-        assert!(graph.layerless_nodes[0].margin.top > 0.0);
+        assert!(graph.layerless_nodes[NodeId::new(0)].margin.top > 0.0);
     }
 
     #[test]
@@ -2917,7 +2923,7 @@ mod tests {
             .into_iter()
             .enumerate()
         {
-            let node = &graph.layerless_nodes[index * 2 + 1];
+            let node = &graph.layerless_nodes[NodeId::new(index * 2 + 1)];
             assert_eq!(
                 (
                     node.position.x + graph.padding.left + graph.offset.x,
@@ -2926,7 +2932,7 @@ mod tests {
                 expected
             );
         }
-        let edge = &graph.edges[2];
+        let edge = &graph.edges[EdgeId::new(2)];
         for (port_ref, expected) in [(edge.source, (69.5, 157.0)), (edge.target, (69.5, 197.0))] {
             let node = &graph.layerless_nodes[port_ref.node];
             let port = &node.ports[port_ref.port];
@@ -2998,9 +3004,10 @@ mod tests {
         assert_eq!(with_minimum.options.node_size.minimum, minimum);
         assert_eq!(with_minimum.exported_root_size(), minimum);
         for (index, id) in ids.iter().enumerate() {
-            assert_eq!(&graph.layerless_nodes[index].id, id);
+            assert_eq!(&graph.layerless_nodes[NodeId::new(index)].id, id);
             assert_eq!(
-                graph.layerless_nodes[index].position, with_minimum.layerless_nodes[index].position,
+                graph.layerless_nodes[NodeId::new(index)].position,
+                with_minimum.layerless_nodes[NodeId::new(index)].position,
                 "root minimum is applied after packing, through the root offset"
             );
         }
@@ -3046,7 +3053,8 @@ mod tests {
         }
         for component in 0..2 {
             for suffix in ["AC", "BB"] {
-                let edge = &graph.edges[component * 4 + if suffix == "AC" { 2 } else { 3 }];
+                let edge =
+                    &graph.edges[EdgeId::new(component * 4 + if suffix == "AC" { 2 } else { 3 })];
                 assert_eq!(edge.id, format!("c{component}{suffix}"));
                 assert_eq!(
                     edge.labels.len(),
@@ -3092,7 +3100,7 @@ mod tests {
             .into_iter()
             .enumerate()
         {
-            let nodes = &graph.layerless_nodes[component * 3..component * 3 + 3];
+            let nodes = &graph.layerless_nodes.as_slice()[component * 3..component * 3 + 3];
             let left = nodes
                 .iter()
                 .map(|node| node.position.x)
@@ -3312,7 +3320,7 @@ mod tests {
             .unwrap();
             execute_ported_processors(&mut graph).unwrap();
             let size = graph.exported_root_size();
-            let child = &graph.layerless_nodes[0];
+            let child = &graph.layerless_nodes[NodeId::new(0)];
             assert_eq!(
                 (size.width, size.height),
                 expected_size,
@@ -3369,7 +3377,7 @@ mod tests {
         })
         .unwrap();
         execute_ported_compound_processors(&mut graph).unwrap();
-        let group = &graph.layerless_nodes[0];
+        let group = &graph.layerless_nodes[NodeId::new(0)];
         let nested = &graph[group.nested_graph.unwrap()];
         assert_eq!(
             group.size,
@@ -3386,7 +3394,9 @@ mod tests {
             }
         );
         assert_eq!(
-            nested.layerless_nodes[0].position.y + nested.offset.y + nested.padding.top,
+            nested.layerless_nodes[NodeId::new(0)].position.y
+                + nested.offset.y
+                + nested.padding.top,
             15.0
         );
     }

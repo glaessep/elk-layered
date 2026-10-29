@@ -8,9 +8,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeId, EdgeLabelPlacement, GraphArena, GraphId,
-    GraphNodeRef, GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep, LGraph, LLabel,
-    LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, NodeSlice, PortId, PortRef, PortSide,
-    PortType, apply_port_index_to_dummy, create_external_port_dummy, port_side_from_direction,
+    GraphNodeRef, GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep, IdVec, LGraph, LLabel,
+    LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, PortId, PortRef, PortSide, PortType,
+    apply_port_index_to_dummy, create_external_port_dummy, port_side_from_direction,
 };
 use crate::options::{ElkDirection, PortConstraints};
 
@@ -262,7 +262,7 @@ pub(crate) fn link_external_port_dummy(
     dummy_node: NodeId,
     dummy_border_offset: Option<f64>,
 ) {
-    let Some(parent_node) = parent_graph.layerless_nodes.get_node_mut(parent_port.node) else {
+    let Some(parent_node) = parent_graph.layerless_nodes.get_mut(parent_port.node) else {
         return;
     };
     let Some(parent_port_data) = parent_node.ports.get_mut(parent_port.port) else {
@@ -290,7 +290,7 @@ pub(crate) fn set_external_dummy_origin(
     origin_graph_id: GraphId,
     origin_port: PortRef,
 ) {
-    let Some(dummy) = dummy_graph.layerless_nodes.get_node_mut(dummy_node) else {
+    let Some(dummy) = dummy_graph.layerless_nodes.get_mut(dummy_node) else {
         return;
     };
     dummy.origin_port = Some(GraphPortRef {
@@ -405,7 +405,7 @@ fn preprocess_source_ported_compound_graph_observed(
     let order = graphs.breadth_first(GraphId::ROOT);
     // `transformHierarchyEdges` reads the port constraints of each compound node before
     // `setSidesOfPortsToSidesOfDummyNodes` fixes them, so keep them.
-    let mut original_constraints = vec![Vec::new(); graphs.len()];
+    let mut original_constraints = vec![IdVec::new(); graphs.len()];
     for &graph in &order {
         original_constraints[graph.index()] = port_constraints_of(&graphs[graph]);
     }
@@ -465,7 +465,7 @@ fn original_net_flows(graphs: &GraphArena) -> HashMap<OriginalNetFlowKey, isize>
     flows
 }
 
-fn port_constraints_of(graph: &LGraph) -> Vec<PortConstraints> {
+fn port_constraints_of(graph: &LGraph) -> IdVec<NodeId, PortConstraints> {
     graph
         .layerless_nodes
         .iter()
@@ -949,7 +949,7 @@ impl NodePortIndex {
         let mut ports = HashMap::new();
         let node = graph
             .layerless_nodes
-            .get_node(owner)
+            .get(owner)
             .expect("compound parent node must exist while indexing its ports");
         for (port_index, port) in node.ports.iter_with_ids() {
             for &port_type in lookup_types(port) {
@@ -978,7 +978,7 @@ impl NodePortIndex {
     fn record_port(&mut self, graph: &LGraph, port: PortId) {
         let port_data = graph
             .layerless_nodes
-            .get_node(self.owner)
+            .get(self.owner)
             .and_then(|node| node.ports.get(port))
             .expect("new compound parent port must belong to the indexed owner");
         for &port_type in lookup_types(port_data) {
@@ -1003,19 +1003,19 @@ struct NestedExternalDummyIndex {
     by_edge_id: HashMap<String, ExternalDummyMetadata>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct CompoundEndpoint {
     port: PortRef,
     edge: EdgeId,
 }
 
 struct CompoundEndpointPlan {
-    by_node: Vec<Vec<CompoundEndpoint>>,
+    by_node: IdVec<NodeId, Vec<CompoundEndpoint>>,
 }
 
 impl CompoundEndpointPlan {
     fn new(graph: &LGraph, observer: &mut impl CompoundPreprocessObserver) -> Self {
-        let mut by_node = graph.node_ids().map(|_| Vec::new()).collect::<Vec<_>>();
+        let mut by_node = IdVec::filled(graph.layerless_nodes.len(), Vec::new());
         for (edge_index, edge) in graph.edges_with_ids() {
             observer.visit_graph_edge_for_endpoint_plan();
             let Some(segment) = edge.compound_segment else {
@@ -1027,10 +1027,10 @@ impl CompoundEndpointPlan {
             };
             if graph
                 .layerless_nodes
-                .get_node(port.node)
+                .get(port.node)
                 .is_some_and(|node| node.compound)
             {
-                by_node[port.node.index()].push(CompoundEndpoint {
+                by_node[port.node].push(CompoundEndpoint {
                     port,
                     edge: edge_index,
                 });
@@ -1041,7 +1041,7 @@ impl CompoundEndpointPlan {
 
     fn for_node(&self, node_index: NodeId) -> &[CompoundEndpoint] {
         self.by_node
-            .get(node_index.index())
+            .get(node_index)
             .map(Vec::as_slice)
             .expect("compound endpoint plan must match the graph node arena")
     }
@@ -1202,7 +1202,7 @@ fn introduce_hierarchical_edge_segment(
         };
         if graph
             .layerless_nodes
-            .get_node(dummy_port.node)
+            .get(dummy_port.node)
             .is_some_and(|node| node.kind == LNodeKind::ExternalPort)
         {
             let exported = !connects_parent_node;
@@ -1424,25 +1424,24 @@ fn prepare_compound_endpoint_metadata(
     observer: &mut impl CompoundPreprocessObserver,
 ) -> CompoundEndpointPlan {
     let endpoint_plan = CompoundEndpointPlan::new(graph, observer);
-    let mut recorded_edges = vec![false; graph.edges.len()];
+    let mut recorded_edges = IdVec::filled(graph.edges.len(), false);
     for record in &graph.cross_hierarchy_edges {
         observer.visit_existing_cross_hierarchy_edge();
-        if let Some(recorded) = recorded_edges.get_mut(record.edge.index()) {
+        if let Some(recorded) = recorded_edges.get_mut(record.edge) {
             *recorded = true;
         }
     }
 
-    for (index, recorded_edge) in recorded_edges.iter_mut().enumerate() {
-        let edge_index = EdgeId::new(index);
+    for edge_index in recorded_edges.ids() {
         let Some(segment) = graph.edges[edge_index].compound_segment else {
             continue;
         };
         observer.process_segment_edge();
-        if !*recorded_edge {
+        if !recorded_edges[edge_index] {
             let edge_id = graph.edges[edge_index].id.clone();
             let model_order = graph.edges[edge_index].model_order;
             record_cross_hierarchy_edge_segment(graph, edge_id, model_order, edge_index, segment);
-            *recorded_edge = true;
+            recorded_edges[edge_index] = true;
         }
     }
 
@@ -1463,7 +1462,7 @@ fn prepare_compound_endpoint_metadata(
 fn ensure_nested_external_dummies_for_parent_ports(
     graphs: &mut GraphArena,
     order: &[GraphId],
-    original_constraints: &[Vec<PortConstraints>],
+    original_constraints: &[IdVec<NodeId, PortConstraints>],
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
     for &graph in order.iter().rev() {
@@ -1479,14 +1478,10 @@ fn ensure_nested_external_dummies_for_parent_ports(
 fn ensure_direct_nested_external_dummies_for_parent_ports(
     graphs: &mut GraphArena,
     graph_id: GraphId,
-    original_constraints: &[PortConstraints],
+    original_constraints: &IdVec<NodeId, PortConstraints>,
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
-    for (node_index, &parent_constraints) in original_constraints
-        .iter()
-        .enumerate()
-        .map(|(index, constraints)| (NodeId::new(index), constraints))
-    {
+    for (node_index, &parent_constraints) in original_constraints.iter_with_ids() {
         let Some(nested_graph_id) = graphs[graph_id].layerless_nodes[node_index].nested_graph
         else {
             continue;
@@ -1522,30 +1517,31 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
             let (port_constraints, port_side) = (parent_constraints, port.side);
             // ELK passes no position and no node size here: `new KVector()` and `null`. The node
             // size only guards against a division by zero for fixed ratios, where ELK fails.
-            let mut dummy = create_external_port_dummy(
-                format!("external:{parent_node_id}"),
-                format!("external:{parent_node_id}:0"),
-                port.port_type,
-                port_constraints,
-                port_side,
-                -net_flows
-                    .get(&(parent_node_id.clone(), port.id.clone(), port.named))
-                    .copied()
-                    .unwrap_or_else(|| port.net_flow()),
-                LPoint::default(),
-                port.size,
-                parent_size,
-                port.border_offset.unwrap_or(0.0),
-                nested_direction,
-            );
-            apply_port_index_to_dummy(&mut dummy, port_constraints, port.port_index);
-            dummy.parent_port_key = Some(port.id.clone());
-            dummy.parent_port_type = Some(port.port_type);
-            let dummy_side = dummy.external_port_side;
+            let dummy_node = nested_graph.push_node_with(|node| {
+                let mut dummy = create_external_port_dummy(
+                    node,
+                    format!("external:{parent_node_id}"),
+                    format!("external:{parent_node_id}:0"),
+                    port.port_type,
+                    port_constraints,
+                    port_side,
+                    -net_flows
+                        .get(&(parent_node_id.clone(), port.id.clone(), port.named))
+                        .copied()
+                        .unwrap_or_else(|| port.net_flow()),
+                    LPoint::default(),
+                    port.size,
+                    parent_size,
+                    port.border_offset.unwrap_or(0.0),
+                    nested_direction,
+                );
+                apply_port_index_to_dummy(&mut dummy, port_constraints, port.port_index);
+                dummy.parent_port_key = Some(port.id.clone());
+                dummy.parent_port_type = Some(port.port_type);
+                dummy
+            });
+            let dummy_side = nested_graph.layerless_nodes[dummy_node].external_port_side;
             let dummy_border_offset = port.border_offset;
-            let dummy_node = nested_graph.next_node_id();
-            dummy.ports[PortId::new(0)].node = dummy_node;
-            nested_graph.layerless_nodes.push(dummy);
 
             link_external_port_dummy(
                 graph,
@@ -1716,7 +1712,7 @@ fn parent_port_for_external_dummy(
         && origin_port.port.node == parent_node
         && graph
             .layerless_nodes
-            .get_node(parent_node)
+            .get(parent_node)
             .and_then(|node| node.ports.get(origin_port.port.port))
             .is_some()
     {
@@ -1842,65 +1838,63 @@ fn create_parent_boundary_port(
     let (port_position, port_size) = named.map_or((LPoint::default(), LSize::default()), |named| {
         (named.position, named.size)
     });
-    let mut dummy = create_external_port_dummy(
-        format!("external:{parent_node_id}"),
-        if parent_port_key.is_empty() {
-            format!("external:{parent_node_id}:0")
+    let direction = graph.options.direction;
+    let node = graph.push_node_with(|node| {
+        let mut dummy = create_external_port_dummy(
+            node,
+            format!("external:{parent_node_id}"),
+            if parent_port_key.is_empty() {
+                format!("external:{parent_node_id}:0")
+            } else {
+                parent_port_key.to_string()
+            },
+            dummy_port_type,
+            parent_constraints,
+            port_side,
+            net_flow,
+            port_position,
+            port_size,
+            LSize::default(),
+            border_offset,
+            direction,
+        );
+        apply_port_index_to_dummy(
+            &mut dummy,
+            parent_constraints,
+            named.and_then(|named| named.port_index),
+        );
+        dummy.parent_port_key = (!parent_port_key.is_empty()).then(|| parent_port_key.to_string());
+        dummy.parent_port_type = if connects_parent_node {
+            Some(parent_port_type)
         } else {
-            parent_port_key.to_string()
-        },
-        dummy_port_type,
-        parent_constraints,
-        port_side,
-        net_flow,
-        port_position,
-        port_size,
-        LSize::default(),
-        border_offset,
-        graph.options.direction,
-    );
-    apply_port_index_to_dummy(
-        &mut dummy,
-        parent_constraints,
-        named.and_then(|named| named.port_index),
-    );
-    let node = graph.next_node_id();
-    dummy.parent_port_key = (!parent_port_key.is_empty()).then(|| parent_port_key.to_string());
-    dummy.parent_port_type = if connects_parent_node {
-        Some(parent_port_type)
-    } else {
-        Some(dummy_port_type)
-    };
-    dummy.ports[PortId::new(0)].node = node;
-    graph.layerless_nodes.push(dummy);
+            Some(dummy_port_type)
+        };
+        dummy
+    });
     PortRef {
         node,
         port: PortId::new(0),
     }
 }
 
-/// A port that holds only a position and a size, for [`calc_port_side`] and the port offset.
-///
-/// ELK's `ElkUtil.calcPortSide` and `LGraphUtil.calcPortOffset` read these from the port they
-/// get. Here they take an `LPort`, and the caller has no such port yet.
-pub(crate) fn port_at(id: &str, x: f64, y: f64, width: f64, height: f64) -> LPort {
-    let mut port = LPort::new(id, NodeId::new(0), PortType::Output);
-    port.position = LPoint { x, y };
-    port.size = LSize { width, height };
-    port
-}
-
-pub(crate) fn calc_port_side(port: &LPort, node_size: LSize, direction: ElkDirection) -> PortSide {
+/// ELK's `ElkUtil.calcPortSide`. It reads only the position and size of the port it gets, so
+/// here it takes those two. A caller with no `LPort` yet has nothing to invent.
+pub(crate) fn calc_port_side(
+    position: LPoint,
+    size: LSize,
+    node_size: LSize,
+    direction: ElkDirection,
+) -> PortSide {
     let node_width = node_size.width;
     let node_height = node_size.height;
     if node_width <= 0.0 && node_height <= 0.0 {
         return PortSide::Undefined;
     }
 
-    let xpos = port.position.x;
-    let ypos = port.position.y;
-    let width = port.size.width;
-    let height = port.size.height;
+    let xpos = position.x;
+    let ypos = position.y;
+    let width = size.width;
+    let height = size.height;
 
     match direction {
         ElkDirection::Left | ElkDirection::Right => {
@@ -3073,7 +3067,7 @@ mod tests {
         let mut input = graph(vec![group, inner, leaf, sibling], Vec::new());
         input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
         let mut lgraph = import_graph(&input).unwrap();
-        let group_graph = lgraph.layerless_nodes[0]
+        let group_graph = lgraph.layerless_nodes[NodeId::new(0)]
             .nested_graph
             .expect("group graph is materialized");
         let inner_step = real_step(&lgraph, "inner");
@@ -3097,7 +3091,7 @@ mod tests {
 
         preprocess_source_ported_compound_graph(&mut lgraph);
 
-        let group_graph = lgraph.layerless_nodes[0]
+        let group_graph = lgraph.layerless_nodes[NodeId::new(0)]
             .nested_graph
             .map(|id| &lgraph[id])
             .expect("group graph remains materialized");
@@ -3107,7 +3101,7 @@ mod tests {
             group_graph.cross_hierarchy_edges[0].original_model_order,
             Some(3)
         );
-        let inner_graph = group_graph.layerless_nodes[0]
+        let inner_graph = group_graph.layerless_nodes[NodeId::new(0)]
             .nested_graph
             .map(|id| &lgraph[id])
             .expect("inner graph remains materialized");
@@ -3278,8 +3272,8 @@ mod tests {
             holder = graphs.nest(holder, node, nested);
             lands.push(holder);
         }
-        assert_eq!(graphs[lands[0]].layerless_nodes[1].id, "p");
-        assert_eq!(graphs[lands[1]].layerless_nodes[0].id, "child");
+        assert_eq!(graphs[lands[0]].layerless_nodes[NodeId::new(1)].id, "p");
+        assert_eq!(graphs[lands[1]].layerless_nodes[NodeId::new(0)].id, "child");
         let segments = lands
             .iter()
             .map(|&lands_in| ScopedHierarchySegment {
