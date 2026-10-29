@@ -4456,6 +4456,8 @@ mod tests {
         }
     }
 
+    // Mutation: hand the random stream back to the root only (`if index == 0`). The stream of the
+    // nested graph is then not advanced.
     #[test]
     fn hierarchical_sweep_advances_graph_random_streams_without_order_changes() {
         for cross_min_type in [
@@ -4527,6 +4529,8 @@ mod tests {
         assert!(sweep.use_node_port_order_crossing_counter(&graphs, 0));
     }
 
+    // Mutation: list the child graphs in node order, not in layer order: sort `children` by node
+    // index in `HierarchySweep::new`.
     #[test]
     fn hierarchical_sweep_discovers_child_graphs_in_current_node_order() {
         let mut graph = LGraph::new("root", LayeredOptions::default());

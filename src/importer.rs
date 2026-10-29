@@ -3169,6 +3169,8 @@ mod tests {
         assert!(lgraph.layerless_nodes.iter().all(|node| !node.compound));
     }
 
+    // Mutation: let `GraphArena::nest` record the node after the holder (`node + 1`) as the parent.
+    // `nested.parent` then no longer names the cluster.
     #[test]
     fn imports_include_children_hierarchy_into_nested_graphs() {
         let mut cluster = node("cluster");
@@ -3197,6 +3199,8 @@ mod tests {
         assert_eq!(nested.layerless_nodes[0].id, "A");
     }
 
+    // Mutation: give every `HierarchyStep` the root as its graph in `transform_cross_hierarchy_edge`.
+    // The step then does not name the graph inside the cluster.
     #[test]
     fn importer_preserves_descendant_edge_for_compound_preprocessor() {
         let mut cluster = node("cluster");

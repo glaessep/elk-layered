@@ -1696,6 +1696,8 @@ mod tests {
         graphs
     }
 
+    // Mutation: give each `GraphExecution` a `parent` of `None` in `graph_algorithm`. The nested graphs
+    // then have no parent link.
     #[test]
     fn compound_run_holds_one_algorithm_per_graph_and_a_parent_for_each_nested_one() {
         for graph_count in [8usize, 16, 32, 64, 128] {
@@ -1713,6 +1715,8 @@ mod tests {
         }
     }
 
+    // Mutation: build the run in pre-order (`GraphArena::preorder`) instead of ELK's discovery
+    // order. The grandchildren then come in another place.
     #[test]
     fn compound_run_preserves_official_reverse_discovery_order() {
         let graphs = branched_compound_graph();
@@ -1736,6 +1740,8 @@ mod tests {
         );
     }
 
+    // Mutation: drop the `.rev()` in `CompoundRun::into_executions`. The results then come in
+    // discovery order, root first.
     #[test]
     fn public_compound_execution_reports_official_reverse_discovery_order() {
         let mut root = branched_compound_graph();
@@ -1859,6 +1865,8 @@ mod tests {
         }
     }
 
+    // Mutation: check only the root in `validate_ported_graph_processors`. The child's processor
+    // is then found after the configurator has changed the graph.
     #[test]
     fn compound_full_runner_rejects_child_unported_processor_before_mutation() {
         let mut graph = deep_compound_chain(2);
@@ -1891,6 +1899,8 @@ mod tests {
         graph
     }
 
+    // Mutation: leave out `check_random_seeds` in `execute_ported_processors`. The configurator then
+    // rewrites the root before it reaches the child with seed 0.
     #[test]
     fn full_runner_rejects_nested_zero_seed_without_changing_the_graph() {
         let mut graph = root_to_rewrite_with_zero_seed_child();
@@ -1905,6 +1915,8 @@ mod tests {
         assert_eq!(graph, before);
     }
 
+    // Mutation: leave out `check_random_seeds` in `execute_ported_compound_processors`. The
+    // configurator then rewrites the root before it reaches the child with seed 0.
     #[test]
     fn compound_full_runner_rejects_nested_zero_seed_without_changing_the_graph() {
         let mut graph = root_to_rewrite_with_zero_seed_child();
@@ -1943,6 +1955,8 @@ mod tests {
         );
     }
 
+    // Mutation: check only the root in `validate_ported_graph_processors`. The processor of the
+    // deepest graph is then never found.
     #[test]
     fn compound_ported_processor_preflight_is_small_stack_safe() {
         const GRAPH_COUNT: usize = 4_096;
@@ -3576,6 +3590,8 @@ mod tests {
         );
     }
 
+    // Mutation: replace `graph.parent.is_none()` with `true` in the rule for the hierarchical greedy
+    // switch. A graph inside a node then follows the root's rule.
     #[test]
     fn graph_aware_greedy_switch_matches_graph_configurator_activation_rules() {
         let mut options = LayeredOptions {

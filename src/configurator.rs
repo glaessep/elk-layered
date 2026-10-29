@@ -73,6 +73,8 @@ mod tests {
         GraphArena::new(graph)
     }
 
+    // Mutation: leave out the zero-seed check in `configure_graph_properties`. Seed 0 is then
+    // accepted.
     #[test]
     fn upstream_zero_seed_is_an_error_at_the_configurator_boundary() {
         let options = LayeredOptions {
@@ -89,6 +91,8 @@ mod tests {
         );
     }
 
+    // Mutation: move the zero-seed check in `configure_graph_properties` below
+    // `configured_options`. The graph is then rewritten before the error.
     #[test]
     fn zero_seed_graph_is_not_rewritten_before_the_error() {
         let mut graphs = arena(LGraph::new(
@@ -106,6 +110,8 @@ mod tests {
         assert_eq!(graphs, before);
     }
 
+    // Mutation: seed the random with the unsigned seed (`random_seed as u32`). A negative seed then
+    // gives another stream.
     #[test]
     fn each_graph_seeds_its_random_with_its_own_signed_seed() {
         let mut graphs = arena(LGraph::new(
@@ -137,6 +143,8 @@ mod tests {
         assert_eq!(graphs[child].random, JavaRandom::new(-7));
     }
 
+    // Mutation: leave the graph's name out of the error (`String::new()`). The error then names
+    // no graph.
     #[test]
     fn nested_graph_with_zero_seed_names_itself_in_the_error() {
         let mut graphs = arena(LGraph::new("root", LayeredOptions::default()));
@@ -164,6 +172,8 @@ mod tests {
         );
     }
 
+    // Mutation: walk the graphs breadth-first in `check_random_seeds`. It then names "child-b",
+    // while the configurator names "grandchild-a".
     #[test]
     fn seed_check_names_the_same_graph_as_the_configurator_and_changes_nothing() {
         // "grandchild-a" and "child-b" both have seed 0. Depth-first order reaches the grandchild
