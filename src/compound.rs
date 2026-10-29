@@ -1970,10 +1970,12 @@ pub fn compare_compound_segments(
     }
 }
 
+/// How many steps two paths share. A node without a graph falls back to the root graph, so the
+/// graph alone cannot tell two such nodes apart. Both the node and the graph must match.
 fn common_graph_depth(left: &[HierarchyStep], right: &[HierarchyStep]) -> usize {
     left.iter()
         .zip(right.iter())
-        .take_while(|(left, right)| left.graph == right.graph)
+        .take_while(|(left, right)| left.node_id == right.node_id && left.graph == right.graph)
         .count()
 }
 
@@ -1998,6 +2000,18 @@ mod tests {
                 ),
             })
             .collect()
+    }
+
+    // Mutation: compare only the graph in `common_graph_depth`. Two nodes without a graph both
+    // fall back to the root, so the paths would share a step they do not share.
+    #[test]
+    fn paths_through_different_nodes_that_share_the_root_fallback_have_no_common_depth() {
+        let step = |node: &str| HierarchyStep {
+            node_id: node.to_string(),
+            graph: GraphId::ROOT,
+        };
+        assert_eq!(common_graph_depth(&[step("a")], &[step("b")]), 0);
+        assert_eq!(common_graph_depth(&[step("a")], &[step("a")]), 1);
     }
 
     /// Steps of the node called `name` in `graphs`, with the graph inside it.
