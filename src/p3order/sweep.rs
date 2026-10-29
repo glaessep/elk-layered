@@ -2192,16 +2192,17 @@ impl AdjacencyList {
             for edge in edges_connected_to_side(graph, port, side) {
                 if !is_edge_self_loop(graph, edge) && !is_in_layer_edge(graph, edge) {
                     let adjacent_port = adjacent_port_of_side(graph, edge, side);
-                    if let Some(adjacent_port_position) = port_positions.get(&adjacent_port) {
-                        adjacency_list.push(Adjacency::new(*adjacent_port_position));
+                    if let Some(&adjacent_port_position) = port_positions.get(&adjacent_port) {
+                        add_adjacency(&mut adjacency_list, adjacent_port_position);
                         size += 1;
                     }
                 }
             }
         }
 
+        // Collections.sort is stable, and so is sort_by_key. Two entries at one position that the
+        // collection did not merge stay two entries, in the order they were collected.
         adjacency_list.sort_by_key(|adjacency| adjacency.position);
-        let adjacency_list = merge_equal_adjacencies(adjacency_list);
         Self {
             adjacency_list,
             size,
@@ -3785,19 +3786,21 @@ fn build_adjacencies<L: AsRef<[NodeId]>>(
         .collect()
 }
 
-fn merge_equal_adjacencies(adjacencies: Vec<Adjacency>) -> Vec<Adjacency> {
-    let mut merged: Vec<Adjacency> = Vec::new();
-    for adjacency in adjacencies {
-        if let Some(last) = merged.last_mut()
-            && last.position == adjacency.position
-        {
-            last.cardinality += adjacency.cardinality;
-            last.current_cardinality += adjacency.current_cardinality;
-            continue;
-        }
-        merged.push(adjacency);
+/// `BetweenLayerEdgeTwoNodeCrossingsCounter.AdjacencyList.addAdjacencyOf`. An edge to the
+/// position of the entry added last raises that entry's cardinality; any other edge adds a new
+/// entry. So two edges to one port merge only when they are collected one after the other. ELK
+/// sorts the list afterwards and never merges the entries that the sort brings together. The
+/// count then takes the second entry at a position as an adjacency below the first, and a switch
+/// can look better than it is. elkjs counts this way, so this port does too.
+fn add_adjacency(adjacency_list: &mut Vec<Adjacency>, position: usize) {
+    if let Some(last) = adjacency_list.last_mut()
+        && last.position == position
+    {
+        last.cardinality += 1;
+        last.current_cardinality += 1;
+        return;
     }
-    merged
+    adjacency_list.push(Adjacency::new(position));
 }
 
 fn neighboring_layer_port_positions<L: AsRef<[NodeId]>>(
@@ -4272,6 +4275,23 @@ mod tests {
     use crate::options::{ElkDirection, HierarchyHandling, LayeredOptions};
     use crate::p2layers::layer_network_simplex;
     use crate::p3order::{process_port_sides, sort_port_lists};
+
+    // Mutation: in `add_adjacency`, merge with any entry at the same position, not only the last.
+    #[test]
+    fn an_adjacency_merges_only_with_the_entry_collected_just_before_it() {
+        let mut list = Vec::new();
+        for position in [5, 5, 3, 5] {
+            add_adjacency(&mut list, position);
+        }
+        list.sort_by_key(|adjacency| adjacency.position);
+        let entries: Vec<(usize, usize)> = list
+            .iter()
+            .map(|adjacency| (adjacency.position, adjacency.cardinality))
+            .collect();
+        // The first two edges merge; the third edge to position 5 comes after another position,
+        // so it stays its own entry, and the stable sort keeps it behind the merged one.
+        assert_eq!(entries, vec![(3, 1), (5, 2), (5, 1)]);
+    }
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {
