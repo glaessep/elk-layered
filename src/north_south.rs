@@ -238,16 +238,12 @@ fn create_dummy_node(
     in_port: Option<PortRef>,
     out_port: Option<PortRef>,
 ) -> NodeId {
-    let dummy_index = graph.next_node_id();
-    let mut dummy = LNode::new(
-        format!("northSouthPort:{}", dummy_index.index()),
-        0.0,
-        0.0,
-        None,
-    );
-    dummy.kind = LNodeKind::NorthSouthPort;
-    dummy.port_constraints = PortConstraints::FixedPos;
-    graph.layerless_nodes.push(dummy);
+    let dummy_index = graph.push_node_with(|id| {
+        let mut dummy = LNode::new(format!("northSouthPort:{}", id.index()), 0.0, 0.0, None);
+        dummy.kind = LNodeKind::NorthSouthPort;
+        dummy.port_constraints = PortConstraints::FixedPos;
+        dummy
+    });
     let dummy_ref = GraphNodeRef {
         graph_id: graph.id,
         node: dummy_index,

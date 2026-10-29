@@ -431,7 +431,7 @@ fn import_external_ports(
             }
         });
         let direction = root.options.direction;
-        let node = root.push_external_port_dummy(|node| {
+        let node = root.push_node_with(|node| {
             let mut dummy = create_external_port_dummy(
                 node,
                 format!("{scope_id}:external:{}", port.id),
@@ -1166,7 +1166,7 @@ fn ensure_inside_self_loop_dummy(
 
     let dummy_id = format!("external:{parent_node_id}");
     let direction = graph.options.direction;
-    let node = graph.push_external_port_dummy(|node| {
+    let node = graph.push_node_with(|node| {
         let mut dummy = create_external_port_dummy(
             node,
             dummy_id,
@@ -1395,8 +1395,7 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     lnode.node_flexibility = node.node_flexibility;
     lnode.ports_surrounding = node.ports_surrounding;
     let node_size = lnode.size;
-    let node_index = graph.next_node_id();
-    graph.layerless_nodes.push(lnode);
+    let node_index = graph.push_node_with(|_| lnode);
 
     // A port gets a model order when its node does: `needsModelOrder` asks about the node's
     // parent, which also decides the node's own order.

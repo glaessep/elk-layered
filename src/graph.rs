@@ -775,16 +775,19 @@ impl LGraph {
         self.layerless_nodes.next_id()
     }
 
-    /// Builds an external port dummy and pushes it onto `layerless_nodes`. `build` gets the id the
-    /// dummy will have, so it can put the id in the dummy's name. Whatever owner `build` gives the
-    /// dummy's ports, the method sets every port's owner to that id. The method returns the id.
-    pub fn push_external_port_dummy(&mut self, build: impl FnOnce(NodeId) -> LNode) -> NodeId {
+    /// Builds a node and pushes it onto `layerless_nodes`. `build` gets the id the node will have,
+    /// so it can put the id in the node's name. Whatever owner `build` gives the node's ports, the
+    /// method sets every port's owner to that id. The method returns the id.
+    ///
+    /// Use it instead of `next_node_id` followed by `push`: that pair leaves a gap where a node
+    /// can get another id than the one its ports name.
+    pub fn push_node_with(&mut self, build: impl FnOnce(NodeId) -> LNode) -> NodeId {
         let id = self.next_node_id();
-        let mut dummy = build(id);
-        for port in dummy.ports.slots_mut() {
+        let mut node = build(id);
+        for port in node.ports.slots_mut() {
             port.node = id;
         }
-        self.layerless_nodes.push(dummy)
+        self.layerless_nodes.push(node)
     }
 
     pub fn clear_layers(&mut self) {
@@ -1450,14 +1453,14 @@ mod tests {
         );
     }
 
-    // Mutation: drop the loop in `push_external_port_dummy` that sets the owner of each port, or
+    // Mutation: drop the loop in `push_node_with` that sets the owner of each port, or
     // set it to `NodeId::new(0)`.
     #[test]
-    fn pushed_external_port_dummy_gets_the_id_its_port_names() {
+    fn pushed_node_gets_the_id_its_port_names() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
         graph.layerless_nodes.push(LNode::new("a", 1.0, 1.0, None));
         graph.layerless_nodes.push(LNode::new("b", 1.0, 1.0, None));
-        let id = graph.push_external_port_dummy(|_| {
+        let id = graph.push_node_with(|_| {
             // A wrong owner on purpose: the method must repair it.
             create_external_port_dummy(
                 NodeId::new(0),

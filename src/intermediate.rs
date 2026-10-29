@@ -720,22 +720,18 @@ fn set_inverted_port_dummy_long_edge_ports(
 }
 
 fn create_inverted_port_dummy(graph: &mut LGraph, edge_index: EdgeId) -> NodeId {
-    let dummy_index = graph.next_node_id();
-    let mut dummy = LNode::new(
-        format!(
-            "invertedPort:{}:{}",
-            edge_index.index(),
-            dummy_index.index()
-        ),
-        0.0,
-        0.0,
-        None,
-    );
-    dummy.kind = LNodeKind::LongEdge;
-    dummy.origin_edge = Some(edge_index);
-    dummy.port_constraints = PortConstraints::FixedPos;
-    graph.layerless_nodes.push(dummy);
-    dummy_index
+    graph.push_node_with(|id| {
+        let mut dummy = LNode::new(
+            format!("invertedPort:{}:{}", edge_index.index(), id.index()),
+            0.0,
+            0.0,
+            None,
+        );
+        dummy.kind = LNodeKind::LongEdge;
+        dummy.origin_edge = Some(edge_index);
+        dummy.port_constraints = PortConstraints::FixedPos;
+        dummy
+    })
 }
 
 fn add_inverted_dummy_port(
@@ -967,17 +963,18 @@ pub fn insert_label_dummies(graph: &mut LGraph) {
 }
 
 fn create_label_dummy_node(graph: &mut LGraph, edge_index: EdgeId, thickness: f64) -> NodeId {
-    let dummy_index = graph.next_node_id();
-    let mut dummy = LNode::new(
-        format!("label:{}:{}", edge_index.index(), dummy_index.index()),
-        0.0,
-        0.0,
-        None,
-    );
-    dummy.kind = LNodeKind::Label;
-    dummy.origin_edge = Some(edge_index);
-    dummy.port_constraints = PortConstraints::FixedPos;
-    graph.layerless_nodes.push(dummy);
+    let dummy_index = graph.push_node_with(|id| {
+        let mut dummy = LNode::new(
+            format!("label:{}:{}", edge_index.index(), id.index()),
+            0.0,
+            0.0,
+            None,
+        );
+        dummy.kind = LNodeKind::Label;
+        dummy.origin_edge = Some(edge_index);
+        dummy.port_constraints = PortConstraints::FixedPos;
+        dummy
+    });
     graph.layerless_nodes[dummy_index].size.height = thickness.max(0.0);
     dummy_index
 }
@@ -3968,33 +3965,34 @@ fn create_hierarchical_port_replacement_dummy(
     original_dummy: NodeId,
 ) -> ReplacementDummy {
     let original = graph.layerless_nodes[original_dummy].clone();
-    let node_index = graph.next_node_id();
-    let mut replacement = LNode::new(
-        format!("{}:replacement:{}", original.id, node_index.index()),
-        original.size.width,
-        original.size.height,
-        None,
-    );
-    replacement.kind = LNodeKind::ExternalPort;
-    replacement.margin = original.margin;
-    replacement.padding = original.padding;
-    replacement.node_label_placement = original.node_label_placement;
-    replacement.model_order = original.model_order;
-    replacement.layer_constraint = original.layer_constraint;
-    replacement.external_port_side = original.external_port_side;
-    replacement.external_port_size = original.external_port_size;
-    replacement.port_ratio_or_position = original.port_ratio_or_position;
-    replacement.replaced_external_port_dummy = Some(original_dummy);
-    replacement.in_layer_successor_constraints = original.in_layer_successor_constraints;
-    replacement.origin_port = original.origin_port;
-    replacement.origin_edge = original.origin_edge;
-    replacement.label_side = original.label_side;
-    replacement.in_layer_constraint = original.in_layer_constraint;
-    replacement.layer_constraint_explicit = original.layer_constraint_explicit;
-    replacement.compound = original.compound;
-    replacement.port_constraints = PortConstraints::FixedPos;
-    replacement.node_alignment = Alignment::Center;
-    graph.layerless_nodes.push(replacement);
+    let node_index = graph.push_node_with(|id| {
+        let mut replacement = LNode::new(
+            format!("{}:replacement:{}", original.id, id.index()),
+            original.size.width,
+            original.size.height,
+            None,
+        );
+        replacement.kind = LNodeKind::ExternalPort;
+        replacement.margin = original.margin;
+        replacement.padding = original.padding;
+        replacement.node_label_placement = original.node_label_placement;
+        replacement.model_order = original.model_order;
+        replacement.layer_constraint = original.layer_constraint;
+        replacement.external_port_side = original.external_port_side;
+        replacement.external_port_size = original.external_port_size;
+        replacement.port_ratio_or_position = original.port_ratio_or_position;
+        replacement.replaced_external_port_dummy = Some(original_dummy);
+        replacement.in_layer_successor_constraints = original.in_layer_successor_constraints;
+        replacement.origin_port = original.origin_port;
+        replacement.origin_edge = original.origin_edge;
+        replacement.label_side = original.label_side;
+        replacement.in_layer_constraint = original.in_layer_constraint;
+        replacement.layer_constraint_explicit = original.layer_constraint_explicit;
+        replacement.compound = original.compound;
+        replacement.port_constraints = PortConstraints::FixedPos;
+        replacement.node_alignment = Alignment::Center;
+        replacement
+    });
 
     let input = graph
         .add_port(
@@ -4024,17 +4022,18 @@ fn create_long_edge_dummy_node(
     target_layer_index: usize,
     edge_to_split: EdgeId,
 ) -> NodeId {
-    let dummy_index = graph.next_node_id();
-    let mut dummy = LNode::new(
-        format!("longEdge:{}:{target_layer_index}", edge_to_split.index()),
-        0.0,
-        0.0,
-        None,
-    );
-    dummy.kind = LNodeKind::LongEdge;
-    dummy.origin_edge = Some(edge_to_split);
-    dummy.port_constraints = PortConstraints::FixedPos;
-    graph.layerless_nodes.push(dummy);
+    let dummy_index = graph.push_node_with(|_| {
+        let mut dummy = LNode::new(
+            format!("longEdge:{}:{target_layer_index}", edge_to_split.index()),
+            0.0,
+            0.0,
+            None,
+        );
+        dummy.kind = LNodeKind::LongEdge;
+        dummy.origin_edge = Some(edge_to_split);
+        dummy.port_constraints = PortConstraints::FixedPos;
+        dummy
+    });
     graph.set_node_layer(dummy_index, target_layer_index);
     dummy_index
 }
