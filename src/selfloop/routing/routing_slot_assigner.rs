@@ -5,7 +5,9 @@
 use std::collections::VecDeque;
 
 use crate::graph::{LGraph, NodeId, PortSide, SelfHyperLoop, SelfLoopHolder};
-use crate::p5edges::orthogonal::{HyperEdgeGraph, HyperEdgeSegment, break_non_critical_cycles};
+use crate::phase::routing::orthogonal::{
+    HyperEdgeGraph, HyperEdgeSegment, break_non_critical_cycles,
+};
 use crate::selfloop::routing::routing_director::PortPlaces;
 
 pub(crate) fn assign_routing_slots(

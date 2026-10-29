@@ -8,7 +8,7 @@ use crate::intermediate::hierarchical_port_position_processor::{
 };
 use crate::intermediate::long_edge_joiner::first_port_on_side;
 use crate::options::PortConstraints;
-use crate::p5edges::orthogonal::{RoutingDirection, route_edges};
+use crate::phase::routing::orthogonal::{RoutingDirection, route_edges};
 
 pub fn process_hierarchical_port_orthogonal_edges(graph: &mut LGraph) {
     if graph.layers().is_empty() {

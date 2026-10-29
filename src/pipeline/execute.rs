@@ -26,7 +26,6 @@ use crate::p3order::{
     process_port_sides, sort_by_input_model, sort_port_lists,
     sweep::{CrossMinType, minimize_crossings_layer_sweep_with_type},
 };
-use crate::p5edges::route_edges_orthogonal;
 use crate::phase::cycles::{
     break_cycles_depth_first, break_cycles_greedy, break_cycles_greedy_model_order,
     break_cycles_interactive, break_cycles_model_order,
@@ -35,6 +34,7 @@ use crate::phase::layering::{layer_network_simplex, layer_with_strategy};
 use crate::phase::placement::{
     place_nodes_brandes_koepf, place_nodes_network_simplex, place_nodes_simple,
 };
+use crate::phase::routing::route_edges_orthogonal;
 use crate::selfloop::{
     postprocess_self_loops, preprocess_self_loops, restore_self_loop_ports, route_self_loops,
 };
