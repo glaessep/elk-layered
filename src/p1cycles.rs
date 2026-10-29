@@ -10,7 +10,7 @@
 
 use std::collections::VecDeque;
 
-use crate::graph::{LGraph, PortRef, reverse_edge};
+use crate::graph::{NodeId, NodeSlice, LGraph, PortRef, reverse_edge};
 use crate::options::LayerConstraint;
 
 pub fn break_cycles_depth_first(graph: &mut LGraph) {
@@ -19,7 +19,7 @@ pub fn break_cycles_depth_first(graph: &mut LGraph) {
     let mut active = vec![false; node_count];
     let mut edges_to_reverse = Vec::new();
 
-    let sources = (0..node_count)
+    let sources = graph.node_ids()
         .filter(|node| graph.node_incoming_edges(*node).is_empty())
         .collect::<Vec<_>>();
     for source in sources {
@@ -32,8 +32,8 @@ pub fn break_cycles_depth_first(graph: &mut LGraph) {
         );
     }
 
-    for node in 0..node_count {
-        if !visited[node] {
+    for node in graph.node_ids() {
+        if !visited[node.index()] {
             collect_depth_first_back_edges(
                 graph,
                 node,
@@ -50,7 +50,7 @@ pub fn break_cycles_depth_first(graph: &mut LGraph) {
 pub fn break_cycles_interactive(graph: &mut LGraph) {
     let mut rev_edges = Vec::new();
 
-    for source in 0..graph.layerless_nodes.len() {
+    for source in graph.node_ids() {
         let source_x = interactive_reference_x(graph, source);
         for edge_index in graph.node_outgoing_edges(source) {
             let target = graph.edges[edge_index].target.node;
@@ -68,8 +68,8 @@ pub fn break_cycles_interactive(graph: &mut LGraph) {
     let node_count = graph.layerless_nodes.len();
     let mut state = vec![InteractiveVisitState::Unvisited; node_count];
     let mut rev_edges = Vec::new();
-    for node in 0..node_count {
-        if state[node] == InteractiveVisitState::Unvisited {
+    for node in graph.node_ids() {
+        if state[node.index()] == InteractiveVisitState::Unvisited {
             collect_interactive_back_edges(graph, node, &mut state, &mut rev_edges);
         }
     }
@@ -96,7 +96,7 @@ fn model_order_feedback_edges(graph: &LGraph) -> Vec<usize> {
     let mut context = ModelOrderContext::default();
     let mut feedback_edges = Vec::new();
 
-    for source in 0..graph.layerless_nodes.len() {
+    for source in graph.node_ids() {
         let model_order_source = context.compute_constraint_model_order(graph, source, offset);
         for port in &graph.layerless_nodes[source].ports {
             for &edge_index in &port.outgoing_edges {
@@ -137,14 +137,14 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
     let mut sources = VecDeque::new();
     let mut sinks = VecDeque::new();
 
-    for node_index in 0..node_count {
+    for node_index in graph.node_ids() {
         for port in &graph.layerless_nodes[node_index].ports {
             for edge_index in &port.incoming_edges {
                 let edge = &graph.edges[*edge_index];
                 if edge.source.node == node_index {
                     continue;
                 }
-                indeg[node_index] += positive_priority_weight(edge.priority_direction);
+                indeg[node_index.index()] += positive_priority_weight(edge.priority_direction);
             }
 
             for edge_index in &port.outgoing_edges {
@@ -152,13 +152,13 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
                 if edge.target.node == node_index {
                     continue;
                 }
-                outdeg[node_index] += positive_priority_weight(edge.priority_direction);
+                outdeg[node_index.index()] += positive_priority_weight(edge.priority_direction);
             }
         }
 
-        if outdeg[node_index] == 0 {
+        if outdeg[node_index.index()] == 0 {
             sinks.push_back(node_index);
-        } else if indeg[node_index] == 0 {
+        } else if indeg[node_index.index()] == 0 {
             sources.push_back(node_index);
         }
     }
@@ -169,7 +169,7 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
 
     while unprocessed_node_count > 0 {
         while let Some(sink) = sinks.pop_front() {
-            mark[sink] = next_right;
+            mark[sink.index()] = next_right;
             next_right -= 1;
             update_neighbors(
                 graph,
@@ -184,7 +184,7 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
         }
 
         while let Some(source) = sources.pop_front() {
-            mark[source] = next_left;
+            mark[source.index()] = next_left;
             next_left += 1;
             update_neighbors(
                 graph,
@@ -202,9 +202,9 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
             let mut max_outflow = i32::MIN;
             let mut max_nodes = Vec::new();
 
-            for node_index in 0..node_count {
-                if mark[node_index] == 0 {
-                    let outflow = outdeg[node_index] - indeg[node_index];
+            for node_index in graph.node_ids() {
+                if mark[node_index.index()] == 0 {
+                    let outflow = outdeg[node_index.index()] - indeg[node_index.index()];
                     if outflow >= max_outflow {
                         if outflow > max_outflow {
                             max_nodes.clear();
@@ -216,7 +216,7 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
             }
 
             if let Some(max_node) = choose_node_with_max_outflow(graph, &max_nodes, choice) {
-                mark[max_node] = next_left;
+                mark[max_node.index()] = next_left;
                 next_left += 1;
                 update_neighbors(
                     graph,
@@ -241,7 +241,7 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
         }
     }
 
-    for node_index in 0..node_count {
+    for node_index in graph.node_ids() {
         // `reverse_edge` with `adapt_ports` can add a collector port to the node's list, so the
         // loop walks a copy of the ids.
         let port_ids = graph.layerless_nodes[node_index]
@@ -254,7 +254,7 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
                 .clone();
             for edge_index in outgoing_edges {
                 let target_index = graph.edges[edge_index].target.node;
-                if mark[node_index] > mark[target_index] && reverse_edge(graph, edge_index, true) {
+                if mark[node_index.index()] > mark[target_index.index()] && reverse_edge(graph, edge_index, true) {
                     graph.cyclic = true;
                 }
             }
@@ -264,52 +264,52 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
 
 fn collect_depth_first_back_edges(
     graph: &LGraph,
-    node: usize,
+    node: NodeId,
     visited: &mut [bool],
     active: &mut [bool],
     edges_to_reverse: &mut Vec<usize>,
 ) {
-    if visited[node] {
+    if visited[node.index()] {
         return;
     }
 
-    visited[node] = true;
-    active[node] = true;
+    visited[node.index()] = true;
+    active[node.index()] = true;
 
     for edge_index in graph.node_outgoing_edges(node) {
         let target = graph.edges[edge_index].target.node;
         if target == node {
             continue;
         }
-        if active[target] {
+        if active[target.index()] {
             edges_to_reverse.push(edge_index);
         } else {
             collect_depth_first_back_edges(graph, target, visited, active, edges_to_reverse);
         }
     }
 
-    active[node] = false;
+    active[node.index()] = false;
 }
 
-fn interactive_reference_x(graph: &LGraph, node: usize) -> f64 {
+fn interactive_reference_x(graph: &LGraph, node: NodeId) -> f64 {
     let node = &graph.layerless_nodes[node];
     node.position.x + node.size.width / 2.0
 }
 
 fn collect_interactive_back_edges(
     graph: &LGraph,
-    node: usize,
+    node: NodeId,
     state: &mut [InteractiveVisitState],
     edges_to_reverse: &mut Vec<usize>,
 ) {
-    state[node] = InteractiveVisitState::Active;
+    state[node.index()] = InteractiveVisitState::Active;
 
     for edge_index in graph.node_outgoing_edges(node) {
         let target = graph.edges[edge_index].target.node;
         if target == node {
             continue;
         }
-        match state[target] {
+        match state[target.index()] {
             InteractiveVisitState::Active => edges_to_reverse.push(edge_index),
             InteractiveVisitState::Unvisited => {
                 collect_interactive_back_edges(graph, target, state, edges_to_reverse);
@@ -318,7 +318,7 @@ fn collect_interactive_back_edges(
         }
     }
 
-    state[node] = InteractiveVisitState::Visited;
+    state[node.index()] = InteractiveVisitState::Visited;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,7 +338,7 @@ impl ModelOrderContext {
     fn compute_constraint_model_order(
         &mut self,
         graph: &LGraph,
-        node_index: usize,
+        node_index: NodeId,
         offset: i64,
     ) -> i64 {
         let node = &graph.layerless_nodes[node_index];
@@ -372,9 +372,9 @@ fn reverse_feedback_edges(graph: &mut LGraph, edges: Vec<usize>, mark_cyclic: bo
 
 fn choose_node_with_max_outflow(
     graph: &mut LGraph,
-    nodes: &[usize],
+    nodes: &[NodeId],
     choice: GreedyNodeChoice,
-) -> Option<usize> {
+) -> Option<NodeId> {
     if choice == GreedyNodeChoice::MinimumModelOrder
         && let Some(node) = nodes
             .iter()
@@ -395,12 +395,12 @@ fn choose_node_with_max_outflow(
 
 fn update_neighbors(
     graph: &LGraph,
-    node_index: usize,
+    node_index: NodeId,
     indeg: &mut [i32],
     outdeg: &mut [i32],
     mark: &[i32],
-    sources: &mut VecDeque<usize>,
-    sinks: &mut VecDeque<usize>,
+    sources: &mut VecDeque<NodeId>,
+    sinks: &mut VecDeque<NodeId>,
 ) {
     for (port_index, port) in graph.layerless_nodes[node_index].ports.iter_with_ids() {
         let port_ref = PortRef {
@@ -427,16 +427,16 @@ fn update_neighbors(
                 continue;
             }
 
-            if mark[endpoint_index] == 0 {
+            if mark[endpoint_index.index()] == 0 {
                 let weight = non_negative_priority_weight(edge.priority_direction);
                 if edge.target == connected_port {
-                    indeg[endpoint_index] -= weight;
-                    if indeg[endpoint_index] <= 0 && outdeg[endpoint_index] > 0 {
+                    indeg[endpoint_index.index()] -= weight;
+                    if indeg[endpoint_index.index()] <= 0 && outdeg[endpoint_index.index()] > 0 {
                         sources.push_back(endpoint_index);
                     }
                 } else {
-                    outdeg[endpoint_index] -= weight;
-                    if outdeg[endpoint_index] <= 0 && indeg[endpoint_index] > 0 {
+                    outdeg[endpoint_index.index()] -= weight;
+                    if outdeg[endpoint_index.index()] <= 0 && indeg[endpoint_index.index()] > 0 {
                         sinks.push_back(endpoint_index);
                     }
                 }
@@ -556,21 +556,21 @@ mod tests {
                 edge("C-A", "C", "A"),
             ],
         );
-        let a = graph
+        let a = NodeId::new(graph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "A")
-            .unwrap();
-        let b = graph
+            .unwrap());
+        let b = NodeId::new(graph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "B")
-            .unwrap();
-        let c = graph
+            .unwrap());
+        let c = NodeId::new(graph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "C")
-            .unwrap();
+            .unwrap());
         graph.layerless_nodes[a].model_order = Some(3);
         graph.layerless_nodes[b].model_order = Some(1);
         graph.layerless_nodes[c].model_order = Some(2);
@@ -609,16 +609,16 @@ mod tests {
     #[test]
     fn interactive_cycle_breaker_reverses_edges_against_reference_x() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("B-A", "B", "A")]);
-        let a = graph
+        let a = NodeId::new(graph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "A")
-            .unwrap();
-        let b = graph
+            .unwrap());
+        let b = NodeId::new(graph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "B")
-            .unwrap();
+            .unwrap());
         graph.layerless_nodes[a].position.x = 0.0;
         graph.layerless_nodes[b].position.x = 100.0;
 
@@ -631,16 +631,16 @@ mod tests {
     #[test]
     fn model_order_cycle_breaker_respects_first_layer_constraint() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("B-A", "B", "A")]);
-        let a = graph
+        let a = NodeId::new(graph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "A")
-            .unwrap();
-        let b = graph
+            .unwrap());
+        let b = NodeId::new(graph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "B")
-            .unwrap();
+            .unwrap());
         graph.layerless_nodes[a].model_order = Some(1);
         graph.layerless_nodes[a].layer_constraint = crate::options::LayerConstraint::First;
         graph.layerless_nodes[b].model_order = Some(0);
@@ -724,8 +724,9 @@ mod tests {
 
         break_cycles_greedy(&mut graph);
         let node_count = graph.layerless_nodes.len();
+        let all_nodes = graph.node_ids().collect();
         graph.layers.push(Layer {
-            nodes: (0..node_count).collect(),
+            nodes: all_nodes,
             size: Default::default(),
         });
         restore_reversed_edges(&mut graph);
@@ -851,17 +852,17 @@ mod tests {
 
     fn has_directed_cycle(graph: &LGraph) -> bool {
         let mut state = vec![VisitState::Unseen; graph.layerless_nodes.len()];
-        (0..graph.layerless_nodes.len()).any(|node| visit(graph, node, &mut state))
+        graph.node_ids().any(|node| visit(graph, node, &mut state))
     }
 
-    fn visit(graph: &LGraph, node: usize, state: &mut [VisitState]) -> bool {
-        match state[node] {
+    fn visit(graph: &LGraph, node: NodeId, state: &mut [VisitState]) -> bool {
+        match state[node.index()] {
             VisitState::Active => return true,
             VisitState::Done => return false,
             VisitState::Unseen => {}
         }
 
-        state[node] = VisitState::Active;
+        state[node.index()] = VisitState::Active;
         for port in &graph.layerless_nodes[node].ports {
             for edge_index in &port.outgoing_edges {
                 let edge = &graph.edges[*edge_index];
@@ -873,7 +874,7 @@ mod tests {
                 }
             }
         }
-        state[node] = VisitState::Done;
+        state[node.index()] = VisitState::Done;
         false
     }
 

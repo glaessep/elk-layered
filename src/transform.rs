@@ -4,7 +4,7 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/GraphTransformer.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/options/DirectionCongruency.java
 
-use crate::graph::{
+use crate::graph::{NodeId, NodeSlice, 
     InLayerConstraint, LGraph, LLabel, LNode, LNodeKind, LPadding, LPoint, LPort, LSize, PortSide,
 };
 use crate::options::{Alignment, DirectionCongruency, ElkDirection, ElkPadding, LayerConstraint};
@@ -1240,12 +1240,12 @@ mod tests {
     }
 
     trait TestGraphExt {
-        fn add_node_for_test(&mut self, node: LNode) -> usize;
+        fn add_node_for_test(&mut self, node: LNode) -> NodeId;
     }
 
     impl TestGraphExt for LGraph {
-        fn add_node_for_test(&mut self, mut node: LNode) -> usize {
-            let index = self.layerless_nodes.len();
+        fn add_node_for_test(&mut self, mut node: LNode) -> NodeId {
+            let index = self.next_node_id();
             node.port_constraints = PortConstraints::FixedSide;
             node.ports.push(LPort::new(
                 format!("{}:0", node.id),

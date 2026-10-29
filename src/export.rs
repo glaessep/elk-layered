@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::compound::compare_compound_segments;
 use crate::error::Error;
-use crate::graph::{
+use crate::graph::{NodeId, NodeSlice, 
     GraphArena, GraphId, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize, PortRef, PortSide,
 };
 
@@ -84,7 +84,7 @@ pub(crate) struct LayoutResult {
 }
 
 /// An `LNode` anywhere in the hierarchy: graph and node index.
-type NodeAt = (GraphId, usize);
+type NodeAt = (GraphId, NodeId);
 
 /// A port anywhere in the hierarchy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,7 +98,7 @@ struct Hierarchy<'a> {
     /// The graphs level by level, the order in which ELK collects them.
     order: Vec<GraphId>,
     /// For each graph, by slot, the graph and node index of the node it is inside.
-    parents: Vec<Option<(GraphId, usize)>>,
+    parents: Vec<Option<(GraphId, NodeId)>>,
     /// The graph of each container the caller names, by the caller's id of the node it is in.
     by_name: HashMap<&'a str, GraphId>,
 }
@@ -372,7 +372,7 @@ pub(crate) fn apply_layout(
     // The external ports of the top graph are placed first. This moves their dummies, which
     // the edges that end at them read.
     let mut scope_ports = Vec::new();
-    for index in 0..root.layerless_nodes.len() {
+    for index in root.node_ids() {
         let Some(port) = root.layerless_nodes[index].scope_port else {
             continue;
         };
@@ -472,7 +472,7 @@ fn is_original_edge(graph: &LGraph, index: usize, input: &TransferInput<'_>) -> 
     let attached = |port: PortRef, outgoing: bool| {
         graph
             .layerless_nodes
-            .get(port.node)
+            .get_node(port.node)
             .and_then(|node| node.ports.get(port.port))
             .is_some_and(|data| {
                 let list = if outgoing {
@@ -519,7 +519,7 @@ fn apply_graph_layout(
         x: graph.offset.x + graph.padding.left,
         y: graph.offset.y + graph.padding.top,
     };
-    for (index, node) in graph.layerless_nodes.iter().enumerate() {
+    for (index, node) in graph.nodes_with_ids() {
         if node.kind != LNodeKind::Normal || !input.parents.contains_key(&node.id) {
             continue;
         }
@@ -706,7 +706,7 @@ mod tests {
                 .push(LNode::new(id, 10.0, 10.0, None));
             graphs.nest(
                 GraphId::ROOT,
-                position,
+                NodeId::new(position),
                 LGraph::new(id, LayeredOptions::default()),
             );
         }
@@ -725,8 +725,8 @@ mod tests {
         };
         hierarchical_offset(
             &hierarchy,
-            (GraphId::new(1), 0),
-            (GraphId::new(2), 0),
+            (GraphId::new(1), NodeId::new(0)),
+            (GraphId::new(2), NodeId::new(0)),
             "e",
             &input,
         )

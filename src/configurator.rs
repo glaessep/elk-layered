@@ -68,6 +68,7 @@ pub fn configured_options(graph: &LGraph) -> LayeredOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::NodeId;
 
     fn arena(graph: LGraph) -> GraphArena {
         GraphArena::new(graph)
@@ -121,7 +122,7 @@ mod tests {
             .push(crate::graph::LNode::new("holder", 10.0, 10.0, None));
         let child = graphs.nest(
             GraphId::ROOT,
-            0,
+            NodeId::new(0),
             LGraph::new(
                 "child",
                 LayeredOptions {
@@ -146,7 +147,7 @@ mod tests {
             .push(crate::graph::LNode::new("holder", 10.0, 10.0, None));
         graphs.nest(
             GraphId::ROOT,
-            0,
+            NodeId::new(0),
             LGraph::new(
                 "child",
                 LayeredOptions {
@@ -179,7 +180,7 @@ mod tests {
                 .push(crate::graph::LNode::new(holder, 10.0, 10.0, None));
             let nested = graphs.nest(
                 GraphId::ROOT,
-                position,
+                NodeId::new(position),
                 LGraph::new(
                     child,
                     LayeredOptions {
@@ -198,7 +199,7 @@ mod tests {
                 ));
             graphs.nest(
                 nested,
-                0,
+                NodeId::new(0),
                 LGraph::new(
                     format!("grandchild-{}", &child[6..]),
                     LayeredOptions {

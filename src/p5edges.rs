@@ -4,7 +4,7 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p5edges/OrthogonalEdgeRouter.java
 //! - https://github.com/eclipse-elk/elk/tree/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p5edges/orthogonal
 
-use crate::graph::{LGraph, LNodeKind};
+use crate::graph::{NodeId, NodeSlice, LGraph, LNodeKind};
 use crate::options::Alignment;
 
 pub mod orthogonal;
@@ -15,7 +15,7 @@ pub fn route_edges_orthogonal(graph: &mut LGraph) {
     let edge_node_spacing = graph.options.spacing.edge_node_between_layers;
 
     let mut xpos = 0.0;
-    let mut left_layer_nodes: Option<Vec<usize>> = None;
+    let mut left_layer_nodes: Option<Vec<NodeId>> = None;
 
     for layer_index in 0..=graph.layers.len() {
         let right_layer_nodes = graph
@@ -83,7 +83,7 @@ pub fn route_edges_orthogonal(graph: &mut LGraph) {
     graph.size.width = xpos;
 }
 
-fn place_nodes_horizontally(graph: &mut LGraph, nodes: &[usize], xoffset: f64) {
+fn place_nodes_horizontally(graph: &mut LGraph, nodes: &[NodeId], xoffset: f64) {
     let max_left_margin = nodes
         .iter()
         .map(|node| graph.layerless_nodes[*node].margin.left)
@@ -118,7 +118,7 @@ fn place_nodes_horizontally(graph: &mut LGraph, nodes: &[usize], xoffset: f64) {
     }
 }
 
-fn horizontal_alignment_ratio(graph: &LGraph, node: usize) -> f64 {
+fn horizontal_alignment_ratio(graph: &LGraph, node: NodeId) -> f64 {
     let lnode = &graph.layerless_nodes[node];
     match lnode.node_alignment {
         Alignment::Left => 0.0,
@@ -144,7 +144,7 @@ fn horizontal_alignment_ratio(graph: &LGraph, node: usize) -> f64 {
     }
 }
 
-fn is_external_west_or_east_port(graph: &LGraph, node: usize) -> bool {
+fn is_external_west_or_east_port(graph: &LGraph, node: NodeId) -> bool {
     if graph.layerless_nodes[node].kind != LNodeKind::ExternalPort {
         return false;
     }
@@ -169,11 +169,11 @@ mod tests {
     #[test]
     fn orthogonal_router_places_layers_and_routes_between_them() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
-        let source = graph.layerless_nodes.len();
+        let source = graph.next_node_id();
         graph
             .layerless_nodes
             .push(LNode::new("A", 40.0, 20.0, Some(0)));
-        let target = graph.layerless_nodes.len();
+        let target = graph.next_node_id();
         let mut target_node = LNode::new("B", 40.0, 20.0, Some(1));
         target_node.position.y = 40.0;
         graph.layerless_nodes.push(target_node);
@@ -232,11 +232,11 @@ mod tests {
     #[test]
     fn orthogonal_router_centers_unconnected_nodes_in_wide_layers() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
-        let wide = graph.layerless_nodes.len();
+        let wide = graph.next_node_id();
         graph
             .layerless_nodes
             .push(LNode::new("wide", 80.0, 20.0, Some(0)));
-        let narrow = graph.layerless_nodes.len();
+        let narrow = graph.next_node_id();
         graph
             .layerless_nodes
             .push(LNode::new("narrow", 20.0, 20.0, Some(1)));

@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::{
+use crate::graph::{NodeId, NodeSlice, 
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphArena, GraphId, GraphNodeRef,
     GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep, LGraph, LLabel, LNodeKind, LPoint,
     LPort, LSize, LayeredEdge, PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy,
@@ -258,10 +258,10 @@ pub(crate) fn link_external_port_dummy(
     parent_port: PortRef,
     dummy_side: PortSide,
     dummy_graph_id: GraphId,
-    dummy_node: usize,
+    dummy_node: NodeId,
     dummy_border_offset: Option<f64>,
 ) {
-    let Some(parent_node) = parent_graph.layerless_nodes.get_mut(parent_port.node) else {
+    let Some(parent_node) = parent_graph.layerless_nodes.get_node_mut(parent_port.node) else {
         return;
     };
     let Some(parent_port_data) = parent_node.ports.get_mut(parent_port.port) else {
@@ -285,11 +285,11 @@ pub(crate) fn link_external_port_dummy(
 
 pub(crate) fn set_external_dummy_origin(
     dummy_graph: &mut LGraph,
-    dummy_node: usize,
+    dummy_node: NodeId,
     origin_graph_id: GraphId,
     origin_port: PortRef,
 ) {
-    let Some(dummy) = dummy_graph.layerless_nodes.get_mut(dummy_node) else {
+    let Some(dummy) = dummy_graph.layerless_nodes.get_node_mut(dummy_node) else {
         return;
     };
     dummy.origin_port = Some(GraphPortRef {
@@ -867,7 +867,7 @@ struct SegmentState {
 struct ExternalPort {
     original_edges: Vec<String>,
     new_edge: usize,
-    dummy_node: usize,
+    dummy_node: NodeId,
     dummy_port: PortRef,
     port_type: PortType,
     exported: bool,
@@ -880,15 +880,16 @@ struct ExternalPortKey {
 }
 
 struct GraphPortIndex {
-    nodes: HashMap<String, usize>,
-    ports: HashMap<(usize, PortType), HashMap<String, PortId>>,
+    nodes: HashMap<String, NodeId>,
+    ports: HashMap<(NodeId, PortType), HashMap<String, PortId>>,
 }
 
 impl GraphPortIndex {
     fn new(graph: &LGraph) -> Self {
         let mut nodes = HashMap::with_capacity(graph.layerless_nodes.len());
         let mut ports = HashMap::new();
-        for (node, data) in graph.layerless_nodes.iter().enumerate() {
+        for node in graph.node_ids() {
+            let data = &graph.layerless_nodes[node];
             nodes.entry(data.id.clone()).or_insert(node);
             for (port, data) in data.ports.iter_with_ids() {
                 for &port_type in lookup_types(data) {
@@ -934,16 +935,16 @@ impl GraphPortIndex {
 }
 
 struct NodePortIndex {
-    owner: usize,
+    owner: NodeId,
     ports: HashMap<PortType, HashMap<String, PortId>>,
 }
 
 impl NodePortIndex {
-    fn new(graph: &LGraph, owner: usize) -> Self {
+    fn new(graph: &LGraph, owner: NodeId) -> Self {
         let mut ports = HashMap::new();
         let node = graph
             .layerless_nodes
-            .get(owner)
+            .get_node(owner)
             .expect("compound parent node must exist while indexing its ports");
         for (port_index, port) in node.ports.iter_with_ids() {
             for &port_type in lookup_types(port) {
@@ -957,7 +958,7 @@ impl NodePortIndex {
         Self { owner, ports }
     }
 
-    fn owner(&self) -> usize {
+    fn owner(&self) -> NodeId {
         self.owner
     }
 
@@ -972,7 +973,7 @@ impl NodePortIndex {
     fn record_port(&mut self, graph: &LGraph, port: PortId) {
         let port_data = graph
             .layerless_nodes
-            .get(self.owner)
+            .get_node(self.owner)
             .and_then(|node| node.ports.get(port))
             .expect("new compound parent port must belong to the indexed owner");
         for &port_type in lookup_types(port_data) {
@@ -987,7 +988,7 @@ impl NodePortIndex {
 
 #[derive(Debug, Clone, Copy)]
 struct ExternalDummyMetadata {
-    dummy_node: usize,
+    dummy_node: NodeId,
     external_port_side: PortSide,
     border_offset: Option<f64>,
 }
@@ -1009,7 +1010,7 @@ struct CompoundEndpointPlan {
 
 impl CompoundEndpointPlan {
     fn new(graph: &LGraph, observer: &mut impl CompoundPreprocessObserver) -> Self {
-        let mut by_node = (0..graph.layerless_nodes.len())
+        let mut by_node = graph.node_ids()
             .map(|_| Vec::new())
             .collect::<Vec<_>>();
         for (edge_index, edge) in graph.edges.iter().enumerate() {
@@ -1023,10 +1024,10 @@ impl CompoundEndpointPlan {
             };
             if graph
                 .layerless_nodes
-                .get(port.node)
+                .get_node(port.node)
                 .is_some_and(|node| node.compound)
             {
-                by_node[port.node].push(CompoundEndpoint {
+                by_node[port.node.index()].push(CompoundEndpoint {
                     port,
                     edge: edge_index,
                 });
@@ -1035,9 +1036,9 @@ impl CompoundEndpointPlan {
         Self { by_node }
     }
 
-    fn for_node(&self, node_index: usize) -> &[CompoundEndpoint] {
+    fn for_node(&self, node_index: NodeId) -> &[CompoundEndpoint] {
         self.by_node
-            .get(node_index)
+            .get(node_index.index())
             .map(Vec::as_slice)
             .expect("compound endpoint plan must match the graph node arena")
     }
@@ -1055,7 +1056,7 @@ impl NestedExternalDummyIndex {
     ) -> Self {
         let dummy_id = format!("external:{parent_node_id}");
         let mut by_edge_id = HashMap::new();
-        for (dummy_node, node) in graph.layerless_nodes.iter().enumerate() {
+        for (dummy_node, node) in graph.nodes_with_ids() {
             observer.visit_endpoint_nested_node();
             if node.kind != LNodeKind::ExternalPort || node.id != dummy_id {
                 continue;
@@ -1198,7 +1199,7 @@ fn introduce_hierarchical_edge_segment(
         };
         if graph
             .layerless_nodes
-            .get(dummy_port.node)
+            .get_node(dummy_port.node)
             .is_some_and(|node| node.kind == LNodeKind::ExternalPort)
         {
             let exported = !connects_parent_node;
@@ -1477,7 +1478,11 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
     original_constraints: &[PortConstraints],
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
-    for (node_index, &parent_constraints) in original_constraints.iter().enumerate() {
+    for (node_index, &parent_constraints) in original_constraints
+        .iter()
+        .enumerate()
+        .map(|(index, constraints)| (NodeId::new(index), constraints))
+    {
         let Some(nested_graph_id) = graphs[graph_id].layerless_nodes[node_index].nested_graph
         else {
             continue;
@@ -1534,7 +1539,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
             dummy.parent_port_type = Some(port.port_type);
             let dummy_side = dummy.external_port_side;
             let dummy_border_offset = port.border_offset;
-            let dummy_node = nested_graph.layerless_nodes.len();
+            let dummy_node = nested_graph.next_node_id();
             dummy.ports[PortId::new(0)].node = dummy_node;
             nested_graph.layerless_nodes.push(dummy);
 
@@ -1553,7 +1558,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
 
 #[derive(Debug, Clone)]
 struct ExternalDummyInfo {
-    dummy_node: usize,
+    dummy_node: NodeId,
     port_type: PortType,
     parent_port_key: String,
     parent_port_type: PortType,
@@ -1592,7 +1597,7 @@ fn link_compound_external_dummy_metadata(
 
 fn link_direct_compound_external_dummy_metadata(
     graph: &mut LGraph,
-    node_index: usize,
+    node_index: NodeId,
     nested_graph: &mut LGraph,
     endpoints: &[CompoundEndpoint],
     observer: &mut impl CompoundPreprocessObserver,
@@ -1676,9 +1681,7 @@ fn external_dummies_for_parent_node(
 ) -> Vec<ExternalDummyInfo> {
     let dummy_id = format!("external:{parent_node_id}");
     nested_graph
-        .layerless_nodes
-        .iter()
-        .enumerate()
+        .nodes_with_ids()
         .filter(|(_, node)| node.kind == LNodeKind::ExternalPort && node.id == dummy_id)
         .filter_map(|(dummy_node, node)| {
             let port = node.ports.first()?;
@@ -1709,7 +1712,7 @@ fn parent_port_for_external_dummy(
         && origin_port.port.node == parent_node
         && graph
             .layerless_nodes
-            .get(parent_node)
+            .get_node(parent_node)
             .and_then(|node| node.ports.get(origin_port.port.port))
             .is_some()
     {
@@ -1730,7 +1733,7 @@ fn parent_port_for_external_dummy(
 
 fn create_parent_external_port(
     graph: &mut LGraph,
-    parent_node: usize,
+    parent_node: NodeId,
     port_type: PortType,
     port_side: PortSide,
     port_key: Option<&str>,
@@ -1857,7 +1860,7 @@ fn create_parent_boundary_port(
         parent_constraints,
         named.and_then(|named| named.port_index),
     );
-    let node = graph.layerless_nodes.len();
+    let node = graph.next_node_id();
     dummy.parent_port_key = (!parent_port_key.is_empty()).then(|| parent_port_key.to_string());
     dummy.parent_port_type = if connects_parent_node {
         Some(parent_port_type)
@@ -1877,7 +1880,7 @@ fn create_parent_boundary_port(
 /// ELK's `ElkUtil.calcPortSide` and `LGraphUtil.calcPortOffset` read these from the port they
 /// get. Here they take an `LPort`, and the caller has no such port yet.
 pub(crate) fn port_at(id: &str, x: f64, y: f64, width: f64, height: f64) -> LPort {
-    let mut port = LPort::new(id, 0, PortType::Output);
+    let mut port = LPort::new(id, NodeId::new(0), PortType::Output);
     port.position = LPoint { x, y };
     port.size = LSize { width, height };
     port
@@ -2406,11 +2409,11 @@ mod tests {
     fn compound_endpoint_link_uses_exact_port_identity_when_ids_repeat() {
         let mut graph = import_graph(&compound_fanout_graph(1)).expect("compound fixture import");
         introduce_source_ported_hierarchy_edge_segments(&mut graph);
-        let group = graph
+        let group = NodeId::new(graph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "group")
-            .expect("compound parent node");
+            .expect("compound parent node"));
         let edge_index = graph
             .edges
             .iter()
@@ -2445,9 +2448,7 @@ mod tests {
             .map(|id| &graph[id])
             .expect("compound child graph");
         let incident_dummy = nested
-            .layerless_nodes
-            .iter()
-            .enumerate()
+            .nodes_with_ids()
             .find(|(_, node)| {
                 node.kind == LNodeKind::ExternalPort
                     && node.ports.iter().any(|port| {
@@ -2803,11 +2804,11 @@ mod tests {
                 for original_offset in [None, Some(7.0), Some(-4.0)] {
                     let (mut graph, key) =
                         parent_and_crossing_edge_graph(reverse, spacing, original_offset);
-                    let group_index = graph
+                    let group_index = NodeId::new(graph
                         .layerless_nodes
                         .iter()
                         .position(|node| node.id == "group")
-                        .unwrap();
+                        .unwrap());
                     let original_port = graph.layerless_nodes[group_index]
                         .ports
                         .iter_with_ids()
@@ -2916,11 +2917,11 @@ mod tests {
             vec![edge("cluster-A", "cluster", "A")],
         ))
         .unwrap();
-        let cluster_index = lgraph
+        let cluster_index = NodeId::new(lgraph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "cluster")
-            .unwrap();
+            .unwrap());
         {
             let parent_port = &mut lgraph.layerless_nodes[cluster_index].ports[PortId::new(0)];
             parent_port.set_side(PortSide::East);
@@ -2965,11 +2966,11 @@ mod tests {
             vec![edge("cluster-A", "cluster", "A")],
         ))
         .unwrap();
-        let cluster_index = lgraph
+        let cluster_index = NodeId::new(lgraph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "cluster")
-            .unwrap();
+            .unwrap());
 
         preprocess_source_ported_compound_graph(&mut lgraph);
 
@@ -3006,11 +3007,11 @@ mod tests {
             vec![edge("S1-S2", "S1", "S2"), edge("sub1-sub4", "sub1", "sub4")],
         ))
         .unwrap();
-        let s2_index = lgraph
+        let s2_index = NodeId::new(lgraph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "S2")
-            .unwrap();
+            .unwrap());
 
         preprocess_source_ported_compound_graph(&mut lgraph);
 
@@ -3178,7 +3179,7 @@ mod tests {
                     .layerless_nodes
                     .push(crate::graph::LNode::new(child, 1.0, 1.0, None));
             }
-            lands.push(graphs.nest(GraphId::ROOT, position, nested));
+            lands.push(graphs.nest(GraphId::ROOT, NodeId::new(position), nested));
         }
         let edge = HierarchyEdge {
             id: "e".to_string(),

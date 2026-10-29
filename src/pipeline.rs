@@ -17,7 +17,7 @@ use super::options::{
 };
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::configurator::{check_random_seeds, configure_graph_properties, configured_options};
-use crate::graph::{
+use crate::graph::{NodeId, NodeSlice, 
     GraphArena, GraphId, GraphParent, LGraph, LNode, LNodeKind, LPoint, LSize, OtherGraphs,
     PortSide, is_across_flow,
 };
@@ -814,7 +814,7 @@ fn review_and_correct_hierarchical_processors(graphs: &mut GraphArena) -> Pipeli
 fn transfer_nested_graph_layout_to_parent_node(
     nested_graph: &mut LGraph,
     parent: &mut LGraph,
-    node_index: usize,
+    node_index: NodeId,
     size: LSize,
 ) {
     let has_external_ports = {
@@ -851,10 +851,10 @@ fn actual_graph_size(graph: &LGraph) -> LSize {
 
 fn transfer_external_port_dummy_layout_to_parent_node(
     nested_graph: &mut LGraph,
-    parent_node_index: usize,
+    parent_node_index: NodeId,
     parent_ports: &mut crate::graph::NodePorts,
 ) {
-    for dummy_index in 0..nested_graph.layerless_nodes.len() {
+    for dummy_index in nested_graph.node_ids() {
         if nested_graph.layerless_nodes[dummy_index].kind != LNodeKind::ExternalPort {
             continue;
         }
@@ -886,7 +886,7 @@ fn transfer_external_port_dummy_layout_to_parent_node(
 /// relative to the graph's node. It moves the dummy as well.
 pub(crate) fn external_port_position(
     graph: &mut LGraph,
-    dummy_index: usize,
+    dummy_index: NodeId,
     external_size: LSize,
 ) -> LPoint {
     let dummy_size = graph.layerless_nodes[dummy_index].size;
@@ -1664,7 +1664,7 @@ mod tests {
             holder.compound = true;
             graphs[parent].layerless_nodes.push(holder);
             let graph = LGraph::new(format!("graph-{depth}"), options.clone());
-            parent = graphs.nest(parent, 0, graph);
+            parent = graphs.nest(parent, NodeId::new(0), graph);
         }
         graphs
     }
@@ -1680,7 +1680,7 @@ mod tests {
         for branch in ["first", "second"] {
             let mut holder = LNode::new(format!("{branch}-holder"), 1.0, 1.0, None);
             holder.compound = true;
-            let position = graphs.root().layerless_nodes.len();
+            let position = graphs.root().next_node_id();
             graphs.root_mut().layerless_nodes.push(holder);
 
             let mut child = LGraph::new(format!("{branch}-child"), options.clone());
@@ -1691,7 +1691,7 @@ mod tests {
             let child = graphs.nest(GraphId::ROOT, position, child);
 
             let grandchild = LGraph::new(format!("{branch}-grandchild"), options.clone());
-            graphs.nest(child, 0, grandchild);
+            graphs.nest(child, NodeId::new(0), grandchild);
         }
         graphs
     }
@@ -1767,7 +1767,7 @@ mod tests {
             .root_mut()
             .layerless_nodes
             .push(LNode::new("holder", 1.0, 1.0, None));
-        let child = graphs.nest(GraphId::ROOT, 0, LGraph::new("child", options));
+        let child = graphs.nest(GraphId::ROOT, NodeId::new(0), LGraph::new("child", options));
         let mut run = CompoundRun::new(&graphs);
         let child_index = run
             .algorithms
@@ -2820,10 +2820,10 @@ mod tests {
                 "{separate}/{hierarchy:?}"
             );
             if separate && hierarchy == crate::options::HierarchyHandling::SeparateChildren {
-                for (index, node) in graph.layerless_nodes.iter().enumerate() {
+                for (index, node) in graph.nodes_with_ids() {
                     assert_eq!(
                         node.id,
-                        ["A", "B", "C"][index],
+                        ["A", "B", "C"][index.index()],
                         "stable input arena indices"
                     );
                     assert_eq!(
@@ -2831,7 +2831,7 @@ mod tests {
                             node.position.x + graph.offset.x,
                             node.position.y + graph.offset.y
                         ),
-                        (0.0, index as f64 * 77.0)
+                        (0.0, index.index() as f64 * 77.0)
                     );
                 }
             }
@@ -2964,7 +2964,7 @@ mod tests {
                 "root minimum is applied after packing, through the root offset"
             );
         }
-        for (index, node) in graph.layerless_nodes.iter().enumerate() {
+        for (index, node) in graph.nodes_with_ids() {
             for (port_index, port) in node.ports.iter_with_ids() {
                 assert_eq!(port.node, index);
                 for &edge in &port.incoming_edges {
@@ -3412,14 +3412,14 @@ mod tests {
         east_node.kind = LNodeKind::ExternalPort;
         east_node.external_port_side = PortSide::East;
         east_node.position.x = 12.0;
-        let east = graph.layerless_nodes.len();
+        let east = graph.next_node_id();
         graph.layerless_nodes.push(east_node);
 
         let mut south_node = LNode::new("south", 0.0, 0.0, None);
         south_node.kind = LNodeKind::ExternalPort;
         south_node.external_port_side = PortSide::South;
         south_node.position.y = 25.0;
-        let south = graph.layerless_nodes.len();
+        let south = graph.next_node_id();
         graph.layerless_nodes.push(south_node);
 
         resize_graph_no_really_i_mean_it(
@@ -3446,14 +3446,14 @@ mod tests {
         node.port_constraints = PortConstraints::Free;
         node.ports.push(crate::graph::LPort::new(
             "east".to_string(),
-            0,
+            NodeId::new(0),
             crate::graph::PortType::Output,
         ));
         node.ports[PortId::new(0)].set_side(PortSide::East);
         node.ports[PortId::new(0)].position = LPoint { x: 100.0, y: 25.0 };
         node.ports.push(crate::graph::LPort::new(
             "south".to_string(),
-            0,
+            NodeId::new(0),
             crate::graph::PortType::Output,
         ));
         node.ports[PortId::new(1)].set_side(PortSide::South);
@@ -3487,7 +3487,7 @@ mod tests {
         node.port_constraints = PortConstraints::FixedPos;
         node.ports.push(crate::graph::LPort::new(
             "external".to_string(),
-            0,
+            NodeId::new(0),
             crate::graph::PortType::Input,
         ));
         node.ports[PortId::new(0)].set_side(PortSide::West);
@@ -3613,7 +3613,7 @@ mod tests {
         );
         nested.parent = Some(GraphParent {
             graph: GraphId::ROOT,
-            node: 0,
+            node: NodeId::new(0),
         });
         assert!(
             !graph_kinds(&nested)
@@ -3621,8 +3621,8 @@ mod tests {
         );
     }
 
-    fn push_test_external_dummy(graph: &mut LGraph, id: &str, side: PortSide) -> usize {
-        let node = graph.layerless_nodes.len();
+    fn push_test_external_dummy(graph: &mut LGraph, id: &str, side: PortSide) -> NodeId {
+        let node = graph.next_node_id();
         let mut dummy = LNode::new(id, 0.0, 0.0, None);
         dummy.kind = LNodeKind::ExternalPort;
         dummy.external_port_side = side;

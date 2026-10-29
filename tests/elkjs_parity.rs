@@ -312,7 +312,7 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    (`if false && rects[first].x + ...`), so every cell overlaps every other and they all stack:
 //    7 cases, such as random/r030, random/r057, random-group-ends/r004.
 // 4. In `hide_ports` (src/selfloops.rs), split off no hidden ports
-//    (`node.ports.split_off(node.ports.len())`), so they stay on the node: 12 cases, such as
+//    (`node.ports.split_off(node.ports.len())`), so they stay on the node: NodeId::new(12) cases, such as
 //    random/r000, random/r038, random-group-ends/r029.
 // 5. In `create_east_port_side_dummy` and `create_west_port_side_dummy`, call
 //    `set_dummy_node_properties` instead of `set_inverted_port_dummy_long_edge_ports`: 1 case,

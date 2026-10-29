@@ -14,7 +14,7 @@
 //! ELK also sets `CROSSING_HINT` on each dummy. Nothing in ELK reads it at this commit, so it has
 //! no field here.
 
-use crate::graph::{
+use crate::graph::{NodeId, NodeSlice, 
     GraphNodeRef, LGraph, LNode, LNodeKind, LPoint, LPort, PortRef, PortSide, PortType,
 };
 use crate::options::PortConstraints;
@@ -105,7 +105,7 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
 }
 
 /// Whether the port a dummy was made for may switch sides.
-fn origin_allows_side_switch(graph: &LGraph, dummy: usize) -> bool {
+fn origin_allows_side_switch(graph: &LGraph, dummy: NodeId) -> bool {
     graph.layerless_nodes[dummy]
         .ports
         .first()
@@ -116,7 +116,7 @@ fn origin_allows_side_switch(graph: &LGraph, dummy: usize) -> bool {
         })
 }
 
-fn insert_into_layer(graph: &mut LGraph, node: usize, layer_index: usize, index: usize) {
+fn insert_into_layer(graph: &mut LGraph, node: NodeId, layer_index: usize, index: usize) {
     graph.layers[layer_index].nodes.insert(index, node);
     graph.layerless_nodes[node].layer_index = Some(layer_index);
 }
@@ -124,7 +124,7 @@ fn insert_into_layer(graph: &mut LGraph, node: usize, layer_index: usize, index:
 /// Ports `NorthSouthPortPreprocessor.sortPortList`: ports with only incoming edges end up left,
 /// ports with only outgoing edges end up right, and ports with both end up in between. Ports on
 /// the eastern and western sides keep their order.
-fn sort_port_list(graph: &mut LGraph, node: usize) {
+fn sort_port_list(graph: &mut LGraph, node: NodeId) {
     let ports = &graph.layerless_nodes[node].ports;
     let port_count = ports.len() as i64;
 
@@ -179,7 +179,8 @@ fn sort_port_list(graph: &mut LGraph, node: usize) {
     let order = order.into_iter().map(|position| port_ids[position]);
     assert!(
         graph.reorder_node_ports(node, order),
-        "the sorted port order of node {node} is not a permutation of its ports"
+        "the sorted port order of node {} is not a permutation of its ports",
+        node.index()
     );
 }
 
@@ -191,8 +192,8 @@ fn sort_port_list(graph: &mut LGraph, node: usize) {
 fn create_dummy_nodes(
     graph: &mut LGraph,
     ports: &[PortRef],
-    barycenter_associates: &mut Vec<usize>,
-) -> Vec<usize> {
+    barycenter_associates: &mut Vec<NodeId>,
+) -> Vec<NodeId> {
     let mut in_ports = Vec::new();
     let mut out_ports = Vec::new();
     let mut in_out_ports = Vec::new();
@@ -236,9 +237,9 @@ fn create_dummy_node(
     graph: &mut LGraph,
     in_port: Option<PortRef>,
     out_port: Option<PortRef>,
-) -> usize {
-    let dummy_index = graph.layerless_nodes.len();
-    let mut dummy = LNode::new(format!("northSouthPort:{dummy_index}"), 0.0, 0.0, None);
+) -> NodeId {
+    let dummy_index = graph.next_node_id();
+    let mut dummy = LNode::new(format!("northSouthPort:{}", dummy_index.index()), 0.0, 0.0, None);
     dummy.kind = LNodeKind::NorthSouthPort;
     dummy.port_constraints = PortConstraints::FixedPos;
     graph.layerless_nodes.push(dummy);
@@ -278,7 +279,7 @@ fn create_dummy_node(
 
 fn push_dummy_port(
     graph: &mut LGraph,
-    dummy: usize,
+    dummy: NodeId,
     port_type: PortType,
     side: PortSide,
 ) -> PortRef {
@@ -420,8 +421,8 @@ mod tests {
         constraints: PortConstraints,
         sides: &[PortSide],
         layer: usize,
-    ) -> usize {
-        let index = graph.layerless_nodes.len();
+    ) -> NodeId {
+        let index = graph.next_node_id();
         let mut node = LNode::new(id, 40.0, 20.0, None);
         node.port_constraints = constraints;
         for (position, side) in sides.iter().enumerate() {
@@ -434,7 +435,7 @@ mod tests {
         index
     }
 
-    fn port(node: usize, port: usize) -> PortRef {
+    fn port(node: NodeId, port: usize) -> PortRef {
         PortRef {
             node,
             port: PortId::new(port),
@@ -467,7 +468,7 @@ mod tests {
     }
 
     /// A free-standing node in layer 0 with an east and a west port, to connect the tests' edges.
-    fn neighbour(graph: &mut LGraph, id: &str) -> usize {
+    fn neighbour(graph: &mut LGraph, id: &str) -> NodeId {
         add_node(
             graph,
             id,
@@ -477,11 +478,11 @@ mod tests {
         )
     }
 
-    fn layer(graph: &LGraph, index: usize) -> Vec<usize> {
+    fn layer(graph: &LGraph, index: usize) -> Vec<NodeId> {
         graph.layers[index].nodes.clone()
     }
 
-    fn dummy_of(graph: &LGraph, node: usize, port: usize) -> usize {
+    fn dummy_of(graph: &LGraph, node: NodeId, port: usize) -> NodeId {
         graph.layerless_nodes[node].ports[PortId::new(port)]
             .port_dummy
             .as_ref()
@@ -878,7 +879,7 @@ mod tests {
 
     /// Runs the pre-processor on a node with one north port and a neighbour on each side, places
     /// the dummy and the node, and returns the graph, the node and the dummy.
-    fn placed_graph(incoming: bool, outgoing: bool) -> (LGraph, usize, usize, Vec<usize>) {
+    fn placed_graph(incoming: bool, outgoing: bool) -> (LGraph, NodeId, NodeId, Vec<usize>) {
         let mut graph = graph();
         let neighbour = neighbour(&mut graph, "n");
         let node = add_node(
@@ -993,7 +994,7 @@ mod tests {
     fn a_dummy_whose_ports_stand_for_different_ports_gets_no_junction_points() {
         let (mut graph, node, dummy, edges) = placed_graph(true, false);
         // A second port on the dummy, made for the neighbour's port.
-        let neighbour = 0;
+        let neighbour = NodeId::new(0);
         let extra = push_dummy_port(&mut graph, dummy, PortType::Output, PortSide::East);
         graph.layerless_nodes[dummy].ports[extra.port].origin_port = Some(port(neighbour, 0));
         let second = connect(&mut graph, extra, port(neighbour, 1));

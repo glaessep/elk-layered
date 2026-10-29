@@ -4,10 +4,11 @@
 //! Priority-queue ties follow the GWT `java.util.PriorityQueue` emitted in elkjs 0.9.3.
 //! Those ties are observable in node order, so a Rust heap's unspecified tie order is unsuitable.
 
+use crate::graph::NodeId;
 use super::{LayeringError, LayeringInput, LayeringResult};
 use std::cmp::Ordering;
 
-pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>> {
+pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>>> {
     if input.nodes.is_empty() {
         return Ok(Vec::new());
     }
@@ -18,33 +19,33 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>
     // Source transitive reduction marks edges; it does not remove them from the graph.
     for &start in &input.nodes {
         visited.fill(false);
-        for &edge in &input.outgoing[start] {
+        for &edge in &input.outgoing[start.index()] {
             let root = input.target(edge);
-            if visited[root] {
+            if visited[root.index()] {
                 continue;
             }
-            active[root] = true;
+            active[root.index()] = true;
             stack.push((root, 0usize));
             while let Some((node, cursor)) = stack.last_mut() {
-                if let Some(&edge) = input.outgoing[*node].get(*cursor) {
+                if let Some(&edge) = input.outgoing[(*node).index()].get(*cursor) {
                     *cursor += 1;
                     let next = input.target(edge);
-                    for &transitive in &input.incoming[next] {
+                    for &transitive in &input.incoming[next.index()] {
                         if input.source(transitive) == start {
                             marked_edges[transitive] = true;
                         }
                     }
-                    if active[next] {
+                    if active[next.index()] {
                         return Err(LayeringError::CyclicGraph);
                     }
-                    if !visited[next] {
-                        active[next] = true;
+                    if !visited[next.index()] {
+                        active[next.index()] = true;
                         stack.push((next, 0));
                     }
                 } else {
                     let (node, _) = stack.pop().expect("the DFS frame exists");
-                    visited[node] = true;
-                    active[node] = false;
+                    visited[node.index()] = true;
+                    active[node.index()] = false;
                 }
             }
         }
@@ -55,32 +56,32 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>
     let mut topological = vec![0usize; input.len()];
     let mut sources = Vec::new();
     for &node in &input.nodes {
-        incoming[node] = input.incoming[node]
+        incoming[node.index()] = input.incoming[node.index()]
             .iter()
             .filter(|&&edge| !marked_edges[edge])
             .count();
-        if incoming[node] == 0 {
+        if incoming[node.index()] == 0 {
             push(&mut sources, node, |a, b| {
-                compare_topology(&predecessors[a], &predecessors[b])
+                compare_topology(&predecessors[a.index()], &predecessors[b.index()])
             });
         }
     }
     let mut count = 0;
     while let Some(node) = pop(&mut sources, |a, b| {
-        compare_topology(&predecessors[a], &predecessors[b])
+        compare_topology(&predecessors[a.index()], &predecessors[b.index()])
     }) {
-        topological[node] = count;
+        topological[node.index()] = count;
         count += 1;
-        for &edge in &input.outgoing[node] {
+        for &edge in &input.outgoing[node.index()] {
             if marked_edges[edge] {
                 continue;
             }
             let next = input.target(edge);
-            incoming[next] -= 1;
-            predecessors[next].push(topological[node]);
-            if incoming[next] == 0 {
+            incoming[next.index()] -= 1;
+            predecessors[next.index()].push(topological[node.index()]);
+            if incoming[next.index()] == 0 {
                 push(&mut sources, next, |a, b| {
-                    compare_topology(&predecessors[a], &predecessors[b])
+                    compare_topology(&predecessors[a.index()], &predecessors[b.index()])
                 });
             }
         }
@@ -92,38 +93,38 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>
     let mut outgoing = vec![0usize; input.len()];
     let mut sinks = Vec::new();
     for &node in &input.nodes {
-        outgoing[node] = input.outgoing[node]
+        outgoing[node.index()] = input.outgoing[node.index()]
             .iter()
             .filter(|&&edge| !marked_edges[edge])
             .count();
-        if outgoing[node] == 0 {
-            push(&mut sinks, node, |a, b| topological[b].cmp(&topological[a]));
+        if outgoing[node.index()] == 0 {
+            push(&mut sinks, node, |a, b| topological[b.index()].cmp(&topological[a.index()]));
         }
     }
-    let mut layers: Vec<Vec<usize>> = vec![Vec::new()];
+    let mut layers: Vec<Vec<NodeId>> = vec![Vec::new()];
     let mut assigned = vec![None; input.len()];
     let bound = input.graph.options.layering_coffman_graham_layer_bound;
-    while let Some(node) = pop(&mut sinks, |a, b| topological[b].cmp(&topological[a])) {
+    while let Some(node) = pop(&mut sinks, |a, b| topological[b.index()].cmp(&topological[a.index()])) {
         let mut layer = layers.len() - 1;
         if layers[layer].len() as i64 >= i64::from(bound)
-            || input.outgoing[node]
+            || input.outgoing[node.index()]
                 .iter()
-                .any(|&edge| assigned[input.target(edge)] == Some(layer))
+                .any(|&edge| assigned[input.target(edge).index()] == Some(layer))
         {
             layers.push(Vec::new());
             layer += 1;
         }
-        assigned[node] = Some(layer);
+        assigned[node.index()] = Some(layer);
         layers[layer].push(node);
-        for &edge in &input.incoming[node] {
+        for &edge in &input.incoming[node.index()] {
             if marked_edges[edge] {
                 continue;
             }
             let source = input.source(edge);
-            outgoing[source] -= 1;
-            if outgoing[source] == 0 {
+            outgoing[source.index()] -= 1;
+            if outgoing[source.index()] == 0 {
                 push(&mut sinks, source, |a, b| {
-                    topological[b].cmp(&topological[a])
+                    topological[b.index()].cmp(&topological[a.index()])
                 });
             }
         }
@@ -154,7 +155,7 @@ fn compare_topology(left: &[usize], right: &[usize]) -> Ordering {
     }
 }
 
-fn push(heap: &mut Vec<usize>, value: usize, mut compare: impl FnMut(usize, usize) -> Ordering) {
+fn push(heap: &mut Vec<NodeId>, value: NodeId, mut compare: impl FnMut(NodeId, NodeId) -> Ordering) {
     let mut cursor = heap.len();
     heap.push(value);
     while cursor > 0 {
@@ -168,7 +169,7 @@ fn push(heap: &mut Vec<usize>, value: usize, mut compare: impl FnMut(usize, usiz
     heap[cursor] = value;
 }
 
-fn pop(heap: &mut Vec<usize>, mut compare: impl FnMut(usize, usize) -> Ordering) -> Option<usize> {
+fn pop(heap: &mut Vec<NodeId>, mut compare: impl FnMut(NodeId, NodeId) -> Ordering) -> Option<NodeId> {
     let result = *heap.first()?;
     let value = heap.pop().expect("the heap is nonempty");
     if !heap.is_empty() {

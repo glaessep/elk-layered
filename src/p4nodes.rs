@@ -10,13 +10,13 @@ pub mod network_simplex;
 pub mod simple;
 
 use crate::common::nodespacing;
-use crate::graph::{InLayerConstraint, LGraph, LNodeKind};
+use crate::graph::{InLayerConstraint, LGraph, LNodeKind, NodeId};
 
 pub use bk::place_nodes_brandes_koepf;
 pub use network_simplex::place_nodes_network_simplex;
 pub use simple::place_nodes_simple;
 
-pub(crate) fn vertical_spacing(graph: &LGraph, first: usize, second: usize) -> f64 {
+pub(crate) fn vertical_spacing(graph: &LGraph, first: NodeId, second: NodeId) -> f64 {
     use LNodeKind::*;
 
     match (
@@ -190,7 +190,7 @@ mod tests {
             node_label_placement: None,
         });
         graph.layerless_nodes.push(dummy);
-        graph.set_node_layer(0, 0);
+        graph.set_node_layer(NodeId::new(0), 0);
 
         calculate_innermost_node_margins(&mut graph);
 
@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn in_layer_constraint_processor_moves_top_and_bottom_nodes() {
         let mut graph = graph(vec![node("A"), node("B"), node("C"), node("D")], vec![]);
-        for index in 0..graph.layerless_nodes.len() {
+        for index in graph.node_ids() {
             graph.set_node_layer(index, 0);
         }
         graph.layerless_nodes[2].in_layer_constraint = InLayerConstraint::Top;
@@ -219,16 +219,16 @@ mod tests {
     #[test]
     fn label_and_node_size_processor_delegates_common_node_spacing() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("A-B", "A", "B")]);
-        let a = graph
+        let a = NodeId::new(graph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "A")
-            .unwrap();
-        let b = graph
+            .unwrap());
+        let b = NodeId::new(graph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "B")
-            .unwrap();
+            .unwrap());
         graph.set_node_layer(a, 0);
         graph.set_node_layer(b, 1);
         graph.layerless_nodes[a].ports[PortId::new(0)].set_side(PortSide::East);

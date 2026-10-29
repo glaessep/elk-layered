@@ -1,6 +1,7 @@
 //! Stretch-width layering translated from Eclipse ELK, EPL-2.0:
 //! https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/StretchWidthLayerer.java
 
+use crate::graph::NodeId;
 use super::{LayeringError, LayeringInput, LayeringResult};
 use crate::graph::LNodeKind;
 use std::cmp::Reverse;
@@ -15,7 +16,7 @@ use std::cmp::Reverse;
 /// The bound turns that case into an error and changes no layering ELK completes.
 const MAX_WIDTH_RETRIES: usize = 1_000_000;
 
-pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>> {
+pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>>> {
     if input.nodes.is_empty() {
         return Ok(Vec::new());
     }
@@ -26,13 +27,13 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>
     let mut maximum = f64::NEG_INFINITY;
     let mut total_outgoing = 0.0;
     for &node in &input.nodes {
-        outgoing[node] = input.outgoing[node].len();
-        incoming[node] = input.incoming[node].len();
-        ranks[node] = input.incoming[node]
+        outgoing[node.index()] = input.outgoing[node.index()].len();
+        incoming[node.index()] = input.incoming[node.index()].len();
+        ranks[node.index()] = input.incoming[node.index()]
             .iter()
-            .map(|&edge| input.outgoing[input.source(edge)].len())
-            .fold(outgoing[node], usize::max);
-        total_outgoing += outgoing[node] as f64;
+            .map(|&edge| input.outgoing[input.source(edge).index()].len())
+            .fold(outgoing[node.index()], usize::max);
+        total_outgoing += outgoing[node.index()] as f64;
         let data = &input.graph.layerless_nodes[node];
         if data.kind == LNodeKind::Normal {
             minimum = minimum.min(data.size.height);
@@ -40,14 +41,14 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>
         }
     }
     let mut nodes = input.nodes.clone();
-    nodes.sort_by_key(|&node| Reverse(ranks[node]));
+    nodes.sort_by_key(|&node| Reverse(ranks[node.index()]));
     // ELK normalizes nodes before clamping the minimum to one. A zero minimum together with a
     // positive height makes the adaptive retry loop infinite. Keep the all-zero case's NaN
     // comparisons (both Java and JavaScript treat them as false), but reject infinite sizes.
     let mut sizes = vec![0.0; input.len()];
     for &node in &nodes {
-        sizes[node] = input.graph.layerless_nodes[node].size.height / minimum;
-        if sizes[node].is_infinite() {
+        sizes[node.index()] = input.graph.layerless_nodes[node].size.height / minimum;
+        if sizes[node.index()].is_infinite() {
             return Err(LayeringError::InvalidStretchWidthDimensions);
         }
     }
@@ -58,18 +59,18 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>
     let influence = total_outgoing / nodes.len() as f64;
     let mut remaining = nodes.clone();
     let mut remaining_outgoing = outgoing.clone();
-    let mut layers: Vec<Vec<usize>> = vec![Vec::new()];
+    let mut layers: Vec<Vec<NodeId>> = vec![Vec::new()];
     let mut width_current = 0.0;
     let mut width_up = 0.0;
     let mut retries = 0;
     while !remaining.is_empty() {
         let selected = remaining
             .iter()
-            .position(|&node| remaining_outgoing[node] == 0);
+            .position(|&node| remaining_outgoing[node.index()] == 0);
         let go_up = selected.is_some_and(|index| {
             let node = remaining[index];
-            width_current - outgoing[node] as f64 * dummy_size + sizes[node] > max_width
-                || width_up + incoming[node] as f64 * dummy_size
+            width_current - outgoing[node.index()] as f64 * dummy_size + sizes[node.index()] > max_width
+                || width_up + incoming[node.index()] as f64 * dummy_size
                     > max_width * influence * dummy_size
         });
         let current = layers.last_mut().expect("the initial layer exists");
@@ -78,8 +79,8 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>
                 return Err(LayeringError::CyclicGraph);
             }
             for &node in current.iter() {
-                for &edge in &input.incoming[node] {
-                    remaining_outgoing[input.source(edge)] -= 1;
+                for &edge in &input.incoming[node.index()] {
+                    remaining_outgoing[input.source(edge).index()] -= 1;
                 }
             }
             layers.push(Vec::new());
@@ -109,8 +110,8 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<usize>>
             };
             let node = remaining.remove(selected);
             current.push(node);
-            width_current = width_current - outgoing[node] as f64 * dummy_size + sizes[node];
-            width_up += incoming[node] as f64 * dummy_size;
+            width_current = width_current - outgoing[node.index()] as f64 * dummy_size + sizes[node.index()];
+            width_up += incoming[node.index()] as f64 * dummy_size;
         }
     }
     layers.reverse();

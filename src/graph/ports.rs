@@ -248,12 +248,12 @@ pub(crate) fn port_ids<const N: usize>(numbers: [usize; N]) -> [PortId; N] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::PortType;
+    use crate::graph::{NodeId, PortType};
 
     fn ports(names: &[&str]) -> NodePorts {
         let mut ports = NodePorts::default();
         for name in names {
-            ports.push(LPort::new(*name, 0, PortType::Input));
+            ports.push(LPort::new(*name, NodeId::new(0), PortType::Input));
         }
         ports
     }
@@ -323,7 +323,7 @@ mod tests {
         let mut ports = ports(&["a", "b", "c"]);
 
         ports.unlist(&port_ids([1]));
-        let d = ports.push(LPort::new("d", 0, PortType::Input));
+        let d = ports.push(LPort::new("d", NodeId::new(0), PortType::Input));
 
         assert_eq!(names(&ports), ["a", "c", "d"]);
         assert_eq!(d, PortId::new(3));

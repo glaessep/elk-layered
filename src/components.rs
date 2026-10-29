@@ -10,7 +10,7 @@
 
 mod group;
 
-use crate::graph::{GraphArena, GraphId, LGraph, LLabel, LNodeKind, LPoint, LSize, PortRef};
+use crate::graph::{NodeId, NodeSlice, GraphArena, GraphId, LGraph, LLabel, LNodeKind, LPoint, LSize, PortRef};
 use crate::options::{HierarchyHandling, PortConstraints};
 use crate::pipeline::PipelineResult;
 
@@ -26,7 +26,7 @@ pub enum ComponentError {
 
 pub(crate) struct Component {
     pub(crate) graph: LGraph,
-    original_nodes: Vec<usize>,
+    original_nodes: Vec<NodeId>,
     original_edges: Vec<usize>,
     priority: i32,
     /// The sides of the external ports the component joins (ELK's `EXT_PORT_CONNECTIONS`), as
@@ -55,10 +55,10 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
     }
     let node_count = graph.layerless_nodes.len();
     let mut owners = vec![usize::MAX; node_count];
-    let mut groups = Vec::<Vec<usize>>::new();
+    let mut groups = Vec::<Vec<NodeId>>::new();
     let mut stack = Vec::new();
-    for start in 0..node_count {
-        if owners[start] != usize::MAX {
+    for start in graph.node_ids() {
+        if owners[start.index()] != usize::MAX {
             continue;
         }
         let owner = groups.len();
@@ -68,15 +68,15 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
             let node =
                 graph
                     .layerless_nodes
-                    .get(index)
+                    .get_node(index)
                     .ok_or(ComponentError::InvalidReference {
                         kind: "node",
-                        index,
+                        index: index.index(),
                     })?;
-            if owners[index] != usize::MAX {
+            if owners[index.index()] != usize::MAX {
                 continue;
             }
-            owners[index] = owner;
+            owners[index.index()] = owner;
             nodes.push(index);
             // LPort.getConnectedPorts visits incoming then outgoing edges; reverse the
             // pushes so this iterative traversal retains the source recursive DFS order.
@@ -136,15 +136,15 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
         .collect::<Vec<_>>();
     for (index, edge) in graph.edges.iter().enumerate() {
         let owner = *owners
-            .get(edge.source.node)
+            .get(edge.source.node.index())
             .ok_or(ComponentError::InvalidReference {
                 kind: "source node",
-                index: edge.source.node,
+                index: edge.source.node.index(),
             })?;
-        if owners.get(edge.target.node) != Some(&owner) {
+        if owners.get(edge.target.node.index()) != Some(&owner) {
             return Err(ComponentError::InvalidReference {
                 kind: "target node",
-                index: edge.target.node,
+                index: edge.target.node.index(),
             }
             .into());
         }
@@ -171,11 +171,11 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
     }
     // Reuse the global maps across components: clearing only each component's entries
     // keeps this O(V + E), including a graph made entirely of isolated nodes.
-    let mut node_map = vec![usize::MAX; node_count];
+    let mut node_map = vec![None; node_count];
     let mut edge_map = vec![usize::MAX; graph.edges.len()];
     for component in &mut components {
         for (local, &original) in component.original_nodes.iter().enumerate() {
-            node_map[original] = local;
+            node_map[original.index()] = Some(NodeId::new(local));
         }
         for (local, &original) in component.original_edges.iter().enumerate() {
             edge_map[original] = local;
@@ -184,7 +184,7 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
         remap_nested_references(graphs, &component.graph, &node_map, &edge_map)?;
         component.graph.clear_layers();
         for &original in &component.original_nodes {
-            node_map[original] = usize::MAX;
+            node_map[original.index()] = None;
         }
         for &original in &component.original_edges {
             edge_map[original] = usize::MAX;
@@ -193,8 +193,51 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
     Ok(Some(components))
 }
 
-fn component_owner(owners: &[usize], node: usize) -> Result<usize, ComponentError> {
-    map_index(owners, node, "node")
+fn component_owner(owners: &[usize], node: NodeId) -> Result<usize, ComponentError> {
+    owners
+        .get(node.index())
+        .copied()
+        .filter(|&owner| owner != usize::MAX)
+        .ok_or(ComponentError::InvalidReference {
+            kind: "node",
+            index: node.index(),
+        })
+}
+
+fn map_node(
+    map: &[Option<NodeId>],
+    id: NodeId,
+    kind: &'static str,
+) -> Result<NodeId, ComponentError> {
+    map.get(id.index())
+        .copied()
+        .flatten()
+        .ok_or(ComponentError::InvalidReference {
+            kind,
+            index: id.index(),
+        })
+}
+
+fn map_optional_node(
+    value: &mut Option<NodeId>,
+    map: &[Option<NodeId>],
+    kind: &'static str,
+) -> Result<(), ComponentError> {
+    if let Some(id) = value {
+        *id = map_node(map, *id, kind)?;
+    }
+    Ok(())
+}
+
+fn map_node_list(
+    values: &mut [NodeId],
+    map: &[Option<NodeId>],
+    kind: &'static str,
+) -> Result<(), ComponentError> {
+    for id in values {
+        *id = map_node(map, *id, kind)?;
+    }
+    Ok(())
 }
 
 fn map_index(map: &[usize], index: usize, kind: &'static str) -> Result<usize, ComponentError> {
@@ -222,8 +265,8 @@ fn map_list(values: &mut [usize], map: &[usize], kind: &'static str) -> Result<(
     Ok(())
 }
 
-fn map_port(port: &mut PortRef, nodes: &[usize]) -> Result<(), ComponentError> {
-    port.node = map_index(nodes, port.node, "port node")?;
+fn map_port(port: &mut PortRef, nodes: &[Option<NodeId>]) -> Result<(), ComponentError> {
+    port.node = map_node(nodes, port.node, "port node")?;
     Ok(())
 }
 
@@ -238,18 +281,18 @@ fn map_labels(labels: &mut [LLabel], edges: &[usize]) -> Result<(), ComponentErr
 /// Port ids are node-local and are deliberately unchanged.
 fn remap_references(
     graph: &mut LGraph,
-    nodes: &[usize],
+    nodes: &[Option<NodeId>],
     edges: &[usize],
 ) -> Result<(), ComponentError> {
     for node in &mut graph.layerless_nodes {
-        map_optional(
+        map_optional_node(
             &mut node.replaced_external_port_dummy,
             nodes,
             "replaced dummy",
         )?;
-        map_list(&mut node.in_layer_successor_constraints, nodes, "successor")?;
-        map_optional(&mut node.in_layer_layout_unit, nodes, "layout unit")?;
-        map_list(
+        map_node_list(&mut node.in_layer_successor_constraints, nodes, "successor")?;
+        map_optional_node(&mut node.in_layer_layout_unit, nodes, "layout unit")?;
+        map_node_list(
             &mut node.barycenter_associates,
             nodes,
             "barycenter associate",
@@ -264,8 +307,8 @@ fn remap_references(
         map_labels(&mut node.labels, edges)?;
         map_labels(&mut node.represented_labels, edges)?;
         for port in node.ports.slots_mut() {
-            port.node = map_index(nodes, port.node, "port owner")?;
-            map_optional(&mut port.long_edge_target_node, nodes, "long edge target")?;
+            port.node = map_node(nodes, port.node, "port owner")?;
+            map_optional_node(&mut port.long_edge_target_node, nodes, "long edge target")?;
             if let Some(origin) = &mut port.origin_port {
                 map_port(origin, nodes)?;
             }
@@ -283,16 +326,16 @@ fn remap_references(
         map_labels(&mut edge.labels, edges)?;
     }
     for layer in &mut graph.layers {
-        map_list(&mut layer.nodes, nodes, "layer node")?;
+        map_node_list(&mut layer.nodes, nodes, "layer node")?;
     }
-    map_list(&mut graph.hidden_nodes, nodes, "hidden node")?;
-    map_list(
+    map_node_list(&mut graph.hidden_nodes, nodes, "hidden node")?;
+    map_node_list(
         &mut graph.replaced_external_port_dummies,
         nodes,
         "external dummy",
     )?;
     for holder in &mut graph.self_loop_holders {
-        holder.node = map_index(nodes, holder.node, "self loop owner")?;
+        holder.node = map_node(nodes, holder.node, "self loop owner")?;
         for hyper_loop in &mut holder.hyper_loops {
             for edge in &mut hyper_loop.edges {
                 edge.edge = map_index(edges, edge.edge, "self loop edge")?;
@@ -313,7 +356,7 @@ fn remap_references(
 fn remap_nested_references(
     graphs: &mut GraphArena,
     graph: &LGraph,
-    nodes: &[usize],
+    nodes: &[Option<NodeId>],
     edges: &[usize],
 ) -> Result<(), ComponentError> {
     let nested = graph
@@ -332,7 +375,7 @@ fn remap_nested_references(
 fn remap_graph_references(
     current: &mut LGraph,
     graph_id: GraphId,
-    nodes: &[usize],
+    nodes: &[Option<NodeId>],
     edges: &[usize],
 ) -> Result<(), ComponentError> {
     for node in &mut current.layerless_nodes {
@@ -345,7 +388,7 @@ fn remap_graph_references(
             if let Some(dummy) = &mut port.port_dummy
                 && dummy.graph_id == graph_id
             {
-                dummy.node = map_index(nodes, dummy.node, "graph port dummy")?;
+                dummy.node = map_node(nodes, dummy.node, "graph port dummy")?;
             }
         }
     }
@@ -505,17 +548,18 @@ pub(crate) fn combine(
     for mut component in components {
         let mut node_map = component.original_nodes;
         let added_nodes = component.graph.layerless_nodes.len() - node_map.len();
-        node_map.extend(next_node..next_node + added_nodes);
+        node_map.extend((next_node..next_node + added_nodes).map(NodeId::new));
         next_node += added_nodes;
         let mut edge_map = component.original_edges;
         let added_edges = component.graph.edges.len() - edge_map.len();
         edge_map.extend(next_edge..next_edge + added_edges);
         next_edge += added_edges;
         component.graph.clear_layers();
-        remap_references(&mut component.graph, &node_map, &edge_map)?;
-        remap_nested_references(graphs, &component.graph, &node_map, &edge_map)?;
+        let node_lookup = node_map.iter().copied().map(Some).collect::<Vec<_>>();
+        remap_references(&mut component.graph, &node_lookup, &edge_map)?;
+        remap_nested_references(graphs, &component.graph, &node_lookup, &edge_map)?;
         for (index, node) in node_map.into_iter().zip(component.graph.layerless_nodes) {
-            nodes[index] = Some(node);
+            nodes[index.index()] = Some(node);
         }
         for (index, edge) in edge_map.into_iter().zip(component.graph.edges) {
             edges[index] = Some(edge);
@@ -583,18 +627,18 @@ mod tests {
         dummy.kind = LNodeKind::NorthSouthPort;
         graph.layerless_nodes.push(dummy);
         let north = graph
-            .add_port(1, PortType::Input, PortSide::North, LPoint::default())
+            .add_port(NodeId::new(1), PortType::Input, PortSide::North, LPoint::default())
             .unwrap();
         let west = graph
-            .add_port(1, PortType::Input, PortSide::West, LPoint::default())
+            .add_port(NodeId::new(1), PortType::Input, PortSide::West, LPoint::default())
             .unwrap();
         let out = graph
-            .add_port(2, PortType::Output, PortSide::East, LPoint::default())
+            .add_port(NodeId::new(2), PortType::Output, PortSide::East, LPoint::default())
             .unwrap();
         graph.layerless_nodes[2].ports[out.port].origin_port = Some(north);
         graph.layerless_nodes[1].ports[north.port].port_dummy = Some(GraphNodeRef {
             graph_id: GraphId::ROOT,
-            node: 2,
+            node: NodeId::new(2),
         });
         graph
             .add_edge(LayeredEdge {
@@ -627,7 +671,7 @@ mod tests {
         assert_eq!(
             second.layerless_nodes[1].ports[PortId::new(0)].origin_port,
             Some(PortRef {
-                node: 0,
+                node: NodeId::new(0),
                 port: PortId::new(0)
             })
         );
@@ -636,7 +680,7 @@ mod tests {
                 .port_dummy
                 .as_ref()
                 .map(|dummy| dummy.node),
-            Some(1)
+            Some(NodeId::new(1))
         );
     }
 }

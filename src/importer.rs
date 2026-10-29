@@ -13,7 +13,7 @@ use crate::compound::{
     compound_label_segment_index, introduce_source_ported_scoped_edge_segments, port_at,
     source_ported_cross_hierarchy_segments,
 };
-use crate::graph::{
+use crate::graph::{NodeId, NodeSlice, 
     CompoundEdgeSegment, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge, HierarchyStep,
     LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, PortId, PortRef, PortSide,
     PortType, apply_port_index_to_dummy, create_external_port_dummy, is_across_flow,
@@ -340,7 +340,7 @@ fn import_external_ports(
     root: &mut LGraph,
     scope: &ScopePorts<'_>,
     scope_id: &str,
-) -> HashMap<String, usize> {
+) -> HashMap<String, NodeId> {
     let mut dummies = HashMap::new();
     if scope.ports.iter().any(|port| port.child_edges > 0) {
         root.graph_properties.external_ports = true;
@@ -383,7 +383,7 @@ fn import_external_ports(
             root.options.direction,
         );
         apply_port_index_to_dummy(&mut dummy, constraints, port.index.map(|i| i as isize));
-        let node = root.layerless_nodes.len();
+        let node = root.next_node_id();
         let dummy_port = &mut dummy.ports[PortId::new(0)];
         dummy_port.node = node;
         dummy_port.named = true;
@@ -710,6 +710,10 @@ fn replace_scoped_boundary_endpoint(
     };
 }
 
+/// Stands in the port index for the node a hierarchy edge's parent end sits at: the dummy of an
+/// inside self loop belongs to no node of the graph.
+const PARENT_BOUNDARY: NodeId = NodeId::new(usize::MAX);
+
 #[derive(Default)]
 struct ImportNodePortIndex {
     by_type: HashMap<PortType, HashMap<String, PortRef>>,
@@ -717,7 +721,7 @@ struct ImportNodePortIndex {
 
 #[derive(Default)]
 struct ImportGraphPortIndex {
-    nodes: HashMap<usize, ImportNodePortIndex>,
+    nodes: HashMap<NodeId, ImportNodePortIndex>,
 }
 
 struct ImportPortIndex {
@@ -775,7 +779,7 @@ impl ImportPortIndex {
     fn get(
         &mut self,
         graph_parent: Option<&str>,
-        node: usize,
+        node: NodeId,
         port_key: &str,
         port_type: PortType,
     ) -> Option<PortRef> {
@@ -793,7 +797,7 @@ impl ImportPortIndex {
     fn insert(
         &mut self,
         graph_parent: Option<&str>,
-        node: usize,
+        node: NodeId,
         port_key: &str,
         port_type: PortType,
         port: PortRef,
@@ -888,7 +892,7 @@ impl HierarchicalImportArena {
         &mut self,
         input_node: usize,
         parent_slot: GraphId,
-        parent_node: usize,
+        parent_node: NodeId,
         graph: LGraph,
     ) -> GraphId {
         let slot = self.graphs.nest(parent_slot, parent_node, graph);
@@ -1107,7 +1111,7 @@ fn ensure_inside_self_loop_dummy(
     parent_port_key: &str,
     port_index: &mut ImportPortIndex,
 ) -> PortRef {
-    if let Some(port) = port_index.get(Some(parent_node_id), usize::MAX, parent_port_key, port_type)
+    if let Some(port) = port_index.get(Some(parent_node_id), PARENT_BOUNDARY, parent_port_key, port_type)
     {
         return port;
     }
@@ -1134,7 +1138,7 @@ fn ensure_inside_self_loop_dummy(
     dummy.parent_port_key = Some(parent_port_key.to_string());
     dummy.parent_port_type = Some(port_type);
 
-    let node = graph.layerless_nodes.len();
+    let node = graph.next_node_id();
     dummy.ports[PortId::new(0)].node = node;
     graph.layerless_nodes.push(dummy);
     let port = PortRef {
@@ -1143,7 +1147,7 @@ fn ensure_inside_self_loop_dummy(
     };
     port_index.insert(
         Some(parent_node_id),
-        usize::MAX,
+        PARENT_BOUNDARY,
         parent_port_key,
         port_type,
         port,
@@ -1319,7 +1323,7 @@ pub(crate) fn include_minimum_graph_size(
 }
 
 /// Ports `ElkGraphImporter.transformNode`, for a node without children.
-fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<usize>) -> usize {
+fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<usize>) -> NodeId {
     let mut lnode = LNode::new(node.id.clone(), node.width, node.height, model_order);
     // Java reads the constraints before it replaces UNDEFINED, and hands that value on to the
     // ports. UNDEFINED is not side fixed, like FREE.
@@ -1350,8 +1354,8 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     lnode.node_flexibility = node.node_flexibility;
     lnode.ports_surrounding = node.ports_surrounding;
     let node_size = lnode.size;
+    let node_index = graph.next_node_id();
     graph.layerless_nodes.push(lnode);
-    let node_index = graph.layerless_nodes.len() - 1;
 
     // A port gets a model order when its node does: `needsModelOrder` asks about the node's
     // parent, which also decides the node's own order.
@@ -1375,7 +1379,7 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
 fn transform_port(
     port: &ElkInputPort,
     position: usize,
-    node: usize,
+    node: NodeId,
     node_size: LSize,
     constraints: PortConstraints,
     graph: &mut LGraph,
@@ -1639,7 +1643,7 @@ fn named_port<'g>(
         })?;
     let node = graph
         .layerless_nodes
-        .get(port.node)
+        .get_node(port.node)
         .ok_or_else(missing_endpoint)?;
     if node.id != node_id {
         return Err(missing_endpoint());
@@ -1872,21 +1876,21 @@ fn hierarchy_edge_end(
 fn ensure_hierarchy_endpoint_port(
     graph: &mut LGraph,
     graph_parent: Option<&str>,
-    node: usize,
+    node: NodeId,
     node_id: &str,
     port_key: &str,
     port_type: PortType,
     port_index: &mut ImportPortIndex,
 ) -> Option<PortRef> {
     if graph.options.merge_edges
-        && graph.layerless_nodes.get(node).is_some_and(|candidate| {
+        && graph.layerless_nodes.get_node(node).is_some_and(|candidate| {
             candidate.id == node_id && !candidate.port_constraints.is_side_fixed()
         })
     {
         return ensure_port_at_node(graph, graph_parent, node, node_id, port_type, port_index);
     }
 
-    let candidate = graph.layerless_nodes.get(node)?;
+    let candidate = graph.layerless_nodes.get_node(node)?;
     if candidate.id != node_id {
         return None;
     }
@@ -1927,12 +1931,12 @@ fn hierarchy_port_key(
 fn ensure_port_at_node(
     graph: &mut LGraph,
     graph_parent: Option<&str>,
-    node: usize,
+    node: NodeId,
     node_id: &str,
     port_type: PortType,
     port_index: &mut ImportPortIndex,
 ) -> Option<PortRef> {
-    let candidate = graph.layerless_nodes.get(node)?;
+    let candidate = graph.layerless_nodes.get_node(node)?;
     if candidate.id != node_id {
         return None;
     }
@@ -2091,7 +2095,7 @@ struct InputIndex<'a> {
     /// The id of the node the run lays out, whose ports are the graph's external ports.
     scope_id: &'a str,
     /// The node index of the dummy of each port of the scope, by the port's id.
-    scope_dummies: HashMap<String, usize>,
+    scope_dummies: HashMap<String, NodeId>,
 }
 
 impl<'a> InputIndex<'a> {
@@ -2296,16 +2300,16 @@ impl<'a> InputIndex<'a> {
 
     /// The index of a node in its graph. The dummies of the external ports come first in the
     /// graph of the run, ahead of its children.
-    fn child_position(&self, node: &str) -> usize {
+    fn child_position(&self, node: &str) -> NodeId {
         let position = *self
             .child_positions
             .get(node)
             .expect("validated input nodes have a stable sibling position");
-        if self.node_parent(node).is_none() {
+        NodeId::new(if self.node_parent(node).is_none() {
             position + self.scope_dummies.len()
         } else {
             position
-        }
+        })
     }
 
     /// Where a named port sits in its node, once `transform_node` has made the node's ports.
@@ -3136,11 +3140,11 @@ mod tests {
             nested.parent,
             Some(crate::graph::GraphParent {
                 graph: GraphId::ROOT,
-                node: lgraph
+                node: NodeId::new(lgraph
                     .layerless_nodes
                     .iter()
                     .position(|n| n.id == "cluster")
-                    .unwrap(),
+                    .unwrap()),
             })
         );
         assert_eq!(nested.layerless_nodes[0].id, "A");
@@ -3234,11 +3238,11 @@ mod tests {
         .unwrap();
         preprocess_source_ported_compound_graph(&mut lgraph);
 
-        let cluster_index = lgraph
+        let cluster_index = NodeId::new(lgraph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "cluster")
-            .unwrap();
+            .unwrap());
         let cluster = &lgraph.layerless_nodes[cluster_index];
         let parent_port = &cluster.ports[PortId::new(0)];
         let port_dummy = parent_port
@@ -3288,9 +3292,7 @@ mod tests {
             .unwrap();
         let nested = &lgraph[cluster.nested_graph.unwrap()];
         let external_dummies = nested
-            .layerless_nodes
-            .iter()
-            .enumerate()
+            .nodes_with_ids()
             .filter(|(_, node)| {
                 node.kind == LNodeKind::ExternalPort && node.id == "external:cluster"
             })
@@ -3328,11 +3330,11 @@ mod tests {
         .unwrap();
         preprocess_source_ported_compound_graph(&mut lgraph);
 
-        let cluster_index = lgraph
+        let cluster_index = NodeId::new(lgraph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "cluster")
-            .unwrap();
+            .unwrap());
         let cluster = &lgraph.layerless_nodes[cluster_index];
         let parent_port = cluster
             .ports
@@ -3576,11 +3578,11 @@ mod tests {
 
         let lgraph = import_graph(&input).unwrap();
 
-        let a = lgraph
+        let a = NodeId::new(lgraph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "A")
-            .unwrap();
+            .unwrap());
         assert_eq!(lgraph.layerless_nodes[a].ports.len(), 1);
         assert_eq!(
             lgraph.layerless_nodes[a].ports[PortId::new(0)].collector_type,
@@ -3602,11 +3604,11 @@ mod tests {
         ))
         .unwrap();
 
-        let a = lgraph
+        let a = NodeId::new(lgraph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "A")
-            .unwrap();
+            .unwrap());
         assert_eq!(lgraph.layerless_nodes[a].ports.len(), 2);
         assert!(
             lgraph.layerless_nodes[a]
@@ -3625,8 +3627,8 @@ mod tests {
         lgraph
             .layerless_nodes
             .push(LNode::new("A", 10.0, 10.0, None));
-        let first = lgraph.add_port(0, PortType::Output, PortSide::East, Default::default());
-        lgraph.add_port(0, PortType::Output, PortSide::East, Default::default());
+        let first = lgraph.add_port(NodeId::new(0), PortType::Output, PortSide::East, Default::default());
+        lgraph.add_port(NodeId::new(0), PortType::Output, PortSide::East, Default::default());
         lgraph.layerless_nodes[0]
             .ports
             .unlist(&[first.unwrap().port]);
@@ -3634,7 +3636,7 @@ mod tests {
         let made_up = ensure_port_at_node(
             &mut lgraph,
             None,
-            0,
+            NodeId::new(0),
             "A",
             PortType::Output,
             &mut ImportPortIndex::new(),
@@ -3698,11 +3700,11 @@ mod tests {
 
         let lgraph = import_graph(&input).unwrap();
 
-        let a = lgraph
+        let a = NodeId::new(lgraph
             .layerless_nodes
             .iter()
             .position(|node| node.id == "A")
-            .unwrap();
+            .unwrap());
         assert_eq!(lgraph.layerless_nodes[a].ports.len(), 2);
         assert!(
             lgraph.layerless_nodes[a]

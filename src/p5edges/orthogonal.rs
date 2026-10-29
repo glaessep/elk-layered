@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
-use crate::graph::{LGraph, LPoint, PortRef, PortSide};
+use crate::graph::{NodeId, NodeSlice, LGraph, LPoint, PortRef, PortSide};
 use crate::random::JavaRandom;
 
 pub const TOLERANCE: f64 = 1e-3;
@@ -460,8 +460,8 @@ impl OrthogonalRoutingThresholds {
 
 pub fn route_edges_west_to_east(
     graph: &mut LGraph,
-    source_layer_nodes: Option<&[usize]>,
-    target_layer_nodes: Option<&[usize]>,
+    source_layer_nodes: Option<&[NodeId]>,
+    target_layer_nodes: Option<&[NodeId]>,
     start_pos: f64,
     edge_spacing: f64,
 ) -> usize {
@@ -478,8 +478,8 @@ pub fn route_edges_west_to_east(
 pub fn route_edges(
     graph: &mut LGraph,
     direction: RoutingDirection,
-    source_layer_nodes: Option<&[usize]>,
-    target_layer_nodes: Option<&[usize]>,
+    source_layer_nodes: Option<&[NodeId]>,
+    target_layer_nodes: Option<&[NodeId]>,
     start_pos: f64,
     edge_spacing: f64,
 ) -> usize {
@@ -579,7 +579,7 @@ pub fn minimum_horizontal_segment_distance(segments: &[HyperEdgeSegment]) -> f64
 fn create_hyperedge_segments(
     graph: &LGraph,
     direction: RoutingDirection,
-    nodes: Option<&[usize]>,
+    nodes: Option<&[NodeId]>,
     port_side: PortSide,
     hyper_graph: &mut HyperEdgeGraph,
     port_to_segment: &mut HashMap<PortRef, usize>,
@@ -589,7 +589,7 @@ fn create_hyperedge_segments(
     };
 
     for node in nodes {
-        let Some(lnode) = graph.layerless_nodes.get(*node) else {
+        let Some(lnode) = graph.layerless_nodes.get_node(*node) else {
             continue;
         };
         for (port_index, port) in lnode.ports.iter_with_ids() {
@@ -1407,7 +1407,7 @@ fn dependency_weight(
 }
 
 fn connected_ports(graph: &LGraph, port_ref: PortRef) -> Vec<PortRef> {
-    let Some(node) = graph.layerless_nodes.get(port_ref.node) else {
+    let Some(node) = graph.layerless_nodes.get_node(port_ref.node) else {
         return Vec::new();
     };
     let Some(port) = node.ports.get(port_ref.port) else {
@@ -1840,7 +1840,7 @@ mod tests {
 
     fn route_test_graph(source_y: f64, target_y: f64) -> LGraph {
         let mut graph = LGraph::new("root", LayeredOptions::default());
-        let source = graph.layerless_nodes.len();
+        let source = graph.next_node_id();
         let mut source_node = LNode::new("A", 40.0, 20.0, Some(0));
         source_node.position = LPoint {
             x: 0.0,
@@ -1848,7 +1848,7 @@ mod tests {
         };
         graph.layerless_nodes.push(source_node);
 
-        let target = graph.layerless_nodes.len();
+        let target = graph.next_node_id();
         let mut target_node = LNode::new("B", 40.0, 20.0, Some(1));
         target_node.position = LPoint {
             x: 100.0,
@@ -1901,7 +1901,7 @@ mod tests {
 
     fn vertical_route_test_graph(source_x: f64, target_x: f64, source_side: PortSide) -> LGraph {
         let mut graph = LGraph::new("root", LayeredOptions::default());
-        let source = graph.layerless_nodes.len();
+        let source = graph.next_node_id();
         let mut source_node = LNode::new("A", 20.0, 40.0, Some(0));
         source_node.position = LPoint {
             x: source_x,
@@ -1909,7 +1909,7 @@ mod tests {
         };
         graph.layerless_nodes.push(source_node);
 
-        let target = graph.layerless_nodes.len();
+        let target = graph.next_node_id();
         let mut target_node = LNode::new("B", 20.0, 40.0, Some(1));
         target_node.position = LPoint {
             x: target_x,
