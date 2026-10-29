@@ -17,7 +17,7 @@ use crate::graph::{
     CompoundEdgeSegment, EdgeId, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge,
     HierarchyStep, LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId,
     PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
-    is_across_flow, port_side_from_direction,
+    is_across_flow, port_box, port_side_from_direction,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
@@ -105,20 +105,10 @@ pub struct ElkInputPort {
 }
 
 impl ElkInputPort {
-    /// Where the port's top left corner lies, relative to its node.
-    pub(crate) fn position(&self) -> LPoint {
-        LPoint {
-            x: self.x,
-            y: self.y,
-        }
-    }
-
-    /// The port's width and height.
-    pub(crate) fn size(&self) -> LSize {
-        LSize {
-            width: self.width,
-            height: self.height,
-        }
+    /// Where the port's top left corner lies, relative to its node, and the port's width and
+    /// height.
+    pub(crate) fn bounds(&self) -> (LPoint, LSize) {
+        port_box(self.x, self.y, self.width, self.height)
     }
 }
 
@@ -423,11 +413,12 @@ fn import_external_ports(
     for (position, port) in scope.ports.iter().enumerate() {
         // If the port has no offset, infer one. A port at (0, 0) gets none, to spare the
         // common case.
+        let (port_position, port_size) = port.bounds();
         let border_offset = port.border_offset.unwrap_or_else(|| {
             if port.x == 0.0 && port.y == 0.0 {
                 0.0
             } else {
-                calc_port_offset(port.position(), port.size(), scope.node_size, port.side)
+                calc_port_offset(port_position, port_size, scope.node_size, port.side)
             }
         });
         let direction = root.options.direction;
@@ -441,10 +432,10 @@ fn import_external_ports(
                 port.side,
                 port.net_flow as isize,
                 LPoint {
-                    x: port.x + port.width / 2.0,
-                    y: port.y + port.height / 2.0,
+                    x: port_position.x + port_size.width / 2.0,
+                    y: port_position.y + port_size.height / 2.0,
                 },
-                port.size(),
+                port_size,
                 scope.node_size,
                 border_offset,
                 direction,
@@ -1433,8 +1424,7 @@ fn transform_port(
     lport.hierarchy_net_flow = Some(port.net_flow as isize);
     lport.model_order = model_order;
     lport.side = port.side;
-    lport.size = port.size();
-    lport.position = port.position();
+    (lport.position, lport.size) = port.bounds();
     // `lport.copyProperties(elkport)` copies the three options. `containsKey` asks whether one is
     // set.
     lport.port_index = port.index.map(|index| index as isize);
@@ -4105,26 +4095,6 @@ mod tests {
             child_edges: 0,
             connected_to_external_nodes: false,
         }
-    }
-
-    // Mutation: swap `x` and `y` in `position`, or `width` and `height` in `size`.
-    #[test]
-    fn an_input_port_reads_its_position_and_size_from_its_four_numbers() {
-        let port = ElkInputPort {
-            x: 1.0,
-            y: 2.0,
-            width: 3.0,
-            height: 4.0,
-            ..input_port("p", PortSide::West)
-        };
-        assert_eq!(port.position(), LPoint { x: 1.0, y: 2.0 });
-        assert_eq!(
-            port.size(),
-            LSize {
-                width: 3.0,
-                height: 4.0
-            }
-        );
     }
 
     /// A node of 80 by 40 with the given ports and port constraints.

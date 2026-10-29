@@ -569,6 +569,12 @@ pub struct LSize {
     pub height: f64,
 }
 
+/// The top left corner and the size of a port, from the four numbers a port carries in the input.
+/// `ElkPort` and `ElkInputPort` both read their geometry through it.
+pub(crate) fn port_box(x: f64, y: f64, width: f64, height: f64) -> (LPoint, LSize) {
+    (LPoint { x, y }, LSize { width, height })
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct LPadding {
     pub top: f64,
@@ -1393,6 +1399,20 @@ fn port_ratio_or_position(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Mutation: swap `x` and `y`, or `width` and `height`, in `port_box`.
+    #[test]
+    fn port_box_reads_the_position_and_size_from_its_four_numbers() {
+        let (position, size) = port_box(1.0, 2.0, 3.0, 4.0);
+        assert_eq!(position, LPoint { x: 1.0, y: 2.0 });
+        assert_eq!(
+            size,
+            LSize {
+                width: 3.0,
+                height: 4.0
+            }
+        );
+    }
 
     // Mutation: swap the two arms of `is_across_flow`, or give an undefined direction the
     // horizontal arm. A case of the table then fails.

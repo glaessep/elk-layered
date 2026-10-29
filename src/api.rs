@@ -31,7 +31,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::graph::{LPoint, LSize};
+use crate::graph::{LPoint, LSize, port_box};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -140,20 +140,10 @@ pub struct ElkPort {
 }
 
 impl ElkPort {
-    /// Where the port's top left corner lies, relative to its node.
-    pub(crate) fn position(&self) -> LPoint {
-        LPoint {
-            x: self.x,
-            y: self.y,
-        }
-    }
-
-    /// The port's width and height.
-    pub(crate) fn size(&self) -> LSize {
-        LSize {
-            width: self.width,
-            height: self.height,
-        }
+    /// Where the port's top left corner lies, relative to its node, and the port's width and
+    /// height.
+    pub(crate) fn bounds(&self) -> (LPoint, LSize) {
+        port_box(self.x, self.y, self.width, self.height)
     }
 }
 
@@ -572,30 +562,5 @@ mod options {
             }
         }
         deserializer.deserialize_map(MapVisitor)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Mutation: swap `x` and `y` in `position`, or `width` and `height` in `size`.
-    #[test]
-    fn a_port_reads_its_position_and_size_from_its_four_numbers() {
-        let port = ElkPort {
-            x: 1.0,
-            y: 2.0,
-            width: 3.0,
-            height: 4.0,
-            ..Default::default()
-        };
-        assert_eq!(port.position(), LPoint { x: 1.0, y: 2.0 });
-        assert_eq!(
-            port.size(),
-            LSize {
-                width: 3.0,
-                height: 4.0
-            }
-        );
     }
 }

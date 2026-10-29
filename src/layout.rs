@@ -1019,7 +1019,8 @@ impl<'a, 't> Work<'a, 't> {
                 }
             } else if port.side == PortSide::Undefined {
                 // The side follows from the position, or else from the direction.
-                match calc_port_side(port.position(), port.size(), size, direction) {
+                let (port_position, port_size) = port.bounds();
+                match calc_port_side(port_position, port_size, size, direction) {
                     PortSide::Undefined => port_side_from_direction(direction),
                     side => side,
                 }
@@ -1171,7 +1172,8 @@ impl<'a, 't> Work<'a, 't> {
                 let mut side = self.port_state[scope][index].side;
                 let port = &mut self.out_node(scope).ports[index];
                 if side == PortSide::Undefined {
-                    side = calc_port_side(port.position(), port.size(), old, direction);
+                    let (port_position, port_size) = port.bounds();
+                    side = calc_port_side(port_position, port_size, old, direction);
                 }
                 match side {
                     PortSide::North => {
