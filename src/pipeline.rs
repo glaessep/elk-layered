@@ -535,23 +535,19 @@ fn validate_ported_graph_processors(graphs: &GraphArena) -> PipelineResult<()> {
     Ok(())
 }
 
-/// Run the assembled processors of a flat graph up to and including the first one `is_last`
+/// Run the assembled processors of the root graph up to and including the first one `is_last`
 /// accepts.
 ///
 /// Tests use this to stop at a phase boundary with exactly the state the full runner has there:
 /// the configurator, the edge and layer constraint steps and every other scheduled processor.
+/// The graphs inside nodes stay as they are, in `graphs`.
 #[cfg(test)]
 fn run_processors_until_slot(
-    graph: &mut LGraph,
+    graphs: &mut GraphArena,
     is_last: impl Fn(&ProcessorSlot) -> bool,
 ) -> PipelineResult<Vec<ProcessorKind>> {
-    // The graph is flat: it has no graph inside a node, so an arena of it alone is enough.
-    let mut graphs = GraphArena::new(std::mem::replace(
-        graph,
-        LGraph::new("", LayeredOptions::default()),
-    ));
     let mut executed = Vec::new();
-    let result = prepare_single_graph_processors(&mut graphs).and_then(|processors| {
+    prepare_single_graph_processors(graphs).and_then(|processors| {
         for slot in processors {
             execute_processor(graphs.root_mut(), OtherGraphs::none(), slot.kind)?;
             executed.push(slot.kind);
@@ -560,15 +556,14 @@ fn run_processors_until_slot(
             }
         }
         Ok(())
-    });
-    *graph = graphs.into_root();
-    result.map(|()| executed)
+    })?;
+    Ok(executed)
 }
 
 /// Run the assembled processors up to and including `target`.
 #[cfg(test)]
 pub(crate) fn run_processors_until(
-    graph: &mut LGraph,
+    graph: &mut GraphArena,
     target: ProcessorKind,
 ) -> PipelineResult<Vec<ProcessorKind>> {
     run_processors_until_slot(graph, |slot| slot.kind == target)
@@ -577,7 +572,7 @@ pub(crate) fn run_processors_until(
 /// Run the assembled processors up to and including the one that carries `phase`.
 #[cfg(test)]
 pub(crate) fn run_processors_until_phase(
-    graph: &mut LGraph,
+    graph: &mut GraphArena,
     phase: LayeredPhase,
 ) -> PipelineResult<Vec<ProcessorKind>> {
     run_processors_until_slot(graph, |slot| slot.phase == Some(phase))
@@ -1629,6 +1624,36 @@ mod tests {
             priority_straightness: 0,
             container: None,
         }
+    }
+
+    // Mutation: move only the root into a new one-graph arena inside `run_processors_until_slot`,
+    // and put it back afterwards. The graph inside `group` is then dropped from the arena the
+    // test passes in.
+    #[test]
+    fn running_processors_until_a_phase_keeps_the_graphs_inside_nodes() {
+        let mut group = node("group");
+        group.hierarchy_handling = Some(crate::options::HierarchyHandling::IncludeChildren);
+        let mut child = node("child");
+        child.parent = Some("group".to_string());
+        let input = ElkInputGraph {
+            id: "root".to_string(),
+            options: LayeredOptions {
+                hierarchy_handling: crate::options::HierarchyHandling::IncludeChildren,
+                ..p3_options()
+            },
+            nodes: vec![group, child],
+            edges: Vec::new(),
+        };
+        let mut graphs = import_graph(&input).unwrap();
+        assert_eq!(graphs.len(), 2);
+
+        run_processors_until_phase(&mut graphs, LayeredPhase::P1CycleBreaking).unwrap();
+
+        assert_eq!(graphs.len(), 2);
+        let nested = graphs.root().layerless_nodes[0]
+            .nested_graph
+            .expect("group still holds its graph");
+        assert_eq!(graphs[nested].layerless_nodes.len(), 1);
     }
 
     fn p3_options() -> LayeredOptions {
