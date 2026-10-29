@@ -18,7 +18,7 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
     let mut stack = Vec::new();
     // Source transitive reduction marks edges; it does not remove them from the graph.
     for &start in &input.nodes {
-        visited.as_mut_slice().fill(false);
+        visited.fill(false);
         for &edge in &input.outgoing[start] {
             let root = input.target(edge);
             if visited[root] {

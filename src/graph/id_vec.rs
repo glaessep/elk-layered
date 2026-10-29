@@ -33,8 +33,7 @@ impl VecId for EdgeId {
 }
 
 /// A `Vec<T>` that only an id of type `I` indexes. It has no `Index<usize>` and does not deref to
-/// `Vec`, so a stray number cannot name an item. `as_slice` is the way out for code that needs
-/// the plain list.
+/// `Vec`, so a stray number cannot name an item. Library code has no way to the plain list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdVec<I, T> {
     items: Vec<T>,
@@ -63,6 +62,15 @@ impl<I: VecId, T> IdVec<I, T> {
         T: Clone,
     {
         vec![value; len].into()
+    }
+
+    /// Sets every item to a copy of `value`. The ids stay as they are: `visited.fill(false)` clears
+    /// a flag table between two passes without a loop over numbers.
+    pub fn fill(&mut self, value: T)
+    where
+        T: Clone,
+    {
+        self.items.fill(value);
     }
 
     /// The item with this id, if the list holds one.
@@ -131,15 +139,11 @@ impl<I: VecId, T> IdVec<I, T> {
         self.items.last()
     }
 
-    /// The items as a plain slice. This is the way out of the typed ids: a place in the slice is
-    /// a number, not an id.
+    /// The items as a plain slice, for tests that compare a whole list. Library code has no way
+    /// out of the typed ids: a place in a slice is a number, not an id.
+    #[cfg(test)]
     pub fn as_slice(&self) -> &[T] {
         &self.items
-    }
-
-    /// The items as a plain slice, for changing. See [`IdVec::as_slice`].
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
-        &mut self.items
     }
 }
 
@@ -227,6 +231,18 @@ mod tests {
         let mut list = abc();
         list[NodeId::new(1)] = "x";
         assert_eq!(list.as_slice(), ["a", "x", "c"]);
+    }
+
+    // Mutation: make `fill` write `value` into every slot but the last, or into `len - 1` slots.
+    #[test]
+    fn fill_overwrites_every_item_and_keeps_the_length() {
+        let mut list: IdVec<NodeId, u8> = [1, 2, 3].into_iter().collect();
+        list.fill(9);
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.as_slice(), [9, 9, 9]);
+        let mut empty = IdVec::<EdgeId, u8>::new();
+        empty.fill(9);
+        assert!(empty.is_empty());
     }
 
     // Mutation: make `get` use `items.get(id + 1)`, or answer `Some` for an id one past the end.
@@ -328,7 +344,7 @@ mod tests {
         list.extend([3, 4]);
         assert_eq!(list.as_slice(), [1, 2, 3, 4]);
         assert_eq!((list.first(), list.last()), (Some(&1), Some(&4)));
-        list.as_mut_slice()[0] = 9;
+        list[NodeId::new(0)] = 9;
         assert_eq!(list[NodeId::new(0)], 9);
     }
 }
