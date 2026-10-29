@@ -1033,7 +1033,7 @@ impl CompoundEndpointPlan {
             if graph
                 .layerless_nodes
                 .get(port.node)
-                .is_some_and(|node| node.compound)
+                .is_some_and(|node| node.nested_graph.is_some())
             {
                 by_node[port.node].push(CompoundEndpoint {
                     port,
@@ -1988,9 +1988,36 @@ fn common_graph_depth(left: &[HierarchyStep], right: &[HierarchyStep]) -> usize 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::LPoint;
+    use crate::graph::{LNode, LPoint};
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::options::{HierarchyHandling, LayeredOptions, NodeLabelPlacement};
+
+    // Mutation: in `CompoundEndpointPlan::new`, plan an endpoint for every node, not only for a
+    // node that holds a nested graph.
+    #[test]
+    fn the_endpoint_plan_lists_only_the_endpoints_at_nodes_that_hold_a_graph() {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        let holder = graph.push_node_with(|_| LNode::new("holder", 10.0, 10.0, None));
+        let plain = graph.push_node_with(|_| LNode::new("plain", 10.0, 10.0, None));
+        graph.layerless_nodes[holder].nested_graph = Some(GraphId::new(1));
+        let mut edge_between = |node, segment| {
+            let port = graph
+                .add_port(node, PortType::Output, PortSide::East, LPoint::default())
+                .unwrap();
+            let mut edge = LayeredEdge::new("e", port, port);
+            edge.compound_segment = Some(segment);
+            graph.add_edge(edge).unwrap()
+        };
+        let segment = CompoundEdgeSegment::Output { depth: 0 };
+        let at_holder = edge_between(holder, segment);
+        edge_between(plain, segment);
+
+        let plan = CompoundEndpointPlan::new(&graph, &mut NoopCompoundPreprocessObserver);
+
+        assert_eq!(plan.for_node(holder).len(), 1);
+        assert_eq!(plan.for_node(holder)[0].edge, at_holder);
+        assert!(plan.for_node(plain).is_empty());
+    }
 
     /// Steps of made-up graphs, one for each name, for tests that only look at the shape of the
     /// segments. Two paths that share a name share the graph.

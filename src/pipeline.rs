@@ -1684,8 +1684,7 @@ mod tests {
         let mut graphs = GraphArena::new(LGraph::new("graph-0", options.clone()));
         let mut parent = GraphId::ROOT;
         for depth in 1..graph_count {
-            let mut holder = LNode::new(format!("node-{}", depth - 1), 1.0, 1.0, None);
-            holder.compound = true;
+            let holder = LNode::new(format!("node-{}", depth - 1), 1.0, 1.0, None);
             graphs[parent].layerless_nodes.push(holder);
             let graph = LGraph::new(format!("graph-{depth}"), options.clone());
             parent = graphs.nest(parent, NodeId::new(0), graph);
@@ -1702,15 +1701,13 @@ mod tests {
         };
         let mut graphs = GraphArena::new(LGraph::new("root", options.clone()));
         for branch in ["first", "second"] {
-            let mut holder = LNode::new(format!("{branch}-holder"), 1.0, 1.0, None);
-            holder.compound = true;
+            let holder = LNode::new(format!("{branch}-holder"), 1.0, 1.0, None);
             let position = graphs.root().next_node_id();
             graphs.root_mut().layerless_nodes.push(holder);
 
             let mut child = LGraph::new(format!("{branch}-child"), options.clone());
-            let mut grandchild_holder =
+            let grandchild_holder =
                 LNode::new(format!("{branch}-grandchild-holder"), 1.0, 1.0, None);
-            grandchild_holder.compound = true;
             child.layerless_nodes.push(grandchild_holder);
             let child = graphs.nest(GraphId::ROOT, position, child);
 

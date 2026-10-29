@@ -994,7 +994,6 @@ fn import_hierarchical_graph(
                     let horizontal = !node.parent_settings.direction.is_vertical();
                     include_minimum_graph_size(&mut nested_graph.options, &cell_node, horizontal);
                 }
-                parent_graph.layerless_nodes[node_index].compound = true;
                 Some((node_index, nested_graph, materializes_children))
             } else {
                 None
@@ -3280,7 +3279,12 @@ mod tests {
             lgraph.options.hierarchy_handling,
             HierarchyHandling::SeparateChildren
         );
-        assert!(lgraph.layerless_nodes.iter().all(|node| !node.compound));
+        assert!(
+            lgraph
+                .layerless_nodes
+                .iter()
+                .all(|node| node.nested_graph.is_none())
+        );
     }
 
     // Mutation: let `GraphArena::nest` record the node after the holder (`node + 1`) as the parent.

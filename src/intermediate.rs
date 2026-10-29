@@ -4012,7 +4012,6 @@ fn create_hierarchical_port_replacement_dummy(
         replacement.model_order = original.model_order;
         replacement.layer_constraint = original.layer_constraint;
         replacement.layer_constraint_explicit = original.layer_constraint_explicit;
-        replacement.compound = original.compound;
         replacement.port_constraints = PortConstraints::FixedPos;
         replacement.node_alignment = Alignment::Center;
         replacement

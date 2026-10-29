@@ -215,7 +215,6 @@ pub struct LNode {
     pub node_flexibility: super::options::NodeFlexibility,
     pub ports_surrounding: Option<super::options::SpacingMargin>,
     pub layer_constraint_explicit: bool,
-    pub compound: bool,
 }
 
 /// The data that only one kind of dummy node has. ELK keeps these as properties that are set
@@ -466,7 +465,6 @@ impl LNode {
             node_flexibility: super::options::NodeFlexibility::None,
             ports_surrounding: None,
             layer_constraint_explicit: false,
-            compound: false,
         }
     }
 }
