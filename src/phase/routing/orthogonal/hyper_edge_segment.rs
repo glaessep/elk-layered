@@ -147,6 +147,8 @@ impl Default for HyperEdgeSegment {
     }
 }
 
+// Java: `HyperEdgeSegment.addPortPositions`, which recurses into each connected port. The
+// explicit stack adds the ports in the same order, and a long chain of ports cannot overflow it.
 pub(crate) fn add_port_positions(
     graph: &LGraph,
     direction: RoutingDirection,
@@ -155,27 +157,31 @@ pub(crate) fn add_port_positions(
     segment: usize,
     port_to_segment: &mut HashMap<PortRef, usize>,
 ) {
-    port_to_segment.insert(port_ref, segment);
-    hyper_graph.segments[segment].ports.push(port_ref);
-    let port_position = direction.port_position_on_hypernode(graph, port_ref);
-    let port = &graph.layerless_nodes[port_ref.node].ports[port_ref.port];
+    let mut add = |port_ref: PortRef, port_to_segment: &mut HashMap<PortRef, usize>| {
+        port_to_segment.insert(port_ref, segment);
+        hyper_graph.segments[segment].ports.push(port_ref);
+        let port_position = direction.port_position_on_hypernode(graph, port_ref);
+        let port = &graph.layerless_nodes[port_ref.node].ports[port_ref.port];
 
-    if port.side == direction.source_port_side() {
-        hyper_graph.segments[segment].insert_incoming(port_position);
-    } else {
-        hyper_graph.segments[segment].insert_outgoing(port_position);
-    }
+        if port.side == direction.source_port_side() {
+            hyper_graph.segments[segment].insert_incoming(port_position);
+        } else {
+            hyper_graph.segments[segment].insert_outgoing(port_position);
+        }
+        connected_ports(graph, port_ref)
+    };
 
-    for other_port in connected_ports(graph, port_ref) {
+    // Each entry is the connected ports of a port added, and the index of the next one to look at.
+    let mut stack = vec![(add(port_ref, port_to_segment), 0)];
+    while let Some((others, next)) = stack.last_mut() {
+        let Some(&other_port) = others.get(*next) else {
+            stack.pop();
+            continue;
+        };
+        *next += 1;
         if !port_to_segment.contains_key(&other_port) {
-            add_port_positions(
-                graph,
-                direction,
-                other_port,
-                hyper_graph,
-                segment,
-                port_to_segment,
-            );
+            let others = add(other_port, port_to_segment);
+            stack.push((others, 0));
         }
     }
 }

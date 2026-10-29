@@ -62,13 +62,17 @@ pub(crate) fn restore_north_south_dummies(graph: &mut LGraph) -> Vec<NodeId> {
 }
 
 fn restore_north_south_dummy(graph: &mut LGraph, dummy: NodeId) {
-    let Some(external_side) = graph.layerless_nodes[dummy]
+    let external_side = graph.layerless_nodes[dummy]
         .external_port()
-        .map(|external| external.side)
-    else {
-        return;
-    };
-    let Some(port) = graph.layerless_nodes[dummy].ports.first_mut() else {
+        .map(|external| external.side);
+    // Java: `dummy.getPorts().get(0)`, which throws on an empty list before the side is looked
+    // at. An external port dummy always lists its port, so an empty list is a bug here, never
+    // caller input.
+    let port = graph.layerless_nodes[dummy]
+        .ports
+        .first_mut()
+        .expect("a restored external port dummy lists at least one port");
+    let Some(external_side) = external_side else {
         return;
     };
 

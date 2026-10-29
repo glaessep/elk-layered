@@ -111,8 +111,8 @@ pub(crate) fn determine_loop_routes(
 }
 
 // Java: RoutingDirector.determineTwoSideOpposingLoopRoutes. Java takes `sides` from
-// `slLoop.getSLPortsBySide().keySet().toArray(...)`, a multimap over a hash map. elkjs (GWT)
-// iterates that map in insertion order, so `sides` keeps the order of the loop's ports and is not
+// `slLoop.getSLPortsBySide().keySet().toArray(...)`, a multimap over a hash map. elkjs iterates
+// that map in insertion order (see `crate::gwt::enum_keys_in_insertion_order`), so `sides` keeps the order of the loop's ports and is not
 // sorted. A tie between the two options goes to option 1, so this order picks the loop's route.
 fn determine_two_side_opposing_loop_route(
     graph: &LGraph,
@@ -228,20 +228,20 @@ fn three_side_route_sides(
 }
 
 /// The distinct sides of the loop's ports, each at its first port. Java: the key order of
-/// `SelfHyperLoop.slPortsBySide` as elkjs iterates it.
+/// `SelfHyperLoop.slPortsBySide` as elkjs iterates it; see
+/// [`crate::gwt::enum_keys_in_insertion_order`].
 fn loop_sides_in_port_order(
     graph: &LGraph,
     node: NodeId,
     hyper_loop: &SelfHyperLoop,
 ) -> Vec<PortSide> {
-    let mut sides = Vec::new();
-    for port in &hyper_loop.ports {
-        let side = graph.layerless_nodes[node].ports[port.port].side;
-        if side != PortSide::Undefined && !sides.contains(&side) {
-            sides.push(side);
-        }
-    }
-    sides
+    crate::gwt::enum_keys_in_insertion_order(
+        hyper_loop
+            .ports
+            .iter()
+            .map(|port| graph.layerless_nodes[node].ports[port.port].side)
+            .filter(|side| *side != PortSide::Undefined),
+    )
 }
 
 fn assign_leftmost_rightmost_ports(

@@ -234,18 +234,13 @@ pub(crate) fn add_junction_point_if_necessary(
 }
 
 /// What `HashSet<KVector>` finds a point by in `createdJunctionPoints`, or `None` for a point it
-/// never finds.
-///
-/// elkjs is GWT, and `Double.hashCode` there is `(int) value`. So `-0.0` and `0.0` fall in one
-/// bucket, and `KVector.equals`, which uses `==`, finds them equal: a point with a negative zero
-/// is the point with a zero. A JVM hashes the bits and tells them apart. A `NaN` is never equal
-/// to itself, so a point with a `NaN` is never found, however often it is added.
+/// never finds. `KVector` hashes and compares its two doubles, so each is keyed as elkjs keys a
+/// double: see [`crate::gwt::double_key`].
 fn junction_key(position: LPoint) -> Option<(u64, u64)> {
-    if position.x.is_nan() || position.y.is_nan() {
-        return None;
-    }
-    // Adding 0.0 turns -0.0 into 0.0 and changes no other number.
-    Some(((position.x + 0.0).to_bits(), (position.y + 0.0).to_bits()))
+    Some((
+        crate::gwt::double_key(position.x)?,
+        crate::gwt::double_key(position.y)?,
+    ))
 }
 
 fn add_bend_point_if_needed(graph: &mut LGraph, edge_index: EdgeId, point: LPoint) {

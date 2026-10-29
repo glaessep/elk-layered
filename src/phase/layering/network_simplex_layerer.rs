@@ -93,21 +93,31 @@ fn connected_components(graph: &LGraph, nodes: &[NodeId]) -> Vec<Vec<NodeId>> {
     components.into_iter().collect()
 }
 
+// Java: `NetworkSimplexLayerer.connectedComponentsDFS`, which recurses. The explicit stack visits
+// the nodes in the same order, and a deep graph cannot overflow it.
 fn connected_components_dfs(
     graph: &LGraph,
-    node: NodeId,
+    start: NodeId,
     visited: &mut IdVec<NodeId, bool>,
     component: &mut Vec<NodeId>,
 ) {
-    visited[node] = true;
-    component.push(node);
-
-    for edge_index in graph.node_connected_edges(node) {
-        let Some(opposite) = opposite_node(graph, node, edge_index) else {
+    visited[start] = true;
+    component.push(start);
+    // Each entry is a node, its edges, and the index of the next edge to follow.
+    let mut stack = vec![(start, graph.node_connected_edges(start), 0)];
+    while let Some((node, edges, next)) = stack.last_mut() {
+        let Some(&edge_index) = edges.get(*next) else {
+            stack.pop();
+            continue;
+        };
+        *next += 1;
+        let Some(opposite) = opposite_node(graph, *node, edge_index) else {
             continue;
         };
         if !visited[opposite] {
-            connected_components_dfs(graph, opposite, visited, component);
+            visited[opposite] = true;
+            component.push(opposite);
+            stack.push((opposite, graph.node_connected_edges(opposite), 0));
         }
     }
 }

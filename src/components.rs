@@ -512,7 +512,9 @@ pub(crate) fn combine(
                 area += size.width * size.height;
                 row_width = row_width.max(size.width);
             }
-            row_width = row_width.max(f64::from(area.sqrt() as f32) * aspect_ratio);
+            // ELK casts the square root to `float`, which elkjs leaves a double: see
+            // `crate::gwt::float_value`.
+            row_width = row_width.max(crate::gwt::float_value(area.sqrt()) * aspect_ratio);
             if !area.is_finite() || !row_width.is_finite() {
                 return Err(ComponentError::InvalidGeometry.into());
             }

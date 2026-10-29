@@ -40,29 +40,37 @@ fn interactive_reference_x(graph: &LGraph, node: NodeId) -> f64 {
     node.position.x + node.size.width / 2.0
 }
 
+// Java: `InteractiveCycleBreaker.findCycles`, which recurses. The explicit stack visits the nodes
+// and finds the back edges in the same order, and a deep graph cannot overflow it.
 fn collect_interactive_back_edges(
     graph: &LGraph,
-    node: NodeId,
+    start: NodeId,
     state: &mut IdVec<NodeId, InteractiveVisitState>,
     edges_to_reverse: &mut Vec<EdgeId>,
 ) {
-    state[node] = InteractiveVisitState::Active;
-
-    for edge_index in graph.node_outgoing_edges(node) {
+    state[start] = InteractiveVisitState::Active;
+    // Each entry is a node on the current path, its outgoing edges, and the next edge to follow.
+    let mut stack = vec![(start, graph.node_outgoing_edges(start), 0)];
+    while let Some((node, edges, next)) = stack.last_mut() {
+        let Some(&edge_index) = edges.get(*next) else {
+            state[*node] = InteractiveVisitState::Visited;
+            stack.pop();
+            continue;
+        };
+        *next += 1;
         let target = graph.edges[edge_index].target().node;
-        if target == node {
+        if target == *node {
             continue;
         }
         match state[target] {
             InteractiveVisitState::Active => edges_to_reverse.push(edge_index),
             InteractiveVisitState::Unvisited => {
-                collect_interactive_back_edges(graph, target, state, edges_to_reverse);
+                state[target] = InteractiveVisitState::Active;
+                stack.push((target, graph.node_outgoing_edges(target), 0));
             }
             InteractiveVisitState::Visited => {}
         }
     }
-
-    state[node] = InteractiveVisitState::Visited;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

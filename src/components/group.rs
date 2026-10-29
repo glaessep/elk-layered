@@ -363,8 +363,9 @@ fn place_in_rows(
         max_row_width = max_row_width.max(size.width);
         total_area += size.width * size.height;
     }
-    // ELK takes the square root as a `float`.
-    max_row_width = max_row_width.max(f64::from(total_area.sqrt() as f32) * aspect_ratio);
+    // ELK casts the square root to `float`, which elkjs leaves a double: see
+    // `crate::gwt::float_value`.
+    max_row_width = max_row_width.max(crate::gwt::float_value(total_area.sqrt()) * aspect_ratio);
     let (mut x, mut y, mut highest, mut broadest) = (0.0f64, 0.0f64, 0.0f64, spacing);
     for &index in indices {
         let graph = &mut components[index].graph;
@@ -506,6 +507,19 @@ mod tests {
         // none-component sits at (11, 9). The group is 26 wide and 24 high.
         assert_eq!(at, vec![(11.0, 9.0), (26.0, 24.0), (0.0, 0.0)]);
         assert_eq!(size, (36.0, 34.0));
+    }
+
+    // Mutation: round the square root of the area to `f32`, as Java on a JVM does.
+    #[test]
+    fn the_row_width_keeps_the_square_root_a_double() {
+        // The area is 700. sqrt(700) * 3.4016802 is just below 90 as a double, which is where the
+        // second component ends; as a `float`, it is just above. elkjs wraps the second component.
+        let components = vec![
+            component(SIDES_NONE, 30.0, 10.0),
+            component(SIDES_NONE, 40.0, 10.0),
+        ];
+        let (at, _) = placed(components, 20.0, 3.401_680_2);
+        assert_eq!(at, vec![(0.0, 0.0), (0.0, 30.0)]);
     }
 
     // Mutation: return a size of 0 for no component, or read the first component of none.

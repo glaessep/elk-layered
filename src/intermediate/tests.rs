@@ -17,8 +17,8 @@ use crate::intermediate::end_label_preprocessor::{
 use crate::intermediate::hierarchical_port_constraint_processor::process_hierarchical_port_constraints;
 use crate::intermediate::hierarchical_port_dummy_size_processor::process_hierarchical_port_dummy_sizes;
 use crate::intermediate::hierarchical_port_orthogonal_edge_router::{
-    process_hierarchical_port_orthogonal_edges, remove_temporary_north_south_dummies,
-    restore_north_south_dummies,
+    connect_replacement_dummy_to_original, process_hierarchical_port_orthogonal_edges,
+    remove_temporary_north_south_dummies, restore_north_south_dummies,
 };
 use crate::intermediate::hierarchical_port_position_processor::process_hierarchical_port_positions;
 use crate::intermediate::hyperedge_dummy_merger::merge_hyperedge_dummies;
@@ -2069,6 +2069,24 @@ fn graph_with_a_replaced_north_dummy() -> (LGraph, NodeId) {
 #[test]
 #[should_panic(expected = "a replaced external port dummy lists at least one port")]
 fn connecting_a_replacement_to_a_dummy_without_ports_fails_loudly() {
+    let (mut graph, north) = graph_with_a_replaced_north_dummy();
+    let replacement = graph
+        .node_ids()
+        .find(|node| {
+            graph.layerless_nodes[*node]
+                .external_port()
+                .is_some_and(|external| external.replaced_dummy == Some(north))
+        })
+        .unwrap();
+    graph.layerless_nodes[north].ports.clear();
+
+    connect_replacement_dummy_to_original(&mut graph, replacement, north);
+}
+
+// Mutation: return without a word from `restore_north_south_dummy` when the dummy lists no port.
+#[test]
+#[should_panic(expected = "a restored external port dummy lists at least one port")]
+fn restoring_a_dummy_without_ports_fails_loudly() {
     let (mut graph, north) = graph_with_a_replaced_north_dummy();
     graph.layerless_nodes[north].ports.clear();
 

@@ -1,12 +1,14 @@
 //! Coffman-Graham layering translated from Eclipse ELK, EPL-2.0:
 //! https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/CoffmanGrahamLayerer.java
 //!
-//! Priority-queue ties follow the GWT `java.util.PriorityQueue` emitted in elkjs 0.9.3.
-//! Those ties are observable in node order, so a Rust heap's unspecified tie order is unsuitable.
+//! Priority-queue ties follow GWT's `java.util.PriorityQueue`, as elkjs 0.9.3 runs it: see
+//! [`crate::gwt::priority_queue_poll`]. Those ties decide the node order.
 
 use super::{LayeringError, LayeringInput, LayeringResult};
 use crate::graph::{IdVec, NodeId};
 use std::cmp::Ordering;
+
+use crate::gwt::{priority_queue_offer, priority_queue_poll};
 
 pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>>> {
     if input.nodes.is_empty() {
@@ -61,13 +63,13 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
             .filter(|&&edge| !marked_edges[edge])
             .count();
         if incoming[node] == 0 {
-            push(&mut sources, node, |a, b| {
+            priority_queue_offer(&mut sources, node, |a, b| {
                 compare_topology(&predecessors[a], &predecessors[b])
             });
         }
     }
     let mut count = 0;
-    while let Some(node) = pop(&mut sources, |a, b| {
+    while let Some(node) = priority_queue_poll(&mut sources, |a, b| {
         compare_topology(&predecessors[a], &predecessors[b])
     }) {
         topological[node] = count;
@@ -80,7 +82,7 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
             incoming[next] -= 1;
             predecessors[next].push(topological[node]);
             if incoming[next] == 0 {
-                push(&mut sources, next, |a, b| {
+                priority_queue_offer(&mut sources, next, |a, b| {
                     compare_topology(&predecessors[a], &predecessors[b])
                 });
             }
@@ -98,13 +100,15 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
             .filter(|&&edge| !marked_edges[edge])
             .count();
         if outgoing[node] == 0 {
-            push(&mut sinks, node, |a, b| topological[b].cmp(&topological[a]));
+            priority_queue_offer(&mut sinks, node, |a, b| topological[b].cmp(&topological[a]));
         }
     }
     let mut layers: Vec<Vec<NodeId>> = vec![Vec::new()];
     let mut assigned = IdVec::filled(input.len(), None);
     let bound = input.graph.options.layering_coffman_graham_layer_bound;
-    while let Some(node) = pop(&mut sinks, |a, b| topological[b].cmp(&topological[a])) {
+    while let Some(node) =
+        priority_queue_poll(&mut sinks, |a, b| topological[b].cmp(&topological[a]))
+    {
         let mut layer = layers.len() - 1;
         if layers[layer].len() as i64 >= i64::from(bound)
             || input.outgoing[node]
@@ -123,7 +127,7 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
             let source = input.source(edge);
             outgoing[source] -= 1;
             if outgoing[source] == 0 {
-                push(&mut sinks, source, |a, b| {
+                priority_queue_offer(&mut sinks, source, |a, b| {
                     topological[b].cmp(&topological[a])
                 });
             }
@@ -139,9 +143,9 @@ fn compare_topology(left: &[usize], right: &[usize]) -> Ordering {
     while a > 0 && b > 0 {
         a -= 1;
         b -= 1;
-        // Upstream compares boxed Integers by identity before comparing their values. GWT caches
-        // only -128..127; equal larger ranks therefore return Equal immediately.
-        if left[a] != right[b] || left[a] >= 128 {
+        // Upstream compares boxed Integers by identity before comparing their values, so equal
+        // ranks above 127 return Equal at once: see `crate::gwt::boxed_integers_differ`.
+        if crate::gwt::boxed_integers_differ(left[a] as i64, right[b] as i64) {
             return left[a].cmp(&right[b]);
         }
     }
@@ -153,46 +157,4 @@ fn compare_topology(left: &[usize], right: &[usize]) -> Ordering {
     } else {
         Ordering::Greater
     }
-}
-
-fn push(
-    heap: &mut Vec<NodeId>,
-    value: NodeId,
-    mut compare: impl FnMut(NodeId, NodeId) -> Ordering,
-) {
-    let mut cursor = heap.len();
-    heap.push(value);
-    while cursor > 0 {
-        let parent = (cursor - 1) / 2;
-        if compare(heap[parent], value) != Ordering::Greater {
-            break;
-        }
-        heap[cursor] = heap[parent];
-        cursor = parent;
-    }
-    heap[cursor] = value;
-}
-
-fn pop(
-    heap: &mut Vec<NodeId>,
-    mut compare: impl FnMut(NodeId, NodeId) -> Ordering,
-) -> Option<NodeId> {
-    let result = *heap.first()?;
-    let value = heap.pop().expect("the heap is nonempty");
-    if !heap.is_empty() {
-        let mut cursor = 0;
-        while cursor * 2 + 1 < heap.len() {
-            let mut child = cursor * 2 + 1;
-            if child + 1 < heap.len() && compare(heap[child + 1], heap[child]) == Ordering::Less {
-                child += 1;
-            }
-            if compare(value, heap[child]) == Ordering::Less {
-                break;
-            }
-            heap[cursor] = heap[child];
-            cursor = child;
-        }
-        heap[cursor] = value;
-    }
-    Some(result)
 }

@@ -2070,6 +2070,7 @@ impl HierarchyQueryIndex {
         children_by_parent: &HashMap<&str, Vec<&ElkInputNode>>,
     ) -> Self {
         let mut children = vec![Vec::new(); node_order.len()];
+        // The map's order does not matter: each parent's list is filled from its own entry only.
         for (parent, input_children) in children_by_parent {
             let parent = node_order[*parent];
             for child in input_children {

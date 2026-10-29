@@ -650,9 +650,9 @@ fn edge_type_weight(source: LNodeKind, target: LNodeKind) -> f64 {
     }
 }
 
+/// `Math.round`, as elkjs computes it (see [`crate::gwt::math_round`]), then Java's cast to `int`.
 fn java_round(value: f64) -> Result<f64, NetworkSimplexError> {
-    let rounded = (value + 0.5).floor();
-    checked_integer(rounded).map(f64::from)
+    checked_integer(crate::gwt::math_round(value)).map(f64::from)
 }
 
 fn ceil_i32(value: f64) -> Result<i32, NetworkSimplexError> {
@@ -672,6 +672,23 @@ mod tests {
     use crate::graph::LMargin;
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::options::{ElkDirection, LayeredOptions};
+
+    // Mutation: round with `(value + 0.5).floor()` again.
+    #[test]
+    fn a_port_position_rounds_as_elkjs_rounds() {
+        assert_eq!(java_round(2.5), Ok(3.0));
+        assert_eq!(java_round(-2.5), Ok(-2.0));
+        assert_eq!(java_round(0.0), Ok(0.0));
+        assert_eq!(java_round(0.499_999_999_999_999_94), Ok(0.0));
+        assert_eq!(
+            java_round(f64::NAN),
+            Err(NetworkSimplexError::CoordinateOutOfRange)
+        );
+        assert_eq!(
+            java_round(3e9),
+            Err(NetworkSimplexError::CoordinateOutOfRange)
+        );
+    }
 
     fn node(id: &str, width: f64, height: f64) -> ElkInputNode {
         ElkInputNode {

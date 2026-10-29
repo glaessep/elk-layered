@@ -1742,3 +1742,21 @@ fn a_graph_nested_one_level_deeper_is_refused() {
         }
     );
 }
+
+// Mutation: round the square root of the area to `f32` in `components::combine`, as Java on a
+// JVM does.
+#[test]
+fn the_row_of_components_is_as_wide_as_the_double_square_root_allows() {
+    // The two components cover 700. sqrt(700) * 3.4016802 is just below 90 as a double, which is
+    // where `b` would end in the first row; as a `float` it is just above. elkjs puts `b` in a
+    // second row. With 3.401681 both are above 90, and `b` stays in the first row.
+    for (ratio, b) in [("3.4016802", (12.0, 42.0)), ("3.401681", (62.0, 12.0))] {
+        let mut graph = root(vec![node("a", 30.0, 10.0), node("b", 40.0, 10.0)], vec![]);
+        graph
+            .layout_options
+            .insert("elk.aspectRatio".into(), ratio.into());
+        let out = layout(&graph).unwrap();
+        assert_eq!(at(&out, "a"), (12.0, 12.0), "{ratio}");
+        assert_eq!(at(&out, "b"), b, "{ratio}");
+    }
+}

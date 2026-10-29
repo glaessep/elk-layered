@@ -387,11 +387,20 @@ impl<'a> NetworkSimplex<'a> {
         Ok(())
     }
 
-    fn tight_tree_dfs(&mut self, node: usize) -> usize {
+    // Java: `NetworkSimplex.tightTreeDFS`, which recurses and returns the number of calls. The
+    // explicit stack visits the edges in the same order, and a deep graph cannot overflow it.
+    fn tight_tree_dfs(&mut self, start: usize) -> usize {
         let mut node_count = 1;
-        self.graph.nodes[node].tree_node = true;
-
-        for edge in self.graph.connected_edges(node) {
+        self.graph.nodes[start].tree_node = true;
+        // Each entry is a node, its edges, and the index of the next edge to look at.
+        let mut stack = vec![(start, self.graph.connected_edges(start), 0)];
+        while let Some((node, edges, next)) = stack.last_mut() {
+            let node = *node;
+            let Some(&edge) = edges.get(*next) else {
+                stack.pop();
+                continue;
+            };
+            *next += 1;
             let edge_id = self.graph.edges[edge].internal_id;
             if self.edge_visited[edge_id] {
                 continue;
@@ -401,8 +410,8 @@ impl<'a> NetworkSimplex<'a> {
                 continue;
             };
 
-            if self.graph.edges[edge].tree_edge {
-                node_count += self.tight_tree_dfs(opposite);
+            let follow = if self.graph.edges[edge].tree_edge {
+                true
             } else if !self.graph.nodes[opposite].tree_node
                 && i64::from(self.graph.edges[edge].delta)
                     == self.graph.edges[edge].target_layer(self.graph)
@@ -410,7 +419,14 @@ impl<'a> NetworkSimplex<'a> {
             {
                 self.graph.edges[edge].tree_edge = true;
                 push_unique(&mut self.tree_edges, edge);
-                node_count += self.tight_tree_dfs(opposite);
+                true
+            } else {
+                false
+            };
+            if follow {
+                node_count += 1;
+                self.graph.nodes[opposite].tree_node = true;
+                stack.push((opposite, self.graph.connected_edges(opposite), 0));
             }
         }
 
@@ -438,24 +454,42 @@ impl<'a> NetworkSimplex<'a> {
         min_slack_edge
     }
 
-    fn postorder_traversal(&mut self, node: usize) -> i32 {
-        let mut lowest = i32::MAX;
-        for edge in self.graph.connected_edges(node) {
-            let edge_id = self.graph.edges[edge].internal_id;
-            if self.graph.edges[edge].tree_edge && !self.edge_visited[edge_id] {
-                self.edge_visited[edge_id] = true;
-                let opposite = self.graph.edges[edge]
-                    .other(node)
-                    .expect("tree edge should connect to current node");
-                lowest = lowest.min(self.postorder_traversal(opposite));
+    // Java: `NetworkSimplex.postorderTraversal`, which recurses. The explicit stack numbers the
+    // nodes in the same order, and a deep graph cannot overflow it.
+    fn postorder_traversal(&mut self, start: usize) -> i32 {
+        // Each entry is a node, its edges, the index of the next edge to look at, and the lowest
+        // number its finished subtrees returned.
+        let mut stack = vec![(start, self.graph.connected_edges(start), 0, i32::MAX)];
+        loop {
+            let Some((node, edges, next, lowest)) = stack.last_mut() else {
+                unreachable!("the loop returns when it pops the start node");
+            };
+            let node = *node;
+            if let Some(&edge) = edges.get(*next) {
+                *next += 1;
+                let edge_id = self.graph.edges[edge].internal_id;
+                if self.graph.edges[edge].tree_edge && !self.edge_visited[edge_id] {
+                    self.edge_visited[edge_id] = true;
+                    let opposite = self.graph.edges[edge]
+                        .other(node)
+                        .expect("tree edge should connect to current node");
+                    stack.push((opposite, self.graph.connected_edges(opposite), 0, i32::MAX));
+                }
+                continue;
+            }
+
+            let lowest = *lowest;
+            stack.pop();
+            let node_id = self.graph.nodes[node].internal_id;
+            self.po_id[node_id] = self.post_order;
+            self.lowest_po_id[node_id] = lowest.min(self.post_order);
+            self.post_order += 1;
+            let returned = self.lowest_po_id[node_id];
+            match stack.last_mut() {
+                Some((_, _, _, parent_lowest)) => *parent_lowest = (*parent_lowest).min(returned),
+                None => return returned,
             }
         }
-
-        let node_id = self.graph.nodes[node].internal_id;
-        self.po_id[node_id] = self.post_order;
-        self.lowest_po_id[node_id] = lowest.min(self.post_order);
-        self.post_order += 1;
-        self.lowest_po_id[node_id]
     }
 
     fn is_in_head(&self, node: usize, edge: usize) -> bool {

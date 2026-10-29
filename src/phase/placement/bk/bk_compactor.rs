@@ -2,7 +2,7 @@
 //!
 //! Source: https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p4nodes/bk/BKCompactor.java
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 use crate::graph::{LGraph, NodeId};
 use crate::phase::placement::bk::bk_aligned_layout::{BKAlignedLayout, HDirection, VDirection};
@@ -64,6 +64,31 @@ pub(crate) fn horizontal_compaction(
     threshold.post_process(graph, ni, layout);
 }
 
+/// One block that `place_block` is placing: Java's local variables of one recursive call.
+struct PlaceBlockFrame {
+    root: usize,
+    current: usize,
+    initial_assignment: bool,
+    thresh: f64,
+}
+
+impl PlaceBlockFrame {
+    fn start(layout: &mut BKAlignedLayout, root: usize) -> Self {
+        layout.y[root] = Some(0.0);
+        Self {
+            root,
+            current: root,
+            initial_assignment: true,
+            thresh: match layout.vdir {
+                VDirection::Down => f64::NEG_INFINITY,
+                VDirection::Up => f64::INFINITY,
+            },
+        }
+    }
+}
+
+// Java: `BKCompactor.placeBlock`, which recurses into the block of each neighbour. The explicit
+// stack places the blocks in the same order, and a wide layer cannot overflow it.
 fn place_block(
     graph: &LGraph,
     ni: &NeighborhoodInformation,
@@ -76,121 +101,140 @@ fn place_block(
         return;
     }
 
-    let mut initial_assignment = true;
-    layout.y[root] = Some(0.0);
-    let mut current = root;
-    let mut thresh = match layout.vdir {
-        VDirection::Down => f64::NEG_INFINITY,
-        VDirection::Up => f64::INFINITY,
-    };
+    let mut stack = vec![PlaceBlockFrame::start(layout, root)];
+    'frames: while let Some(mut frame) = stack.pop() {
+        loop {
+            let current_node = ni.id_to_node[frame.current];
+            let current_index = ni.node_index[frame.current];
+            let current_layer_size = graph.layers()
+                [graph.layerless_nodes[current_node].layer_index().unwrap()]
+            .nodes()
+            .len();
 
-    loop {
-        let current_node = ni.id_to_node[current];
-        let current_index = ni.node_index[current];
-        let current_layer_size = graph.layers()
-            [graph.layerless_nodes[current_node].layer_index().unwrap()]
-        .nodes()
-        .len();
-
-        let needs_neighbor = match layout.vdir {
-            VDirection::Down => current_index > 0,
-            VDirection::Up => current_index < current_layer_size - 1,
-        };
-
-        if needs_neighbor {
-            let layer = &graph.layers()[graph.layerless_nodes[current_node].layer_index().unwrap()];
-            let neighbor_node = match layout.vdir {
-                VDirection::Up => layer.nodes()[current_index + 1],
-                VDirection::Down => layer.nodes()[current_index - 1],
+            let needs_neighbor = match layout.vdir {
+                VDirection::Down => current_index > 0,
+                VDirection::Up => current_index < current_layer_size - 1,
             };
-            let neighbor_root = layout.root[ni.node_id[neighbor_node]];
-            place_block(graph, ni, layout, class_graph, threshold, neighbor_root);
 
-            thresh = threshold.calculate_threshold(graph, ni, layout, thresh, root, current);
+            if needs_neighbor {
+                let layer =
+                    &graph.layers()[graph.layerless_nodes[current_node].layer_index().unwrap()];
+                let neighbor_node = match layout.vdir {
+                    VDirection::Up => layer.nodes()[current_index + 1],
+                    VDirection::Down => layer.nodes()[current_index - 1],
+                };
+                let neighbor_root = layout.root[ni.node_id[neighbor_node]];
+                if layout.y[neighbor_root].is_none() {
+                    // Java recurses into the neighbour's block here. Place it first, then come back
+                    // and run this step again; the block is placed then, so the step goes on.
+                    stack.push(frame);
+                    stack.push(PlaceBlockFrame::start(layout, neighbor_root));
+                    continue 'frames;
+                }
 
-            if layout.sink[root] == root {
-                layout.sink[root] = layout.sink[neighbor_root];
-            }
+                frame.thresh = threshold.calculate_threshold(
+                    graph,
+                    ni,
+                    layout,
+                    frame.thresh,
+                    frame.root,
+                    frame.current,
+                );
 
-            if layout.sink[root] == layout.sink[neighbor_root] {
-                let spacing = vertical_spacing(graph, current_node, neighbor_node);
-                if layout.vdir == VDirection::Up {
-                    let current_block_position = layout.y[root].unwrap_or(0.0);
-                    let neighbor = &graph.layerless_nodes[neighbor_node];
-                    let current_lnode = &graph.layerless_nodes[current_node];
-                    let new_position = layout.y[neighbor_root].unwrap_or(0.0)
-                        + layout.inner_shift[ni.node_id[neighbor_node]]
-                        - neighbor.margin.top
-                        - spacing
-                        - current_lnode.margin.bottom
-                        - current_lnode.size.height
-                        - layout.inner_shift[current];
-                    let candidate = new_position.min(thresh);
-                    layout.y[root] = Some(if initial_assignment {
-                        initial_assignment = false;
-                        candidate
+                if layout.sink[frame.root] == frame.root {
+                    layout.sink[frame.root] = layout.sink[neighbor_root];
+                }
+
+                if layout.sink[frame.root] == layout.sink[neighbor_root] {
+                    let spacing = vertical_spacing(graph, current_node, neighbor_node);
+                    if layout.vdir == VDirection::Up {
+                        let current_block_position = layout.y[frame.root].unwrap_or(0.0);
+                        let neighbor = &graph.layerless_nodes[neighbor_node];
+                        let current_lnode = &graph.layerless_nodes[current_node];
+                        let new_position = layout.y[neighbor_root].unwrap_or(0.0)
+                            + layout.inner_shift[ni.node_id[neighbor_node]]
+                            - neighbor.margin.top
+                            - spacing
+                            - current_lnode.margin.bottom
+                            - current_lnode.size.height
+                            - layout.inner_shift[frame.current];
+                        let candidate = new_position.min(frame.thresh);
+                        layout.y[frame.root] = Some(if frame.initial_assignment {
+                            frame.initial_assignment = false;
+                            candidate
+                        } else {
+                            current_block_position.min(candidate)
+                        });
                     } else {
-                        current_block_position.min(candidate)
-                    });
+                        let current_block_position = layout.y[frame.root].unwrap_or(0.0);
+                        let neighbor = &graph.layerless_nodes[neighbor_node];
+                        let current_lnode = &graph.layerless_nodes[current_node];
+                        let new_position = layout.y[neighbor_root].unwrap_or(0.0)
+                            + layout.inner_shift[ni.node_id[neighbor_node]]
+                            + neighbor.size.height
+                            + neighbor.margin.bottom
+                            + spacing
+                            + current_lnode.margin.top
+                            - layout.inner_shift[frame.current];
+                        let candidate = new_position.max(frame.thresh);
+                        layout.y[frame.root] = Some(if frame.initial_assignment {
+                            frame.initial_assignment = false;
+                            candidate
+                        } else {
+                            current_block_position.max(candidate)
+                        });
+                    }
                 } else {
-                    let current_block_position = layout.y[root].unwrap_or(0.0);
-                    let neighbor = &graph.layerless_nodes[neighbor_node];
+                    let spacing = graph.options.spacing.node_node;
                     let current_lnode = &graph.layerless_nodes[current_node];
-                    let new_position = layout.y[neighbor_root].unwrap_or(0.0)
-                        + layout.inner_shift[ni.node_id[neighbor_node]]
-                        + neighbor.size.height
-                        + neighbor.margin.bottom
-                        + spacing
-                        + current_lnode.margin.top
-                        - layout.inner_shift[current];
-                    let candidate = new_position.max(thresh);
-                    layout.y[root] = Some(if initial_assignment {
-                        initial_assignment = false;
-                        candidate
+                    let neighbor = &graph.layerless_nodes[neighbor_node];
+                    let separation = if layout.vdir == VDirection::Up {
+                        layout.y[frame.root].unwrap_or(0.0)
+                            + layout.inner_shift[frame.current]
+                            + current_lnode.size.height
+                            + current_lnode.margin.bottom
+                            + spacing
+                            - (layout.y[neighbor_root].unwrap_or(0.0)
+                                + layout.inner_shift[ni.node_id[neighbor_node]]
+                                - neighbor.margin.top)
                     } else {
-                        current_block_position.max(candidate)
-                    });
+                        layout.y[frame.root].unwrap_or(0.0) + layout.inner_shift[frame.current]
+                            - current_lnode.margin.top
+                            - layout.y[neighbor_root].unwrap_or(0.0)
+                            - layout.inner_shift[ni.node_id[neighbor_node]]
+                            - neighbor.size.height
+                            - neighbor.margin.bottom
+                            - spacing
+                    };
+                    class_graph.add_edge(
+                        layout.sink[frame.root],
+                        layout.sink[neighbor_root],
+                        separation,
+                    );
                 }
             } else {
-                let spacing = graph.options.spacing.node_node;
-                let current_lnode = &graph.layerless_nodes[current_node];
-                let neighbor = &graph.layerless_nodes[neighbor_node];
-                let separation = if layout.vdir == VDirection::Up {
-                    layout.y[root].unwrap_or(0.0)
-                        + layout.inner_shift[current]
-                        + current_lnode.size.height
-                        + current_lnode.margin.bottom
-                        + spacing
-                        - (layout.y[neighbor_root].unwrap_or(0.0)
-                            + layout.inner_shift[ni.node_id[neighbor_node]]
-                            - neighbor.margin.top)
-                } else {
-                    layout.y[root].unwrap_or(0.0) + layout.inner_shift[current]
-                        - current_lnode.margin.top
-                        - layout.y[neighbor_root].unwrap_or(0.0)
-                        - layout.inner_shift[ni.node_id[neighbor_node]]
-                        - neighbor.size.height
-                        - neighbor.margin.bottom
-                        - spacing
-                };
-                class_graph.add_edge(layout.sink[root], layout.sink[neighbor_root], separation);
+                frame.thresh = threshold.calculate_threshold(
+                    graph,
+                    ni,
+                    layout,
+                    frame.thresh,
+                    frame.root,
+                    frame.current,
+                );
             }
-        } else {
-            thresh = threshold.calculate_threshold(graph, ni, layout, thresh, root, current);
-        }
 
-        current = layout.align[current];
-        if current == root {
-            break;
+            frame.current = layout.align[frame.current];
+            if frame.current == frame.root {
+                threshold.finish_block(frame.root);
+                break;
+            }
         }
     }
-
-    threshold.finish_block(root);
 }
 
 #[derive(Debug, Default)]
 struct ClassGraph {
-    nodes: HashMap<usize, ClassNode>,
+    nodes: BTreeMap<usize, ClassNode>,
 }
 
 impl ClassGraph {

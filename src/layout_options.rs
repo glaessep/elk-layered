@@ -1372,42 +1372,13 @@ pub(crate) fn parse_int(value: &str) -> Result<i32, OptionProblem> {
         .map_err(|_| OptionProblem::InvalidValue)
 }
 
-/// Ports `LayoutOptionData.parseValue`, case `DOUBLE`, as GWT's `Double.valueOf` parses:
-/// `^\s*[+-]?(NaN|Infinity|((\d+\.?\d*)|(\.\d+))([eE][+-]?\d+)?[dDfF]?)\s*$`. A value that is not
-/// finite is refused too, because no layout can use it.
+/// Ports `LayoutOptionData.parseValue`, case `DOUBLE`, with GWT's `Double.valueOf`: see
+/// [`crate::gwt::double_value_of`]. A value that is not finite is refused too, because no layout
+/// can use it.
 pub(crate) fn parse_double(value: &str) -> Result<f64, OptionProblem> {
-    let trimmed = value.trim_matches(|c: char| c.is_whitespace());
-    let body = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
-    let body = body.strip_suffix(['d', 'D', 'f', 'F']).unwrap_or(body);
-    let (mantissa, exponent) = match body.find(['e', 'E']) {
-        Some(at) => (&body[..at], Some(&body[at + 1..])),
-        None => (body, None),
-    };
-    let (whole, fraction) = match mantissa.find('.') {
-        Some(at) => (&mantissa[..at], Some(&mantissa[at + 1..])),
-        None => (mantissa, None),
-    };
-    let digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
-    let mantissa_ok = digits(whole)
-        && fraction.is_none_or(digits)
-        && (!whole.is_empty() || fraction.is_some_and(|f| !f.is_empty()));
-    let exponent_ok = exponent.is_none_or(|e| {
-        let e = e.strip_prefix(['+', '-']).unwrap_or(e);
-        !e.is_empty() && digits(e)
-    });
-    if !mantissa_ok || !exponent_ok {
-        return Err(OptionProblem::InvalidValue);
-    }
-    let number = trimmed
-        .strip_suffix(['d', 'D', 'f', 'F'])
-        .unwrap_or(trimmed);
-    let parsed = number
-        .parse::<f64>()
-        .map_err(|_| OptionProblem::InvalidValue)?;
-    if parsed.is_finite() {
-        Ok(parsed)
-    } else {
-        Err(OptionProblem::InvalidValue)
+    match crate::gwt::double_value_of(value) {
+        Some(parsed) if parsed.is_finite() => Ok(parsed),
+        _ => Err(OptionProblem::InvalidValue),
     }
 }
 

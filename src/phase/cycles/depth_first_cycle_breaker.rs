@@ -40,31 +40,39 @@ pub fn break_cycles_depth_first(graph: &mut LGraph) {
     reverse_feedback_edges(graph, edges_to_reverse, true);
 }
 
+// Java: `DepthFirstCycleBreaker.dfs`, which recurses. The explicit stack visits the nodes and
+// finds the back edges in the same order, and a deep graph cannot overflow it.
 fn collect_depth_first_back_edges(
     graph: &LGraph,
-    node: NodeId,
+    start: NodeId,
     visited: &mut IdVec<NodeId, bool>,
     active: &mut IdVec<NodeId, bool>,
     edges_to_reverse: &mut Vec<EdgeId>,
 ) {
-    if visited[node] {
+    if visited[start] {
         return;
     }
-
-    visited[node] = true;
-    active[node] = true;
-
-    for edge_index in graph.node_outgoing_edges(node) {
+    visited[start] = true;
+    active[start] = true;
+    // Each entry is a node on the current path, its outgoing edges, and the next edge to follow.
+    let mut stack = vec![(start, graph.node_outgoing_edges(start), 0)];
+    while let Some((node, edges, next)) = stack.last_mut() {
+        let Some(&edge_index) = edges.get(*next) else {
+            active[*node] = false;
+            stack.pop();
+            continue;
+        };
+        *next += 1;
         let target = graph.edges[edge_index].target().node;
-        if target == node {
+        if target == *node {
             continue;
         }
         if active[target] {
             edges_to_reverse.push(edge_index);
-        } else {
-            collect_depth_first_back_edges(graph, target, visited, active, edges_to_reverse);
+        } else if !visited[target] {
+            visited[target] = true;
+            active[target] = true;
+            stack.push((target, graph.node_outgoing_edges(target), 0));
         }
     }
-
-    active[node] = false;
 }
