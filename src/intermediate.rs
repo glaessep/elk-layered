@@ -23,7 +23,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::common::cells::grow_label_cell;
 use crate::graph::{
-    EdgeId, EdgeLabelPlacement, GraphId, HorizontalLabelAlignment, LGraph, LLabel, LNode,
+    EdgeId, EdgeLabelPlacement, GraphId, HorizontalLabelAlignment, IdVec, LGraph, LLabel, LNode,
     LNodeKind, LPoint, LSize, LabelCellLayout, LabelSide, LayeredEdge, NodeId, PortId, PortRef,
     PortSide, PortType, VerticalLabelAlignment, reverse_edge,
 };
@@ -421,7 +421,8 @@ fn can_reverse_incoming_edge(
 
 pub fn preprocess_layer_constraints(graph: &mut LGraph) -> IntermediateResult<()> {
     graph.hidden_nodes.clear();
-    let mut hidden_connections = vec![HiddenNodeConnections::None; graph.layerless_nodes.len()];
+    let mut hidden_connections =
+        IdVec::filled(graph.layerless_nodes.len(), HiddenNodeConnections::None);
     let nodes = graph.node_ids().collect::<Vec<_>>();
 
     for node in nodes {
@@ -446,7 +447,7 @@ fn is_relevant_layer_constraint_node(graph: &LGraph, node: NodeId) -> bool {
 fn hide_layer_constraint_node(
     graph: &mut LGraph,
     node: NodeId,
-    hidden_connections: &mut [HiddenNodeConnections],
+    hidden_connections: &mut IdVec<NodeId, HiddenNodeConnections>,
 ) -> IntermediateResult<()> {
     ensure_no_unacceptable_separate_edges(graph, node)?;
     let connected_edges = graph.node_connected_edges(node);
@@ -462,7 +463,7 @@ fn hide_layer_constraint_edge(
     graph: &mut LGraph,
     node: NodeId,
     edge: EdgeId,
-    hidden_connections: &mut [HiddenNodeConnections],
+    hidden_connections: &mut IdVec<NodeId, HiddenNodeConnections>,
 ) {
     let is_outgoing = graph.edges[edge].source.node == node;
     let opposite_port = if is_outgoing {
@@ -485,20 +486,20 @@ fn update_opposite_node_layer_constraints(
     graph: &mut LGraph,
     hidden_node: NodeId,
     opposite_node: NodeId,
-    hidden_connections: &mut [HiddenNodeConnections],
+    hidden_connections: &mut IdVec<NodeId, HiddenNodeConnections>,
 ) {
     if graph.layerless_nodes[opposite_node].layer_constraint_explicit {
         return;
     }
 
-    hidden_connections[opposite_node.index()] = hidden_connections[opposite_node.index()]
+    hidden_connections[opposite_node] = hidden_connections[opposite_node]
         .combine(graph.layerless_nodes[hidden_node].layer_constraint);
 
     if !graph.node_connected_edges(opposite_node).is_empty() {
         return;
     }
 
-    match hidden_connections[opposite_node.index()] {
+    match hidden_connections[opposite_node] {
         HiddenNodeConnections::FirstSeparate => {
             graph.layerless_nodes[opposite_node].layer_constraint = LayerConstraint::First;
             graph.layerless_nodes[opposite_node].layer_constraint_explicit = true;
@@ -1286,13 +1287,13 @@ fn connected_ports(graph: &LGraph, port_ref: PortRef) -> Vec<PortRef> {
 
 fn is_before_label_dummy(graph: &LGraph, node: NodeId) -> bool {
     let mut current = node;
-    let mut visited = vec![false; graph.layerless_nodes.len()];
+    let mut visited = IdVec::filled(graph.layerless_nodes.len(), false);
 
     loop {
-        if current.index() >= visited.len() || visited[current.index()] {
+        if visited.get(current).copied().unwrap_or(true) {
             return false;
         }
-        visited[current.index()] = true;
+        visited[current] = true;
 
         let Some(outgoing) = graph.node_outgoing_edges(current).into_iter().next() else {
             return false;
@@ -2278,7 +2279,7 @@ pub fn sort_end_labels(graph: &mut LGraph) {
     let edge_sort_keys = graph
         .edge_ids()
         .map(|edge| end_label_sort_key(graph, edge, &node_ids, &port_ids))
-        .collect::<Vec<_>>();
+        .collect::<IdVec<EdgeId, _>>();
 
     for node in graph.node_ids() {
         graph.layerless_nodes[node]
@@ -2290,11 +2291,11 @@ pub fn sort_end_labels(graph: &mut LGraph) {
                 port.labels.sort_by(|a, b| {
                     let a_key = a
                         .end_label_edge
-                        .and_then(|edge| edge_sort_keys.get(edge.index()).copied())
+                        .and_then(|edge| edge_sort_keys.get(edge).copied())
                         .unwrap_or((usize::MAX, usize::MAX, usize::MAX));
                     let b_key = b
                         .end_label_edge
-                        .and_then(|edge| edge_sort_keys.get(edge.index()).copied())
+                        .and_then(|edge| edge_sort_keys.get(edge).copied())
                         .unwrap_or((usize::MAX, usize::MAX, usize::MAX));
                     a_key.cmp(&b_key)
                 });
@@ -2304,20 +2305,20 @@ pub fn sort_end_labels(graph: &mut LGraph) {
 
 /// `EndLabelSorter.initialize`: ascending ids over the layers, their nodes and those nodes' ports.
 /// A node outside every layer keeps `usize::MAX`.
-fn end_label_sorter_ids(graph: &LGraph) -> (Vec<usize>, Vec<Vec<usize>>) {
-    let mut node_ids = vec![usize::MAX; graph.layerless_nodes.len()];
+fn end_label_sorter_ids(graph: &LGraph) -> (IdVec<NodeId, usize>, IdVec<NodeId, Vec<usize>>) {
+    let mut node_ids = IdVec::filled(graph.layerless_nodes.len(), usize::MAX);
     let mut port_ids = graph
         .layerless_nodes
         .iter()
         .map(|node| vec![usize::MAX; node.ports.slot_count()])
-        .collect::<Vec<_>>();
+        .collect::<IdVec<NodeId, _>>();
     let mut next_element_id = 0;
     for layer in &graph.layers {
         for &node in &layer.nodes {
-            node_ids[node.index()] = next_element_id;
+            node_ids[node] = next_element_id;
             next_element_id += 1;
             for port in graph.layerless_nodes[node].ports.ids() {
-                port_ids[node.index()][port.index()] = next_element_id;
+                port_ids[node][port.index()] = next_element_id;
                 next_element_id += 1;
             }
         }
@@ -2328,15 +2329,15 @@ fn end_label_sorter_ids(graph: &LGraph) -> (Vec<usize>, Vec<Vec<usize>>) {
 fn end_label_sort_key(
     graph: &LGraph,
     edge: EdgeId,
-    node_ids: &[usize],
-    port_ids: &[Vec<usize>],
+    node_ids: &IdVec<NodeId, usize>,
+    port_ids: &IdVec<NodeId, Vec<usize>>,
 ) -> (usize, usize, usize) {
     let edge = &graph.edges[edge];
-    let source_port = port_ids[edge.source.node.index()][edge.source.port.index()];
-    let target_node = node_ids[edge.target.node.index()];
+    let source_port = port_ids[edge.source.node][edge.source.port.index()];
+    let target_node = node_ids[edge.target.node];
     // Java compares the target ports backwards: western ports run bottom to top.
     let target_port =
-        usize::MAX.saturating_sub(port_ids[edge.target.node.index()][edge.target.port.index()]);
+        usize::MAX.saturating_sub(port_ids[edge.target.node][edge.target.port.index()]);
     (source_port, target_node, target_port)
 }
 
