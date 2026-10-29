@@ -11,7 +11,8 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
-    GraphArena, GraphId, IdVec, LGraph, LNodeKind, NodeId, OtherGraphs, PortId, PortRef, PortSide,
+    GraphArena, GraphId, IdVec, LGraph, LNode, LNodeKind, NodeId, OtherGraphs, PortId, PortRef,
+    PortSide,
 };
 use crate::options::{OrderingStrategy, PortConstraints, PortSortingStrategy};
 
@@ -315,8 +316,7 @@ fn external_port_dummy_side(
         return graph
             .layerless_nodes
             .get(dummy_node)
-            .and_then(|node| node.external_port())
-            .map_or(PortSide::Undefined, |external| external.side);
+            .map_or(PortSide::Undefined, LNode::external_port_side);
     }
 
     // The dummy is in the graph inside the port's node, and no other graph.
@@ -327,8 +327,7 @@ fn external_port_dummy_side(
         .filter(|&nested| nested == dummy_graph_id)
         .and_then(|nested| others.get(nested))
         .and_then(|nested| nested.layerless_nodes.get(dummy_node))
-        .and_then(|node| node.external_port())
-        .map_or(PortSide::Undefined, |external| external.side)
+        .map_or(PortSide::Undefined, LNode::external_port_side)
 }
 
 pub fn sort_port_lists(graph: &mut LGraph) {

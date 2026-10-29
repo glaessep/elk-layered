@@ -889,9 +889,7 @@ pub(crate) fn external_port_position(
 ) -> LPoint {
     let dummy_size = graph.layerless_nodes[dummy_index].size;
     // A node that is no external port dummy has no side to place it on.
-    let external_side = graph.layerless_nodes[dummy_index]
-        .external_port()
-        .map_or(PortSide::Undefined, |external| external.side);
+    let external_side = graph.layerless_nodes[dummy_index].external_port_side();
     let border_offset = graph.layerless_nodes[dummy_index]
         .ports
         .first()

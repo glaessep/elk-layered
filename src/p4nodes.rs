@@ -66,12 +66,7 @@ pub fn process_in_layer_constraints(graph: &mut LGraph) {
         let mut bottom_nodes = Vec::new();
 
         for node in nodes {
-            let in_layer_constraint = graph.layerless_nodes[node]
-                .external_port()
-                .map_or(InLayerConstraint::None, |external| {
-                    external.in_layer_constraint
-                });
-            match in_layer_constraint {
+            match graph.layerless_nodes[node].in_layer_constraint() {
                 InLayerConstraint::Top => top_nodes.push(node),
                 InLayerConstraint::Bottom => bottom_nodes.push(node),
                 InLayerConstraint::None => middle_nodes.push(node),

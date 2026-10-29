@@ -102,12 +102,7 @@ pub fn position_interactive_external_ports(graph: &mut LGraph) {
             continue;
         }
 
-        let in_layer_constraint = graph.layerless_nodes[node_index]
-            .external_port()
-            .map_or(crate::graph::InLayerConstraint::None, |external| {
-                external.in_layer_constraint
-            });
-        match in_layer_constraint {
+        match graph.layerless_nodes[node_index].in_layer_constraint() {
             crate::graph::InLayerConstraint::Top => {
                 if let Some(x) = north_south_external_port_x(graph, node_index) {
                     graph.layerless_nodes[node_index].position.x =
@@ -764,22 +759,7 @@ fn clone_inverted_dummy_edge(
     source: PortRef,
     target: PortRef,
 ) -> LayeredEdge {
-    let old_edge = &graph.edges[edge_index];
-    {
-        let mut built_edge = LayeredEdge::new(old_edge.id.clone(), source, target);
-        built_edge.source_node_id = old_edge.source_node_id.clone();
-        built_edge.target_node_id = old_edge.target_node_id.clone();
-        built_edge.minlen = old_edge.minlen;
-        built_edge.reversed = old_edge.reversed;
-        built_edge.model_order = old_edge.model_order;
-        built_edge.priority_direction = old_edge.priority_direction;
-        built_edge.priority_shortness = old_edge.priority_shortness;
-        built_edge.priority_straightness = old_edge.priority_straightness;
-        built_edge.thickness = old_edge.thickness;
-        built_edge.original_opposite_port = old_edge.original_opposite_port;
-        built_edge.compound_segment = old_edge.compound_segment;
-        built_edge
-    }
+    LayeredEdge::segment_of(&graph.edges[edge_index], source, target)
 }
 
 fn assign_nodes_to_layer(graph: &mut LGraph, nodes: &mut Vec<NodeId>, layer_index: usize) {
@@ -4094,23 +4074,9 @@ pub fn split_edge(graph: &mut LGraph, edge_index: EdgeId, dummy_node: NodeId) ->
         return None;
     }
 
-    let old_segment = graph.edges[edge_index].clone();
-    let dummy_edge = {
-        let mut built_edge =
-            LayeredEdge::new(old_segment.id.clone(), dummy_output, old_edge_target);
-        built_edge.source_node_id = old_segment.source_node_id.clone();
-        built_edge.target_node_id = old_segment.target_node_id.clone();
-        built_edge.minlen = old_segment.minlen;
-        built_edge.reversed = old_segment.reversed;
-        built_edge.model_order = old_segment.model_order;
-        built_edge.priority_direction = old_segment.priority_direction;
-        built_edge.priority_shortness = old_segment.priority_shortness;
-        built_edge.priority_straightness = old_segment.priority_straightness;
-        built_edge.thickness = thickness;
-        built_edge.original_opposite_port = old_segment.original_opposite_port;
-        built_edge.compound_segment = old_segment.compound_segment;
-        built_edge
-    };
+    // The old edge holds the clamped thickness already.
+    let dummy_edge =
+        LayeredEdge::segment_of(&graph.edges[edge_index], dummy_output, old_edge_target);
     let dummy_edge_index = graph.add_edge(dummy_edge)?;
 
     set_dummy_node_properties(graph, dummy_node, edge_index, dummy_edge_index);

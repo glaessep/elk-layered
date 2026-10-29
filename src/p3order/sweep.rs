@@ -4101,7 +4101,7 @@ fn external_dummy_origin_side(
             return side;
         }
     }
-    external.map_or(PortSide::Undefined, |external| external.side)
+    dummy.external_port_side()
 }
 
 fn port_side_at(graph: &LGraph, port: PortRef) -> Option<PortSide> {

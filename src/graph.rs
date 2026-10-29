@@ -525,6 +525,34 @@ impl LNode {
         }
     }
 
+    /// The side of the node the external port dummy stands for. A node that is no external port
+    /// dummy stands for none, so it has no side: [`PortSide::Undefined`].
+    pub fn external_port_side(&self) -> PortSide {
+        self.external_port()
+            .map_or(PortSide::Undefined, |external| external.side)
+    }
+
+    /// The in-layer constraint of an external port dummy. A node that is no external port dummy
+    /// has none: [`InLayerConstraint::None`].
+    pub fn in_layer_constraint(&self) -> InLayerConstraint {
+        self.external_port()
+            .map_or(InLayerConstraint::None, |external| {
+                external.in_layer_constraint
+            })
+    }
+
+    /// The data of an external port dummy together with the layer constraint of the node, both
+    /// for change, or `None` for any other node. A layer constraint and an external port's side
+    /// change together in the graph transformations.
+    pub fn external_port_and_layer_constraint_mut(
+        &mut self,
+    ) -> Option<(&mut ExternalPortData, &mut super::options::LayerConstraint)> {
+        match &mut self.dummy {
+            Some(DummyData::ExternalPort(data)) => Some((data, &mut self.layer_constraint)),
+            _ => None,
+        }
+    }
+
     /// The ports at the ends of the long edge that a long edge dummy or a label dummy belongs
     /// to, or `None` for any other node.
     pub fn long_edge_ends(&self) -> Option<LongEdgeEnds> {
@@ -912,6 +940,26 @@ impl LayeredEdge {
     ) -> Result<(), E> {
         map(&mut self.source)?;
         map(&mut self.target)
+    }
+
+    /// The next piece of an edge that is split or copied between two new ports: it keeps the
+    /// id, the node ids, the minimum length, the direction, the model order, the priorities, the
+    /// thickness, the opposite port and the compound segment of `old`. It has no labels, bend
+    /// points or junction points.
+    pub fn segment_of(old: &LayeredEdge, source: PortRef, target: PortRef) -> Self {
+        let mut segment = Self::new(old.id.clone(), source, target);
+        segment.source_node_id = old.source_node_id.clone();
+        segment.target_node_id = old.target_node_id.clone();
+        segment.minlen = old.minlen;
+        segment.reversed = old.reversed;
+        segment.model_order = old.model_order;
+        segment.priority_direction = old.priority_direction;
+        segment.priority_shortness = old.priority_shortness;
+        segment.priority_straightness = old.priority_straightness;
+        segment.thickness = old.thickness;
+        segment.original_opposite_port = old.original_opposite_port;
+        segment.compound_segment = old.compound_segment;
+        segment
     }
 
     /// The port the edge leaves.
@@ -2836,6 +2884,84 @@ mod tests {
         assert_eq!(external.scope_port, Some(3));
         assert_eq!(external.parent_port_key.as_deref(), Some("key"));
         assert_eq!(external.parent_port_type, Some(PortType::Input));
+    }
+
+    // Mutation: in `external_port_side`, answer `North` for a node that is no external port
+    // dummy, or in `in_layer_constraint`, answer `Top`.
+    #[test]
+    fn a_node_that_is_no_external_port_dummy_has_no_side_and_no_in_layer_constraint() {
+        let mut external = dummy_of(LNodeKind::ExternalPort);
+        let data = external.external_port_mut().unwrap();
+        data.side = PortSide::South;
+        data.in_layer_constraint = InLayerConstraint::Bottom;
+
+        assert_eq!(external.external_port_side(), PortSide::South);
+        assert_eq!(external.in_layer_constraint(), InLayerConstraint::Bottom);
+        for kind in [
+            LNodeKind::Normal,
+            LNodeKind::LongEdge,
+            LNodeKind::NorthSouthPort,
+        ] {
+            let node = dummy_of(kind);
+            assert_eq!(node.external_port_side(), PortSide::Undefined, "{kind:?}");
+            assert_eq!(
+                node.in_layer_constraint(),
+                InLayerConstraint::None,
+                "{kind:?}"
+            );
+        }
+    }
+
+    // Mutation: in `external_port_and_layer_constraint_mut`, answer `Some` for a long edge
+    // dummy too, or hand out the constraint of another node.
+    #[test]
+    fn the_external_port_data_and_the_layer_constraint_change_together() {
+        let mut external = dummy_of(LNodeKind::ExternalPort);
+        external.layer_constraint = LayerConstraint::FirstSeparate;
+
+        let (data, constraint) = external.external_port_and_layer_constraint_mut().unwrap();
+        data.side = PortSide::East;
+        *constraint = LayerConstraint::LastSeparate;
+
+        assert_eq!(external.external_port_side(), PortSide::East);
+        assert_eq!(external.layer_constraint, LayerConstraint::LastSeparate);
+        assert!(
+            dummy_of(LNodeKind::LongEdge)
+                .external_port_and_layer_constraint_mut()
+                .is_none()
+        );
+    }
+
+    // Mutation: in `segment_of`, leave out the copy of one field of the old edge, or keep its
+    // labels or bend points.
+    #[test]
+    fn segment_of_keeps_the_fields_of_the_old_edge_but_not_its_geometry() {
+        let EdgeFixture { a, b, .. } = edge_fixture();
+        let mut old = LayeredEdge::new("old", a[0], b[0]);
+        old.source_node_id = "s".to_string();
+        old.target_node_id = "t".to_string();
+        old.minlen = 3;
+        old.reversed = true;
+        old.model_order = Some(4);
+        old.priority_direction = 1;
+        old.priority_shortness = 2;
+        old.priority_straightness = 3;
+        old.thickness = 5.0;
+        old.original_opposite_port = Some(a[1]);
+        old.compound_segment = Some(CompoundEdgeSegment::Output { depth: 2 });
+        old.labels.push(LLabel::new("label", 1.0, 1.0));
+        old.bend_points.push(LPoint { x: 1.0, y: 2.0 });
+        old.junction_points.push(LPoint { x: 3.0, y: 4.0 });
+
+        let segment = LayeredEdge::segment_of(&old, a[1], b[1]);
+
+        let mut expected = old.clone();
+        expected.labels.clear();
+        expected.bend_points.clear();
+        expected.junction_points.clear();
+        expected.source = a[1];
+        expected.target = b[1];
+        assert_eq!(segment, expected);
     }
 
     // Mutation: in `create_external_port_dummy`, mark the layer constraint of every dummy

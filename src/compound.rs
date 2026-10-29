@@ -1547,9 +1547,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
                 apply_port_index_to_dummy(&mut dummy, port_constraints, port.port_index);
                 dummy
             });
-            let dummy_side = nested_graph.layerless_nodes[dummy_node]
-                .external_port()
-                .map_or(PortSide::Undefined, |external| external.side);
+            let dummy_side = nested_graph.layerless_nodes[dummy_node].external_port_side();
             let dummy_border_offset = port.border_offset;
 
             link_external_port_dummy(
