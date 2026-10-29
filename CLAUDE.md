@@ -53,9 +53,11 @@ The same graph gives the same layout, bit for bit, on every machine.
   This comment is the one exception to "comments say why, not what". A table-driven or snapshot
   test names one mutation per case it adds. The rule binds new and changed tests; an older test
   gets its comment when it changes.
-- **A test counts as changed when what it asserts or the input it builds changes.** A change to
-  only its types, its accessors or a helper's name does not count. Example: `nodes[0]` becoming
-  `nodes[NodeId::new(0)]` needs no new mutation comment.
+- **A test counts as changed only when what it asserts or the values it builds change.** A change
+  to only its types, its accessors, its builder code or a helper's name, which still gives the
+  same values, does not count. Such a test counts as unchanged for every rule in this section.
+  Example: `nodes[0]` becoming `nodes[NodeId::new(0)]`, where both name the same node, is
+  unchanged. A type change that alters a value, such as `f64` to `f32`, is a change.
 
 ```bash
 cargo build
@@ -107,9 +109,9 @@ A review checks, in this order:
 4. **Caller input.** Malformed input gives an error, never a panic: no `unwrap`, `expect` or
    indexing that a caller's graph can break.
 5. **Tests.** Each kind of input the change reads, each edge value and each error has a test.
-   Each new or changed test names a mutation of the code that makes it fail. A test whose
-   only change is a type, an accessor or a helper's name counts as unchanged. A change to
-   `tests/snapshots/` is explained in the pull request.
+   Each new or changed test names a mutation of the code that makes it fail. A test counts as
+   changed only when what it asserts or the values it builds change, as the Tests section says
+   with its example. A change to `tests/snapshots/` is explained in the pull request.
 6. **Scope.** The pull request does what its issue asks, and no more.
 
 ## Commits
