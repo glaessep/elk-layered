@@ -5,7 +5,7 @@
 
 use super::vertical_spacing;
 use crate::common::networksimplex::{NGraph, NetworkSimplex, NetworkSimplexError, coordinate};
-use crate::graph::{EdgeId, LGraph, LNodeKind, NodeId, PortRef, PortSide};
+use crate::graph::{EdgeId, IdVec, LGraph, LNodeKind, NodeId, PortRef, PortSide};
 use crate::options::{NodeFlexibility, NodeLabelLocation};
 
 #[derive(Clone, Copy)]
@@ -23,9 +23,9 @@ struct EdgeRep {
 
 struct Auxiliary {
     graph: NGraph,
-    nodes: Vec<Option<NodeRep>>,
-    ports: Vec<Vec<Option<usize>>>,
-    edges: Vec<Option<EdgeRep>>,
+    nodes: IdVec<NodeId, Option<NodeRep>>,
+    ports: IdVec<NodeId, Vec<Option<usize>>>,
+    edges: IdVec<EdgeId, Option<EdgeRep>>,
 }
 
 pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexError> {
@@ -40,13 +40,13 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
     }
     // ELK rounds anchors independently for flexible nodes, and combined port/anchor
     // positions for every node, before constructing integral simplex constraints.
-    let flexible: Vec<_> = graph
+    let flexible: IdVec<NodeId, bool> = graph
         .node_ids()
         .map(|node| is_flexible(graph, node))
         .collect();
     for &node in &order {
         for port in graph.layerless_nodes[node].ports.slots_mut() {
-            if flexible[node.index()] {
+            if flexible[node] {
                 port.anchor.y = java_round(port.anchor.y)?;
             }
             port.position.y = java_round(port.position.y + port.anchor.y)? - port.anchor.y;
@@ -54,13 +54,13 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
     }
     let mut aux = Auxiliary {
         graph: NGraph::new(),
-        nodes: vec![None; graph.layerless_nodes.len()],
+        nodes: IdVec::filled(graph.layerless_nodes.len(), None),
         ports: graph
             .layerless_nodes
             .iter()
             .map(|node| vec![None; node.ports.slot_count()])
             .collect(),
-        edges: vec![None; graph.edges.len()],
+        edges: IdVec::filled(graph.edges.len(), None),
     };
     for layer in &graph.layers {
         let mut previous: Option<NodeId> = None;
@@ -69,7 +69,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
                 continue;
             }
             let head = aux.graph.add_node(Some(node));
-            let rep = if flexible[node.index()] {
+            let rep = if flexible[node] {
                 let tail = aux.graph.add_node(Some(node));
                 aux.graph.add_edge(
                     None,
@@ -89,7 +89,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
             } else {
                 for (port, data) in graph.layerless_nodes[node].ports.iter_with_ids() {
                     if matches!(data.side, PortSide::East | PortSide::West) {
-                        aux.ports[node.index()][port.index()] = Some(head);
+                        aux.ports[node][port.index()] = Some(head);
                     }
                 }
                 NodeRep {
@@ -98,9 +98,9 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
                     flexible: false,
                 }
             };
-            aux.nodes[node.index()] = Some(rep);
+            aux.nodes[node] = Some(rep);
             if let Some(previous) = previous {
-                let previous_rep = aux.nodes[previous.index()].unwrap();
+                let previous_rep = aux.nodes[previous].unwrap();
                 let previous_node = &graph.layerless_nodes[previous];
                 let spacing = previous_node.margin.bottom
                     + vertical_spacing(graph, previous, node)
@@ -124,15 +124,15 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
             }
             let data = &graph.edges[edge];
             let (Some(source), Some(target)) = (
-                aux.ports[data.source.node.index()][data.source.port.index()],
-                aux.ports[data.target.node.index()][data.target.port.index()],
+                aux.ports[data.source.node][data.source.port.index()],
+                aux.ports[data.target.node][data.target.port.index()],
             ) else {
                 continue;
             };
             let offset = |endpoint: PortRef| {
                 let port = &graph.layerless_nodes[endpoint.node].ports[endpoint.port];
                 port.anchor.y
-                    + if aux.nodes[endpoint.node.index()].unwrap().flexible {
+                    + if aux.nodes[endpoint.node].unwrap().flexible {
                         0.0
                     } else {
                         port.position.y
@@ -166,7 +166,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
                     ceil_i32((source_offset - target_offset).max(0.0))?,
                 )
                 .unwrap();
-            aux.edges[edge.index()] = Some(EdgeRep { left, right });
+            aux.edges[edge] = Some(EdgeRep { left, right });
         }
     }
     insert_port_auxiliary_edges(graph, &mut aux, &order);
@@ -201,14 +201,14 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
         improve_two_path(graph, &mut aux, path, false)?;
     }
     for node in order {
-        let rep = aux.nodes[node.index()].unwrap();
+        let rep = aux.nodes[node].unwrap();
         let y = aux.graph.nodes[rep.head].layer as f64;
         let data = &mut graph.layerless_nodes[node];
         data.position.y = y;
         if rep.flexible {
             let size_delta = (aux.graph.nodes[rep.tail].layer as f64 - y) - data.size.height;
             for (id, port) in data.ports.slots_mut_with_ids() {
-                if let Some(position) = aux.ports[node.index()][id.index()] {
+                if let Some(position) = aux.ports[node][id.index()] {
                     port.position.y = aux.graph.nodes[position].layer as f64 - y;
                 }
             }
@@ -278,7 +278,7 @@ fn transform_ports(
     let mut last_height = None;
     for port in ports {
         let position = aux.graph.add_node(None);
-        aux.ports[node.index()][port.index()] = Some(position);
+        aux.ports[node][port.index()] = Some(position);
         let spacing = last_height
             .map(|height| height + graph.options.spacing.port_port)
             .unwrap_or(surrounding.top);
@@ -308,7 +308,7 @@ fn handled_edge(graph: &LGraph, edge: EdgeId) -> bool {
 
 fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[NodeId]) {
     for &node in order {
-        let rep = aux.nodes[node.index()].unwrap();
+        let rep = aux.nodes[node].unwrap();
         for port in &graph.layerless_nodes[node].ports {
             let Some(dummy) = &port.port_dummy else {
                 continue;
@@ -316,7 +316,7 @@ fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[Nod
             if dummy.graph_id != graph.id {
                 continue;
             }
-            let Some(other) = aux.nodes[dummy.node.index()] else {
+            let Some(other) = aux.nodes[dummy.node] else {
                 continue;
             };
             match port.side {
@@ -330,10 +330,10 @@ fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[Nod
             }
         }
     }
-    let mut position = vec![0; graph.layerless_nodes.len()];
+    let mut position = IdVec::filled(graph.layerless_nodes.len(), 0);
     for layer in &graph.layers {
         for (index, &node) in layer.nodes.iter().enumerate() {
-            position[node.index()] = index;
+            position[node] = index;
         }
     }
     for &node in order {
@@ -354,13 +354,12 @@ fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[Nod
             } else {
                 (edge.source, edge.target.node)
             };
-            let (Some(port_rep), Some(dummy_rep)) = (
-                aux.ports[port.node.index()][port.port.index()],
-                aux.nodes[dummy.index()],
-            ) else {
+            let (Some(port_rep), Some(dummy_rep)) =
+                (aux.ports[port.node][port.port.index()], aux.nodes[dummy])
+            else {
                 continue;
             };
-            let (source, target) = if position[port.node.index()] < position[dummy.index()] {
+            let (source, target) = if position[port.node] < position[dummy] {
                 (port_rep, dummy_rep.head)
             } else {
                 (dummy_rep.head, port_rep)
@@ -410,7 +409,7 @@ fn prefer_straight_edges(
 ) -> Vec<[EdgeId; 2]> {
     let crossing = mark_crossings(graph);
     // -1 visited, 0 path interior, 2 junction (including leaves).
-    let mut state = vec![0i8; graph.layerless_nodes.len()];
+    let mut state = IdVec::filled(graph.layerless_nodes.len(), 0i8);
     for &node in order {
         let incoming = graph
             .node_incoming_edges(node)
@@ -423,12 +422,12 @@ fn prefer_straight_edges(
             .filter(|edge| graph.edges[*edge].source.node != graph.edges[*edge].target.node)
             .count();
         if incoming > 1 || outgoing > 1 || incoming + outgoing == 1 {
-            state[node.index()] = 2;
+            state[node] = 2;
         }
     }
     let mut paths = Vec::new();
     for &junction in order {
-        if state[junction.index()] != 2 {
+        if state[junction] != 2 {
             continue;
         }
         for first in graph.node_connected_edges(junction) {
@@ -446,11 +445,10 @@ fn prefer_straight_edges(
                 } else {
                     data.source.node
                 };
-                if state[other.index()] == -1 || state[other.index()] == 2 || crossing[edge.index()]
-                {
+                if state[other] == -1 || state[other] == 2 || crossing[edge] {
                     break;
                 }
-                state[other.index()] = -1;
+                state[other] = -1;
                 let Some(next) = graph
                     .node_connected_edges(other)
                     .into_iter()
@@ -468,14 +466,14 @@ fn prefer_straight_edges(
     }
     let mut two_paths = Vec::new();
     for mut path in paths {
-        if path.iter().any(|edge| aux.edges[(*edge).index()].is_none()) {
+        if path.iter().any(|edge| aux.edges[*edge].is_none()) {
             continue;
         }
         if path.len() == 2 {
             if graph.edges[path[0]].target.node != graph.edges[path[1]].source.node {
                 path.swap(0, 1);
             }
-            if !aux.nodes[(graph.edges[path[0]].target.node).index()]
+            if !aux.nodes[graph.edges[path[0]].target.node]
                 .unwrap()
                 .flexible
             {
@@ -494,7 +492,7 @@ fn prefer_straight_edges(
                 } else {
                     64.0
                 };
-                let rep = aux.edges[edge.index()].unwrap();
+                let rep = aux.edges[edge].unwrap();
                 for edge in [rep.left, rep.right] {
                     aux.graph.edges[edge].weight = aux.graph.edges[edge].weight.max(weight);
                 }
@@ -504,8 +502,8 @@ fn prefer_straight_edges(
     two_paths
 }
 
-fn mark_crossings(graph: &LGraph) -> Vec<bool> {
-    let mut crossing = vec![false; graph.edges.len()];
+fn mark_crossings(graph: &LGraph) -> IdVec<EdgeId, bool> {
+    let mut crossing = IdVec::filled(graph.edges.len(), false);
     for (layer_index, layers) in graph.layers.windows(2).enumerate() {
         let mut open = Vec::new();
         for &node in &layers[0].nodes {
@@ -537,8 +535,8 @@ fn mark_crossings(graph: &LGraph) -> Vec<bool> {
                     }
                     let mut index = open.len() - 1;
                     while open[index] != edge && index > 0 {
-                        crossing[open[index].index()] = true;
-                        crossing[edge.index()] = true;
+                        crossing[open[index]] = true;
+                        crossing[edge] = true;
                         index -= 1;
                     }
                     // Preserve the source ListIterator's first-entry retention.
@@ -558,8 +556,8 @@ fn improve_two_path(
     path: [EdgeId; 2],
     probe: bool,
 ) -> Result<bool, NetworkSimplexError> {
-    let left = aux.edges[path[0].index()].unwrap();
-    let right = aux.edges[path[1].index()].unwrap();
+    let left = aux.edges[path[0]].unwrap();
+    let right = aux.edges[path[1]].unwrap();
     let not_straight = |rep: EdgeRep| {
         let l = &aux.graph.edges[rep.left];
         let r = &aux.graph.edges[rep.right];
@@ -572,7 +570,7 @@ fn improve_two_path(
         return Ok(false);
     }
     let center = graph.edges[path[0]].target.node;
-    let rep = aux.nodes[center.index()].unwrap();
+    let rep = aux.nodes[center].unwrap();
     if rep.flexible {
         return Ok(false);
     }
@@ -587,7 +585,7 @@ fn improve_two_path(
         let other_data = &graph.layerless_nodes[other];
         above = y
             - data.margin.top
-            - (aux.graph.nodes[aux.nodes[other.index()].unwrap().head].layer as f64
+            - (aux.graph.nodes[aux.nodes[other].unwrap().head].layer as f64
                 + other_data.size.height
                 + other_data.margin.bottom)
             - vertical_spacing(graph, other, center).ceil();
@@ -595,7 +593,7 @@ fn improve_two_path(
     if index + 1 < layer.len() {
         let other = layer[index + 1];
         let other_data = &graph.layerless_nodes[other];
-        below = aux.graph.nodes[aux.nodes[other.index()].unwrap().head].layer as f64
+        below = aux.graph.nodes[aux.nodes[other].unwrap().head].layer as f64
             - other_data.margin.top
             - (y + data.size.height + data.margin.bottom)
             - vertical_spacing(graph, other, center).ceil();
