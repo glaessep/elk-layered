@@ -700,6 +700,8 @@ impl HierarchySweep {
 
     fn minimize_with_counter(&mut self, graphs: &mut GraphArena, info_index: usize) -> f64 {
         let mut is_forward_sweep = self.random.next_bool();
+        // ELK also reads FIRST_TRY_WITH_INITIAL_ORDER here. `minimize_one_sided_greedy_switch`
+        // says why it is safe to leave out.
         {
             let graph = &graphs[self.infos[info_index].graph];
             let mut heuristic = GreedySwitchHeuristic::new(self.cross_min_type);
@@ -2195,7 +2197,9 @@ impl AdjacencyList {
                     let adjacent_port = adjacent_port_of_side(graph, edge, side);
                     // An edge that leaves the free layer and is not an in-layer edge ends in the
                     // neighbouring layer, so its port has a position: the layering is proper.
-                    // ELK looks the position up without a check and would fail on a missing one.
+                    // ELK reads the position from a HashMap<LPort, Integer> and unboxes it into an
+                    // int, so a missing port would throw. The skip cannot happen in a proper
+                    // layering; it only keeps a broken one from panicking.
                     if let Some(&position) = port_positions.get(&adjacent_port) {
                         positions.push(position);
                     }
@@ -3489,6 +3493,12 @@ fn minimize_one_sided_greedy_switch(graph: &mut LGraph, others: OtherGraphs<'_>)
     );
     let mut heuristic = GreedySwitchHeuristic::new(CrossMinType::OneSidedGreedySwitch);
     let mut is_forward_sweep = graph.random.next_bool();
+    // ELK's minimizeCrossingsWithCounter also reads InternalProperties.FIRST_TRY_WITH_INITIAL_ORDER
+    // here. That property and SECOND_TRY_WITH_INITIAL_ORDER share the id
+    // "firstTryWithInitialOrder". The barycenter sweep leaves it set only when its first run keeps
+    // the model order because that order has no crossings. Then ELK returns before it sweeps, and
+    // this sweep finds no crossing to remove either. A port of the flag changed no layout in 3,000
+    // graphs (#26), so it is left out.
 
     heuristic.set_first_layer_order(graph, &mut graph_info.current_node_order, is_forward_sweep);
     sweep_reducing_crossings_greedy(
@@ -4317,16 +4327,47 @@ mod tests {
         );
     }
 
-    // Mutation: in `AdjacencyList::from_positions`, use `sort_unstable_by_key`. With 40 entries
-    // the toolchain of rust-toolchain.toml then puts entries at one position out of the order they
-    // were collected in. Rust sorts shorter lists by insertion, which keeps that order anyway.
+    // Mutation: in `AdjacencyList::from_positions`, count `size` from the entries instead of the
+    // positions (`size = adjacency_list.len()`). The single list then still holds 1, but the
+    // two-edge list below holds 1 instead of 2.
+    #[test]
+    fn an_adjacency_list_of_no_edge_or_one_edge_counts_nothing_against_itself() {
+        // A node with no edge on the side: an empty list that stays empty after a reset.
+        let mut empty = AdjacencyList::from_positions([]);
+        assert!(empty.adjacency_list.is_empty());
+        assert_eq!((empty.size, empty.current_size), (0, 0));
+        empty.reset();
+        assert!(empty.is_empty());
+
+        // One edge: one entry of cardinality 1, with nothing below it.
+        let single = AdjacencyList::from_positions([7]);
+        assert_eq!(single.adjacency_list, vec![Adjacency::new(7)]);
+        assert_eq!(single.count_adjacencies_below_node_of_first_port(), 0);
+
+        // Two edges to one port merge into one entry, but the list still holds two edges.
+        let double = AdjacencyList::from_positions([7, 7]);
+        assert_eq!(double.adjacency_list.len(), 1);
+        assert_eq!(double.size, 2);
+
+        // An empty list against a full one counts no crossing in either order.
+        let mut counter = BetweenLayerEdgeTwoNodeCrossingsCounter::new();
+        counter.count_crossings_by_merging_adjacency_lists(empty, single);
+        assert_eq!(
+            (counter.upper_lower_crossings, counter.lower_upper_crossings),
+            (0, 0)
+        );
+    }
+
+    // Mutation: in `AdjacencyList::from_positions`, use `sort_unstable_by_key`. The test uses
+    // 2,000 entries, far above the small-sort cutoff of the standard library: below it Rust sorts
+    // by insertion, which keeps the order of equal entries even in the unstable sort.
     #[test]
     fn the_sort_keeps_entries_at_one_position_in_the_order_they_were_collected() {
-        // Twenty rounds of edges to position 1, twice in even rounds and once in odd ones, each
-        // round closed by an edge to position 0. No entry merges across a round, so position 1
-        // holds 20 entries whose cardinality alternates 2, 1, 2, 1.
+        // A thousand rounds of edges to position 1, twice in even rounds and once in odd ones,
+        // each round closed by an edge to position 0. No entry merges across a round, so position
+        // 1 holds 1,000 entries whose cardinality alternates 2, 1, 2, 1.
         let mut positions = Vec::new();
-        for round in 0..20 {
+        for round in 0..1000 {
             positions.push(1);
             if round % 2 == 0 {
                 positions.push(1);
@@ -4340,7 +4381,7 @@ mod tests {
             .filter(|adjacency| adjacency.position == 1)
             .map(|adjacency| adjacency.cardinality)
             .collect();
-        let collected: Vec<usize> = (0..20).map(|round| 2 - round % 2).collect();
+        let collected: Vec<usize> = (0..1000).map(|round| 2 - round % 2).collect();
         assert_eq!(at_one, collected);
     }
 
