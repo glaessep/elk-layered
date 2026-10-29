@@ -86,6 +86,13 @@ impl GraphArena {
         self.graphs.len()
     }
 
+    /// The graph `id` names, or `None` when this arena has no such graph. Use it for an id that
+    /// came out of the data being processed, such as a record of a cross-hierarchy edge; indexing
+    /// with a bad id panics.
+    pub fn get(&self, id: GraphId) -> Option<&LGraph> {
+        self.graphs.get(id.0)
+    }
+
     /// The root graph.
     pub fn root(&self) -> &LGraph {
         &self.graphs[GraphId::ROOT.0]
@@ -344,6 +351,16 @@ mod tests {
             assert_eq!(graphs[id].id, id, "{}", graphs[id].name);
         }
         assert_eq!(graphs[a0].name, "a0");
+    }
+
+    // Mutation: make `get` index the graphs (`Some(&self.graphs[id.0])`). An id past the last
+    // graph then panics instead of giving `None`.
+    #[test]
+    fn get_gives_none_for_an_id_the_arena_does_not_hold() {
+        let (graphs, [a, ..]) = branched();
+
+        assert_eq!(graphs.get(a).map(|graph| graph.name.as_str()), Some("a"));
+        assert!(graphs.get(GraphId::new(graphs.len())).is_none());
     }
 
     // Mutation: let `add` give the new graph the id of the previous one.

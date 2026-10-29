@@ -122,6 +122,17 @@ impl<'a> Hierarchy<'a> {
         &self.arena[graph]
     }
 
+    /// No ELK counterpart: the graph an id of the layout data names. An id that names no graph is
+    /// a bug in an earlier step, so it is an error, not a panic.
+    fn checked_graph(&self, graph: GraphId) -> Result<&'a LGraph, Error> {
+        self.arena.get(graph).ok_or_else(|| Error::Internal {
+            message: format!(
+                "the layout names graph {}, which does not exist",
+                graph.index()
+            ),
+        })
+    }
+
     /// The graph inside a node, if any.
     ///
     /// Ports `LNode.getNestedGraph`.
@@ -194,17 +205,18 @@ impl<'a> Hierarchy<'a> {
 
     /// Ports `CrossHierarchyEdge.getActualSource` and `getActualTarget`: the port of an external
     /// port dummy is the port on the compound node it stands for.
-    fn actual_end(&self, graph: GraphId, port: PortRef) -> PortAt {
+    fn actual_end(&self, graph: GraphId, port: PortRef) -> Result<PortAt, Error> {
         let node = &self.graph(graph).layerless_nodes[port.node];
         if node.kind == LNodeKind::ExternalPort
             && let Some(origin) = &node.origin_port
         {
-            return PortAt {
+            self.checked_graph(origin.graph_id)?;
+            return Ok(PortAt {
                 graph: origin.graph_id,
                 port: origin.port,
-            };
+            });
         }
-        PortAt { graph, port }
+        Ok(PortAt { graph, port })
     }
 }
 
@@ -222,12 +234,15 @@ struct JoinedEdge {
 /// Joins the pieces of each edge that crosses a hierarchy level.
 ///
 /// Ports `CompoundGraphPostprocessor.process`, with `CrossHierarchyEdgeComparator.compare`.
-fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, JoinedEdge> {
+fn join_cross_hierarchy_edges(
+    hierarchy: &Hierarchy<'_>,
+) -> Result<BTreeMap<String, JoinedEdge>, Error> {
     // Pieces by original edge id, in hierarchy order.
     let mut pieces: BTreeMap<&str, Vec<(GraphId, &crate::graph::CrossHierarchyEdge)>> =
         BTreeMap::new();
     for &holder in &hierarchy.order {
         for record in &hierarchy.graph(holder).cross_hierarchy_edges {
+            hierarchy.checked_graph(record.graph_id)?;
             pieces
                 .entry(record.original_edge_id.as_str())
                 .or_default()
@@ -248,8 +263,8 @@ fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, Joi
         };
         let (first_graph, first_edge) = edge_of(&list[0]);
         let (last_graph, last_edge) = edge_of(&list[list.len() - 1]);
-        let source = hierarchy.actual_end(first_graph, first_edge.source);
-        let target = hierarchy.actual_end(last_graph, last_edge.target);
+        let source = hierarchy.actual_end(first_graph, first_edge.source)?;
+        let target = hierarchy.actual_end(last_graph, last_edge.target)?;
 
         let reference_node = (source.graph, source.port.node);
         let target_node = (target.graph, target.port.node);
@@ -309,7 +324,7 @@ fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, Joi
                 y: p.y + offset.y,
             }));
 
-            if hierarchy.actual_end(graph, edge.target) == target {
+            if hierarchy.actual_end(graph, edge.target)? == target {
                 let target_graph = target.graph;
                 if target_graph != graph {
                     offset = LPoint::default();
@@ -342,7 +357,7 @@ fn join_cross_hierarchy_edges(hierarchy: &Hierarchy<'_>) -> BTreeMap<String, Joi
             },
         );
     }
-    joined
+    Ok(joined)
 }
 
 /// An edge to apply: an ordinary edge of one graph, or a joined cross-hierarchy edge.
@@ -387,7 +402,7 @@ pub(crate) fn apply_layout(
     let external_ports = root.graph_properties.external_ports;
     let hierarchy = Hierarchy::new(graphs);
     let root = hierarchy.graph(GraphId::ROOT);
-    let joined = join_cross_hierarchy_edges(&hierarchy);
+    let joined = join_cross_hierarchy_edges(&hierarchy)?;
 
     // Every edge in the graph where its source node is, as ELK collects them from the source
     // node's ports. ELK skips an edge into a descendant of its source; the graph inside the
@@ -657,6 +672,7 @@ fn hierarchical_offset(
             message: format!("edge \"{edge_id}\" has no container"),
         });
     };
+    hierarchy.checked_graph(target_graph)?;
     let mut result = LPoint::default();
     let mut current = source.0;
     while current != target_graph {
@@ -721,10 +737,8 @@ mod tests {
         .err()
     }
 
-    // Mutation: leave out `copyJunctionPoints` in `join_cross_hierarchy_edges`. The joined edge
-    // then has no junction points.
-    #[test]
-    fn the_junction_points_of_an_edge_across_levels_are_joined_and_moved_to_one_graph() {
+    /// The edge `e` from `a`, inside `group`, to `b` outside it, laid out in two graphs.
+    fn laid_out_edge_across_levels() -> GraphArena {
         use crate::importer::{ElkInputGraph, import_graph};
         use crate::options::{ElkDirection, HierarchyHandling};
         use crate::snapshot_tests::{edge, node};
@@ -743,13 +757,10 @@ mod tests {
         };
         let mut graph = import_graph(&input).expect("imports");
         crate::pipeline::execute_ported_compound_processors(&mut graph).expect("lays out");
-        // Give every piece of the edge a junction point, as a router would.
-        for piece in graph.iter_mut() {
-            for edge in &mut piece.edges {
-                edge.junction_points = vec![LPoint { x: 1.0, y: 2.0 }];
-            }
-        }
+        graph
+    }
 
+    fn apply_to_edge_e(graph: &mut GraphArena) -> Result<LayoutResult, Error> {
         let parents = HashMap::new();
         let sized_nodes = HashSet::new();
         let containers = HashMap::from([("e".to_string(), GraphId::ROOT)]);
@@ -758,7 +769,22 @@ mod tests {
             sized_nodes: &sized_nodes,
             edge_containers: &containers,
         };
-        let result = apply_layout(&mut graph, &input).expect("transfers");
+        apply_layout(graph, &input)
+    }
+
+    // Mutation: leave out `copyJunctionPoints` in `join_cross_hierarchy_edges`. The joined edge
+    // then has no junction points.
+    #[test]
+    fn the_junction_points_of_an_edge_across_levels_are_joined_and_moved_to_one_graph() {
+        let mut graph = laid_out_edge_across_levels();
+        // Give every piece of the edge a junction point, as a router would.
+        for piece in graph.iter_mut() {
+            for edge in &mut piece.edges {
+                edge.junction_points = vec![LPoint { x: 1.0, y: 2.0 }];
+            }
+        }
+
+        let result = apply_to_edge_e(&mut graph).expect("transfers");
         let edge = result
             .edges
             .iter()
@@ -769,11 +795,50 @@ mod tests {
         assert_ne!(edge.junction_points[0], edge.junction_points[1]);
     }
 
+    // Mutation: index the arena with the record's graph id (`hierarchy.graph(record.graph_id)`)
+    // instead of `checked_graph`. A record that names a missing graph then panics.
+    #[test]
+    fn a_cross_hierarchy_record_of_a_missing_graph_is_an_internal_error() {
+        let mut graph = laid_out_edge_across_levels();
+        graph.root_mut().cross_hierarchy_edges[0].graph_id = GraphId::new(99);
+
+        let error = apply_to_edge_e(&mut graph).expect_err("an error");
+
+        assert!(matches!(error, Error::Internal { ref message } if message.contains("99")));
+    }
+
+    // Mutation: return the origin's graph id unchecked from `actual_end`. The next lookup then
+    // indexes the arena with a missing id and panics.
+    #[test]
+    fn an_external_port_dummy_that_comes_from_a_missing_graph_is_an_internal_error() {
+        let mut graph = laid_out_edge_across_levels();
+        let nested = graph.children(GraphId::ROOT)[0];
+        let origin = graph[nested]
+            .layerless_nodes
+            .iter_mut()
+            .find_map(|node| node.origin_port.as_mut())
+            .expect("the edge leaves group through an external port dummy");
+        origin.graph_id = GraphId::new(99);
+
+        let error = apply_to_edge_e(&mut graph).expect_err("an error");
+
+        assert!(matches!(error, Error::Internal { ref message } if message.contains("99")));
+    }
+
     // Mutation: return `Ok(LPoint::default())` when the edge has no container.
     #[test]
     fn an_edge_without_a_container_is_an_internal_error() {
         let error = offset_error(&HashMap::new()).expect("an error");
         assert!(matches!(error, Error::Internal { ref message } if message.contains("\"e\"")));
+    }
+
+    // Mutation: leave out `hierarchy.checked_graph(target_graph)?` in `hierarchical_offset`. The
+    // walk then ends at the root and returns an offset for a container that does not exist.
+    #[test]
+    fn a_container_that_names_a_missing_graph_is_an_internal_error() {
+        let containers = HashMap::from([("e".to_string(), GraphId::new(99))]);
+        let error = offset_error(&containers).expect("an error");
+        assert!(matches!(error, Error::Internal { ref message } if message.contains("99")));
     }
 
     // Mutation: look the container up by the name of its graph again (`Hierarchy::by_name`, with
