@@ -49,12 +49,15 @@ impl CompoundRun {
     /// still refuses here, whatever the preprocessor changed.
     pub(super) fn new(graphs: &GraphArena) -> PipelineResult<Self> {
         // ELK finds the graphs with `ArrayDeque.push`: the last sibling is searched first, and
-        // the collected list is later executed in reverse discovery order.
-        let algorithms = graphs
+        // the collected list is later executed in reverse discovery order. The first refusal is
+        // the one of the graph that runs first, so the lists are built in that order.
+        let mut algorithms = graphs
             .discovery_order(GraphId::ROOT)
             .into_iter()
+            .rev()
             .map(|graph| graph_algorithm(&graphs[graph]))
-            .collect::<PipelineResult<_>>()?;
+            .collect::<PipelineResult<Vec<_>>>()?;
+        algorithms.reverse();
         Ok(Self { algorithms })
     }
 
@@ -193,6 +196,7 @@ fn review_and_correct_hierarchical_processors(graphs: &mut GraphArena) -> Pipeli
     })
 }
 
+/// Ports `HierarchicalNodeResizingProcessor.graphLayoutToNode`.
 fn transfer_nested_graph_layout_to_parent_node(
     nested_graph: &mut LGraph,
     parent: &mut LGraph,
@@ -224,6 +228,8 @@ fn transfer_nested_graph_layout_to_parent_node(
     }
 }
 
+/// Ports the part of `HierarchicalNodeResizingProcessor.graphLayoutToNode` that gives each port
+/// of the node the position of its external port dummy.
 fn transfer_external_port_dummy_layout_to_parent_node(
     nested_graph: &mut LGraph,
     parent_node_index: NodeId,

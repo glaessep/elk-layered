@@ -149,12 +149,13 @@ fn execute_intermediate(
     Ok(())
 }
 
+/// Ports `HierarchicalNodeResizingProcessor.process`.
 fn resize_hierarchical_node_graph(graph: &mut LGraph) -> PipelineResult<()> {
     graph.clear_layers();
     resize_graph_to_minimum(graph)
 }
 
-/// Ports `ElkLayered.resizeGraph`.
+/// Ports `ElkLayered.resizeGraph`. `HierarchicalNodeResizingProcessor.resizeGraph` is the same.
 pub(super) fn resize_graph_to_minimum(graph: &mut LGraph) -> PipelineResult<()> {
     graph.options.validate_node_size_minimum()?;
     let old_size = actual_graph_size(graph);
@@ -167,7 +168,8 @@ pub(super) fn resize_graph_to_minimum(graph: &mut LGraph) -> PipelineResult<()> 
     Ok(())
 }
 
-/// Ports `ElkLayered.resizeGraphNoReallyIMeanIt`.
+/// Ports `ElkLayered.resizeGraphNoReallyIMeanIt`. `HierarchicalNodeResizingProcessor` has the
+/// same method.
 pub(super) fn resize_graph_no_really_i_mean_it(
     graph: &mut LGraph,
     old_size: LSize,
@@ -212,6 +214,7 @@ pub(super) fn resize_graph_no_really_i_mean_it(
     graph.size.height = new_size.height - graph.padding.top - graph.padding.bottom;
 }
 
+/// Ports `LGraphUtil.resizeNode`.
 pub(super) fn resize_layered_node(
     node: &mut LNode,
     new_size: LSize,

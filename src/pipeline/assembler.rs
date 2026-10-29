@@ -5,10 +5,17 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/IntermediateProcessorStrategy.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/LayeredPhases.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p1cycles/CycleBreakingStrategy.java
+//! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p1cycles/GreedyCycleBreaker.java
+//! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p1cycles/InteractiveCycleBreaker.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/LayeringStrategy.java
+//! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/NetworkSimplexLayerer.java
+//! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/InteractiveLayerer.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p3order/CrossingMinimizationStrategy.java
+//! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p3order/LayerSweepCrossingMinimizer.java
+//! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p3order/NoCrossingMinimizer.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p4nodes/NodePlacementStrategy.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p5edges/EdgeRouterFactory.java
+//! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p5edges/OrthogonalEdgeRouter.java
 //!
 //! Every processor that runs is a variant of one enum: [`IntermediateProcessor`] for the steps
 //! between the phases, and one small enum for the strategies of each phase. A processor that ELK
@@ -531,7 +538,8 @@ fn greedy_switch_for(
     }
 }
 
-/// `CycleBreakingStrategy.getLayoutProcessorConfiguration`.
+/// Ports `getLayoutProcessorConfiguration` of the cycle breakers (`GreedyCycleBreaker` and the
+/// others). Only `InteractiveCycleBreaker` differs: it asks for the external port positioner.
 fn cycle_breaking_configuration(cycle_breaker: CycleBreaker) -> Config {
     let mut config = Config::default();
     if cycle_breaker == CycleBreaker::Interactive {
@@ -547,7 +555,9 @@ fn cycle_breaking_configuration(cycle_breaker: CycleBreaker) -> Config {
     config
 }
 
-/// `LayeringStrategy.getLayoutProcessorConfiguration`.
+/// Ports `getLayoutProcessorConfiguration` of the layerers (`NetworkSimplexLayerer` and the
+/// others). Only `InteractiveLayerer` differs: it asks for the external port positioner, not the
+/// edge and layer constraint reverser.
 fn layering_configuration(layerer: Layerer) -> Config {
     let mut config = Config::default();
     config.add_before(
@@ -569,7 +579,8 @@ fn layering_configuration(layerer: Layerer) -> Config {
     config
 }
 
-/// `CrossingMinimizationStrategy.getLayoutProcessorConfiguration`: the same for every strategy.
+/// Ports `getLayoutProcessorConfiguration` of `LayerSweepCrossingMinimizer` and
+/// `NoCrossingMinimizer`, which are the same.
 fn crossing_minimization_configuration() -> Config {
     let mut config = Config::default();
     config.add_before(

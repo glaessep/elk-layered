@@ -2463,6 +2463,14 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
             }),
             UnportedProcessor::BreakingPointInserter,
         ),
+        // Mutation: check the edge router before the node placer in `Strategies::select`.
+        (
+            options_with(|o| {
+                o.node_placement_strategy = NodePlacementStrategy::Interactive;
+                o.edge_routing = EdgeRouting::Polyline;
+            }),
+            UnportedProcessor::InteractiveNodePlacer,
+        ),
         // Mutation: check the single-edge wrapper before the crossing minimizer in
         // `Strategies::select`.
         (
@@ -2516,6 +2524,22 @@ fn a_refusal_that_shows_after_the_preprocessor_still_stops_the_run() {
         CompoundRun::new(&graphs).map(|_| ()),
         Err(PipelineError::UnsupportedProcessor {
             kind: UnportedProcessor::HypernodesProcessor,
+        })
+    );
+}
+
+// Mutation: in `CompoundRun::new`, drop the `.rev()`, so the root is built first. The root's
+// refusal then hides the one of the graph that runs first.
+#[test]
+fn the_lists_are_built_in_the_order_the_graphs_run() {
+    let mut graphs = deep_compound_chain(3);
+    graphs.root_mut().options.node_placement_strategy = NodePlacementStrategy::Interactive;
+    graphs[GraphId::new(2)].options.layering_strategy = LayeringStrategy::BreadthFirstModelOrder;
+
+    assert_eq!(
+        CompoundRun::new(&graphs).map(|_| ()),
+        Err(PipelineError::UnsupportedProcessor {
+            kind: UnportedProcessor::BreadthFirstModelOrderLayerer,
         })
     );
 }
