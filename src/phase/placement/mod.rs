@@ -1,14 +1,17 @@
-//! Phase 4: node placement, and the spacing between two nodes that its strategies share.
+//! Phase 4: node placement, one file per ELK class, and the spacing between two nodes that
+//! the placers share.
+//!
+//! Source: https://github.com/eclipse-elk/elk/tree/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p4nodes
 
 pub mod bk;
-pub mod network_simplex;
-pub mod simple;
+pub mod network_simplex_placer;
+pub mod simple_node_placer;
 
 use crate::graph::{LGraph, LNodeKind, NodeId};
 
 pub use bk::place_nodes_brandes_koepf;
-pub use network_simplex::place_nodes_network_simplex;
-pub use simple::place_nodes_simple;
+pub use network_simplex_placer::place_nodes_network_simplex;
+pub use simple_node_placer::place_nodes_simple;
 
 pub(crate) fn vertical_spacing(graph: &LGraph, first: NodeId, second: NodeId) -> f64 {
     use LNodeKind::*;

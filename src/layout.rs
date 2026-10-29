@@ -32,7 +32,7 @@ use crate::layout_options::{
 use crate::options::{
     ElkDirection, HierarchyHandling, LayeredOptions, PortConstraints, SizeConstraints,
 };
-use crate::p2layers::LayeringError;
+use crate::phase::layering::LayeringError;
 use crate::pipeline::{self, PipelineError};
 
 /// Lays out an ELK graph the way elkjs 0.9.3 does with the layered algorithm.

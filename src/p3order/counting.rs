@@ -1074,8 +1074,8 @@ mod tests {
     use crate::graph::{LGraph, LNode, LPoint, LayeredEdge, PortType};
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::options::{ElkDirection, LayeredOptions, PortConstraints};
-    use crate::p2layers::layer_network_simplex;
     use crate::p3order::{process_port_sides, sort_port_lists};
+    use crate::phase::layering::layer_network_simplex;
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {

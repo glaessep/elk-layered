@@ -1,4 +1,4 @@
-//! Simple node placement.
+//! Port of ELK's `SimpleNodePlacer`.
 //!
 //! Source references:
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p4nodes/SimpleNodePlacer.java

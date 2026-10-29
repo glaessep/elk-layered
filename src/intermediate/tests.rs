@@ -36,7 +36,7 @@ use crate::intermediate::long_edge_joiner::{join_long_edge_at_indexed, join_long
 use crate::intermediate::long_edge_splitter::{split_edge, split_long_edges};
 use crate::options::{Alignment, EdgeLabelSideSelection};
 use crate::options::{ElkDirection, LayerConstraint, LayeredOptions, PortConstraints};
-use crate::p2layers::layer_network_simplex;
+use crate::phase::layering::layer_network_simplex;
 
 fn node(id: &str) -> ElkInputNode {
     ElkInputNode {

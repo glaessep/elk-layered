@@ -1274,7 +1274,7 @@ mod tests {
     use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
     use crate::intermediate::split_long_edges;
     use crate::options::{ElkDirection, LayeredOptions};
-    use crate::p2layers::layer_network_simplex;
+    use crate::phase::layering::layer_network_simplex;
 
     fn node(id: &str) -> ElkInputNode {
         ElkInputNode {

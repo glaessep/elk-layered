@@ -19,7 +19,7 @@ mod tests;
 
 use crate::graph::{GraphArena, GraphId, LGraph, LSize, PortSide, is_across_flow};
 use crate::intermediate::IntermediateError;
-use crate::p2layers::LayeringError;
+use crate::phase::layering::LayeringError;
 use crate::random::RandomSeedError;
 
 pub use assembler::UnportedProcessor;
