@@ -552,8 +552,8 @@ pub(crate) fn combine(
         .iter()
         .map(|component| component.graph.edges.len())
         .sum::<usize>();
-    let mut nodes = IdVec::<NodeId, _>::from_iter(std::iter::repeat_with(|| None).take(node_count));
-    let mut edges = IdVec::<EdgeId, _>::from_iter(std::iter::repeat_with(|| None).take(edge_count));
+    let mut nodes = IdVec::<NodeId, _>::filled(node_count, None);
+    let mut edges = IdVec::<EdgeId, _>::filled(edge_count, None);
     let mut next_node = original_nodes;
     let mut next_edge = original_edges;
     let mut hidden = Vec::new();

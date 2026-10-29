@@ -1003,7 +1003,7 @@ struct NestedExternalDummyIndex {
     by_edge_id: HashMap<String, ExternalDummyMetadata>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct CompoundEndpoint {
     port: PortRef,
     edge: EdgeId,
@@ -1015,10 +1015,7 @@ struct CompoundEndpointPlan {
 
 impl CompoundEndpointPlan {
     fn new(graph: &LGraph, observer: &mut impl CompoundPreprocessObserver) -> Self {
-        let mut by_node = graph
-            .node_ids()
-            .map(|_| Vec::new())
-            .collect::<IdVec<NodeId, _>>();
+        let mut by_node = IdVec::filled(graph.layerless_nodes.len(), Vec::new());
         for (edge_index, edge) in graph.edges_with_ids() {
             observer.visit_graph_edge_for_endpoint_plan();
             let Some(segment) = edge.compound_segment else {
