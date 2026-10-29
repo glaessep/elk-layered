@@ -11,7 +11,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
-    GraphArena, GraphId, LGraph, LNodeKind, NodeId, OtherGraphs, PortId, PortRef, PortSide,
+    GraphArena, GraphId, IdVec, LGraph, LNodeKind, NodeId, OtherGraphs, PortId, PortRef, PortSide,
 };
 use crate::options::{OrderingStrategy, PortConstraints, PortSortingStrategy};
 
@@ -136,12 +136,12 @@ impl SweepCopy {
 fn correct_north_south_port_sides(graph: &mut LGraph) {
     let mut to_sort: Vec<NodeId> = Vec::new();
     // Which nodes are in `to_sort` already, and where a node sits in the layer being read.
-    let mut queued = vec![false; graph.layerless_nodes.len()];
-    let mut position_in_layer = vec![usize::MAX; graph.layerless_nodes.len()];
+    let mut queued = IdVec::filled(graph.layerless_nodes.len(), false);
+    let mut position_in_layer = IdVec::filled(graph.layerless_nodes.len(), usize::MAX);
     for layer_index in 0..graph.layers.len() {
         let layer = graph.layers[layer_index].nodes.clone();
         for (position, node) in layer.iter().copied().enumerate() {
-            position_in_layer[node.index()] = position;
+            position_in_layer[node] = position;
         }
         for (position, dummy) in layer.iter().copied().enumerate() {
             if graph.layerless_nodes[dummy].kind != LNodeKind::NorthSouthPort {
@@ -155,7 +155,7 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
             // the same numbers: `transferNodeAndPortOrdersToGraph` sets `node.id = j` for every
             // node of the layer first, and only then `assertCorrectPortSides` compares
             // `dummy.id > origin.id`. The ids from before the sweep play no part.
-            let origin_position = position_in_layer[origin.index()];
+            let origin_position = position_in_layer[origin];
             if origin_position == usize::MAX {
                 continue;
             }
@@ -172,14 +172,14 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
                 }
             }
             for node in [origin, dummy] {
-                if !queued[node.index()] {
-                    queued[node.index()] = true;
+                if !queued[node] {
+                    queued[node] = true;
                     to_sort.push(node);
                 }
             }
         }
         for node in layer {
-            position_in_layer[node.index()] = usize::MAX;
+            position_in_layer[node] = usize::MAX;
         }
     }
 
