@@ -17,7 +17,7 @@ mod id_vec;
 mod ids;
 mod ports;
 pub use arena::{GraphArena, GraphId, GraphParent, OtherGraphs};
-pub use id_vec::IdVec;
+pub use id_vec::{IdVec, VecId};
 pub use ids::{EdgeId, NodeId};
 #[cfg(test)]
 pub(crate) use ports::port_ids;

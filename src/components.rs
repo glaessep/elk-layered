@@ -11,7 +11,8 @@
 mod group;
 
 use crate::graph::{
-    EdgeId, GraphArena, GraphId, LGraph, LLabel, LNodeKind, LPoint, LSize, NodeId, PortRef,
+    EdgeId, GraphArena, GraphId, IdVec, LGraph, LLabel, LNodeKind, LPoint, LSize, NodeId, PortRef,
+    VecId,
 };
 use crate::options::{HierarchyHandling, PortConstraints};
 use crate::pipeline::PipelineResult;
@@ -71,11 +72,11 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
         return Err(ComponentError::HierarchyEdges.into());
     }
     let node_count = graph.layerless_nodes.len();
-    let mut owners = vec![usize::MAX; node_count];
+    let mut owners = IdVec::filled(node_count, usize::MAX);
     let mut groups = Vec::<Vec<NodeId>>::new();
     let mut stack = Vec::new();
     for start in graph.node_ids() {
-        if owners[start.index()] != usize::MAX {
+        if owners[start] != usize::MAX {
             continue;
         }
         let owner = groups.len();
@@ -90,10 +91,10 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
                         kind: "node",
                         index: index.index(),
                     })?;
-            if owners[index.index()] != usize::MAX {
+            if owners[index] != usize::MAX {
                 continue;
             }
-            owners[index.index()] = owner;
+            owners[index] = owner;
             nodes.push(index);
             // LPort.getConnectedPorts visits incoming then outgoing edges; reverse the
             // pushes so this iterative traversal retains the source recursive DFS order.
@@ -152,14 +153,13 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
         })
         .collect::<Vec<_>>();
     for (index, edge) in graph.edges_with_ids() {
-        let owner =
-            *owners
-                .get(edge.source.node.index())
-                .ok_or(ComponentError::InvalidReference {
-                    kind: "source node",
-                    index: edge.source.node.index(),
-                })?;
-        if owners.get(edge.target.node.index()) != Some(&owner) {
+        let owner = *owners
+            .get(edge.source.node)
+            .ok_or(ComponentError::InvalidReference {
+                kind: "source node",
+                index: edge.source.node.index(),
+            })?;
+        if owners.get(edge.target.node) != Some(&owner) {
             return Err(ComponentError::InvalidReference {
                 kind: "target node",
                 index: edge.target.node.index(),
@@ -189,31 +189,31 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
     }
     // Reuse the global maps across components: clearing only each component's entries
     // keeps this O(V + E), including a graph made entirely of isolated nodes.
-    let mut node_map = vec![None; node_count];
-    let mut edge_map = vec![None; graph.edges.len()];
+    let mut node_map = IdVec::filled(node_count, None);
+    let mut edge_map = IdVec::filled(graph.edges.len(), None);
     for component in &mut components {
         for (local, &original) in component.original_nodes.iter().enumerate() {
-            node_map[original.index()] = Some(NodeId::new(local));
+            node_map[original] = Some(NodeId::new(local));
         }
         for (local, &original) in component.original_edges.iter().enumerate() {
-            edge_map[original.index()] = Some(EdgeId::new(local));
+            edge_map[original] = Some(EdgeId::new(local));
         }
         remap_references(&mut component.graph, &node_map, &edge_map)?;
         remap_nested_references(graphs, &component.graph, &node_map, &edge_map)?;
         component.graph.clear_layers();
         for &original in &component.original_nodes {
-            node_map[original.index()] = None;
+            node_map[original] = None;
         }
         for &original in &component.original_edges {
-            edge_map[original.index()] = None;
+            edge_map[original] = None;
         }
     }
     Ok(Some(components))
 }
 
-fn component_owner(owners: &[usize], node: NodeId) -> Result<usize, ComponentError> {
+fn component_owner(owners: &IdVec<NodeId, usize>, node: NodeId) -> Result<usize, ComponentError> {
     owners
-        .get(node.index())
+        .get(node)
         .copied()
         .filter(|&owner| owner != usize::MAX)
         .ok_or(ComponentError::InvalidReference {
@@ -222,53 +222,40 @@ fn component_owner(owners: &[usize], node: NodeId) -> Result<usize, ComponentErr
         })
 }
 
-/// What the three `map_*` helpers need from a node id or an edge id.
-trait Id: Copy {
-    fn index(self) -> usize;
-}
-
-impl Id for NodeId {
-    fn index(self) -> usize {
-        NodeId::index(self)
-    }
-}
-
-impl Id for EdgeId {
-    fn index(self) -> usize {
-        EdgeId::index(self)
-    }
-}
-
 /// One entry of a map from old ids to new ones. `split` maps through `Option<I>`, because a node
 /// can stay behind. `combine` maps through plain `I`, because every node of a component has a new id.
 trait Slot<I> {
     fn mapped(&self) -> Option<I>;
 }
 
-impl<I: Id> Slot<I> for I {
+impl<I: VecId> Slot<I> for I {
     fn mapped(&self) -> Option<I> {
         Some(*self)
     }
 }
 
-impl<I: Id> Slot<I> for Option<I> {
+impl<I: VecId> Slot<I> for Option<I> {
     fn mapped(&self) -> Option<I> {
         *self
     }
 }
 
-fn map_id<I: Id, S: Slot<I>>(map: &[S], id: I, kind: &'static str) -> Result<I, ComponentError> {
-    map.get(id.index())
+fn map_id<I: VecId, S: Slot<I>>(
+    map: &IdVec<I, S>,
+    id: I,
+    kind: &'static str,
+) -> Result<I, ComponentError> {
+    map.get(id)
         .and_then(Slot::mapped)
         .ok_or(ComponentError::InvalidReference {
             kind,
-            index: id.index(),
+            index: id.to_index(),
         })
 }
 
-fn map_optional<I: Id, S: Slot<I>>(
+fn map_optional<I: VecId, S: Slot<I>>(
     value: &mut Option<I>,
-    map: &[S],
+    map: &IdVec<I, S>,
     kind: &'static str,
 ) -> Result<(), ComponentError> {
     if let Some(id) = value {
@@ -277,9 +264,9 @@ fn map_optional<I: Id, S: Slot<I>>(
     Ok(())
 }
 
-fn map_list<I: Id, S: Slot<I>>(
+fn map_list<I: VecId, S: Slot<I>>(
     values: &mut [I],
-    map: &[S],
+    map: &IdVec<I, S>,
     kind: &'static str,
 ) -> Result<(), ComponentError> {
     for id in values {
@@ -288,12 +275,18 @@ fn map_list<I: Id, S: Slot<I>>(
     Ok(())
 }
 
-fn map_port<N: Slot<NodeId>>(port: &mut PortRef, nodes: &[N]) -> Result<(), ComponentError> {
+fn map_port<N: Slot<NodeId>>(
+    port: &mut PortRef,
+    nodes: &IdVec<NodeId, N>,
+) -> Result<(), ComponentError> {
     port.node = map_id(nodes, port.node, "port node")?;
     Ok(())
 }
 
-fn map_labels<E: Slot<EdgeId>>(labels: &mut [LLabel], edges: &[E]) -> Result<(), ComponentError> {
+fn map_labels<E: Slot<EdgeId>>(
+    labels: &mut [LLabel],
+    edges: &IdVec<EdgeId, E>,
+) -> Result<(), ComponentError> {
     for label in labels {
         map_optional(&mut label.end_label_edge, edges, "label edge")?;
     }
@@ -304,8 +297,8 @@ fn map_labels<E: Slot<EdgeId>>(labels: &mut [LLabel], edges: &[E]) -> Result<(),
 /// Port ids are node-local and are deliberately unchanged.
 fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     graph: &mut LGraph,
-    nodes: &[N],
-    edges: &[E],
+    nodes: &IdVec<NodeId, N>,
+    edges: &IdVec<EdgeId, E>,
 ) -> Result<(), ComponentError> {
     for node in &mut graph.layerless_nodes {
         map_optional(
@@ -379,8 +372,8 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
 fn remap_nested_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     graphs: &mut GraphArena,
     graph: &LGraph,
-    nodes: &[N],
-    edges: &[E],
+    nodes: &IdVec<NodeId, N>,
+    edges: &IdVec<EdgeId, E>,
 ) -> Result<(), ComponentError> {
     let nested = graph
         .layerless_nodes
@@ -398,8 +391,8 @@ fn remap_nested_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
 fn remap_graph_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     current: &mut LGraph,
     graph_id: GraphId,
-    nodes: &[N],
-    edges: &[E],
+    nodes: &IdVec<NodeId, N>,
+    edges: &IdVec<EdgeId, E>,
 ) -> Result<(), ComponentError> {
     for node in &mut current.layerless_nodes {
         if let Some(origin) = &mut node.origin_port
@@ -556,12 +549,8 @@ pub(crate) fn combine(
         .iter()
         .map(|component| component.graph.edges.len())
         .sum::<usize>();
-    let mut nodes = std::iter::repeat_with(|| None)
-        .take(node_count)
-        .collect::<Vec<_>>();
-    let mut edges = std::iter::repeat_with(|| None)
-        .take(edge_count)
-        .collect::<Vec<_>>();
+    let mut nodes = IdVec::<NodeId, _>::from_iter(std::iter::repeat_with(|| None).take(node_count));
+    let mut edges = IdVec::<EdgeId, _>::from_iter(std::iter::repeat_with(|| None).take(edge_count));
     let mut next_node = original_nodes;
     let mut next_edge = original_edges;
     let mut hidden = Vec::new();
@@ -569,11 +558,11 @@ pub(crate) fn combine(
     let mut self_loops = Vec::new();
     let mut cyclic = false;
     for mut component in components {
-        let mut node_map = component.original_nodes;
+        let mut node_map = IdVec::<NodeId, _>::from(component.original_nodes);
         let added_nodes = component.graph.layerless_nodes.len() - node_map.len();
         node_map.extend((next_node..next_node + added_nodes).map(NodeId::new));
         next_node += added_nodes;
-        let mut edge_map = component.original_edges;
+        let mut edge_map = IdVec::<EdgeId, _>::from(component.original_edges);
         let added_edges = component.graph.edges.len() - edge_map.len();
         edge_map.extend((next_edge..next_edge + added_edges).map(EdgeId::new));
         next_edge += added_edges;
@@ -581,10 +570,10 @@ pub(crate) fn combine(
         remap_references(&mut component.graph, &node_map, &edge_map)?;
         remap_nested_references(graphs, &component.graph, &node_map, &edge_map)?;
         for (index, node) in node_map.into_iter().zip(component.graph.layerless_nodes) {
-            nodes[index.index()] = Some(node);
+            nodes[index] = Some(node);
         }
         for (index, edge) in edge_map.into_iter().zip(component.graph.edges) {
-            edges[index.index()] = Some(edge);
+            edges[index] = Some(edge);
         }
         hidden.extend(component.graph.hidden_nodes);
         replaced.extend(component.graph.replaced_external_port_dummies);
