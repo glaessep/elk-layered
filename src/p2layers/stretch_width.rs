@@ -34,7 +34,7 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
             .fold(outgoing[node], usize::max);
         total_outgoing += outgoing[node] as f64;
         let data = &input.graph.layerless_nodes[node];
-        if data.kind == LNodeKind::Normal {
+        if data.kind() == LNodeKind::Normal {
             minimum = minimum.min(data.size.height);
             maximum = maximum.max(data.size.height);
         }

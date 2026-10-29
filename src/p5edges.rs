@@ -145,7 +145,7 @@ fn horizontal_alignment_ratio(graph: &LGraph, node: NodeId) -> f64 {
 }
 
 fn is_external_west_or_east_port(graph: &LGraph, node: NodeId) -> bool {
-    if graph.layerless_nodes[node].kind != LNodeKind::ExternalPort {
+    if graph.layerless_nodes[node].kind() != LNodeKind::ExternalPort {
         return false;
     }
     graph.layerless_nodes[node]

@@ -236,7 +236,7 @@ impl CrossingsCounter {
             // Collect the edges of the port, which is a bit tedious: north and south ports
             // have no physical edge in the graph at this point.
             let node = &graph.layerless_nodes[port.node];
-            match node.kind {
+            match node.kind() {
                 LNodeKind::Normal => {
                     // The init step only numbers ports that have a dummy.
                     if let Some(dummy) = node.ports[port.port].port_dummy.as_ref()
@@ -317,7 +317,7 @@ impl CrossingsCounter {
                 last_layout_unit = node.in_layer_layout_unit;
             }
 
-            match node.kind {
+            match node.kind() {
                 LNodeKind::Normal => {
                     // The northern ports from west to east.
                     for port in
@@ -929,7 +929,7 @@ fn has_north_south_ports(graph: &LGraph, order: &[Vec<NodeId>]) -> Vec<bool> {
         .map(|layer| {
             layer
                 .iter()
-                .any(|&node| graph.layerless_nodes[node].kind == LNodeKind::NorthSouthPort)
+                .any(|&node| graph.layerless_nodes[node].kind() == LNodeKind::NorthSouthPort)
         })
         .collect()
 }
@@ -1134,11 +1134,9 @@ mod tests {
     }
 
     fn layered_edge(id: &str, source: PortRef, target: PortRef) -> LayeredEdge {
-        {
-            let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
-            built_edge.thickness = 1.0;
-            built_edge
-        }
+        let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
+        built_edge.thickness = 1.0;
+        built_edge
     }
 
     #[test]
@@ -1475,7 +1473,7 @@ mod tests {
         assert_eq!(counter.has_north_south_ports, Some(vec![false]));
 
         // A dummy that shows up later is seen by a new counter at once.
-        graph.layerless_nodes[NodeId::new(0)].kind = LNodeKind::NorthSouthPort;
+        graph.layerless_nodes[NodeId::new(0)].set_kind(LNodeKind::NorthSouthPort);
         let mut fresh = CrossingsCounter::default();
         fresh.count_all_crossings_in_order(&graph, &order);
         assert_eq!(fresh.has_north_south_ports, Some(vec![true]));
@@ -1689,7 +1687,7 @@ mod tests {
     fn add_long_edge_dummy(graph: &mut LGraph, neighbour: NodeId) -> NodeId {
         let index = graph.next_node_id();
         let mut dummy = LNode::new("long", 0.0, 0.0, None);
-        dummy.kind = LNodeKind::LongEdge;
+        dummy.set_kind(LNodeKind::LongEdge);
         graph.layerless_nodes.push(dummy);
         graph.set_node_layer(index, 1);
         let west = graph

@@ -143,7 +143,7 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
             position_in_layer[node] = position;
         }
         for (position, dummy) in layer.iter().copied().enumerate() {
-            if graph.layerless_nodes[dummy].kind != LNodeKind::NorthSouthPort {
+            if graph.layerless_nodes[dummy].kind() != LNodeKind::NorthSouthPort {
                 continue;
             }
             // The node the dummy was made for is in its layout unit, in the same layer.
@@ -315,8 +315,8 @@ fn external_port_dummy_side(
         return graph
             .layerless_nodes
             .get(dummy_node)
-            .map(|node| node.external_port_side)
-            .unwrap_or(PortSide::Undefined);
+            .and_then(|node| node.external_port())
+            .map_or(PortSide::Undefined, |external| external.side);
     }
 
     // The dummy is in the graph inside the port's node, and no other graph.
@@ -327,8 +327,8 @@ fn external_port_dummy_side(
         .filter(|&nested| nested == dummy_graph_id)
         .and_then(|nested| others.get(nested))
         .and_then(|nested| nested.layerless_nodes.get(dummy_node))
-        .map(|node| node.external_port_side)
-        .unwrap_or(PortSide::Undefined)
+        .and_then(|node| node.external_port())
+        .map_or(PortSide::Undefined, |external| external.side)
 }
 
 pub fn sort_port_lists(graph: &mut LGraph) {
@@ -694,12 +694,13 @@ pub fn target_node(graph: &LGraph, port: PortRef) -> Option<NodeId> {
         let edge_data = graph.edges.get(edge)?;
         let node = edge_data.target().node;
         if let Some(target) = graph.layerless_nodes[node]
-            .long_edge_target
+            .long_edge_ends()
+            .and_then(|ends| ends.target)
             .map(|port_ref| port_ref.node)
         {
             return Some(target);
         }
-        if graph.layerless_nodes[node].kind == LNodeKind::Normal {
+        if graph.layerless_nodes[node].kind() == LNodeKind::Normal {
             return Some(node);
         }
         edge = graph.layerless_nodes[node]
@@ -1329,12 +1330,10 @@ mod tests {
     }
 
     fn layered_edge(id: &str, source: PortRef, target: PortRef) -> LayeredEdge {
-        {
-            let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
-            built_edge.source_node_id = format!("node-{}", source.node.index());
-            built_edge.target_node_id = format!("node-{}", target.node.index());
-            built_edge
-        }
+        let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
+        built_edge.source_node_id = format!("node-{}", source.node.index());
+        built_edge.target_node_id = format!("node-{}", target.node.index());
+        built_edge
     }
 
     #[test]
@@ -1474,6 +1473,8 @@ mod tests {
         for (index, port) in parent.ports.iter_with_ids() {
             let dummy = port.port_dummy.as_ref().unwrap();
             let origin = child.layerless_nodes[dummy.node]
+                .external_port()
+                .unwrap()
                 .origin_port
                 .as_ref()
                 .unwrap();
@@ -1522,8 +1523,8 @@ mod tests {
             .push(LNode::new("parent", 80.0, 40.0, None));
         let dummy = graph.next_node_id();
         let mut external = LNode::new("external:parent", 0.0, 0.0, None);
-        external.kind = LNodeKind::ExternalPort;
-        external.external_port_side = PortSide::North;
+        external.set_kind(LNodeKind::ExternalPort);
+        external.external_port_mut().unwrap().side = PortSide::North;
         graph.layerless_nodes.push(external);
         let port = graph
             .add_port(
@@ -1892,8 +1893,8 @@ mod tests {
         graph
             .layerless_nodes
             .push(LNode::new("dummy-2", 0.0, 0.0, None));
-        graph.layerless_nodes[NodeId::new(1)].kind = LNodeKind::LongEdge;
-        graph.layerless_nodes[NodeId::new(2)].kind = LNodeKind::LongEdge;
+        graph.layerless_nodes[NodeId::new(1)].set_kind(LNodeKind::LongEdge);
+        graph.layerless_nodes[NodeId::new(2)].set_kind(LNodeKind::LongEdge);
         graph.set_node_layer(NodeId::new(0), 0);
         graph.set_node_layer(NodeId::new(1), 1);
         graph.set_node_layer(NodeId::new(2), 1);
@@ -2009,8 +2010,8 @@ mod tests {
                 Some(index),
             ));
         }
-        graph.layerless_nodes[NodeId::new(1)].kind = LNodeKind::LongEdge;
-        graph.layerless_nodes[NodeId::new(2)].kind = LNodeKind::LongEdge;
+        graph.layerless_nodes[NodeId::new(1)].set_kind(LNodeKind::LongEdge);
+        graph.layerless_nodes[NodeId::new(2)].set_kind(LNodeKind::LongEdge);
 
         let source = graph
             .add_port(

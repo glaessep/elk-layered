@@ -773,15 +773,15 @@ fn check_external_port_sides(graphs: &GraphArena) -> PipelineResult<()> {
     while let Some(id) = pending.pop() {
         let graph = &graphs[id];
         for node in &graph.layerless_nodes {
-            if node.kind != LNodeKind::ExternalPort {
+            let Some(external) = node.external_port() else {
                 continue;
-            }
-            if node.external_port_side == PortSide::Undefined {
+            };
+            if external.side == PortSide::Undefined {
                 return Err(PipelineError::UnsupportedCompoundGraph {
                     reason: "a port of a node with children that has no side, on a node with fixed port sides",
                 });
             }
-            if is_across_flow(graph.options.direction, node.external_port_side) {
+            if is_across_flow(graph.options.direction, external.side) {
                 return Err(PipelineError::UnsupportedCompoundGraph {
                     reason: "ports of a node with children on a side across the layout direction, which wait for issue #24",
                 });
@@ -850,25 +850,28 @@ fn transfer_external_port_dummy_layout_to_parent_node(
     parent_ports: &mut crate::graph::NodePorts,
 ) {
     for dummy_index in nested_graph.node_ids() {
-        if nested_graph.layerless_nodes[dummy_index].kind != LNodeKind::ExternalPort {
+        if nested_graph.layerless_nodes[dummy_index].kind() != LNodeKind::ExternalPort {
             continue;
         }
-        let Some(origin_port) = nested_graph.layerless_nodes[dummy_index].origin_port else {
+        let Some(external) = nested_graph.layerless_nodes[dummy_index].external_port() else {
+            continue;
+        };
+        let Some(origin_port) = external.origin_port else {
             continue;
         };
         if origin_port.port.node != parent_node_index {
             continue;
         }
 
-        let external_side = nested_graph.layerless_nodes[dummy_index].external_port_side;
+        let external_side = external.side;
+        let external_size = external.size;
         // The size of the port as the parent graph holds it now: the parent graph has turned
         // to the internal direction already, and the dummy is still in that direction. The
         // dummy moves even without its port, as `LGraphUtil.getExternalPortPosition` moves it
         // for every dummy, so its edges leave from where it ends up.
-        let size = parent_ports.get(origin_port.port.port).map_or(
-            nested_graph.layerless_nodes[dummy_index].external_port_size,
-            |port| port.size,
-        );
+        let size = parent_ports
+            .get(origin_port.port.port)
+            .map_or(external_size, |port| port.size);
         let port_position = external_port_position(nested_graph, dummy_index, size);
         if let Some(parent_port) = parent_ports.get_mut(origin_port.port.port) {
             parent_port.position = port_position;
@@ -885,7 +888,10 @@ pub(crate) fn external_port_position(
     external_size: LSize,
 ) -> LPoint {
     let dummy_size = graph.layerless_nodes[dummy_index].size;
-    let external_side = graph.layerless_nodes[dummy_index].external_port_side;
+    // A node that is no external port dummy has no side to place it on.
+    let external_side = graph.layerless_nodes[dummy_index]
+        .external_port()
+        .map_or(PortSide::Undefined, |external| external.side);
     let border_offset = graph.layerless_nodes[dummy_index]
         .ports
         .first()
@@ -1082,10 +1088,10 @@ fn resize_graph_no_really_i_mean_it(graph: &mut LGraph, old_size: LSize, new_siz
         && (new_size.width > old_size.width || new_size.height > old_size.height)
     {
         for node in &mut graph.layerless_nodes {
-            if node.kind != LNodeKind::ExternalPort {
+            let Some(side) = node.external_port().map(|external| external.side) else {
                 continue;
-            }
-            match node.external_port_side {
+            };
+            match side {
                 PortSide::East => node.position.x += new_size.width - old_size.width,
                 PortSide::South => node.position.y += new_size.height - old_size.height,
                 PortSide::North | PortSide::West | PortSide::Undefined => {}
@@ -2474,7 +2480,10 @@ mod tests {
             },
         );
         let port = push_test_external_dummy(&mut graph, "west", PortSide::West);
-        graph.layerless_nodes[port].port_ratio_or_position = 20.0;
+        graph.layerless_nodes[port]
+            .external_port_mut()
+            .unwrap()
+            .ratio_or_position = 20.0;
         graph.set_node_layer(port, 0);
 
         execute_processor(
@@ -2796,7 +2805,7 @@ mod tests {
                 .layers()
                 .iter()
                 .flat_map(|layer| layer.nodes().iter().copied())
-                .any(|node| graph.layerless_nodes[node].kind == crate::graph::LNodeKind::Label)
+                .any(|node| graph.layerless_nodes[node].kind() == crate::graph::LNodeKind::Label)
         );
         let restored = graph
             .edges
@@ -3254,7 +3263,7 @@ mod tests {
             graph
                 .layerless_nodes
                 .iter()
-                .filter(|node| node.kind == crate::graph::LNodeKind::ExternalPort)
+                .filter(|node| node.kind() == crate::graph::LNodeKind::ExternalPort)
                 .all(|node| node.layer_index().is_none())
         );
         assert!(graph.size.width > 0.0);
@@ -3454,15 +3463,15 @@ mod tests {
         };
 
         let mut east_node = LNode::new("east", 0.0, 0.0, None);
-        east_node.kind = LNodeKind::ExternalPort;
-        east_node.external_port_side = PortSide::East;
+        east_node.set_kind(LNodeKind::ExternalPort);
+        east_node.external_port_mut().unwrap().side = PortSide::East;
         east_node.position.x = 12.0;
         let east = graph.next_node_id();
         graph.layerless_nodes.push(east_node);
 
         let mut south_node = LNode::new("south", 0.0, 0.0, None);
-        south_node.kind = LNodeKind::ExternalPort;
-        south_node.external_port_side = PortSide::South;
+        south_node.set_kind(LNodeKind::ExternalPort);
+        south_node.external_port_mut().unwrap().side = PortSide::South;
         south_node.position.y = 25.0;
         let south = graph.next_node_id();
         graph.layerless_nodes.push(south_node);
@@ -3671,8 +3680,8 @@ mod tests {
     fn push_test_external_dummy(graph: &mut LGraph, id: &str, side: PortSide) -> NodeId {
         let node = graph.next_node_id();
         let mut dummy = LNode::new(id, 0.0, 0.0, None);
-        dummy.kind = LNodeKind::ExternalPort;
-        dummy.external_port_side = side;
+        dummy.set_kind(LNodeKind::ExternalPort);
+        dummy.external_port_mut().unwrap().side = side;
         graph.layerless_nodes.push(dummy);
         graph
             .add_port(node, PortType::Input, side.opposed(), Default::default())

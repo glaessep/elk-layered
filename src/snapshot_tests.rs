@@ -357,7 +357,7 @@ fn dump(graphs: &GraphArena, id: GraphId, origin: LPoint, depth: usize, out: &mu
             out,
             "{pad}  node {} {:?} at {} size {:?}x{:?}",
             node.id,
-            node.kind,
+            node.kind(),
             point(at),
             node.size.width,
             node.size.height

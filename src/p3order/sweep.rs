@@ -1006,7 +1006,7 @@ impl HierarchySweep {
 
         if let Some(first_node) = first_node {
             let child_graph = &graphs[self.infos[child_info_index].graph];
-            if child_graph.layerless_nodes[first_node].kind == LNodeKind::ExternalPort {
+            if child_graph.layerless_nodes[first_node].kind() == LNodeKind::ExternalPort {
                 let parent_graph = &graphs[self.infos[child_info_index]
                     .parent
                     .expect("child graph should have parent graph")
@@ -1090,7 +1090,7 @@ impl HierarchySweep {
             last_layer.len() - 1
         };
         let child_graph = &graphs[self.infos[child_info_index].graph];
-        if child_graph.layerless_nodes[last_layer[first]].kind != LNodeKind::ExternalPort {
+        if child_graph.layerless_nodes[last_layer[first]].kind() != LNodeKind::ExternalPort {
             return;
         }
 
@@ -1158,7 +1158,7 @@ impl HierarchySweep {
         } else {
             last_layer.len() - 1
         };
-        if child_graph.layerless_nodes[last_layer[first]].kind != LNodeKind::ExternalPort {
+        if child_graph.layerless_nodes[last_layer[first]].kind() != LNodeKind::ExternalPort {
             return;
         }
         let Some(GraphParent {
@@ -1397,7 +1397,7 @@ impl LayerSweepTypeDecider {
                 }
 
                 let mut current = self.node_info_for(*node);
-                if graph.layerless_nodes[*node].kind == LNodeKind::ExternalPort {
+                if graph.layerless_nodes[*node].kind() == LNodeKind::ExternalPort {
                     current.hierarchical_influence = 1;
                     if external_dummy_origin_side(graph, parent_graph, *node) == PortSide::East {
                         paths_to_hierarchical += current.connected_edges;
@@ -1548,7 +1548,7 @@ impl BarycenterHeuristic {
         let pre_ordered = !is_first_sweep
             || order[free_layer_index]
                 .first()
-                .is_some_and(|node| graph.layerless_nodes[*node].kind == LNodeKind::ExternalPort);
+                .is_some_and(|node| graph.layerless_nodes[*node].kind() == LNodeKind::ExternalPort);
         let mut nodes = order[free_layer_index].clone();
         self.minimize_layer(graph, &mut nodes, pre_ordered, false, forward);
         order[free_layer_index] = nodes;
@@ -1935,13 +1935,13 @@ fn build_forster_constraints_graph(
             continue;
         };
 
-        if only_between_normal_nodes && graph.layerless_nodes[node].kind != LNodeKind::Normal {
+        if only_between_normal_nodes && graph.layerless_nodes[node].kind() != LNodeKind::Normal {
             continue;
         }
 
         for successor in &graph.layerless_nodes[node].in_layer_successor_constraints {
             if only_between_normal_nodes
-                && graph.layerless_nodes[*successor].kind != LNodeKind::Normal
+                && graph.layerless_nodes[*successor].kind() != LNodeKind::Normal
             {
                 continue;
             }
@@ -1950,7 +1950,7 @@ fn build_forster_constraints_graph(
             }
         }
 
-        if !only_between_normal_nodes && graph.layerless_nodes[node].kind == LNodeKind::Normal {
+        if !only_between_normal_nodes && graph.layerless_nodes[node].kind() == LNodeKind::Normal {
             if let Some(previous) = last_non_dummy_node {
                 let previous_unit_nodes = layout_unit_nodes(layout_units, previous);
                 let current_unit_nodes = layout_unit_nodes(layout_units, node);
@@ -2783,7 +2783,7 @@ impl NorthSouthEdgeNeighbouringNodeCrossingsCounter {
         upper_node: NodeId,
         lower_node: NodeId,
     ) {
-        if graph.layerless_nodes[upper_node].kind == LNodeKind::Normal
+        if graph.layerless_nodes[upper_node].kind() == LNodeKind::Normal
             && is_long_edge_dummy(graph, lower_node)
         {
             self.upper_lower_crossings =
@@ -2791,7 +2791,7 @@ impl NorthSouthEdgeNeighbouringNodeCrossingsCounter {
             self.lower_upper_crossings =
                 number_of_north_south_edges(graph, upper_node, PortSide::North);
         }
-        if graph.layerless_nodes[lower_node].kind == LNodeKind::Normal
+        if graph.layerless_nodes[lower_node].kind() == LNodeKind::Normal
             && is_long_edge_dummy(graph, upper_node)
         {
             self.upper_lower_crossings =
@@ -3946,9 +3946,9 @@ fn are_normal_and_north_south_port_dummy(
     lower_node: NodeId,
 ) -> bool {
     (is_north_south_node(graph, upper_node)
-        && graph.layerless_nodes[lower_node].kind == LNodeKind::Normal)
+        && graph.layerless_nodes[lower_node].kind() == LNodeKind::Normal)
         || (is_north_south_node(graph, lower_node)
-            && graph.layerless_nodes[upper_node].kind == LNodeKind::Normal)
+            && graph.layerless_nodes[upper_node].kind() == LNodeKind::Normal)
 }
 
 /// `SwitchDecider.haveSuccessorConstraints`.
@@ -4003,11 +4003,11 @@ fn has_edges_on_side(graph: &LGraph, node: NodeId, side: PortSide) -> bool {
 }
 
 fn is_north_south_node(graph: &LGraph, node: NodeId) -> bool {
-    graph.layerless_nodes[node].kind == LNodeKind::NorthSouthPort
+    graph.layerless_nodes[node].kind() == LNodeKind::NorthSouthPort
 }
 
 fn is_long_edge_dummy(graph: &LGraph, node: NodeId) -> bool {
-    graph.layerless_nodes[node].kind == LNodeKind::LongEdge
+    graph.layerless_nodes[node].kind() == LNodeKind::LongEdge
 }
 
 /// `NorthSouthEdgeNeighbouringNodeCrossingsCounter.originPortOf`: the port of the regular node a
@@ -4086,7 +4086,9 @@ fn external_dummy_origin_side(
     let Some(dummy) = graph.layerless_nodes.get(node) else {
         return PortSide::Undefined;
     };
-    if let Some(origin) = dummy.origin_port.as_ref() {
+    // A node that is no external port dummy has no origin and no side of its own.
+    let external = dummy.external_port();
+    if let Some(origin) = external.and_then(|external| external.origin_port.as_ref()) {
         if origin.graph_id == graph.id
             && let Some(side) = port_side_at(graph, origin.port)
         {
@@ -4099,7 +4101,7 @@ fn external_dummy_origin_side(
             return side;
         }
     }
-    dummy.external_port_side
+    external.map_or(PortSide::Undefined, |external| external.side)
 }
 
 fn port_side_at(graph: &LGraph, port: PortRef) -> Option<PortSide> {
@@ -4159,7 +4161,10 @@ fn parent_port_order_by_dummy_layer(
             order.push(port);
             continue;
         }
-        let Some(origin) = child_graph.layerless_nodes[dummy_node].origin_port.as_ref() else {
+        let Some(origin) = child_graph.layerless_nodes[dummy_node]
+            .external_port()
+            .and_then(|external| external.origin_port.as_ref())
+        else {
             continue;
         };
         if origin.graph_id == parent_graph.id && origin.port.node == parent_node_index {
@@ -4426,7 +4431,7 @@ mod tests {
                 .iter()
                 .map(|&index| {
                     let node = &graph.layerless_nodes[index];
-                    if node.kind == LNodeKind::Normal {
+                    if node.kind() == LNodeKind::Normal {
                         node.id.as_str()
                     } else {
                         let edge = node
@@ -4566,9 +4571,9 @@ mod tests {
 
         let mut child_graph = LGraph::new("child", LayeredOptions::default());
         let mut external = LNode::new("external:parent", 0.0, 0.0, None);
-        external.kind = LNodeKind::ExternalPort;
-        external.external_port_side = PortSide::West;
-        external.origin_port = Some(crate::graph::GraphPortRef {
+        external.set_kind(LNodeKind::ExternalPort);
+        external.external_port_mut().unwrap().side = PortSide::West;
+        external.external_port_mut().unwrap().origin_port = Some(crate::graph::GraphPortRef {
             graph_id: parent_graph.id,
             port: origin,
         });
@@ -4684,7 +4689,7 @@ mod tests {
         let mut first = LNode::new("first", 10.0, 10.0, None);
         first.model_order = Some(0);
         let mut dummy = LNode::new("dummy", 0.0, 0.0, None);
-        dummy.kind = LNodeKind::LongEdge;
+        dummy.set_kind(LNodeKind::LongEdge);
         let mut second = LNode::new("second", 10.0, 10.0, None);
         second.model_order = Some(1);
         graph.layerless_nodes = vec![first, dummy, second].into();
@@ -5031,15 +5036,15 @@ mod tests {
         graph
             .layerless_nodes
             .push(crate::graph::LNode::new("input_dummy", 0.0, 0.0, None));
-        graph.layerless_nodes[NodeId::new(1)].kind = LNodeKind::ExternalPort;
+        graph.layerless_nodes[NodeId::new(1)].set_kind(LNodeKind::ExternalPort);
         graph
             .layerless_nodes
             .push(crate::graph::LNode::new("output_dummy", 0.0, 0.0, None));
-        graph.layerless_nodes[NodeId::new(2)].kind = LNodeKind::ExternalPort;
+        graph.layerless_nodes[NodeId::new(2)].set_kind(LNodeKind::ExternalPort);
         graph
             .layerless_nodes
             .push(crate::graph::LNode::new("both_dummy", 0.0, 0.0, None));
-        graph.layerless_nodes[NodeId::new(3)].kind = LNodeKind::ExternalPort;
+        graph.layerless_nodes[NodeId::new(3)].set_kind(LNodeKind::ExternalPort);
         graph.set_node_layer(NodeId::new(1), 0);
         graph.set_node_layer(NodeId::new(2), 0);
         graph.set_node_layer(NodeId::new(3), 0);
@@ -5592,7 +5597,7 @@ mod north_south_tests {
     fn add_long_edge_dummy(graph: &mut LGraph, layer: usize) -> NodeId {
         let index = graph.next_node_id();
         let mut dummy = LNode::new("long", 0.0, 0.0, None);
-        dummy.kind = LNodeKind::LongEdge;
+        dummy.set_kind(LNodeKind::LongEdge);
         graph.layerless_nodes.push(dummy);
         graph.set_node_layer(index, layer);
         graph.add_port(index, PortType::Input, PortSide::West, LPoint::default());
@@ -5703,7 +5708,7 @@ mod north_south_tests {
             .push(second);
         let plain = add_node(&mut graph, "plain", 1, &[]);
         let bare_dummy = add_node(&mut graph, "bare", 1, &[]);
-        graph.layerless_nodes[bare_dummy].kind = LNodeKind::NorthSouthPort;
+        graph.layerless_nodes[bare_dummy].set_kind(LNodeKind::NorthSouthPort);
         let order = graph
             .layers()
             .iter()
@@ -6342,12 +6347,12 @@ mod greedy_port_distributor_tests {
         let mut inner = graph("inner");
         let first = inner.next_node_id();
         inner.layerless_nodes.push(LNode::new("d0", 1.0, 1.0, None));
-        inner.layerless_nodes[first].kind = LNodeKind::ExternalPort;
+        inner.layerless_nodes[first].set_kind(LNodeKind::ExternalPort);
         inner.set_node_layer(first, 0);
         inner.add_port(first, PortType::Output, PortSide::East, LPoint::default());
         let second = inner.next_node_id();
         inner.layerless_nodes.push(LNode::new("d1", 1.0, 1.0, None));
-        inner.layerless_nodes[second].kind = LNodeKind::ExternalPort;
+        inner.layerless_nodes[second].set_kind(LNodeKind::ExternalPort);
         inner.set_node_layer(second, 0);
         inner.add_port(second, PortType::Output, PortSide::East, LPoint::default());
         let c0 = add_node(

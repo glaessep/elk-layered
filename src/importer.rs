@@ -444,7 +444,9 @@ fn import_external_ports(
             let dummy_port = &mut dummy.ports[PortId::new(0)];
             dummy_port.named = true;
             dummy_port.connected_to_external_nodes = port.connected_to_external_nodes;
-            dummy.scope_port = Some(position);
+            if let Some(external) = dummy.external_port_mut() {
+                external.scope_port = Some(position);
+            }
             dummy
         });
         dummies.insert(port.id.clone(), node);
@@ -496,7 +498,7 @@ fn has_children(graphs: &GraphArena, node: &LNode) -> bool {
         graphs[nested]
             .layerless_nodes
             .iter()
-            .any(|child| child.kind == LNodeKind::Normal)
+            .any(|child| child.kind() == LNodeKind::Normal)
     })
 }
 
@@ -1169,8 +1171,10 @@ fn ensure_inside_self_loop_dummy(
             0.0,
             direction,
         );
-        dummy.parent_port_key = Some(parent_port_key.to_string());
-        dummy.parent_port_type = Some(port_type);
+        if let Some(external) = dummy.external_port_mut() {
+            external.parent_port_key = Some(parent_port_key.to_string());
+            external.parent_port_type = Some(port_type);
+        }
         dummy
     });
     let port = PortRef {
@@ -3052,17 +3056,17 @@ mod tests {
         let external_dummies = nested
             .layerless_nodes
             .iter()
-            .filter(|candidate| candidate.kind == LNodeKind::ExternalPort)
+            .filter(|candidate| candidate.kind() == LNodeKind::ExternalPort)
             .collect::<Vec<_>>();
 
         assert_eq!(external_dummies.len(), 2);
         let input_dummy = external_dummies
             .iter()
-            .find(|dummy| dummy.parent_port_type == Some(PortType::Input))
+            .find(|dummy| dummy.external_port().unwrap().parent_port_type == Some(PortType::Input))
             .expect("inside self-loop input dummy should exist");
         let output_dummy = external_dummies
             .iter()
-            .find(|dummy| dummy.parent_port_type == Some(PortType::Output))
+            .find(|dummy| dummy.external_port().unwrap().parent_port_type == Some(PortType::Output))
             .expect("inside self-loop output dummy should exist");
         assert_eq!(input_dummy.ports[PortId::new(0)].incoming_edges().len(), 2);
         assert_eq!(output_dummy.ports[PortId::new(0)].outgoing_edges().len(), 2);
@@ -3382,7 +3386,7 @@ mod tests {
         let nested = &lgraph[cluster.nested_graph.unwrap()];
         assert_eq!(port_dummy.graph_id, nested.id);
         let external = &nested.layerless_nodes[port_dummy.node];
-        assert_eq!(external.external_port_side, PortSide::South);
+        assert_eq!(external.external_port().unwrap().side, PortSide::South);
         assert_eq!(
             parent_port.border_offset,
             external.ports[PortId::new(0)].border_offset
@@ -3392,6 +3396,8 @@ mod tests {
             Some(nested.options.spacing.edge_edge / 2.0)
         );
         let origin = external
+            .external_port()
+            .unwrap()
             .origin_port
             .as_ref()
             .expect("external dummy should point back to parent port");
@@ -3425,7 +3431,7 @@ mod tests {
         let external_dummies = nested
             .nodes_with_ids()
             .filter(|(_, node)| {
-                node.kind == LNodeKind::ExternalPort && node.id == "external:cluster"
+                node.kind() == LNodeKind::ExternalPort && node.id == "external:cluster"
             })
             .collect::<Vec<_>>();
 
@@ -3479,6 +3485,8 @@ mod tests {
         assert_eq!(port_dummy.graph_id, nested.id);
         let external = &nested.layerless_nodes[port_dummy.node];
         let origin = external
+            .external_port()
+            .unwrap()
             .origin_port
             .as_ref()
             .expect("external dummy should point back to parent port");
@@ -3515,7 +3523,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            nested.layerless_nodes[segment.source().node].kind,
+            nested.layerless_nodes[segment.source().node].kind(),
             LNodeKind::ExternalPort
         );
         assert_eq!(nested.layerless_nodes[segment.target().node].id, "A");
@@ -3700,13 +3708,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![EdgeId::new(0), EdgeId::new(1)]
         );
-        assert!(
-            nested
-                .edges
-                .iter()
-                .all(|edge| nested.layerless_nodes[edge.source().node].kind
-                    == LNodeKind::ExternalPort)
-        );
+        assert!(nested.edges.iter().all(
+            |edge| nested.layerless_nodes[edge.source().node].kind() == LNodeKind::ExternalPort
+        ));
     }
 
     #[test]

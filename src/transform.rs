@@ -5,7 +5,7 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/options/DirectionCongruency.java
 
 use crate::graph::{
-    InLayerConstraint, LGraph, LLabel, LNode, LNodeKind, LPadding, LPoint, LPort, LSize, PortSide,
+    InLayerConstraint, LGraph, LLabel, LNode, LPadding, LPoint, LPort, LSize, PortSide,
 };
 use crate::options::{Alignment, DirectionCongruency, ElkDirection, ElkPadding, LayerConstraint};
 
@@ -100,9 +100,11 @@ fn mirror_node_x(node: &mut LNode, offset: f64) {
     for port in node.ports.slots_mut() {
         mirror_port_x(port, node.size.width);
     }
-    if node.kind == LNodeKind::ExternalPort {
+    if node.external_port().is_some() {
         node.layer_constraint = mirror_layer_constraint_x(node.layer_constraint);
-        node.external_port_side = mirror_port_side_x(node.external_port_side);
+    }
+    if let Some(external) = node.external_port_mut() {
+        external.side = mirror_port_side_x(external.side);
     }
     for label in &mut node.labels {
         label.node_label_placement = label.node_label_placement.map(|p| p.mirror_x());
@@ -147,13 +149,13 @@ fn mirror_node_y(node: &mut LNode, offset: f64) {
     node.padding.swap_top_bottom();
     node.node_label_placement = node.node_label_placement.mirror_y();
     node.node_alignment = mirror_alignment_y(node.node_alignment);
-    node.in_layer_constraint = match node.in_layer_constraint {
-        InLayerConstraint::Top => InLayerConstraint::Bottom,
-        InLayerConstraint::Bottom => InLayerConstraint::Top,
-        InLayerConstraint::None => InLayerConstraint::None,
-    };
-    if node.kind == LNodeKind::ExternalPort {
-        node.external_port_side = mirror_port_side_y(node.external_port_side);
+    if let Some(external) = node.external_port_mut() {
+        external.in_layer_constraint = match external.in_layer_constraint {
+            InLayerConstraint::Top => InLayerConstraint::Bottom,
+            InLayerConstraint::Bottom => InLayerConstraint::Top,
+            InLayerConstraint::None => InLayerConstraint::None,
+        };
+        external.side = mirror_port_side_y(external.side);
     }
     for port in node.ports.slots_mut() {
         mirror_port_y(port, node.size.height);
@@ -209,9 +211,11 @@ fn transpose_node(node: &mut LNode) {
     for port in node.ports.slots_mut() {
         transpose_port(port);
     }
-    if node.kind == LNodeKind::ExternalPort {
+    if node.external_port().is_some() {
         transpose_layer_constraint_for_external_port(node);
-        node.external_port_side = transpose_port_side(node.external_port_side);
+        if let Some(external) = node.external_port_mut() {
+            external.side = transpose_port_side(external.side);
+        }
     }
     for label in &mut node.labels {
         label.node_label_placement = label.node_label_placement.map(|p| p.transpose());
@@ -340,18 +344,27 @@ fn mirror_layer_constraint_x(layer_constraint: LayerConstraint) -> LayerConstrai
 }
 
 fn transpose_layer_constraint_for_external_port(node: &mut LNode) {
-    if node.layer_constraint == LayerConstraint::FirstSeparate {
-        node.layer_constraint = LayerConstraint::None;
-        node.in_layer_constraint = InLayerConstraint::Top;
-    } else if node.layer_constraint == LayerConstraint::LastSeparate {
-        node.layer_constraint = LayerConstraint::None;
-        node.in_layer_constraint = InLayerConstraint::Bottom;
-    } else if node.in_layer_constraint == InLayerConstraint::Top {
-        node.layer_constraint = LayerConstraint::FirstSeparate;
-        node.in_layer_constraint = InLayerConstraint::None;
-    } else if node.in_layer_constraint == InLayerConstraint::Bottom {
-        node.layer_constraint = LayerConstraint::LastSeparate;
-        node.in_layer_constraint = InLayerConstraint::None;
+    let Some(in_layer_constraint) = node
+        .external_port()
+        .map(|external| external.in_layer_constraint)
+    else {
+        return;
+    };
+    let (layer_constraint, in_layer_constraint) =
+        if node.layer_constraint == LayerConstraint::FirstSeparate {
+            (LayerConstraint::None, InLayerConstraint::Top)
+        } else if node.layer_constraint == LayerConstraint::LastSeparate {
+            (LayerConstraint::None, InLayerConstraint::Bottom)
+        } else if in_layer_constraint == InLayerConstraint::Top {
+            (LayerConstraint::FirstSeparate, InLayerConstraint::None)
+        } else if in_layer_constraint == InLayerConstraint::Bottom {
+            (LayerConstraint::LastSeparate, InLayerConstraint::None)
+        } else {
+            (node.layer_constraint, in_layer_constraint)
+        };
+    node.layer_constraint = layer_constraint;
+    if let Some(external) = node.external_port_mut() {
+        external.in_layer_constraint = in_layer_constraint;
     }
 }
 
@@ -1051,9 +1064,9 @@ mod tests {
     fn left_transform_mirrors_external_port_layer_constraint() {
         let mut graph = graph(ElkDirection::Left);
         let mut node = LNode::new("external", 0.0, 0.0, None);
-        node.kind = LNodeKind::ExternalPort;
+        node.set_kind(crate::graph::LNodeKind::ExternalPort);
         node.layer_constraint = LayerConstraint::FirstSeparate;
-        node.external_port_side = PortSide::West;
+        node.external_port_mut().unwrap().side = PortSide::West;
         let node = graph.add_node_for_test(node);
 
         transform_graph_direction(&mut graph, GraphTransformMode::ToInputDirection);
@@ -1063,7 +1076,7 @@ mod tests {
             LayerConstraint::LastSeparate
         );
         assert_eq!(
-            graph.layerless_nodes[node].external_port_side,
+            graph.layerless_nodes[node].external_port().unwrap().side,
             PortSide::East
         );
     }
@@ -1072,9 +1085,9 @@ mod tests {
     fn transpose_preserves_external_port_layer_constraint_through_in_layer_constraint() {
         let mut graph = graph(ElkDirection::Down);
         let mut node = LNode::new("external", 0.0, 0.0, None);
-        node.kind = LNodeKind::ExternalPort;
+        node.set_kind(crate::graph::LNodeKind::ExternalPort);
         node.layer_constraint = LayerConstraint::FirstSeparate;
-        node.external_port_side = PortSide::South;
+        node.external_port_mut().unwrap().side = PortSide::South;
         let node = graph.add_node_for_test(node);
 
         transform_graph_direction(&mut graph, GraphTransformMode::ToInputDirection);
@@ -1084,11 +1097,14 @@ mod tests {
             LayerConstraint::None
         );
         assert_eq!(
-            graph.layerless_nodes[node].in_layer_constraint,
+            graph.layerless_nodes[node]
+                .external_port()
+                .unwrap()
+                .in_layer_constraint,
             InLayerConstraint::Top
         );
         assert_eq!(
-            graph.layerless_nodes[node].external_port_side,
+            graph.layerless_nodes[node].external_port().unwrap().side,
             PortSide::East
         );
 
@@ -1099,11 +1115,14 @@ mod tests {
             LayerConstraint::FirstSeparate
         );
         assert_eq!(
-            graph.layerless_nodes[node].in_layer_constraint,
+            graph.layerless_nodes[node]
+                .external_port()
+                .unwrap()
+                .in_layer_constraint,
             InLayerConstraint::None
         );
         assert_eq!(
-            graph.layerless_nodes[node].external_port_side,
+            graph.layerless_nodes[node].external_port().unwrap().side,
             PortSide::South
         );
     }

@@ -319,13 +319,13 @@ fn incident_to_inner_segment(
     layer1: usize,
     layer2: usize,
 ) -> bool {
-    if graph.layerless_nodes[node].kind != LNodeKind::LongEdge {
+    if graph.layerless_nodes[node].kind() != LNodeKind::LongEdge {
         return false;
     }
 
     for edge in graph.node_incoming_edges(node) {
         let source = graph.edges[edge].source().node;
-        if graph.layerless_nodes[source].kind == LNodeKind::LongEdge
+        if graph.layerless_nodes[source].kind() == LNodeKind::LongEdge
             && graph.layerless_nodes[source].layer_index() == Some(layer2)
             && graph.layerless_nodes[node].layer_index() == Some(layer1)
             && ni.layer_index.get(layer2).copied() == Some(layer2)
@@ -393,7 +393,7 @@ fn vertical_alignment(
                             layout.align[v_id] = layout.root[v_id];
                             let root = layout.root[v_id];
                             layout.only_dummies[root] &=
-                                graph.layerless_nodes[v_i_k].kind == LNodeKind::LongEdge;
+                                graph.layerless_nodes[v_i_k].kind() == LNodeKind::LongEdge;
                             r = ni.node_index[u_id] as isize;
                         }
                     }
@@ -408,7 +408,7 @@ fn vertical_alignment(
                             layout.align[v_id] = layout.root[v_id];
                             let root = layout.root[v_id];
                             layout.only_dummies[root] &=
-                                graph.layerless_nodes[v_i_k].kind == LNodeKind::LongEdge;
+                                graph.layerless_nodes[v_i_k].kind() == LNodeKind::LongEdge;
                             r = ni.node_index[u_id] as isize;
                         }
                     }

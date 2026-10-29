@@ -25,7 +25,8 @@ pub fn preprocess_self_loops(graph: &mut LGraph, others: OtherGraphs<'_>) {
     graph.self_loop_holders.clear();
 
     for node in graph.node_ids() {
-        if graph.layerless_nodes[node].kind != LNodeKind::Normal || !node_has_self_loop(graph, node)
+        if graph.layerless_nodes[node].kind() != LNodeKind::Normal
+            || !node_has_self_loop(graph, node)
         {
             continue;
         }
@@ -2618,12 +2619,10 @@ mod tests {
         source: PortRef,
         target: PortRef,
     ) -> LayeredEdge {
-        {
-            let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
-            built_edge.source_node_id = source_node_id.to_string();
-            built_edge.target_node_id = target_node_id.to_string();
-            built_edge
-        }
+        let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
+        built_edge.source_node_id = source_node_id.to_string();
+        built_edge.target_node_id = target_node_id.to_string();
+        built_edge
     }
 
     fn empty_self_loop_holder(node: NodeId, hyper_loop: SelfHyperLoop) -> SelfLoopHolder {

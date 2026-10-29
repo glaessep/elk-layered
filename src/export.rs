@@ -216,8 +216,9 @@ impl<'a> Hierarchy<'a> {
                     port.node.index()
                 ),
             })?;
-        if node.kind == LNodeKind::ExternalPort
-            && let Some(origin) = &node.origin_port
+        if let Some(origin) = node
+            .external_port()
+            .and_then(|external| external.origin_port.as_ref())
         {
             self.checked_graph(origin.graph_id)?;
             return Ok(PortAt {
@@ -402,17 +403,21 @@ pub(crate) fn apply_layout(
     // the edges that end at them read.
     let mut scope_ports = Vec::new();
     for index in root.node_ids() {
-        let Some(port) = root.layerless_nodes[index].scope_port else {
+        let Some(external) = root.layerless_nodes[index].external_port() else {
+            continue;
+        };
+        let Some(port) = external.scope_port else {
             continue;
         };
         // The port keeps its size, and every step of the run is over: no turn of the graph is left.
-        let size = root.layerless_nodes[index].external_port_size;
+        let size = external.size;
+        let side = external.side;
         let position = crate::pipeline::external_port_position(root, index, size);
         let dummy = &root.layerless_nodes[index];
         scope_ports.push(ScopePortLayout {
             index: port,
             position,
-            side: dummy.external_port_side,
+            side,
             border_offset: dummy
                 .ports
                 .first()
@@ -519,8 +524,10 @@ fn is_original_edge(graph: &LGraph, index: EdgeId, input: &TransferInput<'_>) ->
 
 /// Whether a node stands for something the input has: a node, or a port of the graph's own node.
 fn is_input_end(node: &LNode) -> bool {
-    node.kind == LNodeKind::Normal
-        || (node.kind == LNodeKind::ExternalPort && node.scope_port.is_some())
+    node.kind() == LNodeKind::Normal
+        || node
+            .external_port()
+            .is_some_and(|external| external.scope_port.is_some())
 }
 
 /// `LGraph.getActualSize`.
@@ -548,7 +555,7 @@ fn apply_graph_layout(
         y: graph.offset.y + graph.padding.top,
     };
     for (index, node) in graph.nodes_with_ids() {
-        if node.kind != LNodeKind::Normal || !input.parents.contains_key(&node.id) {
+        if node.kind() != LNodeKind::Normal || !input.parents.contains_key(&node.id) {
             continue;
         }
         result
@@ -837,7 +844,7 @@ mod tests {
         let origin = graph[nested]
             .layerless_nodes
             .iter_mut()
-            .find_map(|node| node.origin_port.as_mut())
+            .find_map(|node| node.external_port_mut()?.origin_port.as_mut())
             .expect("the edge leaves group through an external port dummy");
         origin.graph_id = GraphId::new(99);
 

@@ -36,7 +36,7 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
             pointer += 1;
 
             // Only regular nodes with fixed port sides.
-            if !(graph.layerless_nodes[node].kind == LNodeKind::Normal
+            if !(graph.layerless_nodes[node].kind() == LNodeKind::Normal
                 && graph.layerless_nodes[node].port_constraints.is_side_fixed())
             {
                 continue;
@@ -239,7 +239,7 @@ fn create_dummy_node(
 ) -> NodeId {
     let dummy_index = graph.push_node_with(|id| {
         let mut dummy = LNode::new(format!("northSouthPort:{}", id.index()), 0.0, 0.0, None);
-        dummy.kind = LNodeKind::NorthSouthPort;
+        dummy.set_kind(LNodeKind::NorthSouthPort);
         dummy.port_constraints = PortConstraints::FixedPos;
         dummy
     });
@@ -304,7 +304,7 @@ pub fn postprocess_north_south_ports(graph: &mut LGraph) {
         // A copy, because the loop takes nodes out of the layer.
         let node_array = graph.layers()[layer_index].nodes().to_vec();
         for node in node_array {
-            if graph.layerless_nodes[node].kind != LNodeKind::NorthSouthPort {
+            if graph.layerless_nodes[node].kind() != LNodeKind::NorthSouthPort {
                 continue;
             }
 
@@ -493,7 +493,7 @@ mod tests {
         let dummy = dummy_of(&graph, node, 0);
         assert_eq!(layer(&graph, 1), vec![dummy, node]);
         let dummy_node = &graph.layerless_nodes[dummy];
-        assert_eq!(dummy_node.kind, LNodeKind::NorthSouthPort);
+        assert_eq!(dummy_node.kind(), LNodeKind::NorthSouthPort);
         assert_eq!(dummy_node.port_constraints, PortConstraints::FixedPos);
         assert_eq!(dummy_node.ports.len(), 1);
         assert_eq!(dummy_node.ports[PortId::new(0)].side, PortSide::West);
@@ -804,7 +804,7 @@ mod tests {
             &[PortSide::North],
             1,
         );
-        graph.layerless_nodes[long_edge].kind = LNodeKind::LongEdge;
+        graph.layerless_nodes[long_edge].set_kind(LNodeKind::LongEdge);
         connect(&mut graph, port(neighbour, 0), port(free, 0));
         connect(&mut graph, port(neighbour, 0), port(long_edge, 0));
 

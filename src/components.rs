@@ -11,8 +11,7 @@
 mod group;
 
 use crate::graph::{
-    EdgeId, GraphArena, GraphId, IdVec, LGraph, LLabel, LNodeKind, LPoint, LSize, NodeId, PortRef,
-    VecId,
+    EdgeId, GraphArena, GraphId, IdVec, LGraph, LLabel, LPoint, LSize, NodeId, PortRef, VecId,
 };
 use crate::options::{HierarchyHandling, PortConstraints};
 use crate::pipeline::PipelineResult;
@@ -134,17 +133,16 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
                 .iter()
                 .map(|&node| graph.layerless_nodes[node].clone())
                 .collect();
-            let priority = component
-                .layerless_nodes
-                .iter()
-                .fold(0i32, |sum, node| sum.wrapping_add(node.component_priority));
+            // The importer reads no node priority yet, so every component has priority 0. A
+            // port of ELK's node priority adds the sum over the component's nodes here.
+            let priority = 0i32;
             // ComponentsProcessor.dfs: the side of every external port dummy of the component.
             let ext_port_sides = component
                 .layerless_nodes
                 .iter()
-                .filter(|node| node.kind == LNodeKind::ExternalPort)
-                .fold(group::SIDES_NONE, |sides, node| {
-                    sides | group::side_bit(node.external_port_side)
+                .filter_map(|node| node.external_port())
+                .fold(group::SIDES_NONE, |sides, external| {
+                    sides | group::side_bit(external.side)
                 });
             Component {
                 graph: component,
@@ -304,11 +302,9 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     edges: &IdVec<EdgeId, E>,
 ) -> Result<(), ComponentError> {
     for node in &mut graph.layerless_nodes {
-        map_optional(
-            &mut node.replaced_external_port_dummy,
-            nodes,
-            "replaced dummy",
-        )?;
+        if let Some(external) = node.external_port_mut() {
+            map_optional(&mut external.replaced_dummy, nodes, "replaced dummy")?;
+        }
         map_list(&mut node.in_layer_successor_constraints, nodes, "successor")?;
         map_optional(&mut node.in_layer_layout_unit, nodes, "layout unit")?;
         map_list(
@@ -316,15 +312,19 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
             nodes,
             "barycenter associate",
         )?;
-        map_optional(&mut node.origin_edge, edges, "origin edge")?;
-        for port in [&mut node.long_edge_source, &mut node.long_edge_target]
-            .into_iter()
-            .flatten()
-        {
-            map_port(port, nodes)?;
+        if let Some(ends) = node.long_edge_ends_mut() {
+            for port in [&mut ends.source, &mut ends.target].into_iter().flatten() {
+                map_port(port, nodes)?;
+            }
+        }
+        if let Some(long_edge) = node.long_edge_mut() {
+            map_optional(&mut long_edge.origin_edge, edges, "origin edge")?;
+        }
+        if let Some(label) = node.label_dummy_mut() {
+            map_optional(&mut label.origin_edge, edges, "origin edge")?;
+            map_labels(&mut label.represented_labels, edges)?;
         }
         map_labels(&mut node.labels, edges)?;
-        map_labels(&mut node.represented_labels, edges)?;
         for port in node.ports.slots_mut() {
             port.map_ids(
                 |node| map_id(nodes, node, "port owner"),
@@ -399,7 +399,9 @@ fn remap_graph_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     edges: &IdVec<EdgeId, E>,
 ) -> Result<(), ComponentError> {
     for node in &mut current.layerless_nodes {
-        if let Some(origin) = &mut node.origin_port
+        if let Some(origin) = node
+            .external_port_mut()
+            .and_then(|external| external.origin_port.as_mut())
             && origin.graph_id == graph_id
         {
             map_port(&mut origin.port, nodes)?;
@@ -639,7 +641,7 @@ mod tests {
             .layerless_nodes
             .push(LNode::new("a", 10.0, 10.0, None));
         let mut dummy = LNode::new("dummy", 0.0, 0.0, None);
-        dummy.kind = LNodeKind::NorthSouthPort;
+        dummy.set_kind(crate::graph::LNodeKind::NorthSouthPort);
         graph.layerless_nodes.push(dummy);
         let north = graph
             .add_port(
@@ -701,11 +703,9 @@ mod tests {
     }
 
     fn edge_between(id: &str, source: PortRef, target: PortRef) -> LayeredEdge {
-        {
-            let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
-            built_edge.thickness = 1.0;
-            built_edge
-        }
+        let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
+        built_edge.thickness = 1.0;
+        built_edge
     }
 
     // Mutation: leave out the `remap_nested_references` call in `split`. The nested graph then
@@ -772,7 +772,11 @@ mod tests {
             )
             .unwrap();
         // The dummy stands for the port of `holder`, and holds the dummy made for `c`'s port.
-        inside.layerless_nodes[NodeId::new(0)].origin_port = Some(GraphPortRef {
+        inside.layerless_nodes[NodeId::new(0)].set_kind(crate::graph::LNodeKind::ExternalPort);
+        inside.layerless_nodes[NodeId::new(0)]
+            .external_port_mut()
+            .unwrap()
+            .origin_port = Some(GraphPortRef {
             graph_id: GraphId::ROOT,
             port: holder_out,
         });
@@ -803,6 +807,8 @@ mod tests {
         let between = &graphs[inside_id];
         assert_eq!(
             between.layerless_nodes[NodeId::new(0)]
+                .external_port()
+                .unwrap()
                 .origin_port
                 .map(|o| o.port.node),
             Some(crate::graph::NodeId::new(0)),

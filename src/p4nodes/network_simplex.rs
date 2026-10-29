@@ -143,8 +143,8 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
             let dummy = aux.graph.add_node(None);
             let weight = data.priority_straightness.max(1) as f64
                 * edge_type_weight(
-                    graph.layerless_nodes[data.source().node].kind,
-                    graph.layerless_nodes[data.target().node].kind,
+                    graph.layerless_nodes[data.source().node].kind(),
+                    graph.layerless_nodes[data.target().node].kind(),
                 );
             let left = aux
                 .graph
@@ -238,7 +238,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
 
 fn is_flexible(graph: &LGraph, node: NodeId) -> bool {
     let node = &graph.layerless_nodes[node];
-    if node.kind != LNodeKind::Normal
+    if node.kind() != LNodeKind::Normal
         || node.ports.len() <= 1
         || node.port_constraints.is_pos_fixed()
         || node.node_flexibility == NodeFlexibility::None
@@ -337,7 +337,7 @@ fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[Nod
         }
     }
     for &node in order {
-        if graph.layerless_nodes[node].kind != LNodeKind::Normal {
+        if graph.layerless_nodes[node].kind() != LNodeKind::Normal {
             continue;
         }
         for edge in graph.node_connected_edges(node) {
@@ -349,7 +349,7 @@ fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[Nod
                 continue;
             }
             let (port, dummy) =
-                if graph.layerless_nodes[edge.source().node].kind != LNodeKind::Normal {
+                if graph.layerless_nodes[edge.source().node].kind() != LNodeKind::Normal {
                     (edge.target(), edge.source().node)
                 } else {
                     (edge.source(), edge.target().node)
@@ -482,7 +482,7 @@ fn prefer_straight_edges(
         } else {
             let long_dummy = std::iter::once(graph.edges[path[0]].source().node)
                 .chain(path.iter().map(|edge| graph.edges[*edge].target().node))
-                .any(|node| graph.layerless_nodes[node].kind == LNodeKind::LongEdge);
+                .any(|node| graph.layerless_nodes[node].kind() == LNodeKind::LongEdge);
             if long_dummy {
                 continue;
             }

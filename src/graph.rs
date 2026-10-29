@@ -160,13 +160,14 @@ impl Default for Layer {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LNode {
     pub id: String,
-    pub kind: LNodeKind,
+    /// What the node is, and the data only that kind of node has. `None` for a node of the
+    /// input. Private so the data always fits the kind: see [`Self::kind`] and the accessors.
+    dummy: Option<DummyData>,
     pub size: LSize,
     pub position: LPoint,
     pub margin: LMargin,
     pub padding: LPadding,
     pub labels: Vec<LLabel>,
-    pub represented_labels: Vec<LLabel>,
     pub node_label_placement: NodeLabelPlacement,
     /// The node's own size options. ELK's `LabelAndNodeSizeProcessor` sizes the node by them.
     pub node_size: NodeSizing,
@@ -178,7 +179,6 @@ pub struct LNode {
     /// The graph inside this node, which the layout's [`GraphArena`] holds.
     pub nested_graph: Option<GraphId>,
     pub model_order: Option<usize>,
-    pub component_priority: i32,
     /// The layer the node sits in. Private: `LGraph` sets it together with the layer's list.
     layer_index: Option<usize>,
     pub layer_constraint: super::options::LayerConstraint,
@@ -187,28 +187,123 @@ pub struct LNode {
     pub port_alignment: Option<PortAlignment>,
     pub node_flexibility: super::options::NodeFlexibility,
     pub ports_surrounding: Option<super::options::SpacingMargin>,
-    pub external_port_side: PortSide,
-    pub external_port_size: LSize,
-    /// For the dummy of a port of the graph's own node: the position of that port among the
-    /// node's input ports. ELK keeps the port in `InternalProperties.ORIGIN`.
-    pub scope_port: Option<usize>,
-    pub port_ratio_or_position: f64,
-    pub replaced_external_port_dummy: Option<NodeId>,
     pub in_layer_successor_constraints: Vec<NodeId>,
     pub in_layer_layout_unit: Option<NodeId>,
     pub barycenter_associates: Vec<NodeId>,
-    pub origin_port: Option<GraphPortRef>,
-    pub origin_edge: Option<EdgeId>,
-    pub parent_port_key: Option<String>,
-    pub parent_port_type: Option<PortType>,
-    pub long_edge_source: Option<PortRef>,
-    pub long_edge_target: Option<PortRef>,
-    pub long_edge_has_label_dummies: bool,
-    pub label_side: LabelSide,
-    pub in_layer_constraint: InLayerConstraint,
     pub layer_constraint_explicit: bool,
     pub hidden: bool,
     pub compound: bool,
+}
+
+/// The data that only one kind of dummy node has. ELK keeps these as properties that are set
+/// where they apply; here the node's kind and its data are one value, so a long edge dummy
+/// cannot carry a label side and a reader of the wrong kind gets `None`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DummyData {
+    /// `NodeType.LONG_EDGE`.
+    LongEdge(LongEdgeData),
+    /// `NodeType.LABEL`.
+    Label(LabelData),
+    /// `NodeType.EXTERNAL_PORT`.
+    ExternalPort(ExternalPortData),
+    /// `NodeType.NORTH_SOUTH_PORT`. It has no data of its own: its ports carry the origins.
+    NorthSouthPort,
+}
+
+impl DummyData {
+    fn kind(&self) -> LNodeKind {
+        match self {
+            Self::LongEdge(_) => LNodeKind::LongEdge,
+            Self::Label(_) => LNodeKind::Label,
+            Self::ExternalPort(_) => LNodeKind::ExternalPort,
+            Self::NorthSouthPort => LNodeKind::NorthSouthPort,
+        }
+    }
+}
+
+/// The ports at the two ends of the long edge that a long edge dummy or a label dummy belongs
+/// to. ELK sets both properties on both kinds of dummy.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct LongEdgeEnds {
+    /// `InternalProperties.LONG_EDGE_SOURCE`.
+    pub source: Option<PortRef>,
+    /// `InternalProperties.LONG_EDGE_TARGET`.
+    pub target: Option<PortRef>,
+}
+
+/// Data of a long edge dummy.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LongEdgeData {
+    /// The ports at the ends of the long edge.
+    pub ends: LongEdgeEnds,
+    /// `InternalProperties.LONG_EDGE_HAS_LABEL_DUMMIES`.
+    pub has_label_dummies: bool,
+    /// The edge the dummy was made from: ELK keeps it in `InternalProperties.ORIGIN`.
+    pub origin_edge: Option<EdgeId>,
+}
+
+/// Data of a label dummy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LabelData {
+    /// The ports at the ends of the long edge the label sits on.
+    pub ends: LongEdgeEnds,
+    /// `InternalProperties.LABEL_SIDE`.
+    pub side: LabelSide,
+    /// The edge the labels belong to: ELK keeps it in `InternalProperties.ORIGIN`.
+    pub origin_edge: Option<EdgeId>,
+    /// The labels the dummy stands for, as `InternalProperties.REPRESENTED_LABELS`.
+    pub represented_labels: Vec<LLabel>,
+}
+
+impl Default for LabelData {
+    fn default() -> Self {
+        Self {
+            ends: LongEdgeEnds::default(),
+            side: LabelSide::Below,
+            origin_edge: None,
+            represented_labels: Vec::new(),
+        }
+    }
+}
+
+/// Data of an external port dummy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternalPortData {
+    /// `InternalProperties.EXT_PORT_SIDE`.
+    pub side: PortSide,
+    /// `InternalProperties.EXT_PORT_SIZE`.
+    pub size: LSize,
+    /// `InternalProperties.PORT_RATIO_OR_POSITION`.
+    pub ratio_or_position: f64,
+    /// For the dummy of a port of the graph's own node: the position of that port among the
+    /// node's input ports. ELK keeps the port in `InternalProperties.ORIGIN`.
+    pub scope_port: Option<usize>,
+    /// The dummy that an `HierarchicalPortOrthogonalEdgeRouter` replacement stands in for.
+    pub replaced_dummy: Option<NodeId>,
+    /// The id of the parent node's port the dummy was made for.
+    pub parent_port_key: Option<String>,
+    /// The type of that port.
+    pub parent_port_type: Option<PortType>,
+    /// The port of the parent graph's node, as `InternalProperties.ORIGIN`.
+    pub origin_port: Option<GraphPortRef>,
+    /// `InternalProperties.IN_LAYER_CONSTRAINT`.
+    pub in_layer_constraint: InLayerConstraint,
+}
+
+impl Default for ExternalPortData {
+    fn default() -> Self {
+        Self {
+            side: PortSide::Undefined,
+            size: LSize::default(),
+            ratio_or_position: 0.0,
+            scope_port: None,
+            replaced_dummy: None,
+            parent_port_key: None,
+            parent_port_type: None,
+            origin_port: None,
+            in_layer_constraint: InLayerConstraint::None,
+        }
+    }
 }
 
 impl LNode {
@@ -217,16 +312,124 @@ impl LNode {
         self.layer_index
     }
 
+    /// What the node is.
+    pub fn kind(&self) -> LNodeKind {
+        self.dummy
+            .as_ref()
+            .map_or(LNodeKind::Normal, DummyData::kind)
+    }
+
+    /// Makes the node a dummy of the kind `kind`, with the data of a new dummy of that kind.
+    /// [`LNodeKind::Normal`] makes it a node of the input again.
+    pub fn set_kind(&mut self, kind: LNodeKind) {
+        self.dummy = match kind {
+            LNodeKind::Normal | LNodeKind::BreakingPoint => None,
+            LNodeKind::LongEdge => Some(DummyData::LongEdge(LongEdgeData::default())),
+            LNodeKind::Label => Some(DummyData::Label(LabelData::default())),
+            LNodeKind::ExternalPort => Some(DummyData::ExternalPort(ExternalPortData::default())),
+            LNodeKind::NorthSouthPort => Some(DummyData::NorthSouthPort),
+        };
+    }
+
+    /// Makes the node a dummy that holds `data`.
+    pub fn set_dummy(&mut self, data: DummyData) {
+        self.dummy = Some(data);
+    }
+
+    /// The data of a long edge dummy, or `None` for any other node.
+    pub fn long_edge(&self) -> Option<&LongEdgeData> {
+        match &self.dummy {
+            Some(DummyData::LongEdge(data)) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// The data of a long edge dummy for change, or `None` for any other node.
+    pub fn long_edge_mut(&mut self) -> Option<&mut LongEdgeData> {
+        match &mut self.dummy {
+            Some(DummyData::LongEdge(data)) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// The data of a label dummy, or `None` for any other node.
+    pub fn label_dummy(&self) -> Option<&LabelData> {
+        match &self.dummy {
+            Some(DummyData::Label(data)) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// The data of a label dummy for change, or `None` for any other node.
+    pub fn label_dummy_mut(&mut self) -> Option<&mut LabelData> {
+        match &mut self.dummy {
+            Some(DummyData::Label(data)) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// The ports at the ends of the long edge that a long edge dummy or a label dummy belongs
+    /// to, or `None` for any other node.
+    pub fn long_edge_ends(&self) -> Option<LongEdgeEnds> {
+        match &self.dummy {
+            Some(DummyData::LongEdge(data)) => Some(data.ends),
+            Some(DummyData::Label(data)) => Some(data.ends),
+            _ => None,
+        }
+    }
+
+    /// The same for change.
+    pub fn long_edge_ends_mut(&mut self) -> Option<&mut LongEdgeEnds> {
+        match &mut self.dummy {
+            Some(DummyData::LongEdge(data)) => Some(&mut data.ends),
+            Some(DummyData::Label(data)) => Some(&mut data.ends),
+            _ => None,
+        }
+    }
+
+    /// The labels a label dummy stands for. A node that is no label dummy stands for none.
+    pub fn represented_labels(&self) -> &[LLabel] {
+        match &self.dummy {
+            Some(DummyData::Label(data)) => &data.represented_labels,
+            _ => &[],
+        }
+    }
+
+    /// The edge a long edge dummy or a label dummy was made from, or `None` for any other node
+    /// and for a dummy without one.
+    pub fn origin_edge(&self) -> Option<EdgeId> {
+        match &self.dummy {
+            Some(DummyData::LongEdge(data)) => data.origin_edge,
+            Some(DummyData::Label(data)) => data.origin_edge,
+            _ => None,
+        }
+    }
+
+    /// The data of an external port dummy, or `None` for any other node.
+    pub fn external_port(&self) -> Option<&ExternalPortData> {
+        match &self.dummy {
+            Some(DummyData::ExternalPort(data)) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// The data of an external port dummy for change, or `None` for any other node.
+    pub fn external_port_mut(&mut self) -> Option<&mut ExternalPortData> {
+        match &mut self.dummy {
+            Some(DummyData::ExternalPort(data)) => Some(data),
+            _ => None,
+        }
+    }
+
     pub fn new(id: impl Into<String>, width: f64, height: f64, model_order: Option<usize>) -> Self {
         Self {
             id: id.into(),
-            kind: LNodeKind::Normal,
+            dummy: None,
             size: LSize { width, height },
             position: LPoint::default(),
             margin: LMargin::default(),
             padding: LPadding::default(),
             labels: Vec::new(),
-            represented_labels: Vec::new(),
             node_label_placement: NodeLabelPlacement::FIXED,
             node_size: NodeSizing::default(),
             self_loop_distribution: Default::default(),
@@ -234,7 +437,6 @@ impl LNode {
             ports: NodePorts::default(),
             nested_graph: None,
             model_order,
-            component_priority: 0,
             layer_index: None,
             layer_constraint: super::options::LayerConstraint::None,
             node_alignment: Alignment::Automatic,
@@ -242,23 +444,9 @@ impl LNode {
             port_alignment: None,
             node_flexibility: super::options::NodeFlexibility::None,
             ports_surrounding: None,
-            external_port_side: PortSide::Undefined,
-            external_port_size: LSize::default(),
-            scope_port: None,
-            port_ratio_or_position: 0.0,
-            replaced_external_port_dummy: None,
             in_layer_successor_constraints: Vec::new(),
             in_layer_layout_unit: None,
             barycenter_associates: Vec::new(),
-            origin_port: None,
-            origin_edge: None,
-            parent_port_key: None,
-            parent_port_type: None,
-            long_edge_source: None,
-            long_edge_target: None,
-            long_edge_has_label_dummies: false,
-            label_side: LabelSide::Below,
-            in_layer_constraint: InLayerConstraint::None,
             layer_constraint_explicit: false,
             hidden: false,
             compound: false,
@@ -1535,10 +1723,12 @@ pub fn create_external_port_dummy(
     };
 
     let mut dummy = LNode::new(id, 0.0, 0.0, None);
-    dummy.kind = LNodeKind::ExternalPort;
+    let mut external = ExternalPortData {
+        side: external_side,
+        size: port_size,
+        ..ExternalPortData::default()
+    };
     dummy.port_constraints = PortConstraints::FixedPos;
-    dummy.external_port_side = external_side;
-    dummy.external_port_size = port_size;
 
     let position = match external_side {
         PortSide::West | PortSide::East => LPoint {
@@ -1574,14 +1764,14 @@ pub fn create_external_port_dummy(
             }
         }
         PortSide::North => {
-            dummy.in_layer_constraint = InLayerConstraint::Top;
+            external.in_layer_constraint = InLayerConstraint::Top;
             dummy.size.width = port_size.width;
             if border_offset < 0.0 {
                 dummy.size.height = -border_offset;
             }
         }
         PortSide::South => {
-            dummy.in_layer_constraint = InLayerConstraint::Bottom;
+            external.in_layer_constraint = InLayerConstraint::Bottom;
             dummy.size.width = port_size.width;
             if border_offset < 0.0 {
                 dummy.size.height = -border_offset;
@@ -1598,13 +1788,14 @@ pub fn create_external_port_dummy(
     port.set_side(dummy_port_side);
     port.border_offset = Some(border_offset);
     if port_constraints.is_order_fixed() {
-        dummy.port_ratio_or_position = port_ratio_or_position(
+        external.ratio_or_position = port_ratio_or_position(
             external_side,
             port_position,
             port_node_size,
             port_constraints.is_ratio_fixed(),
         );
     }
+    dummy.set_dummy(DummyData::ExternalPort(external));
     dummy.ports.push(port);
     dummy
 }
@@ -1623,7 +1814,11 @@ pub fn apply_port_index_to_dummy(
     if port_constraints != PortConstraints::FixedOrder {
         return;
     }
-    dummy.port_ratio_or_position = match dummy.external_port_side {
+    // A node that is no external port dummy has no port ratio or position to set.
+    let Some(external) = dummy.external_port_mut() else {
+        return;
+    };
+    external.ratio_or_position = match external.side {
         PortSide::North | PortSide::East => index as f64,
         PortSide::South | PortSide::West => -(index as f64),
         PortSide::Undefined => 0.0,
@@ -2098,6 +2293,116 @@ mod tests {
         assert_eq!(outgoing(&graph, a[0]), [second, first]);
     }
 
+    fn dummy_of(kind: LNodeKind) -> LNode {
+        let mut node = LNode::new("dummy", 0.0, 0.0, None);
+        node.set_kind(kind);
+        node
+    }
+
+    // Mutation: in `set_kind`, make a `Label` dummy hold the data of a long edge dummy.
+    #[test]
+    fn set_kind_gives_the_node_the_data_of_its_kind() {
+        for kind in [
+            LNodeKind::Normal,
+            LNodeKind::LongEdge,
+            LNodeKind::Label,
+            LNodeKind::ExternalPort,
+            LNodeKind::NorthSouthPort,
+        ] {
+            assert_eq!(dummy_of(kind).kind(), kind, "{kind:?}");
+        }
+    }
+
+    // Mutation: in `origin_edge`, answer `Some(EdgeId::new(0))` for an external port dummy.
+    #[test]
+    fn dummy_data_of_another_kind_reads_as_none() {
+        let normal = dummy_of(LNodeKind::Normal);
+        let long_edge = dummy_of(LNodeKind::LongEdge);
+        let label = dummy_of(LNodeKind::Label);
+        let external = dummy_of(LNodeKind::ExternalPort);
+        let north_south = dummy_of(LNodeKind::NorthSouthPort);
+
+        for node in [&normal, &label, &external, &north_south] {
+            assert!(node.long_edge().is_none(), "{:?}", node.kind());
+        }
+        for node in [&normal, &long_edge, &external, &north_south] {
+            assert!(node.label_dummy().is_none(), "{:?}", node.kind());
+        }
+        for node in [&normal, &long_edge, &label, &north_south] {
+            assert!(node.external_port().is_none(), "{:?}", node.kind());
+        }
+        for node in [&normal, &external, &north_south] {
+            assert!(node.long_edge_ends().is_none(), "{:?}", node.kind());
+            assert_eq!(node.origin_edge(), None, "{:?}", node.kind());
+        }
+        for node in [&normal, &long_edge, &external, &north_south] {
+            assert!(node.represented_labels().is_empty(), "{:?}", node.kind());
+        }
+    }
+
+    // Mutation: in `long_edge_ends`, answer for a long edge dummy only, not for a label dummy.
+    #[test]
+    fn long_edge_dummies_and_label_dummies_share_the_ends_of_their_long_edge() {
+        let ends = LongEdgeEnds {
+            source: Some(PortRef {
+                node: NodeId::new(0),
+                port: PortId::new(0),
+            }),
+            target: Some(PortRef {
+                node: NodeId::new(1),
+                port: PortId::new(0),
+            }),
+        };
+        for kind in [LNodeKind::LongEdge, LNodeKind::Label] {
+            let mut node = dummy_of(kind);
+            assert_eq!(node.long_edge_ends(), Some(LongEdgeEnds::default()));
+
+            node.long_edge_ends_mut().unwrap().source = ends.source;
+            node.long_edge_ends_mut().unwrap().target = ends.target;
+
+            assert_eq!(node.long_edge_ends(), Some(ends), "{kind:?}");
+        }
+    }
+
+    // Mutation: in `origin_edge`, read the label dummy's edge from the long edge arm.
+    #[test]
+    fn origin_edge_is_the_edge_a_long_edge_dummy_or_label_dummy_was_made_from() {
+        let mut long_edge = dummy_of(LNodeKind::LongEdge);
+        long_edge.long_edge_mut().unwrap().origin_edge = Some(EdgeId::new(3));
+        let mut label = dummy_of(LNodeKind::Label);
+        label.label_dummy_mut().unwrap().origin_edge = Some(EdgeId::new(4));
+
+        assert_eq!(long_edge.origin_edge(), Some(EdgeId::new(3)));
+        assert_eq!(label.origin_edge(), Some(EdgeId::new(4)));
+        assert_eq!(dummy_of(LNodeKind::LongEdge).origin_edge(), None);
+    }
+
+    // Mutation: in `set_kind`, keep the data of the old kind when the kind changes.
+    #[test]
+    fn set_kind_replaces_the_data_of_the_old_kind() {
+        let mut node = dummy_of(LNodeKind::ExternalPort);
+        node.external_port_mut().unwrap().side = PortSide::North;
+
+        node.set_kind(LNodeKind::LongEdge);
+
+        assert!(node.external_port().is_none());
+        assert_eq!(node.long_edge_ends(), Some(LongEdgeEnds::default()));
+        node.set_kind(LNodeKind::ExternalPort);
+        assert_eq!(node.external_port().unwrap().side, PortSide::Undefined);
+    }
+
+    // Mutation: in `apply_port_index_to_dummy`, set the ratio on a node that is no external
+    // port dummy by making it one.
+    #[test]
+    fn apply_port_index_to_dummy_leaves_a_node_that_is_no_external_port_dummy_alone() {
+        let mut node = dummy_of(LNodeKind::Normal);
+
+        apply_port_index_to_dummy(&mut node, PortConstraints::FixedOrder, Some(2));
+
+        assert_eq!(node.kind(), LNodeKind::Normal);
+        assert!(node.external_port().is_none());
+    }
+
     // Mutation: swap `x` and `y`, or `width` and `height`, in `port_box`.
     #[test]
     fn port_box_reads_the_position_and_size_from_its_four_numbers() {
@@ -2161,8 +2466,11 @@ mod tests {
             ElkDirection::Down,
         );
 
-        assert_eq!(dummy.kind, LNodeKind::ExternalPort);
-        assert_eq!(dummy.in_layer_constraint, InLayerConstraint::Bottom);
+        assert_eq!(dummy.kind(), LNodeKind::ExternalPort);
+        assert_eq!(
+            dummy.external_port().unwrap().in_layer_constraint,
+            InLayerConstraint::Bottom
+        );
         assert_eq!(dummy.port_constraints, PortConstraints::FixedPos);
         assert_eq!(dummy.ports[PortId::new(0)].side, PortSide::North);
         assert_eq!(
@@ -2197,7 +2505,7 @@ mod tests {
         });
         assert_eq!(id, NodeId::new(2));
         assert_eq!(graph.layerless_nodes.len(), 3);
-        assert_eq!(graph.layerless_nodes[id].kind, LNodeKind::ExternalPort);
+        assert_eq!(graph.layerless_nodes[id].kind(), LNodeKind::ExternalPort);
         assert_eq!(graph.layerless_nodes[id].ports[PortId::new(0)].node, id);
     }
 
@@ -2259,14 +2567,14 @@ mod tests {
         );
         assert_eq!(dummy.ports[PortId::new(0)].size, LSize::default());
         assert_eq!(
-            dummy.external_port_size,
+            dummy.external_port().unwrap().size,
             LSize {
                 width: 4.0,
                 height: 6.0
             }
         );
         assert_eq!(dummy.ports[PortId::new(0)].border_offset, Some(-3.0));
-        assert_eq!(dummy.port_ratio_or_position, 0.5);
+        assert_eq!(dummy.external_port().unwrap().ratio_or_position, 0.5);
     }
 
     // Mutation: look a port up by its place in the node's list instead of by its slot.
@@ -2283,7 +2591,7 @@ mod tests {
 
         let mut nested = LGraph::new("cluster", LayeredOptions::default());
         let mut dummy = LNode::new("external:cluster", 0.0, 0.0, None);
-        dummy.kind = LNodeKind::ExternalPort;
+        dummy.set_kind(LNodeKind::ExternalPort);
         let origin = GraphPortRef {
             graph_id: GraphId::ROOT,
             port: PortRef {
@@ -2291,7 +2599,7 @@ mod tests {
                 port: PortId::new(1),
             },
         };
-        dummy.origin_port = Some(origin);
+        dummy.external_port_mut().unwrap().origin_port = Some(origin);
         nested.layerless_nodes.push(dummy);
         parent.layerless_nodes.push(compound);
         let mut graphs = GraphArena::new(parent);
@@ -2306,7 +2614,10 @@ mod tests {
         let nested = &graphs[nested_id];
         let parent = graphs.root();
         assert_eq!(
-            nested.layerless_nodes[NodeId::new(0)].origin_port,
+            nested.layerless_nodes[NodeId::new(0)]
+                .external_port()
+                .unwrap()
+                .origin_port,
             Some(origin)
         );
         // The origin still names the port "p1", which now comes first.
@@ -2408,6 +2719,8 @@ mod tests {
 
     // Mutation: look a port up by its place in the node's list instead of by its slot. The edges
     // then name the port that stands in the old place.
+    // Mutation: in `reorder_node_ports`, clear `origin_port` of every external port dummy, or the
+    // `source` of every long edge dummy's ends.
     #[test]
     fn reordering_ports_changes_no_edge_and_no_other_reference() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
@@ -2417,6 +2730,9 @@ mod tests {
         graph
             .layerless_nodes
             .push(LNode::new("B", 10.0, 10.0, Some(1)));
+        graph
+            .layerless_nodes
+            .push(LNode::new("C", 10.0, 10.0, Some(2)));
         let sides = [PortSide::East, PortSide::North, PortSide::South];
         let a = sides.map(|side| {
             graph
@@ -2453,20 +2769,35 @@ mod tests {
         graph.add_edge(edge("e0", a[0], b));
         graph.add_edge(edge("e1", a[2], b));
         graph.add_edge(edge("e2", a[1], a[2]));
-        graph.layerless_nodes[NodeId::new(1)].long_edge_source = Some(a[0]);
-        graph.layerless_nodes[NodeId::new(1)].long_edge_target = Some(a[2]);
-        graph.layerless_nodes[NodeId::new(1)].origin_port = Some(GraphPortRef {
+        graph.layerless_nodes[NodeId::new(1)].set_kind(LNodeKind::LongEdge);
+        graph.layerless_nodes[NodeId::new(1)]
+            .long_edge_ends_mut()
+            .unwrap()
+            .source = Some(a[0]);
+        graph.layerless_nodes[NodeId::new(1)]
+            .long_edge_ends_mut()
+            .unwrap()
+            .target = Some(a[2]);
+        graph.layerless_nodes[NodeId::new(2)].set_kind(LNodeKind::ExternalPort);
+        graph.layerless_nodes[NodeId::new(2)]
+            .external_port_mut()
+            .unwrap()
+            .origin_port = Some(GraphPortRef {
             graph_id: GraphId::ROOT,
             port: a[1],
         });
         let edges_before = graph.edges.clone();
-        let nodes_before = graph.layerless_nodes[NodeId::new(1)].clone();
+        let nodes_before = [
+            graph.layerless_nodes[NodeId::new(1)].clone(),
+            graph.layerless_nodes[NodeId::new(2)].clone(),
+        ];
 
         assert!(graph.reorder_node_ports(NodeId::new(0), [a[2].port, a[0].port, a[1].port]));
 
         // No edge and no reference of the other node changed.
         assert_eq!(graph.edges, edges_before);
-        assert_eq!(graph.layerless_nodes[NodeId::new(1)], nodes_before);
+        assert_eq!(graph.layerless_nodes[NodeId::new(1)], nodes_before[0]);
+        assert_eq!(graph.layerless_nodes[NodeId::new(2)], nodes_before[1]);
         // Each port still holds the edges it held, under the same id.
         for (port, outgoing) in [(a[0], "e0"), (a[2], "e1"), (a[1], "e2")] {
             let data = &graph.layerless_nodes[NodeId::new(0)].ports[port.port];
