@@ -3,7 +3,7 @@
 //! Source references:
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/ElkLayered.java
 
-use super::assembler::{Processor, Strategies, assemble};
+use super::assembler::{Processor, Strategies, assemble_graph};
 use super::execute::{execute_processor, resize_graph_to_minimum};
 use super::{PipelineResult, check_external_port_sides, validate_node_size_minima};
 use crate::configurator::{check_random_seeds, configure_graph_properties};
@@ -61,26 +61,17 @@ pub(crate) fn execute_ported_processors(graphs: &mut GraphArena) -> PipelineResu
     Ok(executed)
 }
 
-/// The processor list of the root graph. It selects the strategies first, so a processor that is
+/// The processor list of the root graph. It checks the strategies first, so a processor that is
 /// not ported refuses the run while the graph is still as the caller gave it, and builds the list
-/// after the configurator has run.
+/// after the configurator has run, from the graph as it stands then.
 fn prepare_single_graph_processors(graphs: &mut GraphArena) -> PipelineResult<Vec<Processor>> {
-    let strategies = {
-        let root = graphs.root();
-        Strategies::select(&root.options, &root.graph_properties)?
-    };
+    // The options decide whether a processor is ported, so this check needs no list yet.
+    Strategies::for_graph(graphs.root())?;
     // Processor execution below is root-local, but the source-backed GraphConfigurator walks every
     // nested graph to resolve options and random seeds.
     validate_node_size_minima(graphs)?;
     configure_graph_properties(graphs)?;
-    let root = graphs.root();
-    Ok(assemble(
-        strategies,
-        &root.options,
-        &root.graph_properties,
-        root.layerless_nodes.len(),
-        root.parent.is_none(),
-    ))
+    assemble_graph(graphs.root())
 }
 
 /// Run the assembled processors of the root graph up to and including the first one `is_last`

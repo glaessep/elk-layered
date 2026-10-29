@@ -3,7 +3,7 @@
 //! Source references:
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/ElkLayered.java
 
-use super::assembler::{IntermediateProcessor, Processor, Strategies, assemble};
+use super::assembler::{IntermediateProcessor, Processor, Strategies, assemble_graph};
 use super::execute::{execute_processor, resize_layered_node};
 use super::{
     PipelineError, PipelineResult, actual_graph_size, check_external_port_sides,
@@ -44,29 +44,17 @@ pub(super) struct CompoundRun {
 }
 
 impl CompoundRun {
-    /// `selected` holds the strategies of every graph, in discovery order, from
-    /// [`select_strategies`]. The preprocessor and the configurator have run since, so each list
-    /// is built from the graph as it is now. ELK finds the graphs again after them, so this does
-    /// too, and refuses a hierarchy whose graphs are not the ones that were selected.
-    pub(super) fn new(
-        graphs: &GraphArena,
-        selected: Vec<(GraphId, Strategies)>,
-    ) -> PipelineResult<Self> {
-        let found = graphs.discovery_order(GraphId::ROOT);
-        if found.len() != selected.len()
-            || found
-                .iter()
-                .zip(&selected)
-                .any(|(id, (chosen, _))| id != chosen)
-        {
-            return Err(PipelineError::UnsupportedCompoundGraph {
-                reason: "the graphs of the hierarchy changed between the choice of the strategies and the run",
-            });
-        }
-        let algorithms = selected
+    /// Builds the list of every graph, as the preprocessor and the configurator left it. ELK
+    /// finds the graphs again after them, so this does too. A processor that is not ported
+    /// still refuses here, whatever the preprocessor changed.
+    pub(super) fn new(graphs: &GraphArena) -> PipelineResult<Self> {
+        // ELK finds the graphs with `ArrayDeque.push`: the last sibling is searched first, and
+        // the collected list is later executed in reverse discovery order.
+        let algorithms = graphs
+            .discovery_order(GraphId::ROOT)
             .into_iter()
-            .map(|(graph, strategies)| graph_algorithm(&graphs[graph], strategies))
-            .collect();
+            .map(|graph| graph_algorithm(&graphs[graph]))
+            .collect::<PipelineResult<_>>()?;
         Ok(Self { algorithms })
     }
 
@@ -82,43 +70,29 @@ impl CompoundRun {
     }
 }
 
-/// The strategies of every graph of the hierarchy, in discovery order.
+/// Refuses a hierarchy with a graph that needs a processor that is not ported, before anything
+/// changes.
 ///
-/// ELK finds the graphs with `ArrayDeque.push`: the last sibling is searched first, and the
-/// collected list is later executed in reverse discovery order. The first refusal is the one of
-/// the graph that runs first, so the graphs are selected in that reverse order.
-pub(super) fn select_strategies(graphs: &GraphArena) -> PipelineResult<Vec<(GraphId, Strategies)>> {
-    let mut selected = graphs
-        .discovery_order(GraphId::ROOT)
-        .into_iter()
-        .rev()
-        .map(|id| {
-            let graph = &graphs[id];
-            Strategies::select(&graph.options, &graph.graph_properties)
-                .map(|strategies| (id, strategies))
-        })
-        .collect::<PipelineResult<Vec<_>>>()?;
-    selected.reverse();
-    Ok(selected)
+/// The first refusal is the one of the graph that runs first: ELK executes the graphs in the
+/// reverse of discovery order, so they are checked in that order.
+pub(super) fn check_strategies(graphs: &GraphArena) -> PipelineResult<()> {
+    for id in graphs.discovery_order(GraphId::ROOT).into_iter().rev() {
+        Strategies::for_graph(&graphs[id])?;
+    }
+    Ok(())
 }
 
-fn graph_algorithm(graph: &LGraph, strategies: Strategies) -> GraphAlgorithm {
-    GraphAlgorithm {
+fn graph_algorithm(graph: &LGraph) -> PipelineResult<GraphAlgorithm> {
+    Ok(GraphAlgorithm {
         next_processor: 0,
-        processors: assemble(
-            strategies,
-            &graph.options,
-            &graph.graph_properties,
-            graph.layerless_nodes.len(),
-            graph.parent.is_none(),
-        ),
+        processors: assemble_graph(graph)?,
         execution: GraphExecution {
             graph: graph.id,
             graph_name: graph.name.clone(),
             parent: graph.parent,
             processors: Vec::new(),
         },
-    }
+    })
 }
 
 /// Execute the source-backed layered pipeline for a compound graph hierarchy.
@@ -132,9 +106,9 @@ fn graph_algorithm(graph: &LGraph, strategies: Strategies) -> GraphAlgorithm {
 pub fn execute_ported_compound_processors(
     graphs: &mut GraphArena,
 ) -> PipelineResult<Vec<GraphExecution>> {
-    // Every graph names its strategies first, so a processor that is not ported refuses the run
-    // before anything changes. The lists are built later, from the configured graphs.
-    let selected = select_strategies(graphs)?;
+    // A processor that is not ported refuses the run before anything changes. The lists are
+    // built later, from the graphs as the preprocessor and the configurator leave them.
+    check_strategies(graphs)?;
     validate_node_size_minima(graphs)?;
     // Check every seed before the preprocessor and the configurator change the caller's graph.
     check_random_seeds(graphs)?;
@@ -143,7 +117,7 @@ pub fn execute_ported_compound_processors(
     configure_graph_properties(graphs)?;
     review_and_correct_hierarchical_processors(graphs)?;
 
-    let mut run = CompoundRun::new(graphs, selected)?;
+    let mut run = CompoundRun::new(graphs)?;
     const ROOT_ALGORITHM: usize = 0;
 
     while run.algorithms[ROOT_ALGORITHM].next_processor
@@ -187,10 +161,10 @@ fn execute_compound_algorithm_until_pause(
             let (graph, others) = graphs.split_mut(algorithm.execution.graph);
             execute_processor(graph, others, processor)?;
         }
-        let size = actual_graph_size(&graphs[algorithm.execution.graph]);
         if processor == Processor::Intermediate(IntermediateProcessor::HierarchicalNodeResizer)
             && let Some(parent) = algorithm.execution.parent
         {
+            let size = actual_graph_size(&graphs[algorithm.execution.graph]);
             let (nested, parent_graph) = graphs.pair_mut(algorithm.execution.graph, parent.graph);
             transfer_nested_graph_layout_to_parent_node(nested, parent_graph, parent.node, size);
         }
@@ -204,6 +178,7 @@ fn execute_compound_algorithm_until_pause(
     Ok(())
 }
 
+/// Ports `ElkLayered.reviewAndCorrectHierarchicalProcessors`.
 fn review_and_correct_hierarchical_processors(graphs: &mut GraphArena) -> PipelineResult<()> {
     let root_crossing = graphs.root().options.crossing_minimization_strategy;
     let root_greedy_switch = graphs.root().options.greedy_switch_hierarchical_type;

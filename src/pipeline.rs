@@ -30,26 +30,42 @@ pub(crate) use flat::execute_ported_processors;
 #[cfg(test)]
 pub(crate) use flat::{run_processors_until, run_processors_until_phase};
 
+/// Why a layered run stopped.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PipelineError {
+    /// The split into components or their combination failed.
     #[error(transparent)]
     Component(#[from] crate::components::ComponentError),
+    /// A minimum node size is not a finite number.
     #[error(transparent)]
     NodeSize(#[from] crate::options::NodeSizeError),
+    /// A network simplex run failed.
     #[error(transparent)]
     NetworkSimplex(#[from] crate::common::networksimplex::NetworkSimplexError),
+    /// A graph has the random seed 0.
     #[error(transparent)]
     RandomSeed(#[from] RandomSeedError),
+    /// An option asks for a processor of ELK that this crate has not ported.
     #[error("layered processor `{kind:?}` is not ported yet")]
-    UnsupportedProcessor { kind: UnportedProcessor },
+    UnsupportedProcessor {
+        /// The processor that is missing.
+        kind: UnportedProcessor,
+    },
+    /// A hierarchy with a feature that the compound run does not support yet.
     #[error("source-backed compound ELK layout does not support this graph yet: {reason}")]
-    UnsupportedCompoundGraph { reason: &'static str },
+    UnsupportedCompoundGraph {
+        /// What the graph has that is not supported.
+        reason: &'static str,
+    },
+    /// An intermediate processor failed.
     #[error(transparent)]
     Intermediate(#[from] IntermediateError),
+    /// A layerer failed.
     #[error(transparent)]
     Layering(#[from] LayeringError),
 }
 
+/// The result of a step of a layered run.
 pub type PipelineResult<T> = Result<T, PipelineError>;
 
 /// Refuses a graph with an external port dummy that ELK cannot place, or that elk-layered

@@ -1,8 +1,8 @@
 use super::assembler::{
     CrossingMinimizer, CycleBreaker, EdgeRouter, IntermediateProcessor, Layerer, NodePlacer,
-    Strategies, assemble,
+    Strategies, assemble, assemble_graph,
 };
-use super::compound::{CompoundRun, execute_compound_graph_round, select_strategies};
+use super::compound::{CompoundRun, check_strategies, execute_compound_graph_round};
 use super::execute::{
     execute_processor, resize_graph_no_really_i_mean_it, resize_graph_to_minimum,
     resize_layered_node,
@@ -22,7 +22,7 @@ use crate::options::{
 };
 
 fn compound_run(graphs: &GraphArena) -> CompoundRun {
-    CompoundRun::new(graphs, select_strategies(graphs).unwrap()).unwrap()
+    CompoundRun::new(graphs).unwrap()
 }
 
 fn try_kinds(options: &LayeredOptions) -> PipelineResult<Vec<Processor>> {
@@ -36,14 +36,7 @@ fn kinds(options: &LayeredOptions) -> Vec<Processor> {
 }
 
 fn try_graph_kinds(graph: &LGraph) -> PipelineResult<Vec<Processor>> {
-    let strategies = Strategies::select(&graph.options, &graph.graph_properties)?;
-    Ok(assemble(
-        strategies,
-        &graph.options,
-        &graph.graph_properties,
-        graph.layerless_nodes.len(),
-        graph.parent.is_none(),
-    ))
+    assemble_graph(graph)
 }
 
 fn graph_kinds(graph: &LGraph) -> Vec<Processor> {
@@ -273,8 +266,7 @@ fn compound_round_reports_a_failing_child_processor_and_keeps_the_hierarchy() {
         width: f64::NAN,
         height: 1.0,
     });
-    let selected = select_strategies(&graphs).unwrap();
-    let mut run = CompoundRun::new(&graphs, selected).unwrap();
+    let mut run = compound_run(&graphs);
     let child_index = run
         .algorithms
         .iter()
@@ -365,7 +357,7 @@ fn full_runner_rejects_unported_strategies_before_mutating_graph() {
     }
 }
 
-// Mutation: select the strategies of the root only in `select_strategies`. The child's processor
+// Mutation: check the strategies of the root only in `check_strategies`. The child's processor
 // is then found after the configurator has changed the graph.
 #[test]
 fn compound_full_runner_rejects_child_unported_processor_before_mutation() {
@@ -455,7 +447,7 @@ fn full_runner_reports_first_unported_processor_in_pipeline_order() {
     );
 }
 
-// Mutation: select the strategies of the root only in `select_strategies`. The processor of the
+// Mutation: check the strategies of the root only in `check_strategies`. The processor of the
 // deepest graph is then never found.
 #[test]
 fn compound_ported_processor_preflight_is_small_stack_safe() {
@@ -472,7 +464,7 @@ fn compound_ported_processor_preflight_is_small_stack_safe() {
 
             let graph = std::mem::ManuallyDrop::new(graph);
             assert_eq!(
-                select_strategies(&graph).map(|_| ()),
+                check_strategies(&graph),
                 Err(PipelineError::UnsupportedProcessor {
                     kind: UnportedProcessor::BreadthFirstModelOrderLayerer,
                 })
@@ -2511,30 +2503,24 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
     );
 }
 
-// Mutation: leave out the comparison with the graphs found again in `CompoundRun::new`. A graph
-// that joined the hierarchy after the selection then gets no list and does not run.
+// Mutation: replace `assemble_graph(graph)?` in `graph_algorithm` by
+// `assemble_graph(graph).unwrap_or_default()`. A refusal that only shows after the preprocessor
+// then gives an empty list instead of an error.
 #[test]
-fn a_hierarchy_that_changed_since_the_selection_is_refused() {
+fn a_refusal_that_shows_after_the_preprocessor_still_stops_the_run() {
     let mut graphs = deep_compound_chain(2);
-    let selected = select_strategies(&graphs).unwrap();
-    let holder = graphs.root_mut().layerless_nodes.len();
-    graphs
-        .root_mut()
-        .layerless_nodes
-        .push(LNode::new("late", 1.0, 1.0, None));
-    graphs.nest(
-        GraphId::ROOT,
-        NodeId::new(holder),
-        LGraph::new("late-child", LayeredOptions::default()),
-    );
+    check_strategies(&graphs).unwrap();
+    graphs.root_mut().graph_properties.hypernodes = true;
 
-    assert!(matches!(
-        CompoundRun::new(&graphs, selected),
-        Err(PipelineError::UnsupportedCompoundGraph { .. })
-    ));
+    assert_eq!(
+        CompoundRun::new(&graphs).map(|_| ()),
+        Err(PipelineError::UnsupportedProcessor {
+            kind: UnportedProcessor::HypernodesProcessor,
+        })
+    );
 }
 
-// Mutation: in `select_strategies`, drop the `.rev()`, so the root is selected first. The root's
+// Mutation: in `check_strategies`, drop the `.rev()`, so the root is selected first. The root's
 // refusal then hides the one of the graph that runs first.
 #[test]
 fn the_graph_that_runs_first_names_the_first_refusal() {
@@ -2544,7 +2530,7 @@ fn the_graph_that_runs_first_names_the_first_refusal() {
     graphs[leaf].options.layering_strategy = LayeringStrategy::BreadthFirstModelOrder;
 
     assert_eq!(
-        select_strategies(&graphs).map(|_| ()),
+        check_strategies(&graphs),
         Err(PipelineError::UnsupportedProcessor {
             kind: UnportedProcessor::BreadthFirstModelOrderLayerer,
         })

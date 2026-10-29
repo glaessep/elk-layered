@@ -154,6 +154,7 @@ fn resize_hierarchical_node_graph(graph: &mut LGraph) -> PipelineResult<()> {
     resize_graph_to_minimum(graph)
 }
 
+/// Ports `ElkLayered.resizeGraph`.
 pub(super) fn resize_graph_to_minimum(graph: &mut LGraph) -> PipelineResult<()> {
     graph.options.validate_node_size_minimum()?;
     let old_size = actual_graph_size(graph);
@@ -166,6 +167,7 @@ pub(super) fn resize_graph_to_minimum(graph: &mut LGraph) -> PipelineResult<()> 
     Ok(())
 }
 
+/// Ports `ElkLayered.resizeGraphNoReallyIMeanIt`.
 pub(super) fn resize_graph_no_really_i_mean_it(
     graph: &mut LGraph,
     old_size: LSize,

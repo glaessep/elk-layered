@@ -18,7 +18,7 @@
 use std::collections::BTreeSet;
 
 use super::{PipelineError, PipelineResult};
-use crate::graph::GraphProperties;
+use crate::graph::{GraphProperties, LGraph};
 use crate::options::{
     CrossingMinimizationStrategy, CycleBreakingStrategy, EdgeRouting, ElkDirection,
     GreedySwitchType, HierarchyHandling, LayeredOptions, LayeringStrategy, NodePlacementStrategy,
@@ -328,6 +328,11 @@ impl Strategies {
         })
     }
 
+    /// [`Strategies::select`] for a graph as its options and graph properties stand now.
+    pub(crate) fn for_graph(graph: &LGraph) -> PipelineResult<Self> {
+        Self::select(&graph.options, &graph.graph_properties)
+    }
+
     fn phase_processors(self) -> [Processor; 5] {
         [
             Processor::CycleBreaker(self.cycle_breaker),
@@ -384,6 +389,19 @@ impl Config {
         );
         out
     }
+}
+
+/// The processors of one graph as it stands now, in the order they run. The preprocessor and the
+/// configurator change the node count and the graph properties, so a run calls this after them.
+pub(crate) fn assemble_graph(graph: &LGraph) -> PipelineResult<Vec<Processor>> {
+    let strategies = Strategies::for_graph(graph)?;
+    Ok(assemble(
+        strategies,
+        &graph.options,
+        &graph.graph_properties,
+        graph.layerless_nodes.len(),
+        graph.parent.is_none(),
+    ))
 }
 
 /// The processors of one graph, in the order they run.
@@ -482,6 +500,7 @@ fn graph_configurator_configuration(
     config
 }
 
+/// Ports `GraphConfigurator.activateGreedySwitchFor` and the choice of the switch that follows it.
 /// The greedy switch a graph gets, if any. A hierarchical layout switches once, at the root, with
 /// the hierarchical type. Any other graph switches with its own type, unless interactive
 /// crossing minimization is on or the graph has as many nodes as the activation threshold.
