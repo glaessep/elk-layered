@@ -385,7 +385,7 @@ fn place_in_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{LNode, NodeId};
+    use crate::graph::{IdVec, LNode, NodeId};
     use crate::options::LayeredOptions;
 
     /// A component of one node at (0, 0) whose graph has this size and joins these sides.
@@ -397,8 +397,8 @@ mod tests {
             .push(LNode::new("n", width, height, None));
         Component {
             graph,
-            original_nodes: vec![NodeId::new(0)],
-            original_edges: Vec::new(),
+            original_nodes: IdVec::from(vec![NodeId::new(0)]),
+            original_edges: IdVec::new(),
             priority: 0,
             ext_port_sides: sides,
         }

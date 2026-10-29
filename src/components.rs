@@ -29,8 +29,10 @@ pub enum ComponentError {
 
 pub(crate) struct Component {
     pub(crate) graph: LGraph,
-    original_nodes: Vec<NodeId>,
-    original_edges: Vec<EdgeId>,
+    /// For each node of the component graph, the id it has in the whole graph.
+    original_nodes: IdVec<NodeId, NodeId>,
+    /// For each edge of the component graph, the id it has in the whole graph.
+    original_edges: IdVec<EdgeId, EdgeId>,
     priority: i32,
     /// The sides of the external ports the component joins (ELK's `EXT_PORT_CONNECTIONS`), as
     /// `group::side_bit` makes them.
@@ -126,6 +128,7 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
     let mut components = groups
         .into_iter()
         .map(|original_nodes| {
+            let original_nodes = IdVec::<NodeId, NodeId>::from(original_nodes);
             let mut component = graph.component_shell();
             component.layerless_nodes = original_nodes
                 .iter()
@@ -146,7 +149,7 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
             Component {
                 graph: component,
                 original_nodes,
-                original_edges: Vec::new(),
+                original_edges: IdVec::new(),
                 priority,
                 ext_port_sides,
             }
@@ -192,11 +195,11 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
     let mut node_map = IdVec::filled(node_count, None);
     let mut edge_map = IdVec::filled(graph.edges.len(), None);
     for component in &mut components {
-        for (local, &original) in component.original_nodes.iter().enumerate() {
-            node_map[original] = Some(NodeId::new(local));
+        for (local, &original) in component.original_nodes.iter_with_ids() {
+            node_map[original] = Some(local);
         }
-        for (local, &original) in component.original_edges.iter().enumerate() {
-            edge_map[original] = Some(EdgeId::new(local));
+        for (local, &original) in component.original_edges.iter_with_ids() {
+            edge_map[original] = Some(local);
         }
         remap_references(&mut component.graph, &node_map, &edge_map)?;
         remap_nested_references(graphs, &component.graph, &node_map, &edge_map)?;
@@ -558,11 +561,11 @@ pub(crate) fn combine(
     let mut self_loops = Vec::new();
     let mut cyclic = false;
     for mut component in components {
-        let mut node_map = IdVec::<NodeId, _>::from(component.original_nodes);
+        let mut node_map = component.original_nodes;
         let added_nodes = component.graph.layerless_nodes.len() - node_map.len();
         node_map.extend((next_node..next_node + added_nodes).map(NodeId::new));
         next_node += added_nodes;
-        let mut edge_map = IdVec::<EdgeId, _>::from(component.original_edges);
+        let mut edge_map = component.original_edges;
         let added_edges = component.graph.edges.len() - edge_map.len();
         edge_map.extend((next_edge..next_edge + added_edges).map(EdgeId::new));
         next_edge += added_edges;
