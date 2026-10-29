@@ -16,8 +16,9 @@ use crate::options::{ElkDirection, PortConstraints};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingCompoundSegment {
-    /// The graph the segment lands in, or `None` for the graph of the scope being introduced.
-    pub(crate) graph_parent: Option<GraphId>,
+    /// The graph the segment lands in, by its `GraphId`, or `None` for the graph of the scope
+    /// being introduced. A segment with a parent boundary lands in the graph inside that parent.
+    pub(crate) lands_in: Option<GraphId>,
     pub(crate) source: PendingSegmentEndpoint,
     pub(crate) target: PendingSegmentEndpoint,
     pub(crate) segment: CompoundEdgeSegment,
@@ -76,7 +77,7 @@ pub(crate) fn source_ported_cross_hierarchy_segments(
         };
         let connects_parent_node = target == source_path[depth - 1].node_id;
         segments.push(PendingCompoundSegment {
-            graph_parent: Some(source_path[depth - 1].graph),
+            lands_in: Some(source_path[depth - 1].graph),
             source: PendingSegmentEndpoint::LocalNode {
                 node_id: segment_source,
                 port_key: source_port_key.to_string(),
@@ -121,7 +122,7 @@ pub(crate) fn source_ported_cross_hierarchy_segments(
             }
         };
         segments.push(PendingCompoundSegment {
-            graph_parent: common_depth
+            lands_in: common_depth
                 .checked_sub(1)
                 .map(|parent_depth| source_path[parent_depth].graph),
             source: PendingSegmentEndpoint::LocalNode {
@@ -144,7 +145,7 @@ pub(crate) fn source_ported_cross_hierarchy_segments(
         };
         let connects_parent_node = source == target_path[depth - 1].node_id;
         segments.push(PendingCompoundSegment {
-            graph_parent: Some(target_path[depth - 1].graph),
+            lands_in: Some(target_path[depth - 1].graph),
             source: PendingSegmentEndpoint::ParentBoundary {
                 node_id: target_path[depth - 1].node_id.to_string(),
                 port_key: if connects_parent_node {
@@ -650,7 +651,7 @@ fn order_segments_by_publication(
                 && !port_order.contains_key(&(node_id.as_str(), port_type, port_key.as_str()))
             {
                 port_buckets[order].push((
-                    scoped.pending.graph_parent,
+                    scoped.pending.lands_in,
                     LocalPortPublication {
                         node_id: node_id.clone(),
                         port_key: port_key.clone(),
@@ -748,7 +749,7 @@ struct ParentPorts<'a> {
 }
 
 /// Introduces the segments in `scope` and the graphs below it. A segment names the graph it lands
-/// in by the id of that graph's parent node, or by `None` for `scope` itself.
+/// in by that graph's `GraphId`, or by `None` for `scope` itself.
 pub(crate) fn introduce_source_ported_scoped_edge_segments(
     graphs: &mut GraphArena,
     scope: GraphId,
@@ -770,11 +771,11 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
         let has_parent_boundary = [&scoped.pending.source, &scoped.pending.target]
             .into_iter()
             .any(|endpoint| matches!(endpoint, PendingSegmentEndpoint::ParentBoundary { .. }));
-        if let (true, Some(lands_in)) = (has_parent_boundary, scoped.pending.graph_parent) {
+        if let (true, Some(lands_in)) = (has_parent_boundary, scoped.pending.lands_in) {
             original_parent_offsets.entry(lands_in).or_default();
         }
         segments_by_parent
-            .entry(scoped.pending.graph_parent)
+            .entry(scoped.pending.lands_in)
             .or_default()
             .push(scoped);
     }
@@ -2702,7 +2703,7 @@ mod tests {
                         | CompoundEdgeSegment::Output { depth } => depth,
                     };
                     scoped.pending.segment = CompoundEdgeSegment::Output { depth };
-                    if source_is_boundary && scoped.pending.graph_parent.is_none() {
+                    if source_is_boundary && scoped.pending.lands_in.is_none() {
                         scoped.pending.source = PendingSegmentEndpoint::ParentBoundary {
                             node_id: "Outside".to_string(),
                             port_key: "Outside:shared".to_string(),
@@ -3205,7 +3206,7 @@ mod tests {
         let segment = ScopedHierarchySegment {
             edge,
             pending: PendingCompoundSegment {
-                graph_parent: Some(lands[1]),
+                lands_in: Some(lands[1]),
                 source: PendingSegmentEndpoint::LocalNode {
                     node_id: "a".to_string(),
                     port_key: "a:out".to_string(),
@@ -3278,7 +3279,7 @@ mod tests {
                     priority_straightness: 0,
                 },
                 pending: PendingCompoundSegment {
-                    graph_parent: Some(lands_in),
+                    lands_in: Some(lands_in),
                     source: PendingSegmentEndpoint::LocalNode {
                         node_id: "child".to_string(),
                         port_key: "child:out".to_string(),

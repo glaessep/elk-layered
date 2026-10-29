@@ -547,7 +547,7 @@ fn materialize_scoped_edge_segments(
         );
         if local.is_empty() {
             local.push(PendingCompoundSegment {
-                graph_parent: None,
+                lands_in: None,
                 source: PendingSegmentEndpoint::LocalNode {
                     node_id: source_placeholder.to_string(),
                     port_key: source_port_key.clone(),
