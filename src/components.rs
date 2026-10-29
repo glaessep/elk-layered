@@ -354,9 +354,7 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
         }
         map_labels(&mut edge.labels, edges)?;
     }
-    for layer in graph.layers_mut() {
-        layer.map_nodes(|node| map_id(nodes, node, "layer node"))?;
-    }
+    graph.map_layer_nodes(|node| map_id(nodes, node, "layer node"))?;
     map_list(&mut graph.hidden_nodes, nodes, "hidden node")?;
     map_list(
         &mut graph.replaced_external_port_dummies,

@@ -179,8 +179,8 @@ mod tests {
         graph.layerless_nodes.push(target_node);
         graph.set_node_layer(source, 0);
         graph.set_node_layer(target, 1);
-        graph.layers_mut()[0].size.width = 40.0;
-        graph.layers_mut()[1].size.width = 40.0;
+        graph.layer_size_mut(0).width = 40.0;
+        graph.layer_size_mut(1).width = 40.0;
 
         let source_port = graph
             .add_port(
@@ -230,8 +230,8 @@ mod tests {
             .push(LNode::new("narrow", 20.0, 20.0, Some(1)));
         graph.set_node_layer(wide, 0);
         graph.set_node_layer(narrow, 1);
-        graph.layers_mut()[0].size.width = 80.0;
-        graph.layers_mut()[1].size.width = 80.0;
+        graph.layer_size_mut(0).width = 80.0;
+        graph.layer_size_mut(1).width = 80.0;
 
         route_edges_orthogonal(&mut graph);
 

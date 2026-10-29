@@ -1096,7 +1096,7 @@ pub fn merge_hyperedge_dummies(graph: &mut LGraph) {
                         state.same_source,
                         state.same_target,
                     );
-                    graph.remove_node_from_layer(current);
+                    graph.remove_node_at(layer_index, node_position);
                     continue;
                 }
             }
@@ -2451,7 +2451,7 @@ pub fn remove_label_dummies(graph: &mut LGraph) {
                 let add_unnecessary_bendpoints =
                     graph.options.edge_routing == crate::options::EdgeRouting::Polyline;
                 join_long_edge_at(graph, node, add_unnecessary_bendpoints);
-                graph.remove_node_from_layer(node);
+                graph.remove_node_at(layer_index, node_position);
             } else {
                 node_position += 1;
             }
@@ -3054,8 +3054,8 @@ pub fn calculate_layer_sizes_and_graph_height(graph: &mut LGraph) {
         min_y = min_y.min(top);
         max_y = max_y.max(bottom);
     }
-    for (layer, size) in graph.layers_mut().iter_mut().zip(sizes) {
-        layer.size = size;
+    for (layer_index, size) in sizes.into_iter().enumerate() {
+        *graph.layer_size_mut(layer_index) = size;
     }
 
     if !found_nodes {

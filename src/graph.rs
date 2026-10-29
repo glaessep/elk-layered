@@ -221,18 +221,6 @@ impl Layer {
         }
     }
 
-    /// Renames every node id in place, keeping the order. Used when graphs merge and their node
-    /// ids change; `LNode::layer_index` does not move.
-    pub(crate) fn map_nodes<E>(
-        &mut self,
-        mut map: impl FnMut(NodeId) -> Result<NodeId, E>,
-    ) -> Result<(), E> {
-        for node in &mut self.nodes {
-            *node = map(*node)?;
-        }
-        Ok(())
-    }
-
     /// The layer's nodes, top to bottom.
     pub fn nodes(&self) -> &[NodeId] {
         &self.nodes
@@ -1355,9 +1343,24 @@ impl LGraph {
         &self.layers
     }
 
-    /// The layers, for a phase that sets a layer's size. It cannot reach a layer's node list.
-    pub(crate) fn layers_mut(&mut self) -> &mut [Layer] {
-        &mut self.layers
+    /// The size of layer `layer_index` for change. The size is plain data, and this is the only
+    /// way to a layer for change that cannot touch its node list.
+    pub(crate) fn layer_size_mut(&mut self, layer_index: usize) -> &mut LSize {
+        &mut self.layers[layer_index].size
+    }
+
+    /// Renames every node id in the layers in place, keeping the order. Used when graphs merge
+    /// and their node ids change; no node's `layer_index` moves.
+    pub(crate) fn map_layer_nodes<E>(
+        &mut self,
+        mut map: impl FnMut(NodeId) -> Result<NodeId, E>,
+    ) -> Result<(), E> {
+        for layer in &mut self.layers {
+            for node in &mut layer.nodes {
+                *node = map(*node)?;
+            }
+        }
+        Ok(())
     }
 
     /// Adds an empty layer at the right end and returns its index.
@@ -1478,6 +1481,19 @@ impl LGraph {
         if let Some(layer) = self.layers.get_mut(layer_index) {
             remove_node(&mut layer.nodes, node_index);
         }
+    }
+
+    /// Takes the node at `position` out of layer `layer_index` and makes it layerless. Unlike
+    /// [`Self::remove_node_from_layer`] it works by place, so a loop over a layer always makes
+    /// progress. Returns `None` if the layer has no node there.
+    pub fn remove_node_at(&mut self, layer_index: usize, position: usize) -> Option<NodeId> {
+        let layer = self.layers.get_mut(layer_index)?;
+        if position >= layer.nodes.len() {
+            return None;
+        }
+        let node = layer.nodes.remove(position);
+        self.layerless_nodes[node].layer_index = None;
+        Some(node)
     }
 
     pub fn compact_empty_layers(&mut self) {
@@ -2290,6 +2306,50 @@ mod tests {
 
         assert!(graph.layers[0].nodes().is_empty());
         assert_eq!(graph.layers[1].nodes(), [all[1], all[2], all[0]]);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `remove_node_at`, keep `layer_index` set.
+    #[test]
+    fn remove_node_at_takes_out_the_node_at_the_position() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        graph.set_layer_nodes(0, all.clone());
+
+        assert_eq!(graph.remove_node_at(0, 1), Some(all[1]));
+
+        assert_eq!(graph.layers()[0].nodes(), [all[0], all[2]]);
+        assert_eq!(graph.layerless_nodes[all[1]].layer_index(), None);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `remove_node_at`, index the layer's list without checking the position. The
+    // call then panics.
+    #[test]
+    fn remove_node_at_returns_none_past_the_end_or_for_a_missing_layer() {
+        let mut graph = graph_with_nodes(1);
+        let all = ids(&graph, &[0]);
+        graph.set_layer_nodes(0, all);
+        let before = graph.clone();
+
+        assert_eq!(graph.remove_node_at(0, 1), None);
+        assert_eq!(graph.remove_node_at(5, 0), None);
+
+        assert_eq!(graph, before);
+    }
+
+    // Mutation: in `layer_size_mut`, answer with the size of layer 0 for every layer.
+    #[test]
+    fn layer_size_mut_changes_the_size_of_that_layer_only() {
+        let mut graph = graph_with_nodes(2);
+        let all = ids(&graph, &[0, 1]);
+        graph.set_layer_nodes(0, vec![all[0]]);
+        graph.set_layer_nodes(1, vec![all[1]]);
+
+        graph.layer_size_mut(1).width = 7.0;
+
+        assert_eq!(graph.layers()[0].size.width, 0.0);
+        assert_eq!(graph.layers()[1].size.width, 7.0);
         assert_layers_agree_with_nodes(&graph);
     }
 

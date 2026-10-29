@@ -15,8 +15,10 @@ pub fn place_nodes_simple(graph: &mut LGraph) {
 
     for layer_index in 0..graph.layers().len() {
         let layer_height = layer_height(graph, layer_index);
-        graph.layers_mut()[layer_index].size.height = layer_height;
-        graph.layers_mut()[layer_index].size.width = layer_width(graph, layer_index);
+        let layer_width = layer_width(graph, layer_index);
+        let size = graph.layer_size_mut(layer_index);
+        size.height = layer_height;
+        size.width = layer_width;
         max_layer_height = max_layer_height.max(layer_height);
     }
 
