@@ -780,6 +780,7 @@ mod tests {
         assert_eq!(graph.edges[edge].origin, Some(EdgeId::new(3)));
     }
 
+    // Mutation: `normalize` shifts the layers by the highest layer instead of the lowest.
     #[test]
     fn network_simplex_assigns_layers_to_dag() {
         let mut graph = NGraph::new();
@@ -800,6 +801,7 @@ mod tests {
         assert!(graph.nodes[c].layer > graph.nodes[b].layer);
     }
 
+    // Mutation: `normalize` shifts the layers by the highest layer instead of the lowest.
     #[test]
     fn network_simplex_balances_equal_degree_node() {
         let mut graph = NGraph::new();
@@ -820,6 +822,7 @@ mod tests {
         assert!(graph.nodes[c].layer > graph.nodes[a].layer);
     }
 
+    // Mutation: `reattach_subtrees` does not call `add_active_node` for the node it puts back.
     #[test]
     fn network_simplex_reattaches_removed_subtrees() {
         let mut graph = NGraph::new();
