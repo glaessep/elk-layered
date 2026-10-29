@@ -17,8 +17,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::graph::{NodeId, NodeSlice, 
-    GraphArena, GraphId, LGraph, LNode, LNodeKind, OtherGraphs, PortId, PortRef, PortSide, PortType,
+use crate::graph::{
+    GraphArena, GraphId, LGraph, LNode, LNodeKind, NodeId, NodeSlice, OtherGraphs, PortId, PortRef,
+    PortSide, PortType,
 };
 use crate::options::{OrderingStrategy, PortConstraints};
 use crate::p3order::counting::{
@@ -4566,7 +4567,12 @@ mod tests {
             .layerless_nodes
             .push(LNode::new("parent", 10.0, 10.0, None));
         let origin = parent_graph
-            .add_port(NodeId::new(0), PortType::Output, PortSide::East, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Output,
+                PortSide::East,
+                Default::default(),
+            )
             .unwrap();
 
         let mut child_graph = LGraph::new("child", LayeredOptions::default());
@@ -4623,26 +4629,34 @@ mod tests {
                 edge("Bottom-Left", "Bottom", "Left"),
             ],
         );
-        let top = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Top")
-            .unwrap());
-        let bottom = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Bottom")
-            .unwrap());
-        let left = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Left")
-            .unwrap());
-        let right = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Right")
-            .unwrap());
+        let top = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Top")
+                .unwrap(),
+        );
+        let bottom = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Bottom")
+                .unwrap(),
+        );
+        let left = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Left")
+                .unwrap(),
+        );
+        let right = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Right")
+                .unwrap(),
+        );
         graph.layers[0].nodes = vec![top, bottom];
         graph.layers[1].nodes = vec![left, right];
         initialize_crossing_minimization_port_ids(&mut graph);
@@ -4671,26 +4685,34 @@ mod tests {
             ],
         );
         graph.options.force_node_model_order = true;
-        let top = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Top")
-            .unwrap());
-        let bottom = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Bottom")
-            .unwrap());
-        let left = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Left")
-            .unwrap());
-        let right = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Right")
-            .unwrap());
+        let top = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Top")
+                .unwrap(),
+        );
+        let bottom = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Bottom")
+                .unwrap(),
+        );
+        let left = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Left")
+                .unwrap(),
+        );
+        let right = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Right")
+                .unwrap(),
+        );
         graph.layers[0].nodes = vec![top, bottom];
         graph.layers[1].nodes = vec![left, right];
         initialize_crossing_minimization_port_ids(&mut graph);
@@ -4751,21 +4773,27 @@ mod tests {
                 edge("Bottom-Free", "Bottom", "Free"),
             ],
         );
-        let top = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Top")
-            .unwrap());
-        let bottom = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Bottom")
-            .unwrap());
-        let free = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Free")
-            .unwrap());
+        let top = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Top")
+                .unwrap(),
+        );
+        let bottom = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Bottom")
+                .unwrap(),
+        );
+        let free = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Free")
+                .unwrap(),
+        );
         graph.layers[0].nodes = vec![top, bottom];
         graph.layers[1].nodes = vec![free];
         for port in graph.layerless_nodes[top].ports.slots_mut() {
@@ -4804,16 +4832,20 @@ mod tests {
             vec![node("A"), node("B"), node("C")],
             vec![edge("A-B", "A", "B"), edge("B-C", "B", "C")],
         );
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
-        let b = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "B")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
+        let b = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "B")
+                .unwrap(),
+        );
         graph.layers[0].nodes = vec![a];
         graph.layers[1].nodes = vec![b];
         initialize_crossing_minimization_port_ids(&mut graph);
@@ -4855,26 +4887,34 @@ mod tests {
                 edge("Bottom-Left", "Bottom", "Left"),
             ],
         );
-        let top = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Top")
-            .unwrap());
-        let bottom = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Bottom")
-            .unwrap());
-        let left = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Left")
-            .unwrap());
-        let right = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Right")
-            .unwrap());
+        let top = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Top")
+                .unwrap(),
+        );
+        let bottom = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Bottom")
+                .unwrap(),
+        );
+        let left = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Left")
+                .unwrap(),
+        );
+        let right = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Right")
+                .unwrap(),
+        );
         graph.layers[0].nodes = vec![top, bottom];
         graph.layers[1].nodes = vec![left, right];
 
@@ -4893,19 +4933,39 @@ mod tests {
             .layerless_nodes
             .push(crate::graph::LNode::new("parent", 80.0, 40.0, None));
         let west_a = graph
-            .add_port(NodeId::new(0), PortType::Input, PortSide::West, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Input,
+                PortSide::West,
+                Default::default(),
+            )
             .unwrap()
             .port;
         let east_a = graph
-            .add_port(NodeId::new(0), PortType::Output, PortSide::East, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Output,
+                PortSide::East,
+                Default::default(),
+            )
             .unwrap()
             .port;
         let west_b = graph
-            .add_port(NodeId::new(0), PortType::Input, PortSide::West, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Input,
+                PortSide::West,
+                Default::default(),
+            )
             .unwrap()
             .port;
         let east_b = graph
-            .add_port(NodeId::new(0), PortType::Output, PortSide::East, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Output,
+                PortSide::East,
+                Default::default(),
+            )
             .unwrap()
             .port;
         graph.layerless_nodes[0].ports[west_a].id = "west_a".to_string();
@@ -4916,7 +4976,12 @@ mod tests {
             port.inside_connections = true;
         }
 
-        apply_parent_hierarchical_port_order_on_sweep_side(&mut graph, NodeId::new(0), true, &[east_b, east_a]);
+        apply_parent_hierarchical_port_order_on_sweep_side(
+            &mut graph,
+            NodeId::new(0),
+            true,
+            &[east_b, east_a],
+        );
 
         let port_ids = graph.layerless_nodes[0]
             .ports
@@ -4948,19 +5013,39 @@ mod tests {
             .layerless_nodes
             .push(crate::graph::LNode::new("parent", 80.0, 40.0, None));
         let _west_a = graph
-            .add_port(NodeId::new(0), PortType::Input, PortSide::West, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Input,
+                PortSide::West,
+                Default::default(),
+            )
             .unwrap()
             .port;
         let east_a = graph
-            .add_port(NodeId::new(0), PortType::Output, PortSide::East, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Output,
+                PortSide::East,
+                Default::default(),
+            )
             .unwrap()
             .port;
         let _west_b = graph
-            .add_port(NodeId::new(0), PortType::Input, PortSide::West, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Input,
+                PortSide::West,
+                Default::default(),
+            )
             .unwrap()
             .port;
         let east_b = graph
-            .add_port(NodeId::new(0), PortType::Output, PortSide::East, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Output,
+                PortSide::East,
+                Default::default(),
+            )
             .unwrap()
             .port;
         for port in graph.layerless_nodes[0].ports.slots_mut() {
@@ -4970,7 +5055,12 @@ mod tests {
             .layerless_nodes
             .push(crate::graph::LNode::new("target", 10.0, 10.0, None));
         let target_port = graph
-            .add_port(NodeId::new(1), PortType::Input, PortSide::West, Default::default())
+            .add_port(
+                NodeId::new(1),
+                PortType::Input,
+                PortSide::West,
+                Default::default(),
+            )
             .unwrap()
             .port;
 
@@ -5029,7 +5119,12 @@ mod tests {
             })
             .unwrap();
 
-        apply_parent_hierarchical_port_order_on_sweep_side(&mut graph, NodeId::new(0), true, &[east_b, east_a]);
+        apply_parent_hierarchical_port_order_on_sweep_side(
+            &mut graph,
+            NodeId::new(0),
+            true,
+            &[east_b, east_a],
+        );
 
         // The ports moved in the list. The edges still start at the ports they started at.
         assert_eq!(graph.edges[edge_a].source.port, east_a);
@@ -5082,16 +5177,36 @@ mod tests {
         graph.layers[0].nodes = vec![NodeId::new(1), NodeId::new(2), NodeId::new(3)];
 
         let north_input = graph
-            .add_port(NodeId::new(0), PortType::Input, PortSide::North, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Input,
+                PortSide::North,
+                Default::default(),
+            )
             .unwrap();
         let south_input = graph
-            .add_port(NodeId::new(0), PortType::Input, PortSide::South, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Input,
+                PortSide::South,
+                Default::default(),
+            )
             .unwrap();
         let north_output = graph
-            .add_port(NodeId::new(0), PortType::Output, PortSide::North, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Output,
+                PortSide::North,
+                Default::default(),
+            )
             .unwrap();
         let south_both = graph
-            .add_port(NodeId::new(0), PortType::Output, PortSide::South, Default::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Output,
+                PortSide::South,
+                Default::default(),
+            )
             .unwrap();
         for (port, dummy) in [
             (north_input, NodeId::new(1)),
@@ -5107,16 +5222,36 @@ mod tests {
         }
 
         let in_dummy_port = graph
-            .add_port(NodeId::new(1), PortType::Input, PortSide::South, Default::default())
+            .add_port(
+                NodeId::new(1),
+                PortType::Input,
+                PortSide::South,
+                Default::default(),
+            )
             .unwrap();
         let out_dummy_port = graph
-            .add_port(NodeId::new(2), PortType::Output, PortSide::South, Default::default())
+            .add_port(
+                NodeId::new(2),
+                PortType::Output,
+                PortSide::South,
+                Default::default(),
+            )
             .unwrap();
         let both_in_dummy_port = graph
-            .add_port(NodeId::new(3), PortType::Input, PortSide::South, Default::default())
+            .add_port(
+                NodeId::new(3),
+                PortType::Input,
+                PortSide::South,
+                Default::default(),
+            )
             .unwrap();
         let both_out_dummy_port = graph
-            .add_port(NodeId::new(3), PortType::Output, PortSide::South, Default::default())
+            .add_port(
+                NodeId::new(3),
+                PortType::Output,
+                PortSide::South,
+                Default::default(),
+            )
             .unwrap();
 
         graph
@@ -5212,27 +5347,61 @@ mod tests {
             .map(|(position, node)| (node, position))
             .collect::<HashMap<_, _>>();
         assert_eq!(
-            north_south_port_barycenter_sum(&graph, &node_positions, north_input, NodeId::new(1), 7.0),
+            north_south_port_barycenter_sum(
+                &graph,
+                &node_positions,
+                north_input,
+                NodeId::new(1),
+                7.0
+            ),
             Some(-0.0)
         );
         assert_eq!(
-            north_south_port_barycenter_sum(&graph, &node_positions, south_input, NodeId::new(1), 7.0),
+            north_south_port_barycenter_sum(
+                &graph,
+                &node_positions,
+                south_input,
+                NodeId::new(1),
+                7.0
+            ),
             Some(7.0)
         );
         assert_eq!(
-            north_south_port_barycenter_sum(&graph, &node_positions, north_output, NodeId::new(2), 7.0),
+            north_south_port_barycenter_sum(
+                &graph,
+                &node_positions,
+                north_output,
+                NodeId::new(2),
+                7.0
+            ),
             Some(2.0)
         );
         assert_eq!(
-            north_south_port_barycenter_sum(&graph, &node_positions, south_both, NodeId::new(3), 7.0),
+            north_south_port_barycenter_sum(
+                &graph,
+                &node_positions,
+                south_both,
+                NodeId::new(3),
+                7.0
+            ),
             Some(3.5)
         );
 
-        let current_node_positions = [(NodeId::new(3), 0usize), (NodeId::new(2), 1), (NodeId::new(1), 2)]
-            .into_iter()
-            .collect::<HashMap<_, _>>();
+        let current_node_positions = [
+            (NodeId::new(3), 0usize),
+            (NodeId::new(2), 1),
+            (NodeId::new(1), 2),
+        ]
+        .into_iter()
+        .collect::<HashMap<_, _>>();
         assert_eq!(
-            north_south_port_barycenter_sum(&graph, &current_node_positions, south_input, NodeId::new(1), 7.0),
+            north_south_port_barycenter_sum(
+                &graph,
+                &current_node_positions,
+                south_input,
+                NodeId::new(1),
+                7.0
+            ),
             Some(5.0)
         );
     }
@@ -5258,36 +5427,48 @@ mod tests {
             ],
         );
 
-        let top = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Top")
-            .unwrap());
-        let bottom = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Bottom")
-            .unwrap());
-        let left = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Left")
-            .unwrap());
-        let right = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Right")
-            .unwrap());
-        let free = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Free")
-            .unwrap());
-        let fixed = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Fixed")
-            .unwrap());
+        let top = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Top")
+                .unwrap(),
+        );
+        let bottom = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Bottom")
+                .unwrap(),
+        );
+        let left = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Left")
+                .unwrap(),
+        );
+        let right = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Right")
+                .unwrap(),
+        );
+        let free = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Free")
+                .unwrap(),
+        );
+        let fixed = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Fixed")
+                .unwrap(),
+        );
 
         graph.layers[0].nodes = vec![top, bottom, fixed];
         graph.layers[1].nodes = vec![free, right, left];
@@ -5447,21 +5628,27 @@ mod tests {
             vec![node("A"), node("B"), node("C")],
             vec![edge("A-C", "A", "C"), edge("B-C", "B", "C")],
         );
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
-        let b = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "B")
-            .unwrap());
-        let c = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "C")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
+        let b = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "B")
+                .unwrap(),
+        );
+        let c = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "C")
+                .unwrap(),
+        );
         graph.layers[0].nodes = vec![c];
         graph.layers[1].nodes = vec![b, a];
         graph.layerless_nodes[a]
@@ -5531,36 +5718,48 @@ mod tests {
                 edge("MiddleBottom-RightTop", "MiddleBottom", "RightTop"),
             ],
         );
-        let left_top = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "LeftTop")
-            .unwrap());
-        let left_bottom = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "LeftBottom")
-            .unwrap());
-        let middle_top = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "MiddleTop")
-            .unwrap());
-        let middle_bottom = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "MiddleBottom")
-            .unwrap());
-        let right_top = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "RightTop")
-            .unwrap());
-        let right_bottom = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "RightBottom")
-            .unwrap());
+        let left_top = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "LeftTop")
+                .unwrap(),
+        );
+        let left_bottom = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "LeftBottom")
+                .unwrap(),
+        );
+        let middle_top = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "MiddleTop")
+                .unwrap(),
+        );
+        let middle_bottom = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "MiddleBottom")
+                .unwrap(),
+        );
+        let right_top = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "RightTop")
+                .unwrap(),
+        );
+        let right_bottom = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "RightBottom")
+                .unwrap(),
+        );
         graph.layers[0].nodes = vec![left_top, left_bottom];
         graph.layers[1].nodes = vec![middle_top, middle_bottom];
         graph.layers[2].nodes = vec![right_top, right_bottom];
@@ -5602,26 +5801,34 @@ mod tests {
                 edge("Bottom-Left", "Bottom", "Left"),
             ],
         );
-        let top = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Top")
-            .unwrap());
-        let bottom = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Bottom")
-            .unwrap());
-        let left = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Left")
-            .unwrap());
-        let right = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Right")
-            .unwrap());
+        let top = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Top")
+                .unwrap(),
+        );
+        let bottom = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Bottom")
+                .unwrap(),
+        );
+        let left = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Left")
+                .unwrap(),
+        );
+        let right = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Right")
+                .unwrap(),
+        );
         graph.layers[0].nodes = vec![top, bottom];
         graph.layers[1].nodes = vec![left, right];
         let layer_nodes = graph

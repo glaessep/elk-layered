@@ -5,7 +5,7 @@
 
 use super::vertical_spacing;
 use crate::common::networksimplex::{NGraph, NetworkSimplex, NetworkSimplexError, coordinate};
-use crate::graph::{LGraph, LNodeKind, NodeId, NodeSlice, PortRef, PortSide};
+use crate::graph::{LGraph, LNodeKind, NodeId, PortRef, PortSide};
 use crate::options::{NodeFlexibility, NodeLabelLocation};
 
 #[derive(Clone, Copy)]
@@ -354,9 +354,10 @@ fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[Nod
             } else {
                 (edge.source, edge.target.node)
             };
-            let (Some(port_rep), Some(dummy_rep)) =
-                (aux.ports[port.node.index()][port.port.index()], aux.nodes[dummy.index()])
-            else {
+            let (Some(port_rep), Some(dummy_rep)) = (
+                aux.ports[port.node.index()][port.port.index()],
+                aux.nodes[dummy.index()],
+            ) else {
                 continue;
             };
             let (source, target) = if position[port.node.index()] < position[dummy.index()] {

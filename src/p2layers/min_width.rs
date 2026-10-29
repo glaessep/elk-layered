@@ -2,7 +2,7 @@
 //! https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/MinWidthLayerer.java
 
 use super::{LayeringError, LayeringInput, LayeringResult};
-use crate::graph::{LNodeKind, NodeId, NodeSlice};
+use crate::graph::{LNodeKind, NodeId};
 use std::cmp::Reverse;
 
 pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>>> {
@@ -126,7 +126,8 @@ fn attempt(
         if node.is_none()
             || remaining.is_empty()
             || node.is_some_and(|node| {
-                width_current >= width_bound && sizes[node.index()] > outgoing[node.index()] as f64 * dummy_size
+                width_current >= width_bound
+                    && sizes[node.index()] > outgoing[node.index()] as f64 * dummy_size
             })
             || width_up >= compensator * width_bound
         {

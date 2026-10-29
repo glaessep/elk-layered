@@ -10,8 +10,9 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::{NodeId, NodeSlice, 
-    GraphArena, GraphId, LGraph, LNodeKind, OtherGraphs, PortId, PortRef, PortSide,
+use crate::graph::{
+    GraphArena, GraphId, LGraph, LNodeKind, NodeId, NodeSlice, OtherGraphs, PortId, PortRef,
+    PortSide,
 };
 use crate::options::{OrderingStrategy, PortConstraints, PortSortingStrategy};
 
@@ -1416,7 +1417,12 @@ mod tests {
                 .push(LNode::new("parent", 0.0, 0.0, None));
             for _ in 0..length {
                 graph
-                    .add_port(NodeId::new(0), PortType::Input, PortSide::West, LPoint::default())
+                    .add_port(
+                        NodeId::new(0),
+                        PortType::Input,
+                        PortSide::West,
+                        LPoint::default(),
+                    )
                     .unwrap();
             }
             let target_orders = HashMap::new();
@@ -1499,16 +1505,20 @@ mod tests {
 
         process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
 
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
-        let b = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "B")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
+        let b = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "B")
+                .unwrap(),
+        );
         assert_eq!(
             graph.layerless_nodes[a].port_constraints,
             PortConstraints::FixedSide
@@ -1563,11 +1573,13 @@ mod tests {
     #[test]
     fn port_list_sorter_uses_clockwise_order_and_rewrites_edge_refs() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("A-B", "A", "B")]);
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
         graph.layerless_nodes[a].port_constraints = PortConstraints::FixedPos;
         let north = graph
             .add_port(
@@ -1648,7 +1660,8 @@ mod tests {
             for (index, side) in sides.iter().copied().enumerate() {
                 let outgoing = index % 2 == 0;
                 let local = graph
-                    .add_port(NodeId::new(0),
+                    .add_port(
+                        NodeId::new(0),
                         if outgoing {
                             PortType::Output
                         } else {
@@ -1659,7 +1672,8 @@ mod tests {
                     )
                     .unwrap();
                 let remote = graph
-                    .add_port(NodeId::new(1),
+                    .add_port(
+                        NodeId::new(1),
                         if outgoing {
                             PortType::Input
                         } else {
@@ -1746,7 +1760,12 @@ mod tests {
         .enumerate()
         {
             let port = graph
-                .add_port(NodeId::new(0), PortType::Input, side, LPoint { x: 0.0, y: 0.0 })
+                .add_port(
+                    NodeId::new(0),
+                    PortType::Input,
+                    side,
+                    LPoint { x: 0.0, y: 0.0 },
+                )
                 .unwrap();
             graph.layerless_nodes[0].ports[port.port].id = index.to_string();
         }
@@ -1770,11 +1789,13 @@ mod tests {
     #[test]
     fn fixed_order_ports_fall_back_to_position_without_both_indices() {
         let mut graph = graph(vec![node("A")], vec![]);
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
         graph.layerless_nodes[a].port_constraints = PortConstraints::FixedOrder;
         let left = graph
             .add_port(
@@ -1822,16 +1843,20 @@ mod tests {
         process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
         sort_port_lists(&mut graph);
 
-        let left = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Left")
-            .unwrap());
-        let right = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "Right")
-            .unwrap());
+        let left = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Left")
+                .unwrap(),
+        );
+        let right = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "Right")
+                .unwrap(),
+        );
         let target_layer = graph.layerless_nodes[left].layer_index.unwrap();
         graph.layers[target_layer].nodes = vec![right, left];
 
@@ -1856,16 +1881,36 @@ mod tests {
         graph.set_node_layer(NodeId::new(2), 1);
 
         let first_source = graph
-            .add_port(NodeId::new(0), PortType::Output, PortSide::East, LPoint::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Output,
+                PortSide::East,
+                LPoint::default(),
+            )
             .unwrap();
         let last_source = graph
-            .add_port(NodeId::new(1), PortType::Output, PortSide::East, LPoint::default())
+            .add_port(
+                NodeId::new(1),
+                PortType::Output,
+                PortSide::East,
+                LPoint::default(),
+            )
             .unwrap();
         let first_target = graph
-            .add_port(NodeId::new(2), PortType::Input, PortSide::West, LPoint::default())
+            .add_port(
+                NodeId::new(2),
+                PortType::Input,
+                PortSide::West,
+                LPoint::default(),
+            )
             .unwrap();
         let last_target = graph
-            .add_port(NodeId::new(2), PortType::Input, PortSide::West, LPoint::default())
+            .add_port(
+                NodeId::new(2),
+                PortType::Input,
+                PortSide::West,
+                LPoint::default(),
+            )
             .unwrap();
         graph
             .add_edge(layered_edge("first", first_source, first_target))
@@ -1901,16 +1946,36 @@ mod tests {
         graph.set_node_layer(NodeId::new(1), 1);
         graph.set_node_layer(NodeId::new(2), 1);
         let first = graph
-            .add_port(NodeId::new(0), PortType::Output, PortSide::East, LPoint::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Output,
+                PortSide::East,
+                LPoint::default(),
+            )
             .unwrap();
         let second = graph
-            .add_port(NodeId::new(0), PortType::Output, PortSide::East, LPoint::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Output,
+                PortSide::East,
+                LPoint::default(),
+            )
             .unwrap();
         let first_target = graph
-            .add_port(NodeId::new(1), PortType::Input, PortSide::West, LPoint::default())
+            .add_port(
+                NodeId::new(1),
+                PortType::Input,
+                PortSide::West,
+                LPoint::default(),
+            )
             .unwrap();
         let second_target = graph
-            .add_port(NodeId::new(2), PortType::Input, PortSide::West, LPoint::default())
+            .add_port(
+                NodeId::new(2),
+                PortType::Input,
+                PortSide::West,
+                LPoint::default(),
+            )
             .unwrap();
         graph
             .add_edge(crate::graph::LayeredEdge {
@@ -1990,16 +2055,20 @@ mod tests {
         layer_network_simplex(&mut graph).unwrap();
         split_long_edges(&mut graph);
 
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
-        let d = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "D")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
+        let d = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "D")
+                .unwrap(),
+        );
         let orders = long_edge_target_node_preprocessing(&mut graph, a);
 
         assert_eq!(orders.get(&d), Some(&3));
@@ -2026,22 +2095,52 @@ mod tests {
         graph.layerless_nodes[2].kind = LNodeKind::LongEdge;
 
         let source = graph
-            .add_port(NodeId::new(0), PortType::Output, PortSide::East, LPoint::default())
+            .add_port(
+                NodeId::new(0),
+                PortType::Output,
+                PortSide::East,
+                LPoint::default(),
+            )
             .unwrap();
         let first_input = graph
-            .add_port(NodeId::new(1), PortType::Input, PortSide::West, LPoint::default())
+            .add_port(
+                NodeId::new(1),
+                PortType::Input,
+                PortSide::West,
+                LPoint::default(),
+            )
             .unwrap();
         let first_output = graph
-            .add_port(NodeId::new(1), PortType::Output, PortSide::East, LPoint::default())
+            .add_port(
+                NodeId::new(1),
+                PortType::Output,
+                PortSide::East,
+                LPoint::default(),
+            )
             .unwrap();
         let cycle_input = graph
-            .add_port(NodeId::new(1), PortType::Input, PortSide::West, LPoint::default())
+            .add_port(
+                NodeId::new(1),
+                PortType::Input,
+                PortSide::West,
+                LPoint::default(),
+            )
             .unwrap();
         let second_input = graph
-            .add_port(NodeId::new(2), PortType::Input, PortSide::West, LPoint::default())
+            .add_port(
+                NodeId::new(2),
+                PortType::Input,
+                PortSide::West,
+                LPoint::default(),
+            )
             .unwrap();
         let second_output = graph
-            .add_port(NodeId::new(2), PortType::Output, PortSide::East, LPoint::default())
+            .add_port(
+                NodeId::new(2),
+                PortType::Output,
+                PortSide::East,
+                LPoint::default(),
+            )
             .unwrap();
 
         graph
@@ -2064,11 +2163,13 @@ mod tests {
     #[test]
     fn sweep_copy_restores_the_port_order_by_port_id_when_id_strings_repeat() {
         let mut graph = graph(vec![node("A")], vec![]);
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
         graph.layerless_nodes[a].ports.clear();
         let first = graph
             .add_port(

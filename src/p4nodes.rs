@@ -219,16 +219,20 @@ mod tests {
     #[test]
     fn label_and_node_size_processor_delegates_common_node_spacing() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("A-B", "A", "B")]);
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
-        let b = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "B")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
+        let b = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "B")
+                .unwrap(),
+        );
         graph.set_node_layer(a, 0);
         graph.set_node_layer(b, 1);
         graph.layerless_nodes[a].ports[PortId::new(0)].set_side(PortSide::East);

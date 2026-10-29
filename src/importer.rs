@@ -13,11 +13,11 @@ use crate::compound::{
     compound_label_segment_index, introduce_source_ported_scoped_edge_segments, port_at,
     source_ported_cross_hierarchy_segments,
 };
-use crate::graph::{NodeId, NodeSlice, 
+use crate::graph::{
     CompoundEdgeSegment, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge, HierarchyStep,
-    LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, PortId, PortRef, PortSide,
-    PortType, apply_port_index_to_dummy, create_external_port_dummy, is_across_flow,
-    port_side_from_direction,
+    LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, NodeSlice, PortId,
+    PortRef, PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
+    is_across_flow, port_side_from_direction,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
@@ -1111,8 +1111,12 @@ fn ensure_inside_self_loop_dummy(
     parent_port_key: &str,
     port_index: &mut ImportPortIndex,
 ) -> PortRef {
-    if let Some(port) = port_index.get(Some(parent_node_id), PARENT_BOUNDARY, parent_port_key, port_type)
-    {
+    if let Some(port) = port_index.get(
+        Some(parent_node_id),
+        PARENT_BOUNDARY,
+        parent_port_key,
+        port_type,
+    ) {
         return port;
     }
     graph.graph_properties.external_ports = true;
@@ -1883,9 +1887,12 @@ fn ensure_hierarchy_endpoint_port(
     port_index: &mut ImportPortIndex,
 ) -> Option<PortRef> {
     if graph.options.merge_edges
-        && graph.layerless_nodes.get_node(node).is_some_and(|candidate| {
-            candidate.id == node_id && !candidate.port_constraints.is_side_fixed()
-        })
+        && graph
+            .layerless_nodes
+            .get_node(node)
+            .is_some_and(|candidate| {
+                candidate.id == node_id && !candidate.port_constraints.is_side_fixed()
+            })
     {
         return ensure_port_at_node(graph, graph_parent, node, node_id, port_type, port_index);
     }
@@ -3140,11 +3147,13 @@ mod tests {
             nested.parent,
             Some(crate::graph::GraphParent {
                 graph: GraphId::ROOT,
-                node: NodeId::new(lgraph
-                    .layerless_nodes
-                    .iter()
-                    .position(|n| n.id == "cluster")
-                    .unwrap()),
+                node: NodeId::new(
+                    lgraph
+                        .layerless_nodes
+                        .iter()
+                        .position(|n| n.id == "cluster")
+                        .unwrap()
+                ),
             })
         );
         assert_eq!(nested.layerless_nodes[0].id, "A");
@@ -3238,11 +3247,13 @@ mod tests {
         .unwrap();
         preprocess_source_ported_compound_graph(&mut lgraph);
 
-        let cluster_index = NodeId::new(lgraph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "cluster")
-            .unwrap());
+        let cluster_index = NodeId::new(
+            lgraph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "cluster")
+                .unwrap(),
+        );
         let cluster = &lgraph.layerless_nodes[cluster_index];
         let parent_port = &cluster.ports[PortId::new(0)];
         let port_dummy = parent_port
@@ -3330,11 +3341,13 @@ mod tests {
         .unwrap();
         preprocess_source_ported_compound_graph(&mut lgraph);
 
-        let cluster_index = NodeId::new(lgraph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "cluster")
-            .unwrap());
+        let cluster_index = NodeId::new(
+            lgraph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "cluster")
+                .unwrap(),
+        );
         let cluster = &lgraph.layerless_nodes[cluster_index];
         let parent_port = cluster
             .ports
@@ -3578,11 +3591,13 @@ mod tests {
 
         let lgraph = import_graph(&input).unwrap();
 
-        let a = NodeId::new(lgraph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
+        let a = NodeId::new(
+            lgraph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
         assert_eq!(lgraph.layerless_nodes[a].ports.len(), 1);
         assert_eq!(
             lgraph.layerless_nodes[a].ports[PortId::new(0)].collector_type,
@@ -3604,11 +3619,13 @@ mod tests {
         ))
         .unwrap();
 
-        let a = NodeId::new(lgraph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
+        let a = NodeId::new(
+            lgraph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
         assert_eq!(lgraph.layerless_nodes[a].ports.len(), 2);
         assert!(
             lgraph.layerless_nodes[a]
@@ -3627,8 +3644,18 @@ mod tests {
         lgraph
             .layerless_nodes
             .push(LNode::new("A", 10.0, 10.0, None));
-        let first = lgraph.add_port(NodeId::new(0), PortType::Output, PortSide::East, Default::default());
-        lgraph.add_port(NodeId::new(0), PortType::Output, PortSide::East, Default::default());
+        let first = lgraph.add_port(
+            NodeId::new(0),
+            PortType::Output,
+            PortSide::East,
+            Default::default(),
+        );
+        lgraph.add_port(
+            NodeId::new(0),
+            PortType::Output,
+            PortSide::East,
+            Default::default(),
+        );
         lgraph.layerless_nodes[0]
             .ports
             .unlist(&[first.unwrap().port]);
@@ -3700,11 +3727,13 @@ mod tests {
 
         let lgraph = import_graph(&input).unwrap();
 
-        let a = NodeId::new(lgraph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
+        let a = NodeId::new(
+            lgraph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
         assert_eq!(lgraph.layerless_nodes[a].ports.len(), 2);
         assert!(
             lgraph.layerless_nodes[a]

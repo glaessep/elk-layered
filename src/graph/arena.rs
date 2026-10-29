@@ -355,7 +355,10 @@ mod tests {
 
         assert_ne!(first, second);
         assert_eq!(graphs[first].name, graphs[second].name);
-        let ref_to = |graph_id| GraphNodeRef { graph_id, node: NodeId::new(0) };
+        let ref_to = |graph_id| GraphNodeRef {
+            graph_id,
+            node: NodeId::new(0),
+        };
         assert_ne!(ref_to(first), ref_to(second));
     }
 
@@ -477,7 +480,8 @@ mod tests {
         }
         let port = graphs
             .root_mut()
-            .add_port(NodeId::new(1),
+            .add_port(
+                NodeId::new(1),
                 crate::graph::PortType::Output,
                 PortSide::Undefined,
                 Default::default(),

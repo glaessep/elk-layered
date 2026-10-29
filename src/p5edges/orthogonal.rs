@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
-use crate::graph::{NodeId, NodeSlice, LGraph, LPoint, PortRef, PortSide};
+use crate::graph::{LGraph, LPoint, NodeId, NodeSlice, PortRef, PortSide};
 use crate::random::JavaRandom;
 
 pub const TOLERANCE: f64 = 1e-3;

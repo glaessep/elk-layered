@@ -15,8 +15,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::compound::compare_compound_segments;
 use crate::error::Error;
-use crate::graph::{NodeId, NodeSlice, 
-    GraphArena, GraphId, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize, PortRef, PortSide,
+use crate::graph::{
+    GraphArena, GraphId, LGraph, LLabel, LNode, LNodeKind, LPoint, LSize, NodeId, NodeSlice,
+    PortRef, PortSide,
 };
 
 /// `OrthogonalRoutingGenerator.TOLERANCE`.

@@ -22,10 +22,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::common::cells::grow_label_cell;
-use crate::graph::{NodeId, NodeSlice, 
+use crate::graph::{
     EdgeLabelPlacement, GraphId, HorizontalLabelAlignment, LGraph, LLabel, LNode, LNodeKind,
-    LPoint, LSize, LabelCellLayout, LabelSide, LayeredEdge, PortId, PortRef, PortSide, PortType,
-    VerticalLabelAlignment, reverse_edge,
+    LPoint, LSize, LabelCellLayout, LabelSide, LayeredEdge, NodeId, NodeSlice, PortId, PortRef,
+    PortSide, PortType, VerticalLabelAlignment, reverse_edge,
 };
 use crate::options::{
     Alignment, EdgeLabelSideSelection, ElkDirection, LayerConstraint, PortConstraints,
@@ -927,7 +927,8 @@ fn ensure_no_outgoing_except_label_dummies(graph: &LGraph, node: NodeId) -> Inte
 // order inside a layer before crossing minimisation. Walking the edge list by index gives another
 // order whenever a node has an edge on a declared port and one on the node itself.
 pub fn insert_label_dummies(graph: &mut LGraph) {
-    let edge_indices = graph.node_ids()
+    let edge_indices = graph
+        .node_ids()
         .flat_map(|node| graph.node_outgoing_edges(node))
         .filter(|&index| {
             let edge = &graph.edges[index];
@@ -962,7 +963,12 @@ pub fn insert_label_dummies(graph: &mut LGraph) {
 
 fn create_label_dummy_node(graph: &mut LGraph, edge_index: usize, thickness: f64) -> NodeId {
     let dummy_index = graph.next_node_id();
-    let mut dummy = LNode::new(format!("label:{edge_index}:{}", dummy_index.index()), 0.0, 0.0, None);
+    let mut dummy = LNode::new(
+        format!("label:{edge_index}:{}", dummy_index.index()),
+        0.0,
+        0.0,
+        None,
+    );
     dummy.kind = LNodeKind::Label;
     dummy.origin_edge = Some(edge_index);
     dummy.port_constraints = PortConstraints::FixedPos;
@@ -3228,7 +3234,11 @@ fn restore_north_south_dummy(graph: &mut LGraph, dummy: NodeId) {
     port.port_type = PortType::Output;
 }
 
-fn connect_replacement_dummy_to_original(graph: &mut LGraph, replacement: NodeId, original: NodeId) {
+fn connect_replacement_dummy_to_original(
+    graph: &mut LGraph,
+    replacement: NodeId,
+    original: NodeId,
+) {
     // Java: `original.getPorts().get(0)`, the first port of the list, which a reorder may have
     // moved away from the first port added. Java throws on an empty list. An external port dummy
     // always lists its port, so an empty list is a bug here, never caller input.
@@ -4188,11 +4198,13 @@ mod tests {
         let mut first = node("start");
         first.layer_constraint = Some(LayerConstraint::First);
         let mut graph = graph(vec![node("A"), first], vec![edge("A-start", "A", "start")]);
-        let start = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "start")
-            .unwrap());
+        let start = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "start")
+                .unwrap(),
+        );
 
         reverse_edges_for_edge_and_layer_constraints(&mut graph);
 
@@ -4207,11 +4219,13 @@ mod tests {
         let mut last = node("end");
         last.layer_constraint = Some(LayerConstraint::Last);
         let mut graph = graph(vec![last, node("A")], vec![edge("end-A", "end", "A")]);
-        let end = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "end")
-            .unwrap());
+        let end = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "end")
+                .unwrap(),
+        );
 
         reverse_edges_for_edge_and_layer_constraints(&mut graph);
 
@@ -4228,11 +4242,13 @@ mod tests {
             vec![edge("B-A", "B", "A"), edge("C-B", "C", "B")],
         );
         for node_id in ["A", "B"] {
-            let node_index = NodeId::new(graph
-                .layerless_nodes
-                .iter()
-                .position(|node| node.id == node_id)
-                .unwrap());
+            let node_index = NodeId::new(
+                graph
+                    .layerless_nodes
+                    .iter()
+                    .position(|node| node.id == node_id)
+                    .unwrap(),
+            );
             graph.layerless_nodes[node_index].port_constraints = PortConstraints::FixedSide;
             for port in graph.layerless_nodes[node_index].ports.slots_mut() {
                 port.set_side(PortSide::East);
@@ -4271,11 +4287,13 @@ mod tests {
             edges,
         })
         .unwrap();
-        let fixed = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "F")
-            .unwrap());
+        let fixed = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "F")
+                .unwrap(),
+        );
         graph.layerless_nodes[fixed].port_constraints = PortConstraints::FixedSide;
         for port in graph.layerless_nodes[fixed].ports.slots_mut() {
             port.set_side(PortSide::East);
@@ -4403,11 +4421,13 @@ mod tests {
 
         split_long_edges(&mut graph);
 
-        let dummy = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.kind == LNodeKind::LongEdge)
-            .unwrap());
+        let dummy = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.kind == LNodeKind::LongEdge)
+                .unwrap(),
+        );
         assert_eq!(graph.layerless_nodes[dummy].origin_edge, Some(long_edge));
         assert_eq!(
             graph.layerless_nodes[dummy].long_edge_source,
@@ -4449,11 +4469,13 @@ mod tests {
 
         process_inverted_ports(&mut graph);
 
-        let dummy = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.kind == LNodeKind::LongEdge)
-            .expect("inverted input should create a long-edge dummy"));
+        let dummy = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.kind == LNodeKind::LongEdge)
+                .expect("inverted input should create a long-edge dummy"),
+        );
         assert_eq!(graph.layerless_nodes[dummy].layer_index, Some(1));
         assert_eq!(graph.edges[edge].target.node, dummy);
         assert_eq!(graph.edges[edge].target.port, PortId::new(0));
@@ -4495,11 +4517,13 @@ mod tests {
 
         process_inverted_ports(&mut graph);
 
-        let dummy = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.kind == LNodeKind::LongEdge)
-            .expect("inverted output should create a long-edge dummy"));
+        let dummy = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.kind == LNodeKind::LongEdge)
+                .expect("inverted output should create a long-edge dummy"),
+        );
         assert_eq!(graph.layerless_nodes[dummy].layer_index, Some(0));
         assert_eq!(graph.edges[edge].source.node, source);
         assert_eq!(graph.edges[edge].target.node, dummy);
@@ -4541,11 +4565,13 @@ mod tests {
 
         insert_label_dummies(&mut graph);
 
-        let dummy = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.kind == LNodeKind::Label)
-            .unwrap());
+        let dummy = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.kind == LNodeKind::Label)
+                .unwrap(),
+        );
         assert_eq!(graph.layerless_nodes[dummy].origin_edge, Some(edge_index));
         assert_eq!(
             graph.layerless_nodes[dummy].long_edge_source,
@@ -4600,11 +4626,13 @@ mod tests {
 
         insert_label_dummies(&mut graph);
 
-        let dummy = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.kind == LNodeKind::Label)
-            .unwrap());
+        let dummy = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.kind == LNodeKind::Label)
+                .unwrap(),
+        );
         let edge_index = graph.layerless_nodes[dummy].origin_edge.unwrap();
         (graph, dummy, edge_index)
     }
@@ -4802,11 +4830,13 @@ mod tests {
         split_long_edges(&mut graph);
         switch_label_dummies(&mut graph);
         select_label_sides(&mut graph);
-        let dummy = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.kind == LNodeKind::Label)
-            .unwrap());
+        let dummy = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.kind == LNodeKind::Label)
+                .unwrap(),
+        );
         graph.layerless_nodes[dummy].position = LPoint { x: 20.0, y: 40.0 };
 
         remove_label_dummies(&mut graph);
@@ -4995,11 +5025,13 @@ mod tests {
         split_long_edges(&mut graph);
         switch_label_dummies(&mut graph);
         select_label_sides(&mut graph);
-        let dummy = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.kind == LNodeKind::Label)
-            .unwrap());
+        let dummy = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.kind == LNodeKind::Label)
+                .unwrap(),
+        );
         graph.layerless_nodes[dummy].position = LPoint { x: 20.0, y: 40.0 };
         graph.layerless_nodes[dummy].size.height = 14.0;
         graph.layerless_nodes[dummy]
@@ -5048,11 +5080,13 @@ mod tests {
             .unwrap();
         split_long_edges(&mut graph);
 
-        let dummy = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.kind == LNodeKind::LongEdge)
-            .unwrap());
+        let dummy = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.kind == LNodeKind::LongEdge)
+                .unwrap(),
+        );
         graph.layerless_nodes[dummy].position = LPoint { x: 50.0, y: 70.0 };
         graph.edges[long_edge]
             .bend_points
@@ -5250,16 +5284,20 @@ mod tests {
 
         preprocess_layer_constraints(&mut graph).unwrap();
 
-        let hidden = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "start")
-            .unwrap());
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
+        let hidden = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "start")
+                .unwrap(),
+        );
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
         assert!(graph.layerless_nodes[hidden].hidden);
         assert_eq!(graph.hidden_nodes, vec![hidden]);
         assert_eq!(
@@ -5281,11 +5319,13 @@ mod tests {
 
         preprocess_layer_constraints(&mut graph).unwrap();
 
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
         assert_eq!(
             graph.layerless_nodes[a].layer_constraint,
             LayerConstraint::First
@@ -5302,11 +5342,13 @@ mod tests {
 
         preprocess_layer_constraints(&mut graph).unwrap();
 
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
         assert!(graph.layerless_nodes[a].layer_constraint_explicit);
         assert_eq!(
             graph.layerless_nodes[a].layer_constraint,
@@ -5327,11 +5369,13 @@ mod tests {
 
         preprocess_layer_constraints(&mut graph).unwrap();
 
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
         assert_eq!(
             graph.layerless_nodes[a].layer_constraint,
             LayerConstraint::None
@@ -5356,16 +5400,20 @@ mod tests {
         layer_network_simplex(&mut graph).unwrap();
         postprocess_layer_constraints(&mut graph).unwrap();
 
-        let start = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "start")
-            .unwrap());
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
+        let start = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "start")
+                .unwrap(),
+        );
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
         assert!(!graph.layerless_nodes[start].hidden);
         assert!(graph.hidden_nodes.is_empty());
         assert_eq!(graph.layerless_nodes[start].layer_index, Some(0));
@@ -5395,11 +5443,13 @@ mod tests {
         layer_network_simplex(&mut graph).unwrap();
         postprocess_layer_constraints(&mut graph).unwrap();
 
-        let end = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "end")
-            .unwrap());
+        let end = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "end")
+                .unwrap(),
+        );
         assert_eq!(
             graph.layerless_nodes[end].layer_index,
             Some(graph.layers.len() - 1)

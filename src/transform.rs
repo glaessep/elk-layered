@@ -4,7 +4,7 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/GraphTransformer.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/options/DirectionCongruency.java
 
-use crate::graph::{NodeId, NodeSlice, 
+use crate::graph::{
     InLayerConstraint, LGraph, LLabel, LNode, LNodeKind, LPadding, LPoint, LPort, LSize, PortSide,
 };
 use crate::options::{Alignment, DirectionCongruency, ElkDirection, ElkPadding, LayerConstraint};
@@ -444,8 +444,8 @@ impl PaddingTransform for ElkPadding {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::PortId;
     use crate::graph::{EdgeLabelPlacement, LayeredEdge, PortType};
+    use crate::graph::{NodeId, PortId};
     use crate::options::{
         Alignment, ElkPadding, LayeredOptions, NodeLabelPlacement, PortConstraints,
     };

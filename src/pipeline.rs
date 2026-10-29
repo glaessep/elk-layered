@@ -17,8 +17,8 @@ use super::options::{
 };
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::configurator::{check_random_seeds, configure_graph_properties, configured_options};
-use crate::graph::{NodeId, NodeSlice, 
-    GraphArena, GraphId, GraphParent, LGraph, LNode, LNodeKind, LPoint, LSize, OtherGraphs,
+use crate::graph::{
+    GraphArena, GraphId, GraphParent, LGraph, LNode, LNodeKind, LPoint, LSize, NodeId, OtherGraphs,
     PortSide, is_across_flow,
 };
 use crate::intermediate::{

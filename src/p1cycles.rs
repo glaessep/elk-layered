@@ -10,7 +10,7 @@
 
 use std::collections::VecDeque;
 
-use crate::graph::{NodeId, NodeSlice, LGraph, PortRef, reverse_edge};
+use crate::graph::{LGraph, NodeId, PortRef, reverse_edge};
 use crate::options::LayerConstraint;
 
 pub fn break_cycles_depth_first(graph: &mut LGraph) {
@@ -19,7 +19,8 @@ pub fn break_cycles_depth_first(graph: &mut LGraph) {
     let mut active = vec![false; node_count];
     let mut edges_to_reverse = Vec::new();
 
-    let sources = graph.node_ids()
+    let sources = graph
+        .node_ids()
         .filter(|node| graph.node_incoming_edges(*node).is_empty())
         .collect::<Vec<_>>();
     for source in sources {
@@ -254,7 +255,9 @@ fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: GreedyNodeChoice)
                 .clone();
             for edge_index in outgoing_edges {
                 let target_index = graph.edges[edge_index].target.node;
-                if mark[node_index.index()] > mark[target_index.index()] && reverse_edge(graph, edge_index, true) {
+                if mark[node_index.index()] > mark[target_index.index()]
+                    && reverse_edge(graph, edge_index, true)
+                {
                     graph.cyclic = true;
                 }
             }
@@ -556,21 +559,27 @@ mod tests {
                 edge("C-A", "C", "A"),
             ],
         );
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
-        let b = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "B")
-            .unwrap());
-        let c = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "C")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
+        let b = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "B")
+                .unwrap(),
+        );
+        let c = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "C")
+                .unwrap(),
+        );
         graph.layerless_nodes[a].model_order = Some(3);
         graph.layerless_nodes[b].model_order = Some(1);
         graph.layerless_nodes[c].model_order = Some(2);
@@ -609,16 +618,20 @@ mod tests {
     #[test]
     fn interactive_cycle_breaker_reverses_edges_against_reference_x() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("B-A", "B", "A")]);
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
-        let b = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "B")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
+        let b = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "B")
+                .unwrap(),
+        );
         graph.layerless_nodes[a].position.x = 0.0;
         graph.layerless_nodes[b].position.x = 100.0;
 
@@ -631,16 +644,20 @@ mod tests {
     #[test]
     fn model_order_cycle_breaker_respects_first_layer_constraint() {
         let mut graph = graph(vec![node("A"), node("B")], vec![edge("B-A", "B", "A")]);
-        let a = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "A")
-            .unwrap());
-        let b = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "B")
-            .unwrap());
+        let a = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "A")
+                .unwrap(),
+        );
+        let b = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "B")
+                .unwrap(),
+        );
         graph.layerless_nodes[a].model_order = Some(1);
         graph.layerless_nodes[a].layer_constraint = crate::options::LayerConstraint::First;
         graph.layerless_nodes[b].model_order = Some(0);
@@ -723,7 +740,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         break_cycles_greedy(&mut graph);
-        let node_count = graph.layerless_nodes.len();
         let all_nodes = graph.node_ids().collect();
         graph.layers.push(Layer {
             nodes: all_nodes,

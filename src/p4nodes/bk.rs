@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::vertical_spacing;
-use crate::graph::{NodeId, NodeSlice, LGraph, LNodeKind, LayeredEdge, PortRef};
+use crate::graph::{LGraph, LNodeKind, LayeredEdge, NodeId, PortRef};
 use crate::options::{EdgeStraighteningStrategy, FixedAlignment};
 
 const MIN_LAYERS_FOR_CONFLICTS: usize = 3;

@@ -10,9 +10,9 @@
 use std::collections::VecDeque;
 
 use crate::common::cells::grow_label_cell;
-use crate::graph::{NodeId, NodeSlice, 
-    GraphId, LGraph, LMargin, LNodeKind, LPoint, LSize, NodePorts, OtherGraphs, PortId, PortRef,
-    PortSide, SelfHyperLoop, SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder,
+use crate::graph::{
+    GraphId, LGraph, LMargin, LNodeKind, LPoint, LSize, NodeId, NodePorts, NodeSlice, OtherGraphs,
+    PortId, PortRef, PortSide, SelfHyperLoop, SelfHyperLoopLabels, SelfLoopEdge, SelfLoopHolder,
     SelfLoopLabelAlignment, SelfLoopLabelRef, SelfLoopPort, SelfLoopType,
 };
 use crate::options::{SelfLoopDistributionStrategy, SelfLoopOrderingStrategy};
@@ -124,7 +124,12 @@ fn install_self_loop_holder(graph: &LGraph, node: NodeId) -> SelfLoopHolder {
     }
 }
 
-fn ensure_self_loop_port(graph: &LGraph, node: NodeId, port: PortId, ports: &mut Vec<SelfLoopPort>) {
+fn ensure_self_loop_port(
+    graph: &LGraph,
+    node: NodeId,
+    port: PortId,
+    ports: &mut Vec<SelfLoopPort>,
+) {
     if ports.iter().any(|candidate| candidate.port == port) {
         return;
     }

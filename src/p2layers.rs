@@ -7,7 +7,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::common::networksimplex::{NGraph, NetworkSimplex, NetworkSimplexError};
-use crate::graph::{NodeId, NodeSlice, LGraph, LayeredEdge};
+use crate::graph::{LGraph, LayeredEdge, NodeId};
 
 mod coffman_graham;
 #[cfg(test)]

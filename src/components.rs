@@ -10,7 +10,9 @@
 
 mod group;
 
-use crate::graph::{NodeId, NodeSlice, GraphArena, GraphId, LGraph, LLabel, LNodeKind, LPoint, LSize, PortRef};
+use crate::graph::{
+    GraphArena, GraphId, LGraph, LLabel, LNodeKind, LPoint, LSize, NodeId, NodeSlice, PortRef,
+};
 use crate::options::{HierarchyHandling, PortConstraints};
 use crate::pipeline::PipelineResult;
 
@@ -135,12 +137,13 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
         })
         .collect::<Vec<_>>();
     for (index, edge) in graph.edges.iter().enumerate() {
-        let owner = *owners
-            .get(edge.source.node.index())
-            .ok_or(ComponentError::InvalidReference {
-                kind: "source node",
-                index: edge.source.node.index(),
-            })?;
+        let owner =
+            *owners
+                .get(edge.source.node.index())
+                .ok_or(ComponentError::InvalidReference {
+                    kind: "source node",
+                    index: edge.source.node.index(),
+                })?;
         if owners.get(edge.target.node.index()) != Some(&owner) {
             return Err(ComponentError::InvalidReference {
                 kind: "target node",
@@ -627,13 +630,28 @@ mod tests {
         dummy.kind = LNodeKind::NorthSouthPort;
         graph.layerless_nodes.push(dummy);
         let north = graph
-            .add_port(NodeId::new(1), PortType::Input, PortSide::North, LPoint::default())
+            .add_port(
+                NodeId::new(1),
+                PortType::Input,
+                PortSide::North,
+                LPoint::default(),
+            )
             .unwrap();
         let west = graph
-            .add_port(NodeId::new(1), PortType::Input, PortSide::West, LPoint::default())
+            .add_port(
+                NodeId::new(1),
+                PortType::Input,
+                PortSide::West,
+                LPoint::default(),
+            )
             .unwrap();
         let out = graph
-            .add_port(NodeId::new(2), PortType::Output, PortSide::East, LPoint::default())
+            .add_port(
+                NodeId::new(2),
+                PortType::Output,
+                PortSide::East,
+                LPoint::default(),
+            )
             .unwrap();
         graph.layerless_nodes[2].ports[out.port].origin_port = Some(north);
         graph.layerless_nodes[1].ports[north.port].port_dummy = Some(GraphNodeRef {

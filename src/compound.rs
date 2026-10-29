@@ -6,11 +6,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::{NodeId, NodeSlice, 
+use crate::graph::{
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeLabelPlacement, GraphArena, GraphId, GraphNodeRef,
     GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep, LGraph, LLabel, LNodeKind, LPoint,
-    LPort, LSize, LayeredEdge, PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy,
-    create_external_port_dummy, port_side_from_direction,
+    LPort, LSize, LayeredEdge, NodeId, NodeSlice, PortId, PortRef, PortSide, PortType,
+    apply_port_index_to_dummy, create_external_port_dummy, port_side_from_direction,
 };
 use crate::options::{ElkDirection, PortConstraints};
 
@@ -1010,9 +1010,7 @@ struct CompoundEndpointPlan {
 
 impl CompoundEndpointPlan {
     fn new(graph: &LGraph, observer: &mut impl CompoundPreprocessObserver) -> Self {
-        let mut by_node = graph.node_ids()
-            .map(|_| Vec::new())
-            .collect::<Vec<_>>();
+        let mut by_node = graph.node_ids().map(|_| Vec::new()).collect::<Vec<_>>();
         for (edge_index, edge) in graph.edges.iter().enumerate() {
             observer.visit_graph_edge_for_endpoint_plan();
             let Some(segment) = edge.compound_segment else {
@@ -2409,11 +2407,13 @@ mod tests {
     fn compound_endpoint_link_uses_exact_port_identity_when_ids_repeat() {
         let mut graph = import_graph(&compound_fanout_graph(1)).expect("compound fixture import");
         introduce_source_ported_hierarchy_edge_segments(&mut graph);
-        let group = NodeId::new(graph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "group")
-            .expect("compound parent node"));
+        let group = NodeId::new(
+            graph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "group")
+                .expect("compound parent node"),
+        );
         let edge_index = graph
             .edges
             .iter()
@@ -2804,11 +2804,13 @@ mod tests {
                 for original_offset in [None, Some(7.0), Some(-4.0)] {
                     let (mut graph, key) =
                         parent_and_crossing_edge_graph(reverse, spacing, original_offset);
-                    let group_index = NodeId::new(graph
-                        .layerless_nodes
-                        .iter()
-                        .position(|node| node.id == "group")
-                        .unwrap());
+                    let group_index = NodeId::new(
+                        graph
+                            .layerless_nodes
+                            .iter()
+                            .position(|node| node.id == "group")
+                            .unwrap(),
+                    );
                     let original_port = graph.layerless_nodes[group_index]
                         .ports
                         .iter_with_ids()
@@ -2917,11 +2919,13 @@ mod tests {
             vec![edge("cluster-A", "cluster", "A")],
         ))
         .unwrap();
-        let cluster_index = NodeId::new(lgraph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "cluster")
-            .unwrap());
+        let cluster_index = NodeId::new(
+            lgraph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "cluster")
+                .unwrap(),
+        );
         {
             let parent_port = &mut lgraph.layerless_nodes[cluster_index].ports[PortId::new(0)];
             parent_port.set_side(PortSide::East);
@@ -2966,11 +2970,13 @@ mod tests {
             vec![edge("cluster-A", "cluster", "A")],
         ))
         .unwrap();
-        let cluster_index = NodeId::new(lgraph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "cluster")
-            .unwrap());
+        let cluster_index = NodeId::new(
+            lgraph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "cluster")
+                .unwrap(),
+        );
 
         preprocess_source_ported_compound_graph(&mut lgraph);
 
@@ -3007,11 +3013,13 @@ mod tests {
             vec![edge("S1-S2", "S1", "S2"), edge("sub1-sub4", "sub1", "sub4")],
         ))
         .unwrap();
-        let s2_index = NodeId::new(lgraph
-            .layerless_nodes
-            .iter()
-            .position(|node| node.id == "S2")
-            .unwrap());
+        let s2_index = NodeId::new(
+            lgraph
+                .layerless_nodes
+                .iter()
+                .position(|node| node.id == "S2")
+                .unwrap(),
+        );
 
         preprocess_source_ported_compound_graph(&mut lgraph);
 

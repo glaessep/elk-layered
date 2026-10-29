@@ -14,8 +14,8 @@
 //! ELK also sets `CROSSING_HINT` on each dummy. Nothing in ELK reads it at this commit, so it has
 //! no field here.
 
-use crate::graph::{NodeId, NodeSlice, 
-    GraphNodeRef, LGraph, LNode, LNodeKind, LPoint, LPort, PortRef, PortSide, PortType,
+use crate::graph::{
+    GraphNodeRef, LGraph, LNode, LNodeKind, LPoint, LPort, NodeId, PortRef, PortSide, PortType,
 };
 use crate::options::PortConstraints;
 
@@ -239,7 +239,12 @@ fn create_dummy_node(
     out_port: Option<PortRef>,
 ) -> NodeId {
     let dummy_index = graph.next_node_id();
-    let mut dummy = LNode::new(format!("northSouthPort:{}", dummy_index.index()), 0.0, 0.0, None);
+    let mut dummy = LNode::new(
+        format!("northSouthPort:{}", dummy_index.index()),
+        0.0,
+        0.0,
+        None,
+    );
     dummy.kind = LNodeKind::NorthSouthPort;
     dummy.port_constraints = PortConstraints::FixedPos;
     graph.layerless_nodes.push(dummy);

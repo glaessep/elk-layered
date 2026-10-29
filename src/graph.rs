@@ -16,7 +16,7 @@ mod arena;
 mod ids;
 mod ports;
 pub use arena::{GraphArena, GraphId, GraphParent, OtherGraphs};
-pub use ids::{EdgeId, NodeId, NodeSlice};
+pub use ids::{NodeId, NodeSlice};
 #[cfg(test)]
 pub(crate) use ports::port_ids;
 pub use ports::{NodePorts, PortId};
@@ -729,19 +729,11 @@ impl LGraph {
     }
 
     /// Every node with its id, in the order of `layerless_nodes`.
-    pub fn nodes_with_ids(&self) -> impl DoubleEndedIterator<Item = (NodeId, &LNode)> + ExactSizeIterator {
+    pub fn nodes_with_ids(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (NodeId, &LNode)> + ExactSizeIterator {
         self.layerless_nodes
             .iter()
-            .enumerate()
-            .map(|(index, node)| (NodeId::new(index), node))
-    }
-
-    /// Every node with its id, for changing, in the order of `layerless_nodes`.
-    pub fn nodes_with_ids_mut(
-        &mut self,
-    ) -> impl DoubleEndedIterator<Item = (NodeId, &mut LNode)> + ExactSizeIterator {
-        self.layerless_nodes
-            .iter_mut()
             .enumerate()
             .map(|(index, node)| (NodeId::new(index), node))
     }
@@ -1461,8 +1453,12 @@ mod tests {
     fn reordering_ports_leaves_the_origin_of_a_nested_external_dummy_alone() {
         let mut parent = LGraph::new("root", LayeredOptions::default());
         let mut compound = LNode::new("cluster", 10.0, 10.0, Some(0));
-        compound.ports.push(LPort::new("p0", NodeId::new(0), PortType::Output));
-        compound.ports.push(LPort::new("p1", NodeId::new(0), PortType::Output));
+        compound
+            .ports
+            .push(LPort::new("p0", NodeId::new(0), PortType::Output));
+        compound
+            .ports
+            .push(LPort::new("p1", NodeId::new(0), PortType::Output));
 
         let mut nested = LGraph::new("cluster", LayeredOptions::default());
         let mut dummy = LNode::new("external:cluster", 0.0, 0.0, None);
@@ -1480,7 +1476,11 @@ mod tests {
         let mut graphs = GraphArena::new(parent);
         let nested_id = graphs.nest(GraphId::ROOT, NodeId::new(0), nested);
 
-        assert!(graphs.root_mut().reorder_node_ports(NodeId::new(0), port_ids([1, 0])));
+        assert!(
+            graphs
+                .root_mut()
+                .reorder_node_ports(NodeId::new(0), port_ids([1, 0]))
+        );
 
         let nested = &graphs[nested_id];
         let parent = graphs.root();
@@ -1529,7 +1529,11 @@ mod tests {
                 port: PortId::new(3)
             }]
         );
-        assert!(graph.ports_on_side(NodeId::new(0), PortSide::West).is_empty());
+        assert!(
+            graph
+                .ports_on_side(NodeId::new(0), PortSide::West)
+                .is_empty()
+        );
     }
 
     // Mutation: return `true` without rewriting the node's list.
@@ -1537,9 +1541,12 @@ mod tests {
     fn reorder_node_ports_puts_the_ports_in_the_given_order() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
         let mut node = LNode::new("A", 10.0, 10.0, Some(0));
-        node.ports.push(LPort::new("p0", NodeId::new(0), PortType::Output));
-        node.ports.push(LPort::new("p1", NodeId::new(0), PortType::Output));
-        node.ports.push(LPort::new("p2", NodeId::new(0), PortType::Output));
+        node.ports
+            .push(LPort::new("p0", NodeId::new(0), PortType::Output));
+        node.ports
+            .push(LPort::new("p1", NodeId::new(0), PortType::Output));
+        node.ports
+            .push(LPort::new("p2", NodeId::new(0), PortType::Output));
         graph.layerless_nodes.push(node);
 
         assert!(graph.reorder_node_ports(NodeId::new(0), port_ids([2, 0, 1])));
@@ -1561,7 +1568,8 @@ mod tests {
         let mut graph = LGraph::new("root", LayeredOptions::default());
         let mut node = LNode::new("A", 10.0, 10.0, Some(0));
         for id in ["p0", "p1", "p2"] {
-            node.ports.push(LPort::new(id, NodeId::new(0), PortType::Output));
+            node.ports
+                .push(LPort::new(id, NodeId::new(0), PortType::Output));
         }
         graph.layerless_nodes.push(node);
         let before = graph.layerless_nodes[0].ports.clone();
@@ -1592,7 +1600,12 @@ mod tests {
                 .unwrap()
         });
         let b = graph
-            .add_port(NodeId::new(1), PortType::Input, PortSide::West, LPoint::default())
+            .add_port(
+                NodeId::new(1),
+                PortType::Input,
+                PortSide::West,
+                LPoint::default(),
+            )
             .unwrap();
         let edge = |id: &str, source: PortRef, target: PortRef| LayeredEdge {
             id: id.to_string(),

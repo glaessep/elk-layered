@@ -1,9 +1,9 @@
 //! Stretch-width layering translated from Eclipse ELK, EPL-2.0:
 //! https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers/StretchWidthLayerer.java
 
-use crate::graph::NodeId;
 use super::{LayeringError, LayeringInput, LayeringResult};
 use crate::graph::LNodeKind;
+use crate::graph::NodeId;
 use std::cmp::Reverse;
 
 /// Most times the adaptive loop may widen `max_width` and start over.
@@ -69,7 +69,8 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
             .position(|&node| remaining_outgoing[node.index()] == 0);
         let go_up = selected.is_some_and(|index| {
             let node = remaining[index];
-            width_current - outgoing[node.index()] as f64 * dummy_size + sizes[node.index()] > max_width
+            width_current - outgoing[node.index()] as f64 * dummy_size + sizes[node.index()]
+                > max_width
                 || width_up + incoming[node.index()] as f64 * dummy_size
                     > max_width * influence * dummy_size
         });
@@ -110,7 +111,8 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
             };
             let node = remaining.remove(selected);
             current.push(node);
-            width_current = width_current - outgoing[node.index()] as f64 * dummy_size + sizes[node.index()];
+            width_current =
+                width_current - outgoing[node.index()] as f64 * dummy_size + sizes[node.index()];
             width_up += incoming[node.index()] as f64 * dummy_size;
         }
     }

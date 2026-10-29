@@ -4,8 +4,8 @@
 //! Priority-queue ties follow the GWT `java.util.PriorityQueue` emitted in elkjs 0.9.3.
 //! Those ties are observable in node order, so a Rust heap's unspecified tie order is unsuitable.
 
-use crate::graph::NodeId;
 use super::{LayeringError, LayeringInput, LayeringResult};
+use crate::graph::NodeId;
 use std::cmp::Ordering;
 
 pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>>> {
@@ -98,13 +98,17 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
             .filter(|&&edge| !marked_edges[edge])
             .count();
         if outgoing[node.index()] == 0 {
-            push(&mut sinks, node, |a, b| topological[b.index()].cmp(&topological[a.index()]));
+            push(&mut sinks, node, |a, b| {
+                topological[b.index()].cmp(&topological[a.index()])
+            });
         }
     }
     let mut layers: Vec<Vec<NodeId>> = vec![Vec::new()];
     let mut assigned = vec![None; input.len()];
     let bound = input.graph.options.layering_coffman_graham_layer_bound;
-    while let Some(node) = pop(&mut sinks, |a, b| topological[b.index()].cmp(&topological[a.index()])) {
+    while let Some(node) = pop(&mut sinks, |a, b| {
+        topological[b.index()].cmp(&topological[a.index()])
+    }) {
         let mut layer = layers.len() - 1;
         if layers[layer].len() as i64 >= i64::from(bound)
             || input.outgoing[node.index()]
@@ -155,7 +159,11 @@ fn compare_topology(left: &[usize], right: &[usize]) -> Ordering {
     }
 }
 
-fn push(heap: &mut Vec<NodeId>, value: NodeId, mut compare: impl FnMut(NodeId, NodeId) -> Ordering) {
+fn push(
+    heap: &mut Vec<NodeId>,
+    value: NodeId,
+    mut compare: impl FnMut(NodeId, NodeId) -> Ordering,
+) {
     let mut cursor = heap.len();
     heap.push(value);
     while cursor > 0 {
@@ -169,7 +177,10 @@ fn push(heap: &mut Vec<NodeId>, value: NodeId, mut compare: impl FnMut(NodeId, N
     heap[cursor] = value;
 }
 
-fn pop(heap: &mut Vec<NodeId>, mut compare: impl FnMut(NodeId, NodeId) -> Ordering) -> Option<NodeId> {
+fn pop(
+    heap: &mut Vec<NodeId>,
+    mut compare: impl FnMut(NodeId, NodeId) -> Ordering,
+) -> Option<NodeId> {
     let result = *heap.first()?;
     let value = heap.pop().expect("the heap is nonempty");
     if !heap.is_empty() {

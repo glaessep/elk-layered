@@ -4,8 +4,8 @@
 //! https://github.com/eclipse-elk/elk/tree/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p2layers
 //! (`LongestPathLayerer.java`, `LongestPathSourceLayerer.java`).
 
-use crate::graph::NodeId;
 use super::{LayeringError, LayeringInput, LayeringResult};
+use crate::graph::NodeId;
 
 pub(super) fn layer(
     input: &LayeringInput<'_>,
