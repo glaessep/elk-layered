@@ -1521,7 +1521,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
             let (port_constraints, port_side) = (parent_constraints, port.side);
             // ELK passes no position and no node size here: `new KVector()` and `null`. The node
             // size only guards against a division by zero for fixed ratios, where ELK fails.
-            let dummy_node = nested_graph.push_external_port_dummy(|node| {
+            let dummy_node = nested_graph.push_node_with(|node| {
                 let mut dummy = create_external_port_dummy(
                     node,
                     format!("external:{parent_node_id}"),
@@ -1849,7 +1849,7 @@ fn create_parent_boundary_port(
         (named.position, named.size)
     });
     let direction = graph.options.direction;
-    let node = graph.push_external_port_dummy(|node| {
+    let node = graph.push_node_with(|node| {
         let mut dummy = create_external_port_dummy(
             node,
             format!("external:{parent_node_id}"),

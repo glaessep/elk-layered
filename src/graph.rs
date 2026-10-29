@@ -493,6 +493,9 @@ pub struct ExternalPortData {
     pub origin_port: Option<GraphPortRef>,
     /// `InternalProperties.IN_LAYER_CONSTRAINT`.
     pub in_layer_constraint: InLayerConstraint,
+    /// Whether ELK sets the layer constraint of the dummy on purpose, as it does for a west or
+    /// east dummy. Such a constraint counts as explicit.
+    pub layer_constraint_explicit: bool,
 }
 
 impl Default for ExternalPortData {
@@ -507,6 +510,7 @@ impl Default for ExternalPortData {
             parent_port_type: None,
             origin_port: None,
             in_layer_constraint: InLayerConstraint::None,
+            layer_constraint_explicit: false,
         }
     }
 }
@@ -1420,24 +1424,14 @@ impl LGraph {
     /// Whether the caller, or a hierarchical port dummy, set the layer constraint of `node`.
     pub(crate) fn is_layer_constraint_explicit(&self, node: NodeId) -> bool {
         self.tables.layer_constraint_explicit.get(node).is_some()
+            || self.layerless_nodes[node]
+                .external_port()
+                .is_some_and(|external| external.layer_constraint_explicit)
     }
 
     /// Records that the layer constraint of `node` is explicit.
     pub(crate) fn mark_layer_constraint_explicit(&mut self, node: NodeId) {
         self.tables.layer_constraint_explicit.row_mut(node);
-    }
-
-    /// Pushes a node made by [`create_external_port_dummy`]. ELK sets the layer constraint of a
-    /// west or east dummy on purpose, so a separate constraint on the new node counts as explicit.
-    pub fn push_external_port_dummy(&mut self, build: impl FnOnce(NodeId) -> LNode) -> NodeId {
-        let node = self.push_node_with(build);
-        if matches!(
-            self.layerless_nodes[node].layer_constraint,
-            LayerConstraint::FirstSeparate | LayerConstraint::LastSeparate
-        ) {
-            self.mark_layer_constraint_explicit(node);
-        }
-        node
     }
 
     /// Which nodes the layer constraint preprocessing has hidden from the layering. A node is
@@ -2106,6 +2100,7 @@ pub fn create_external_port_dummy(
         size: port_size,
         ratio_or_position: 0.0,
         in_layer_constraint: InLayerConstraint::None,
+        layer_constraint_explicit: false,
         ..data
     };
     dummy.port_constraints = PortConstraints::FixedPos;
@@ -2129,6 +2124,7 @@ pub fn create_external_port_dummy(
     match external_side {
         PortSide::West => {
             dummy.layer_constraint = LayerConstraint::FirstSeparate;
+            external.layer_constraint_explicit = true;
             dummy.size.height = port_size.height;
             if border_offset < 0.0 {
                 dummy.size.width = -border_offset;
@@ -2136,6 +2132,7 @@ pub fn create_external_port_dummy(
         }
         PortSide::East => {
             dummy.layer_constraint = LayerConstraint::LastSeparate;
+            external.layer_constraint_explicit = true;
             dummy.size.height = port_size.height;
             if border_offset < 0.0 {
                 dummy.size.width = -border_offset;
@@ -2894,8 +2891,8 @@ mod tests {
         assert_eq!(external.parent_port_type, Some(PortType::Input));
     }
 
-    // Mutation: in `push_external_port_dummy`, mark the layer constraint of every dummy explicit,
-    // or of none.
+    // Mutation: in `create_external_port_dummy`, mark the layer constraint of every dummy
+    // explicit, or of none. In `is_layer_constraint_explicit`, read only the table.
     #[test]
     fn a_west_or_east_external_port_dummy_has_an_explicit_layer_constraint() {
         let mut graph = graph_with_nodes(0);
@@ -2906,7 +2903,7 @@ mod tests {
             (PortSide::South, false),
         ]
         .map(|(side, explicit)| {
-            let dummy = graph.push_external_port_dummy(|_| external_dummy_on(side));
+            let dummy = graph.push_node_with(|_| external_dummy_on(side));
             (dummy, explicit, side)
         });
 

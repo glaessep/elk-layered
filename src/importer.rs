@@ -423,7 +423,7 @@ fn import_external_ports(
             }
         });
         let direction = root.options.direction;
-        let node = root.push_external_port_dummy(|node| {
+        let node = root.push_node_with(|node| {
             let mut dummy = create_external_port_dummy(
                 node,
                 format!("{scope_id}:external:{}", port.id),
@@ -1154,7 +1154,7 @@ fn ensure_inside_self_loop_dummy(
 
     let dummy_id = format!("external:{parent_node_id}");
     let direction = graph.options.direction;
-    let node = graph.push_external_port_dummy(|node| {
+    let node = graph.push_node_with(|node| {
         create_external_port_dummy(
             node,
             dummy_id,
