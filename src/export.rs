@@ -97,24 +97,22 @@ struct Hierarchy<'a> {
     arena: &'a GraphArena,
     /// The graphs level by level, the order in which ELK collects them.
     order: Vec<GraphId>,
-    /// For each graph, by slot, the graph and node index of the node it is inside.
-    parents: Vec<Option<(GraphId, usize)>>,
 }
 
 impl<'a> Hierarchy<'a> {
-    /// No ELK counterpart: indexes the parent of each graph by slot, which ELK reaches through
-    /// `LGraph.getParentNode`.
+    /// No ELK counterpart: collects the graphs in ELK's order.
     fn new(arena: &'a GraphArena) -> Self {
-        let order = arena.breadth_first(GraphId::ROOT);
-        let mut parents = vec![None; arena.len()];
-        for &graph in &order {
-            parents[graph.index()] = arena[graph].parent.map(|p| (p.graph, p.node));
-        }
         Self {
             arena,
-            order,
-            parents,
+            order: arena.breadth_first(GraphId::ROOT),
         }
+    }
+
+    /// The graph and node index of the node `graph` is inside, or `None` for the root.
+    ///
+    /// Ports `LGraph.getParentNode`.
+    fn parent_of(&self, graph: GraphId) -> Option<(GraphId, usize)> {
+        self.graph(graph).parent.map(|p| (p.graph, p.node))
     }
 
     /// No ELK counterpart: an arena lookup.
@@ -144,7 +142,7 @@ impl<'a> Hierarchy<'a> {
     /// `parent`.
     fn is_descendant(&self, child: NodeAt, parent: NodeAt) -> bool {
         let mut graph = child.0;
-        while let Some(node) = self.parents[graph.index()] {
+        while let Some(node) = self.parent_of(graph) {
             if node == parent {
                 return true;
             }
@@ -176,7 +174,7 @@ impl<'a> Hierarchy<'a> {
             let data = self.graph(graph);
             point.x += data.offset.x;
             point.y += data.offset.y;
-            let Some((parent_graph, parent_node)) = self.parents[graph.index()] else {
+            let Some((parent_graph, parent_node)) = self.parent_of(graph) else {
                 break;
             };
             point.x += data.padding.left;
@@ -191,7 +189,7 @@ impl<'a> Hierarchy<'a> {
             let data = self.graph(graph);
             point.x -= data.offset.x;
             point.y -= data.offset.y;
-            let Some((parent_graph, parent_node)) = self.parents[graph.index()] else {
+            let Some((parent_graph, parent_node)) = self.parent_of(graph) else {
                 break;
             };
             point.x -= data.padding.left;
@@ -676,7 +674,7 @@ fn hierarchical_offset(
     let mut result = LPoint::default();
     let mut current = source.0;
     while current != target_graph {
-        let Some((parent_graph, parent_node)) = hierarchy.parents[current.index()] else {
+        let Some((parent_graph, parent_node)) = hierarchy.parent_of(current) else {
             break;
         };
         let node = &hierarchy.graph(parent_graph).layerless_nodes[parent_node];

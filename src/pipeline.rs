@@ -226,9 +226,6 @@ pub struct GraphExecution {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GraphAlgorithm {
-    graph: GraphId,
-    /// The graph and node this graph lies in. `None` for the root.
-    parent: Option<GraphParent>,
     next_processor: usize,
     processors: Vec<ProcessorSlot>,
     execution: GraphExecution,
@@ -266,8 +263,6 @@ impl CompoundRun {
 
 fn graph_algorithm(graph: &LGraph) -> GraphAlgorithm {
     GraphAlgorithm {
-        graph: graph.id,
-        parent: graph.parent,
         next_processor: 0,
         processors: assemble_processors_for_graph(graph),
         execution: GraphExecution {
@@ -712,7 +707,7 @@ fn execute_compound_algorithm_until_pause(
     graphs: &mut GraphArena,
     algorithm: &mut GraphAlgorithm,
 ) -> PipelineResult<()> {
-    let is_root = algorithm.parent.is_none();
+    let is_root = algorithm.execution.parent.is_none();
     while algorithm.next_processor < algorithm.processors.len() {
         let kind = algorithm.processors[algorithm.next_processor].kind;
         algorithm.next_processor += 1;
@@ -725,14 +720,14 @@ fn execute_compound_algorithm_until_pause(
         if hierarchy_aware {
             execute_hierarchy_aware_processor(graphs, kind)?;
         } else {
-            let (graph, others) = graphs.split_mut(algorithm.graph);
+            let (graph, others) = graphs.split_mut(algorithm.execution.graph);
             execute_processor(graph, others, kind)?;
         }
-        let size = actual_graph_size(&graphs[algorithm.graph]);
+        let size = actual_graph_size(&graphs[algorithm.execution.graph]);
         if kind == ProcessorKind::HierarchicalNodeResizer
-            && let Some(parent) = algorithm.parent
+            && let Some(parent) = algorithm.execution.parent
         {
-            let (nested, parent_graph) = graphs.pair_mut(algorithm.graph, parent.graph);
+            let (nested, parent_graph) = graphs.pair_mut(algorithm.execution.graph, parent.graph);
             transfer_nested_graph_layout_to_parent_node(nested, parent_graph, parent.node, size);
         }
         algorithm.execution.processors.push(kind);
@@ -1709,12 +1704,12 @@ mod tests {
             let parent_links = run
                 .algorithms
                 .iter()
-                .filter(|algorithm| algorithm.parent.is_some())
+                .filter(|algorithm| algorithm.execution.parent.is_some())
                 .count();
 
             assert_eq!(run.algorithms.len(), graph_count);
             assert_eq!(parent_links, graph_count - 1);
-            assert!(run.algorithms[0].parent.is_none());
+            assert!(run.algorithms[0].execution.parent.is_none());
         }
     }
 
