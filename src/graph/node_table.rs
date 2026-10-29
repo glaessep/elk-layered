@@ -55,27 +55,19 @@ impl<T: Default + Clone> NodeTable<T> {
         self.rows.iter_mut().flatten()
     }
 
-    /// The table of `len` nodes that puts each row of `parts` at the node it names. A node that
-    /// no part names has no row.
-    pub(crate) fn scattered(
-        len: usize,
-        parts: impl IntoIterator<Item = (NodeId, Option<T>)>,
-    ) -> Self {
-        let mut table = Self {
-            rows: IdVec::filled(len, None),
-        };
-        for (node, row) in parts {
-            table.rows[node] = row;
+    /// Moves every row of `other` into this table: row `local` of `other` lands at
+    /// `node_map[local]`. Rows already here stay unless a moved row takes their place. Used when
+    /// the graphs of a component split merge again and their node ids change back.
+    pub(crate) fn absorb(&mut self, node_map: &IdVec<NodeId, NodeId>, other: NodeTable<T>) {
+        for (local, row) in other.rows.into_iter().enumerate() {
+            let (Some(row), Some(&node)) = (row, node_map.get(NodeId::new(local))) else {
+                continue;
+            };
+            while self.rows.len() <= node.index() {
+                self.rows.push(None);
+            }
+            self.rows[node] = Some(row);
         }
-        table
-    }
-
-    /// How many nodes the table reaches: the index of the last row that exists, plus one.
-    pub(crate) fn row_count(&self) -> usize {
-        self.rows
-            .iter()
-            .rposition(Option::is_some)
-            .map_or(0, |last| last + 1)
     }
 }
 
@@ -150,33 +142,34 @@ mod tests {
         assert_eq!(subset.get(NodeId::new(2)), Some(&vec![5]));
     }
 
-    // Mutation: in `row_count`, count the first row that exists, not the last.
+    // Mutation: in `absorb`, put each row at its own index, not at `node_map[local]`.
     #[test]
-    fn row_count_reaches_the_last_row_that_exists() {
-        let mut table = NodeTable::<u8>::default();
-        assert_eq!(table.row_count(), 0);
+    fn absorb_moves_each_row_to_the_node_the_map_names() {
+        let mut part = NodeTable::<Vec<usize>>::default();
+        part.row_mut(NodeId::new(0)).push(10);
+        part.row_mut(NodeId::new(2)).push(12);
+        let mut table = NodeTable::<Vec<usize>>::default();
+        table.row_mut(NodeId::new(5)).push(99);
 
-        *table.row_mut(NodeId::new(2)) = 1;
-        *table.row_mut(NodeId::new(0)) = 1;
+        table.absorb(&nodes(&[3, 4, 1]), part);
 
-        assert_eq!(table.row_count(), 3);
+        assert_eq!(table.get(NodeId::new(3)), Some(&vec![10]));
+        assert_eq!(table.get(NodeId::new(1)), Some(&vec![12]));
+        assert_eq!(table.get(NodeId::new(4)), None);
+        // A row that is already here stays.
+        assert_eq!(table.get(NodeId::new(5)), Some(&vec![99]));
     }
 
-    // Mutation: in `scattered`, put the rows at node 0, not at the node they name.
+    // Mutation: in `absorb`, move a missing row too, as a default row.
     #[test]
-    fn scattered_puts_each_row_at_its_node() {
-        let table = NodeTable::scattered(
-            4,
-            [
-                (NodeId::new(3), Some(vec![3])),
-                (NodeId::new(1), Some(vec![1])),
-            ],
-        );
+    fn absorb_leaves_a_node_without_a_row_without_one() {
+        let mut part = NodeTable::<Vec<usize>>::default();
+        part.row_mut(NodeId::new(1)).push(1);
+        let mut table = NodeTable::<Vec<usize>>::default();
 
-        assert_eq!(table.row_count(), 4);
-        assert_eq!(table.get(NodeId::new(0)), None);
-        assert_eq!(table.get(NodeId::new(1)), Some(&vec![1]));
-        assert_eq!(table.get(NodeId::new(2)), None);
-        assert_eq!(table.get(NodeId::new(3)), Some(&vec![3]));
+        table.absorb(&nodes(&[7, 8]), part);
+
+        assert_eq!(table.get(NodeId::new(7)), None);
+        assert_eq!(table.get(NodeId::new(8)), Some(&vec![1]));
     }
 }

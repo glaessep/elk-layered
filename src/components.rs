@@ -558,7 +558,7 @@ pub(crate) fn combine(
     let mut hidden = Vec::new();
     let mut replaced = Vec::new();
     let mut self_loops = Vec::new();
-    let mut table_rows = Vec::new();
+    let mut tables = NodeTables::default();
     let mut cyclic = false;
     for mut component in components {
         let mut node_map = component.original_nodes;
@@ -572,7 +572,7 @@ pub(crate) fn combine(
         component.graph.clear_layers();
         remap_references(&mut component.graph, &node_map, &edge_map)?;
         remap_nested_references(graphs, &component.graph, &node_map, &edge_map)?;
-        table_rows.extend(node_map.iter().copied().zip(component.graph.tables.rows()));
+        tables.absorb(&node_map, component.graph.tables);
         for (index, node) in node_map.into_iter().zip(component.graph.layerless_nodes) {
             nodes[index] = Some(node);
         }
@@ -605,7 +605,7 @@ pub(crate) fn combine(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let target = graphs.root_mut();
-    target.tables = NodeTables::scattered(layerless_nodes.len(), table_rows);
+    target.tables = tables;
     target.layerless_nodes = layerless_nodes.into();
     target.edges = edges.into();
     target.clear_layers();
@@ -840,7 +840,7 @@ mod tests {
 
     // Mutation: in `split`, leave out `tables` of a component. In `remap_references`, leave out
     // `map_node_ids`. In `combine`, leave the root's `tables` as they were. In `NodeTables`, leave
-    // one of the five tables out of `subset`, `rows` or `scattered`.
+    // one of the five tables out of `subset` or `absorb`.
     #[test]
     fn the_side_tables_of_nodes_follow_them_through_split_and_combine() {
         let mut graph = LGraph::new("g", LayeredOptions::default());

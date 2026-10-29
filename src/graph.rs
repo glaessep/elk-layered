@@ -95,8 +95,9 @@ pub struct LGraph {
 }
 
 /// The side tables of the nodes of one graph. Each table belongs to one processor, as its doc
-/// says. A component split and combine move all of them through `subset`, `rows` and
-/// `scattered`, so a new table needs its edits only here.
+/// says. A component split and combine move all of them through `subset` and `absorb`, so a new
+/// table needs its edits only here: the field, `subset`, `absorb`, and `map_node_ids` if its rows
+/// hold node ids.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct NodeTables {
     /// What `NorthSouthPortPreprocessor` tells the crossing minimization about a node. Only the
@@ -113,16 +114,6 @@ pub(crate) struct NodeTables {
     /// A node has a row when its layer constraint was set by the caller or by a hierarchical
     /// port dummy, not derived. Only the layer constraint preprocessing reads it.
     pub(crate) layer_constraint_explicit: NodeTable<()>,
-}
-
-/// One node's rows of every table in [`NodeTables`].
-#[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct NodeRow {
-    in_layer: Option<InLayerLayout>,
-    self_loop_options: Option<SelfLoopOptions>,
-    port_alignment: Option<PortAlignment>,
-    placement_options: Option<PlacementOptions>,
-    layer_constraint_explicit: Option<()>,
 }
 
 impl NodeTables {
@@ -157,61 +148,17 @@ impl NodeTables {
         Ok(())
     }
 
-    /// The rows of every node from 0 up to the last node that has a row in any table, taking the
-    /// tables apart for a combine.
-    pub(crate) fn rows(&self) -> Vec<NodeRow> {
-        let len = [
-            self.in_layer.row_count(),
-            self.self_loop_options.row_count(),
-            self.port_alignment.row_count(),
-            self.placement_options.row_count(),
-            self.layer_constraint_explicit.row_count(),
-        ]
-        .into_iter()
-        .max()
-        .unwrap_or(0);
-        (0..len)
-            .map(|index| {
-                let node = NodeId::new(index);
-                NodeRow {
-                    in_layer: self.in_layer.get(node).cloned(),
-                    self_loop_options: self.self_loop_options.get(node).cloned(),
-                    port_alignment: self.port_alignment.get(node).copied(),
-                    placement_options: self.placement_options.get(node).cloned(),
-                    layer_constraint_explicit: self.layer_constraint_explicit.get(node).copied(),
-                }
-            })
-            .collect()
-    }
-
-    /// The tables of `len` nodes that put each row at the node it names, as a combine needs.
-    pub(crate) fn scattered(len: usize, rows: impl IntoIterator<Item = (NodeId, NodeRow)>) -> Self {
-        let rows = rows.into_iter().collect::<Vec<_>>();
-        Self {
-            in_layer: NodeTable::scattered(
-                len,
-                rows.iter().map(|(node, row)| (*node, row.in_layer.clone())),
-            ),
-            self_loop_options: NodeTable::scattered(
-                len,
-                rows.iter()
-                    .map(|(node, row)| (*node, row.self_loop_options.clone())),
-            ),
-            port_alignment: NodeTable::scattered(
-                len,
-                rows.iter().map(|(node, row)| (*node, row.port_alignment)),
-            ),
-            placement_options: NodeTable::scattered(
-                len,
-                rows.iter()
-                    .map(|(node, row)| (*node, row.placement_options.clone())),
-            ),
-            layer_constraint_explicit: NodeTable::scattered(
-                len,
-                rows.iter()
-                    .map(|(node, row)| (*node, row.layer_constraint_explicit)),
-            ),
-        }
+    /// Moves every row of the tables `other` of a component into these tables: row `local` lands
+    /// at `node_map[local]`.
+    pub(crate) fn absorb(&mut self, node_map: &IdVec<NodeId, NodeId>, other: NodeTables) {
+        self.in_layer.absorb(node_map, other.in_layer);
+        self.self_loop_options
+            .absorb(node_map, other.self_loop_options);
+        self.port_alignment.absorb(node_map, other.port_alignment);
+        self.placement_options
+            .absorb(node_map, other.placement_options);
+        self.layer_constraint_explicit
+            .absorb(node_map, other.layer_constraint_explicit);
     }
 }
 
