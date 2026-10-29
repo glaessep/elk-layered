@@ -1432,17 +1432,16 @@ fn prepare_compound_endpoint_metadata(
         }
     }
 
-    for (index, recorded_edge) in recorded_edges.iter_mut().enumerate() {
-        let edge_index = EdgeId::new(index);
+    for edge_index in recorded_edges.ids() {
         let Some(segment) = graph.edges[edge_index].compound_segment else {
             continue;
         };
         observer.process_segment_edge();
-        if !*recorded_edge {
+        if !recorded_edges[edge_index] {
             let edge_id = graph.edges[edge_index].id.clone();
             let model_order = graph.edges[edge_index].model_order;
             record_cross_hierarchy_edge_segment(graph, edge_id, model_order, edge_index, segment);
-            *recorded_edge = true;
+            recorded_edges[edge_index] = true;
         }
     }
 
