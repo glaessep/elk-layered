@@ -776,13 +776,15 @@ impl LGraph {
     }
 
     /// Builds an external port dummy and pushes it onto `layerless_nodes`. `build` gets the id the
-    /// dummy will have, because the dummy's port names it as owner. The method returns the id
-    /// `push` gave the dummy. Nothing can push between the two, as `build` cannot reach the graph.
+    /// dummy will have, so it can put the id in the dummy's name. Whatever owner `build` gives the
+    /// dummy's ports, the method sets every port's owner to that id. The method returns the id.
     pub fn push_external_port_dummy(&mut self, build: impl FnOnce(NodeId) -> LNode) -> NodeId {
-        let expected = self.next_node_id();
-        let id = self.layerless_nodes.push(build(expected));
-        debug_assert_eq!(id, expected, "the dummy got another id than its port names");
-        id
+        let id = self.next_node_id();
+        let mut dummy = build(id);
+        for port in dummy.ports.slots_mut() {
+            port.node = id;
+        }
+        self.layerless_nodes.push(dummy)
     }
 
     pub fn clear_layers(&mut self) {
@@ -1448,16 +1450,17 @@ mod tests {
         );
     }
 
-    // Mutation: hand `build` the id `NodeId::new(0)`, or return `NodeId::new(0)` from
-    // `push_external_port_dummy`.
+    // Mutation: drop the loop in `push_external_port_dummy` that sets the owner of each port, or
+    // set it to `NodeId::new(0)`.
     #[test]
     fn pushed_external_port_dummy_gets_the_id_its_port_names() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
         graph.layerless_nodes.push(LNode::new("a", 1.0, 1.0, None));
         graph.layerless_nodes.push(LNode::new("b", 1.0, 1.0, None));
-        let id = graph.push_external_port_dummy(|node| {
+        let id = graph.push_external_port_dummy(|_| {
+            // A wrong owner on purpose: the method must repair it.
             create_external_port_dummy(
-                node,
+                NodeId::new(0),
                 "external:A",
                 "external:A:0",
                 PortType::Output,
