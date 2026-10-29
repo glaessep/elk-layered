@@ -717,3 +717,54 @@ fn route_edges_south_to_north_writes_orthogonal_bendpoints_for_non_straight_edge
         vec![LPoint { x: 5.0, y: -20.0 }, LPoint { x: 45.0, y: -20.0 }]
     );
 }
+
+// Mutation: let `add_port_positions` recurse into each connected port again.
+#[test]
+fn a_long_chain_of_connected_ports_routes_on_a_small_stack() {
+    // Sources in layer 0 and targets in layer 1. Source i reaches targets i - 1 and i, so the ports
+    // form one hyperedge whose walk goes 8,000 ports deep.
+    const PAIRS: usize = 4_000;
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    let mut sources = Vec::new();
+    let mut targets = Vec::new();
+    for i in 0..PAIRS {
+        for (layer, x, side, list) in [
+            (0, 0.0, PortSide::East, &mut sources),
+            (1, 100.0, PortSide::West, &mut targets),
+        ] {
+            let node = graph.next_node_id();
+            let mut lnode = LNode::new(format!("{layer}-{i}"), 40.0, 20.0, None);
+            lnode.position = LPoint {
+                x,
+                y: 30.0 * i as f64,
+            };
+            graph.layerless_nodes.push(lnode);
+            graph.set_node_layer(node, layer);
+            let port_x = if side == PortSide::East { 40.0 } else { 0.0 };
+            let port = graph
+                .add_port(node, PortType::Output, side, LPoint { x: port_x, y: 10.0 })
+                .unwrap();
+            list.push(port);
+        }
+    }
+    for (i, &source) in sources.iter().enumerate() {
+        for target in [i.checked_sub(1), Some(i)].into_iter().flatten() {
+            graph.add_edge(LayeredEdge::new(
+                format!("e{i}-{target}"),
+                source,
+                targets[target],
+            ));
+        }
+    }
+
+    let routed = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            crate::phase::routing::route_edges_orthogonal(&mut graph);
+            graph.edges.len()
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert_eq!(routed, 2 * PAIRS - 1);
+}

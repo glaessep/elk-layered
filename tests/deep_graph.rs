@@ -48,8 +48,8 @@ fn closed_chain() -> ElkNode {
     }
 }
 
-// Mutation: let `connected_components_dfs` of the network simplex layerer, `tight_tree_dfs` of the
-// network simplex, or `collect_depth_first_back_edges` recurse again.
+// Mutation: let `connected_components_dfs` of the network simplex layerer, `tight_tree_dfs` or
+// `postorder_traversal` of the network simplex, or `collect_depth_first_back_edges` recurse again.
 #[test]
 fn a_graph_10000_nodes_deep_lays_out_on_a_small_stack() {
     let graph = closed_chain();

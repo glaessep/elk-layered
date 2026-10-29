@@ -2,7 +2,7 @@
 //!
 //! Source: https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p3order/BarycenterHeuristic.java
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::graph::{LGraph, LNodeKind, NodeId, PortRef, PortType};
 use crate::intermediate::preserveorder::model_order_node_comparator::update_bigger_and_smaller_associations;
@@ -28,8 +28,8 @@ pub(crate) struct BarycenterHeuristic {
     /// `ForsterConstraintResolver.layoutUnits`: the nodes of each layout unit, in the order the
     /// layers had when the resolver was made. The order of the layers changes later.
     pub(crate) layout_units: HashMap<NodeId, Vec<NodeId>>,
-    bigger_than: HashMap<NodeId, HashSet<NodeId>>,
-    smaller_than: HashMap<NodeId, HashSet<NodeId>>,
+    bigger_than: HashMap<NodeId, crate::gwt::LinkedSet<NodeId>>,
+    smaller_than: HashMap<NodeId, crate::gwt::LinkedSet<NodeId>>,
 }
 
 impl BarycenterHeuristic {

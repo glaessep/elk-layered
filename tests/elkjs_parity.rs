@@ -305,7 +305,7 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 }
 
 // Mutations, each tried alone. A mutation undoes one fix, and these cases then differ from elkjs.
-// 1. In `label_cell_size` (src/intermediate.rs), pass `!horizontal_layout`, so a cell stacks its
+// 1. In `label_cell_size` (src/intermediate/end_label_preprocessor.rs), pass `!horizontal_layout`, so a cell stacks its
 //    labels the wrong way: 47 cases, such as random/r000, random/r002, random-group-ends/r002.
 // 2. In `update_end_label_node_margin`, read the right and bottom margin from the far corner,
 //    `(min_x + width) - margin.left - node_size.width`: 174 cases, such as labels, random/r000,
@@ -313,7 +313,7 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 3. In `remove_end_label_overlaps`, never drop a cell from the scanline
 //    (`if false && rects[first].x + ...`), so every cell overlaps every other and they all stack:
 //    7 cases, such as random/r030, random/r057, random-group-ends/r004.
-// 4. In `hide_ports` (src/selfloops.rs), split off no hidden ports
+// 4. In `hide_ports` (src/selfloop/self_loop_pre_processor.rs), split off no hidden ports
 //    (`node.ports.split_off(node.ports.len())`), so they stay on the node: 12 cases, such as
 //    random/r000, random/r038, random-group-ends/r029.
 // 5. In `create_east_port_side_dummy` and `create_west_port_side_dummy`, call
@@ -322,15 +322,14 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 6. In `parent_port_net_flows` (src/compound.rs), vote by port type alone
 //    (`votes_output = !leaves_port`): 14 cases, such as random-group-ends/r004,
 //    random-group-ends/r025, random-group-ends/r033.
-// 7. In `minimize_two_sided_greedy_switch` (src/p3order/sweep.rs), drop the
-//    `graph.random.next_long()`: 6 cases, random/r017, random/r063, random/r144, random/r145,
-//    random/r169 and random-group-ends/r082.
-// 8. In `minimize_one_sided_greedy_switch` (src/p3order/sweep.rs), drop the
-//    `graph.random.next_long()`: 1 case, greedy-switch-one-sided. It has two connected
-//    components and sets the one-sided greedy switch, so the draws decide each component's sweep
-//    direction.
-// 9. In the same function, drop the `graph.random.next_bool()` that comes right after: the same
-//    1 case, greedy-switch-one-sided.
+// 7. In `HierarchySweep::new` (src/phase/ordering/layer_sweep_crossing_minimizer.rs), drop the
+//    `random.next_long()`, which `LayerSweepCrossingMinimizer.initialize` draws for every cross-min
+//    type, greedy switches included: 959 of 1224 cases differ, among them greedy-switch-one-sided
+//    and most of the random cases.
+// 8. (Merged into 7: the flat sweep that had its own copy of this draw is gone.)
+// 9. In `HierarchySweep::minimize_with_counter` (same file), start with a forward sweep instead of
+//    drawing `random.next_bool()`: 69 cases, greedy-switch-one-sided,
+//    greedy-switch-one-sided-split-segment and 67 of random-one-sided.
 // 10. In the `to_graph` refusal of src/layout.rs, return `Error::Internal` instead of
 //    `Error::Unsupported`: all 26 cases that elkjs refuses, such as random-group-ends/r034.
 // 11. In the `to_graph` refusal of src/layout.rs, change the `feature` text, for example to "an
@@ -413,15 +412,16 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 41. In the segment code of src/compound.rs, set the flag when the source port already has an
 //    edge, as the compound preprocessor used to: 2 cases,
 //    hierarchy-edge-in-and-out-at-one-port and random-group-ports/r092.
-// 42. In `minimize_barycenter` (src/p3order/sweep.rs), make a new port distributor and heuristic
-//    for each run instead of one for all runs: 3 cases,
-//    free-port-in-and-out-between-separate-layers and its two seed variants.
-// 43. In `BinaryIndexedTree::rank` (src/p3order/counting.rs), clamp the index to the last one
+// 42. In `GraphInfoHolder::new` (src/phase/ordering/graph_info_holder.rs), the port distributor
+//    and the heuristic are made once and serve every run. Making new ones for each run broke 3
+//    cases, free-port-in-and-out-between-separate-layers and its two seed variants, when the flat
+//    sweep still had its own copy; this entry was not run again after the merge into one sweep.
+// 43. In `BinaryIndexedTree::rank` (src/phase/ordering/counting/binary_indexed_tree.rs), clamp the index to the last one
 //    instead of giving `None`: 1 case, hierarchy-count-of-crossings-is-nan, and
 //    random-group-ports/r122.
 // 44. In `CrossingsCounter::count_crossings_on_ports`, add 0 for a rank past the end instead of
 //    `NaN`: the same 2 cases.
-// 45. In `minimize_barycenter_with_counter` (src/p3order/sweep.rs), end the loop with
+// 45. In `minimize_barycenter_with_counter` (src/phase/ordering/layer_sweep_crossing_minimizer.rs), end the loop with
 //    `old <= new` instead of `!sweep_improved_crossings(old, new)`: the same 2 cases differ, as a `NaN` count no longer
 //    ends the loop.
 // 46. In `original_net_flows` (src/compound.rs), key the source of a hierarchy edge as a made-up
@@ -431,7 +431,7 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    importer gives to the made-up port of the edge into G, so the two ports must not share a flow.
 // 47. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), look the
 //    flow of a port up as a made-up port (`false` for `port.named`): 2 cases, ports-group-include-flow-of-split-edges and random-group-ports/r037.
-// 48. In `gather_end_labels` (src/intermediate.rs), skip the ports of the north or south port
+// 48. In `gather_end_labels` (src/intermediate/end_label_preprocessor.rs), skip the ports of the north or south port
 //    dummy (`if false && ..origin_port == Some(origin)`), so the labels of the edges moved to the
 //    dummy belong to no port: 124 cases, such as ports-end-labels-north-port-head-and-tail,
 //    ports-end-labels-fixed-side-port-head and random-cross-ports/r001.
@@ -439,21 +439,21 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    keeps the margins it had before its end labels: 98 cases, such as
 //    ports-end-labels-east-port-edge-from-node-down, ports-end-labels-north-port-tail-and-center
 //    and ports-end-labels-fixed-side-port-head.
-// 50. In `assign_four_sides_label_side_and_alignment` (src/selfloops.rs), read the side of the
+// 50. In `assign_four_sides_label_side_and_alignment` (src/selfloop/routing/label_placer.rs), read the side of the
 //    rightmost port instead of the leftmost one twice: 2 cases,
 //    ports-self-loops-on-four-sides-with-labels and random-cross-ports/r143.
-// 51. In `north_south_port_connection_sides` (src/selfloops.rs), take the ports of the dummy whose
+// 51. In `north_south_port_connection_sides` (src/selfloop/ordering/port_restorer.rs), take the ports of the dummy whose
 //    node has an origin port instead of the dummy ports whose origin is this port: 2 cases,
 //    ports-self-loop-ports-restored-beside-a-north-port and random-cross-ports/r023.
-// 52. In `correct_north_south_port_sides` (src/p3order.rs), leave the port on its side after the
+// 52. In `correct_north_south_port_sides` (src/phase/ordering/sweep_copy.rs), leave the port on its side after the
 //    dummy has moved (drop both `set_side` calls): 4 cases, ports-switch-sides-north-to-south,
 //    ports-switch-sides-south-to-north, ports-switch-sides-two-north-ports and
 //    ports-switch-sides-both-ways.
 // 53. In the same function, switch a northern port when its dummy sits above the node
 //    (`position < origin_position`): 89 cases, such as the same four.
-// 54. In `origin_allows_side_switch` (src/north_south.rs), always answer no, so the dummy keeps
+// 54. In `origin_allows_side_switch` (src/intermediate/north_south_port_preprocessor.rs), always answer no, so the dummy keeps
 //    its order constraint to the node: the same four cases.
-// 55. In `apply_label_side` (src/intermediate.rs), call a label dummy inline when any of its
+// 55. In `apply_label_side` (src/intermediate/label_side_selector.rs), call a label dummy inline when any of its
 //    labels is inline, not all: 24 cases, such as labels-inline-mixed-one-edge,
 //    labels-inline-mixed-one-edge-down and random-inline-labels/r012. The two hand cases put an
 //    inline and a plain centre label on one edge, in both orders.
@@ -474,7 +474,7 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    instead of `origin_edge`, or leave out a `.max(0.0)` of the edge thickness in
 //    `apply_label_side` or `place_label_dummy_labels`: no case fails. The option
 //    `elk.edge.thickness` is not ported, so every edge has thickness 1, where `(1 / 2).ceil()`
-//    is 1 and no thickness is negative. Unit tests in src/intermediate.rs give edges the
+//    is 1 and no thickness is negative. Unit tests in src/intermediate/tests.rs give edges the
 //    thickness 5 and -3 and fail on each of these.
 // 63. In `place_label_dummy_labels`, call the labels inline when any of them is, not all: 7 cases,
 //    such as labels-inline-mixed-one-edge-down and random-inline-labels/r069.
@@ -507,16 +507,16 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    `ElkDirection::Down`: 231 cases, such as labels-inline-direction-right. It is the one hand
 //    case with inline labels that sets `elk.direction` to RIGHT, which is also the default. Random
 //    cases set it too, so this case adds no other coverage; it stays as the small readable one.
-// 74. In `rate_area` (src/p5edges/orthogonal.rs), call `split_segment.recompute_extent()` after
+// 74. In `rate_area` (src/phase/routing/orthogonal/hyper_edge_segment_splitter.rs), call `split_segment.recompute_extent()` after
 //    the area centre joins its connections: 1 case, greedy-switch-one-sided-split-segment. Its
 //    router splits a segment and must rate the free areas with the extent of the simulated split.
-// 75. In `add_adjacency` (src/p3order/sweep.rs), merge with any entry at the same position, not
+// 75. In `add_adjacency` (src/intermediate/greedyswitch/between_layer_edge_two_node_crossings_counter.rs), merge with any entry at the same position, not
 //    only the last one: 1 case, greedy-switch-one-sided-adjacency. Its free ports send edges to
 //    one port of the next layer from places that are not one after another.
-// 76. In `CrossingMatrixFiller::new` (src/p3order/sweep.rs), never count one side only
+// 76. In `CrossingMatrixFiller::new` (src/intermediate/greedyswitch/crossing_matrix_filler.rs), never count one side only
 //    (`one_sided: false`): 150 cases, 148 of random-one-sided, such as random-one-sided/r000,
 //    and the two cases above.
-// 77. In `AdjacencyList::new` (src/p3order/sweep.rs), walk the ports of the side in reverse
+// 77. In `AdjacencyList::new` (src/intermediate/greedyswitch/between_layer_edge_two_node_crossings_counter.rs), walk the ports of the side in reverse
 //    (`ports_in_north_south_east_west_order(..).into_iter().rev()`): 1 case,
 //    greedy-switch-one-sided-port-order. Its node n1 has two free ports with edges to one port of
 //    the next layer, so the order of collection decides which entries merge.

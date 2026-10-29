@@ -1,10 +1,10 @@
 //! Running one processor on one graph, and the resizing of a node around its content.
 
-use super::PipelineResult;
 use super::assembler::{
     CrossingMinimizer, CycleBreaker, EdgeRouter, IntermediateProcessor, Layerer, NodePlacer,
     Processor,
 };
+use super::{PipelineError, PipelineResult};
 use crate::graph::{GraphArena, GraphId, LGraph, LNode, LSize, OtherGraphs, PortSide};
 use crate::intermediate::graph_transformer::{GraphTransformMode, transform_graph_direction};
 use crate::intermediate::{
@@ -37,17 +37,19 @@ use crate::selfloop::{
     postprocess_self_loops, preprocess_self_loops, restore_self_loop_ports, route_self_loops,
 };
 
-/// Runs `processor` on the graph `id` of `graphs`, without the graphs inside its nodes.
+/// Runs `processor` on the graph `id` of `graphs`. The layer sweep also orders the graphs inside
+/// its nodes when `include_children` is set.
 ///
 /// The layer sweep needs the arena, because it is the one port of `LayerSweepCrossingMinimizer`
 /// that also serves `INCLUDE_CHILDREN`. Every other processor runs through `execute_processor`.
 pub(super) fn execute_in_arena(
     graphs: &mut GraphArena,
     id: GraphId,
+    include_children: bool,
     processor: Processor,
 ) -> PipelineResult<()> {
     if let Some(sweep) = processor.hierarchy_aware_sweep() {
-        minimize_crossings_layer_sweep(graphs, id, false, sweep);
+        minimize_crossings_layer_sweep(graphs, id, include_children, sweep);
         return Ok(());
     }
     let (graph, others) = graphs.split_mut(id);
@@ -82,7 +84,7 @@ pub(super) fn execute_processor(
         },
         Processor::CrossingMinimizer(CrossingMinimizer::NoMinimizer) => {}
         Processor::CrossingMinimizer(CrossingMinimizer::LayerSweep) => {
-            unreachable!("the layer sweep runs through `execute_in_arena`")
+            return Err(PipelineError::SweepOutsideArena);
         }
         Processor::NodePlacer(placer) => match placer {
             NodePlacer::Simple => place_nodes_simple(graph),
@@ -125,7 +127,7 @@ fn execute_intermediate(
         P::NorthSouthPortPreprocessor => preprocess_north_south_ports(graph),
         P::NorthSouthPortPostprocessor => postprocess_north_south_ports(graph),
         P::OneSidedGreedySwitch | P::TwoSidedGreedySwitch => {
-            unreachable!("the layer sweep runs through `execute_in_arena`")
+            return Err(PipelineError::SweepOutsideArena);
         }
         P::SelfLoopPortRestorer => restore_self_loop_ports(graph, others),
         P::InLayerConstraintProcessor => process_in_layer_constraints(graph),

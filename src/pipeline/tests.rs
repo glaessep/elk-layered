@@ -2676,3 +2676,21 @@ fn intermediate_processors_run_in_the_order_of_elks_enum() {
         ]
     );
 }
+
+// Mutation: let `execute_processor` run a layer sweep processor as a no-op instead of returning
+// the error.
+#[test]
+fn a_layer_sweep_outside_the_arena_is_an_error_not_a_panic() {
+    for processor in [
+        Processor::CrossingMinimizer(CrossingMinimizer::LayerSweep),
+        Processor::Intermediate(IntermediateProcessor::OneSidedGreedySwitch),
+        Processor::Intermediate(IntermediateProcessor::TwoSidedGreedySwitch),
+    ] {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        assert_eq!(
+            execute_processor(&mut graph, OtherGraphs::none(), processor),
+            Err(PipelineError::SweepOutsideArena),
+            "{processor:?}"
+        );
+    }
+}

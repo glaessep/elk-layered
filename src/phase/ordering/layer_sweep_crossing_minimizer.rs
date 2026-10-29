@@ -200,8 +200,13 @@ impl HierarchySweep {
 
     fn minimize_with_counter(&mut self, graphs: &mut GraphArena, info_index: usize) -> f64 {
         let mut is_forward_sweep = self.random.next_bool();
-        // ELK also reads FIRST_TRY_WITH_INITIAL_ORDER here. `minimize_one_sided_greedy_switch`
-        // says why it is safe to leave out.
+        // ELK's minimizeCrossingsWithCounter also reads
+        // InternalProperties.FIRST_TRY_WITH_INITIAL_ORDER here. That property and
+        // SECOND_TRY_WITH_INITIAL_ORDER share the id "firstTryWithInitialOrder". The barycenter
+        // sweep leaves it set only when its first run keeps the model order because that order has
+        // no crossings. Then ELK returns before it sweeps, and this sweep finds no crossing to
+        // remove either. A port of the flag changed no layout in 3,000 graphs (#26), so it is left
+        // out.
         {
             let graph = &graphs[self.infos[info_index].graph];
             let mut heuristic = GreedySwitchHeuristic::new(self.cross_min_type);

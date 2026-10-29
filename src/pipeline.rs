@@ -63,6 +63,10 @@ pub enum PipelineError {
     /// A layerer failed.
     #[error(transparent)]
     Layering(#[from] LayeringError),
+    /// A layer sweep reached `execute_processor`, which has no arena to run it on. The sweep runs
+    /// through `execute_in_arena`; reaching this is a bug in the run, never caller input.
+    #[error("the layer sweep was run outside the graph arena")]
+    SweepOutsideArena,
 }
 
 /// The result of a step of a layered run.

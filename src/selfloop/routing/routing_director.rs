@@ -112,8 +112,9 @@ pub(crate) fn determine_loop_routes(
 
 // Java: RoutingDirector.determineTwoSideOpposingLoopRoutes. Java takes `sides` from
 // `slLoop.getSLPortsBySide().keySet().toArray(...)`, a multimap over a hash map. elkjs iterates
-// that map in insertion order (see `crate::gwt::enum_keys_in_insertion_order`), so `sides` keeps the order of the loop's ports and is not
-// sorted. A tie between the two options goes to option 1, so this order picks the loop's route.
+// that map in insertion order (see `crate::gwt::enum_keys_in_insertion_order`), so `sides` keeps
+// the order of the loop's ports and is not sorted. A tie between the two options goes to option
+// 1, so this order picks the loop's route.
 fn determine_two_side_opposing_loop_route(
     graph: &LGraph,
     places: &PortPlaces,

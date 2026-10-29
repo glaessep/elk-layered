@@ -35,9 +35,9 @@ pub(crate) fn execute_ported_processors(graphs: &mut GraphArena) -> PipelineResu
         for component in &mut components {
             component.graph.random = random;
             std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
-            let result = processors
-                .iter()
-                .try_for_each(|&processor| execute_in_arena(graphs, GraphId::ROOT, processor));
+            let result = processors.iter().try_for_each(|&processor| {
+                execute_in_arena(graphs, GraphId::ROOT, false, processor)
+            });
             std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
             result?;
             random = component.graph.random.clone();
@@ -47,7 +47,7 @@ pub(crate) fn execute_ported_processors(graphs: &mut GraphArena) -> PipelineResu
         executed.extend(processors);
     } else {
         for processor in processors {
-            execute_in_arena(graphs, GraphId::ROOT, processor)?;
+            execute_in_arena(graphs, GraphId::ROOT, false, processor)?;
             executed.push(processor);
         }
     }
@@ -90,7 +90,7 @@ fn run_processors_until_processor(
     let mut executed = Vec::new();
     prepare_single_graph_processors(graphs).and_then(|processors| {
         for processor in processors {
-            execute_in_arena(graphs, GraphId::ROOT, processor)?;
+            execute_in_arena(graphs, GraphId::ROOT, false, processor)?;
             executed.push(processor);
             if is_last(processor) {
                 break;

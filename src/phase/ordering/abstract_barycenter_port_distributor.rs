@@ -14,7 +14,7 @@ use crate::phase::ordering::{connected_edges, is_first_layer, other_end_of_edge}
 
 #[derive(Debug, Clone)]
 pub(crate) struct BarycenterPortDistributor {
-    kind: PortDistributorKind,
+    pub(crate) kind: PortDistributorKind,
     port_ranks: HashMap<usize, f64>,
     port_barycenters: HashMap<usize, f64>,
     node_positions: HashMap<NodeId, usize>,

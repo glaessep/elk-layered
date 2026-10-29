@@ -54,7 +54,6 @@ fn sweep_alone(graph: &mut LGraph, cross_min_type: CrossMinType) -> bool {
 // A second mutation deletes the sort in `AdjacencyList::from_positions`. Either one changes the
 // counted crossings.
 #[test]
-
 fn an_adjacency_merges_only_with_the_entry_collected_just_before_it() {
     // Edges to positions 5, 5, 3 and 5: the first two merge, the last stays its own entry,
     // and the stable sort keeps it behind the merged one.
@@ -1118,9 +1117,20 @@ fn barycenter_sweep_distributes_free_and_fixed_layer_ports() {
     graph.set_layer_nodes(2, vec![right, left]);
     initialize_crossing_minimization_port_ids(&mut graph);
 
+    // Seed 2 makes `ISweepPortDistributor.create` pick the node-relative distributor.
+    graph.random = JavaRandom::new(2);
     let mut graphs = graph;
     let mut sweep =
         HierarchySweep::new(&mut graphs, GraphId::ROOT, false, CrossMinType::Barycenter);
+    // The sweep draws the distributor kind from the graph's seed. This test is about the
+    // node-relative distributor, so it checks that the seed picks it.
+    assert_eq!(
+        sweep.infos[0]
+            .barycenter_heuristic
+            .as_ref()
+            .map(|heuristic| heuristic.port_distributor.kind),
+        Some(PortDistributorKind::NodeRelative)
+    );
     sweep.sweep_reducing_crossings_barycenter(&mut graphs, 0, true, false, false);
     let graph = graphs.root();
 

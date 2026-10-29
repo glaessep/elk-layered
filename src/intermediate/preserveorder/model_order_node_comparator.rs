@@ -3,7 +3,7 @@
 //! Source: https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/preserveorder/ModelOrderNodeComparator.java
 
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::graph::{LGraph, NodeId, PortRef};
 use crate::options::OrderingStrategy;
@@ -12,8 +12,8 @@ pub(crate) struct ModelOrderNodeComparator<'a> {
     graph: &'a LGraph,
     previous_layer: &'a [NodeId],
     ordering_strategy: OrderingStrategy,
-    bigger_than: HashMap<NodeId, HashSet<NodeId>>,
-    smaller_than: HashMap<NodeId, HashSet<NodeId>>,
+    bigger_than: HashMap<NodeId, crate::gwt::LinkedSet<NodeId>>,
+    smaller_than: HashMap<NodeId, crate::gwt::LinkedSet<NodeId>>,
 }
 
 impl<'a> ModelOrderNodeComparator<'a> {
@@ -169,22 +169,19 @@ pub(crate) fn last_previous_layer_source_port(graph: &LGraph, node: NodeId) -> O
 pub(crate) fn update_bigger_and_smaller_associations<T>(
     bigger: T,
     smaller: T,
-    bigger_than: &mut HashMap<T, HashSet<T>>,
-    smaller_than: &mut HashMap<T, HashSet<T>>,
+    bigger_than: &mut HashMap<T, crate::gwt::LinkedSet<T>>,
+    smaller_than: &mut HashMap<T, crate::gwt::LinkedSet<T>>,
 ) where
-    T: Copy + Ord + std::hash::Hash,
+    T: Copy + Eq + std::hash::Hash,
 {
     bigger_than.entry(bigger).or_default();
     bigger_than.entry(smaller).or_default();
     smaller_than.entry(bigger).or_default();
     smaller_than.entry(smaller).or_default();
 
-    // Sorted, so no hash order reaches the sets. ELK's `HashSet` iteration order would depend on
-    // object hashes; the sets it builds do not, since each step only adds to them.
-    let mut smaller_bigger_than = bigger_than[&smaller].iter().copied().collect::<Vec<_>>();
-    smaller_bigger_than.sort_unstable();
-    let mut bigger_smaller_than = smaller_than[&bigger].iter().copied().collect::<Vec<_>>();
-    bigger_smaller_than.sort_unstable();
+    // The sets iterate as elkjs's do, in insertion order: see `crate::gwt::LinkedSet`.
+    let smaller_bigger_than = bigger_than[&smaller].clone();
+    let bigger_smaller_than = smaller_than[&bigger].clone();
 
     bigger_than.get_mut(&bigger).unwrap().insert(smaller);
     smaller_than.get_mut(&smaller).unwrap().insert(bigger);

@@ -408,3 +408,27 @@ enum VisitState {
     Active,
     Done,
 }
+
+// Mutation: let `collect_interactive_back_edges` recurse again.
+#[test]
+fn a_cycle_through_10000_nodes_breaks_interactively_on_a_small_stack() {
+    const DEPTH: usize = 10_000;
+    let nodes = (0..DEPTH).map(|i| node(&format!("n{i}"))).collect();
+    let mut edges: Vec<_> = (1..DEPTH)
+        .map(|i| edge(&format!("e{i}"), &format!("n{}", i - 1), &format!("n{i}")))
+        .collect();
+    edges.push(edge("back", &format!("n{}", DEPTH - 1), "n0"));
+    let mut graph = graph(nodes, edges);
+    // Every node sits at the same x, so the first pass reverses nothing and the depth-first pass
+    // walks the whole chain to find the back edge.
+    let reversed = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            break_cycles_interactive(&mut graph);
+            graph.edges.iter().filter(|edge| edge.reversed).count()
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert_eq!(reversed, 1);
+}

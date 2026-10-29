@@ -3,7 +3,7 @@
 //! Source: https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/preserveorder/ModelOrderPortComparator.java
 
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::graph::{LGraph, NodeId, PortId, PortSide};
 use crate::intermediate::port_list_sorter::port_side_order;
@@ -17,8 +17,8 @@ pub(crate) struct ModelOrderPortComparator<'a> {
     strategy: OrderingStrategy,
     target_node_model_order: &'a HashMap<NodeId, usize>,
     port_model_order: bool,
-    pub(crate) bigger_than: HashMap<PortId, HashSet<PortId>>,
-    pub(crate) smaller_than: HashMap<PortId, HashSet<PortId>>,
+    pub(crate) bigger_than: HashMap<PortId, crate::gwt::LinkedSet<PortId>>,
+    pub(crate) smaller_than: HashMap<PortId, crate::gwt::LinkedSet<PortId>>,
 }
 
 impl<'a> ModelOrderPortComparator<'a> {

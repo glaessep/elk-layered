@@ -172,6 +172,60 @@ pub(crate) fn sort<T: Copy>(order: &mut [T], mut compare: impl FnMut(T, T) -> Or
     merge_sort(&mut source, order, &mut compare);
 }
 
+/// A GWT `HashSet` of objects that hash by identity, such as ELK's nodes and ports: it iterates
+/// in the order the elements were first added.
+///
+/// GWT gives each object a new identity hash, and keeps the entries of a set in a JavaScript
+/// `Map` keyed by that hash, which iterates in insertion order. A JVM's `HashSet` iterates by
+/// bucket, and Rust's `HashSet` in an order that changes from run to run.
+#[derive(Debug, Clone)]
+pub(crate) struct LinkedSet<T> {
+    order: Vec<T>,
+    members: std::collections::HashSet<T>,
+}
+
+impl<T> Default for LinkedSet<T> {
+    fn default() -> Self {
+        Self {
+            order: Vec::new(),
+            members: std::collections::HashSet::new(),
+        }
+    }
+}
+
+impl<T: Copy + Eq + std::hash::Hash> LinkedSet<T> {
+    /// Adds `value` at the end, unless the set holds it. Returns whether it was added.
+    pub(crate) fn insert(&mut self, value: T) -> bool {
+        let added = self.members.insert(value);
+        if added {
+            self.order.push(value);
+        }
+        added
+    }
+
+    /// Whether the set holds `value`.
+    pub(crate) fn contains(&self, value: &T) -> bool {
+        self.members.contains(value)
+    }
+}
+
+impl<T: Copy + Eq + std::hash::Hash> Extend<T> for LinkedSet<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, values: I) {
+        for value in values {
+            self.insert(value);
+        }
+    }
+}
+
+impl<T> IntoIterator for LinkedSet<T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.order.into_iter()
+    }
+}
+
 /// The keys of a GWT `HashMap` whose keys are enum constants, in the order elkjs iterates them:
 /// the order they were first put in.
 ///
@@ -198,7 +252,7 @@ pub(crate) fn enum_keys_in_insertion_order<T: Copy + PartialEq>(
 /// JavaScript's `parseFloat`. A JVM also accepts hexadecimal numbers such as `0x1p3`, which GWT
 /// refuses.
 pub(crate) fn double_value_of(text: &str) -> Option<f64> {
-    let trimmed = text.trim_matches(|c: char| c.is_whitespace());
+    let trimmed = text.trim_matches(is_javascript_whitespace);
     let (negative, body) = match trimmed.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, trimmed.strip_prefix('+').unwrap_or(trimmed)),
@@ -235,6 +289,22 @@ pub(crate) fn double_value_of(text: &str) -> Option<f64> {
         .strip_suffix(['d', 'D', 'f', 'F'])
         .unwrap_or(trimmed);
     number.parse::<f64>().ok()
+}
+
+/// What JavaScript's `\s` matches, which GWT's regex for `Double.valueOf` uses. It is not Rust's
+/// `char::is_whitespace`: it takes U+FEFF and leaves out U+0085.
+fn is_javascript_whitespace(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202f}'
+                | '\u{205f}'
+                | '\u{3000}'
+                | '\u{feff}'
+    )
 }
 
 #[cfg(test)]
@@ -330,6 +400,20 @@ mod tests {
         assert_eq!(polled, vec![1, 3, 3, 4, 5]);
     }
 
+    // Mutation: iterate a `LinkedSet` in sorted order, or let `insert` add a value twice.
+    #[test]
+    fn a_linked_set_keeps_the_order_values_were_first_added() {
+        let mut set = LinkedSet::default();
+        assert!(set.insert(5));
+        assert!(set.insert(2));
+        assert!(!set.insert(5));
+        set.extend([9, 2, 1]);
+        assert!(set.contains(&9));
+        assert!(!set.contains(&3));
+        assert_eq!(set.into_iter().collect::<Vec<_>>(), vec![5, 2, 9, 1]);
+        assert_eq!(LinkedSet::<u8>::default().into_iter().count(), 0);
+    }
+
     // Mutation: sort the keys instead of keeping their first order.
     #[test]
     fn enum_keys_keep_the_order_they_were_first_put_in() {
@@ -353,7 +437,8 @@ mod tests {
         assert_eq!(enum_keys_in_insertion_order(Vec::<Side>::new()), Vec::new());
     }
 
-    // Mutation: skip the syntax check and let Rust parse the string; Rust takes `infinity`.
+    // Mutation: skip the syntax check and let Rust parse the string; Rust takes `infinity`. A
+    // second mutation trims with `char::is_whitespace`, which refuses U+FEFF and takes U+0085.
     #[test]
     fn double_value_of_takes_the_gwt_syntax_only() {
         for (text, want) in [
@@ -370,8 +455,11 @@ mod tests {
         }
         assert!(double_value_of("NaN").is_some_and(f64::is_nan));
         assert_eq!(double_value_of("-Infinity"), Some(f64::NEG_INFINITY));
+        // JavaScript's whitespace, not Rust's.
+        assert_eq!(double_value_of("\u{feff}1\u{3000}"), Some(1.0));
+        assert_eq!(double_value_of("\u{2028}1"), Some(1.0));
         for text in [
-            "", ".", "e3", "1e", "0x1p3", "1,5", "abc", "1.2.3", "--1", "infinity",
+            "", ".", "e3", "1e", "0x1p3", "1,5", "abc", "1.2.3", "--1", "infinity", "1\u{85}",
         ] {
             assert_eq!(double_value_of(text), None, "{text}");
         }
