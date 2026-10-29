@@ -15,10 +15,12 @@ use crate::random::JavaRandom;
 mod arena;
 mod id_vec;
 mod ids;
+mod node_table;
 mod ports;
 pub use arena::{GraphArena, GraphId, GraphParent, OtherGraphs};
 pub use id_vec::{IdVec, VecId};
 pub use ids::{EdgeId, NodeId};
+pub use node_table::NodeTable;
 #[cfg(test)]
 pub(crate) use ports::port_ids;
 pub use ports::{NodePorts, PortId};
@@ -50,6 +52,33 @@ pub struct LGraph {
     pub cross_hierarchy_edges: Vec<CrossHierarchyEdge>,
     pub self_loop_holders: Vec<SelfLoopHolder>,
     pub in_layer_successor_constraints_between_non_dummies: bool,
+    /// What `NorthSouthPortPreprocessor` tells the crossing minimization about a node. Only the
+    /// nodes with fixed port sides and their dummies have a row.
+    pub(crate) in_layer: NodeTable<InLayerLayout>,
+    /// `layered.edgeRouting.selfLoopDistribution` and `selfLoopOrdering` of the nodes the importer
+    /// read them for. The self loop processors are the only readers.
+    pub(crate) self_loop_options: NodeTable<SelfLoopOptions>,
+}
+
+/// What `NorthSouthPortPreprocessor` records for one node, for the crossing minimization.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InLayerLayout {
+    /// `InternalProperties.IN_LAYER_LAYOUT_UNIT`: the node a dummy and the node itself form a
+    /// layout unit under.
+    pub(crate) layout_unit: Option<NodeId>,
+    /// `InternalProperties.IN_LAYER_SUCCESSOR_CONSTRAINTS`.
+    pub(crate) successor_constraints: Vec<NodeId>,
+    /// `InternalProperties.BARYCENTER_ASSOCIATES`.
+    pub(crate) barycenter_associates: Vec<NodeId>,
+}
+
+/// The self loop options of one node.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SelfLoopOptions {
+    /// `layered.edgeRouting.selfLoopDistribution`.
+    pub(crate) distribution: super::options::SelfLoopDistributionStrategy,
+    /// `layered.edgeRouting.selfLoopOrdering`.
+    pub(crate) ordering: super::options::SelfLoopOrderingStrategy,
 }
 
 impl LGraph {
@@ -92,6 +121,8 @@ impl LGraph {
             cross_hierarchy_edges: Vec::new(),
             self_loop_holders: Vec::new(),
             in_layer_successor_constraints_between_non_dummies: false,
+            in_layer: NodeTable::default(),
+            self_loop_options: NodeTable::default(),
         }
     }
 
@@ -171,10 +202,6 @@ pub struct LNode {
     pub node_label_placement: NodeLabelPlacement,
     /// The node's own size options. ELK's `LabelAndNodeSizeProcessor` sizes the node by them.
     pub node_size: NodeSizing,
-    /// `layered.edgeRouting.selfLoopDistribution`, which ELK reads from each node.
-    pub self_loop_distribution: super::options::SelfLoopDistributionStrategy,
-    /// `layered.edgeRouting.selfLoopOrdering`, which ELK reads from each node.
-    pub self_loop_ordering: super::options::SelfLoopOrderingStrategy,
     pub ports: NodePorts,
     /// The graph inside this node, which the layout's [`GraphArena`] holds.
     pub nested_graph: Option<GraphId>,
@@ -187,9 +214,6 @@ pub struct LNode {
     pub port_alignment: Option<PortAlignment>,
     pub node_flexibility: super::options::NodeFlexibility,
     pub ports_surrounding: Option<super::options::SpacingMargin>,
-    pub in_layer_successor_constraints: Vec<NodeId>,
-    pub in_layer_layout_unit: Option<NodeId>,
-    pub barycenter_associates: Vec<NodeId>,
     pub layer_constraint_explicit: bool,
     pub compound: bool,
 }
@@ -431,8 +455,6 @@ impl LNode {
             labels: Vec::new(),
             node_label_placement: NodeLabelPlacement::FIXED,
             node_size: NodeSizing::default(),
-            self_loop_distribution: Default::default(),
-            self_loop_ordering: Default::default(),
             ports: NodePorts::default(),
             nested_graph: None,
             model_order,
@@ -443,9 +465,6 @@ impl LNode {
             port_alignment: None,
             node_flexibility: super::options::NodeFlexibility::None,
             ports_surrounding: None,
-            in_layer_successor_constraints: Vec::new(),
-            in_layer_layout_unit: None,
-            barycenter_associates: Vec::new(),
             layer_constraint_explicit: false,
             compound: false,
         }
@@ -1101,6 +1120,27 @@ impl LGraph {
             port.node = id;
         }
         self.layerless_nodes.push(node)
+    }
+
+    /// The node that `node` forms an in-layer layout unit under, if the north/south port
+    /// preprocessing recorded one.
+    pub(crate) fn in_layer_layout_unit(&self, node: NodeId) -> Option<NodeId> {
+        self.in_layer.get(node).and_then(|row| row.layout_unit)
+    }
+
+    /// The nodes that must stay below `node` in its layer. Empty if none were recorded.
+    pub(crate) fn in_layer_successor_constraints(&self, node: NodeId) -> &[NodeId] {
+        self.in_layer
+            .get(node)
+            .map_or(&[], |row| row.successor_constraints.as_slice())
+    }
+
+    /// The nodes whose positions pull `node` in the crossing minimization. Empty if none were
+    /// recorded.
+    pub(crate) fn barycenter_associates(&self, node: NodeId) -> &[NodeId] {
+        self.in_layer
+            .get(node)
+            .map_or(&[], |row| row.barycenter_associates.as_slice())
     }
 
     /// Which nodes the layer constraint preprocessing has hidden from the layering. A node is

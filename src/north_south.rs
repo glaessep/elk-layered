@@ -51,7 +51,7 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
             }
 
             // Nodes form their own layout unit.
-            graph.layerless_nodes[node].in_layer_layout_unit = Some(node);
+            graph.in_layer.row_mut(node).layout_unit = Some(node);
 
             let mut barycenter_associates = Vec::new();
 
@@ -68,11 +68,13 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
                 pointer += 1;
 
                 // The dummies form a layout unit named by the node they were made for.
-                graph.layerless_nodes[dummy].in_layer_layout_unit = Some(node);
+                graph.in_layer.row_mut(dummy).layout_unit = Some(node);
 
                 if !origin_allows_side_switch(graph, dummy) {
-                    graph.layerless_nodes[dummy]
-                        .in_layer_successor_constraints
+                    graph
+                        .in_layer
+                        .row_mut(dummy)
+                        .successor_constraints
                         .push(node);
                 }
             }
@@ -87,18 +89,20 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
                 pointer += 1;
                 insert_into_layer(graph, dummy, layer_index, pointer as usize);
 
-                graph.layerless_nodes[dummy].in_layer_layout_unit = Some(node);
+                graph.in_layer.row_mut(dummy).layout_unit = Some(node);
 
                 // The regular node has every southern dummy as its successor.
                 if !origin_allows_side_switch(graph, dummy) {
-                    graph.layerless_nodes[node]
-                        .in_layer_successor_constraints
+                    graph
+                        .in_layer
+                        .row_mut(node)
+                        .successor_constraints
                         .push(dummy);
                 }
             }
 
             if !barycenter_associates.is_empty() {
-                graph.layerless_nodes[node].barycenter_associates = barycenter_associates;
+                graph.in_layer.row_mut(node).barycenter_associates = barycenter_associates;
             }
         }
     }
@@ -512,13 +516,10 @@ mod tests {
                 .is_empty()
         );
         // The dummy and the node form one layout unit. The dummy must stay above the node.
-        assert_eq!(dummy_node.in_layer_layout_unit, Some(node));
-        assert_eq!(graph.layerless_nodes[node].in_layer_layout_unit, Some(node));
-        assert_eq!(dummy_node.in_layer_successor_constraints, vec![node]);
-        assert_eq!(
-            graph.layerless_nodes[node].barycenter_associates,
-            vec![dummy]
-        );
+        assert_eq!(graph.in_layer_layout_unit(dummy), Some(node));
+        assert_eq!(graph.in_layer_layout_unit(node), Some(node));
+        assert_eq!(graph.in_layer_successor_constraints(dummy), vec![node]);
+        assert_eq!(graph.barycenter_associates(node), vec![dummy]);
     }
 
     // Mutation: take the edge from the incoming list of the port in place of the outgoing one, or
@@ -576,18 +577,11 @@ mod tests {
         let second = dummy_of(&graph, node, 1);
         assert_eq!(layer(&graph, 1), vec![node, first, second]);
         assert_eq!(
-            graph.layerless_nodes[node].in_layer_successor_constraints,
+            graph.in_layer_successor_constraints(node),
             vec![first, second]
         );
-        assert!(
-            graph.layerless_nodes[first]
-                .in_layer_successor_constraints
-                .is_empty()
-        );
-        assert_eq!(
-            graph.layerless_nodes[node].barycenter_associates,
-            vec![first, second]
-        );
+        assert!(graph.in_layer_successor_constraints(first).is_empty());
+        assert_eq!(graph.barycenter_associates(node), vec![first, second]);
     }
 
     // Mutation: make one dummy for the two directions of a port, or give the second port of the
@@ -650,10 +644,7 @@ mod tests {
         let out = dummy_of(&graph, node, 1);
         let incoming = dummy_of(&graph, node, 2);
         assert_eq!(layer(&graph, 1), vec![both, out, incoming, node]);
-        assert_eq!(
-            graph.layerless_nodes[node].barycenter_associates,
-            vec![incoming, out, both]
-        );
+        assert_eq!(graph.barycenter_associates(node), vec![incoming, out, both]);
     }
 
     // Mutation: sort the ports of a node whose port order is fixed.
@@ -737,8 +728,8 @@ mod tests {
                 .port_dummy
                 .is_none()
         );
-        assert!(graph.layerless_nodes[node].barycenter_associates.is_empty());
-        assert_eq!(graph.layerless_nodes[node].in_layer_layout_unit, Some(node));
+        assert!(graph.barycenter_associates(node).is_empty());
+        assert_eq!(graph.in_layer_layout_unit(node), Some(node));
     }
 
     // Mutation: ignore the option and always add the constraints.
@@ -764,25 +755,11 @@ mod tests {
 
         let north = dummy_of(&graph, node, 0);
         let south = dummy_of(&graph, node, 1);
-        assert!(
-            graph.layerless_nodes[north]
-                .in_layer_successor_constraints
-                .is_empty()
-        );
-        assert!(
-            graph.layerless_nodes[node]
-                .in_layer_successor_constraints
-                .is_empty()
-        );
+        assert!(graph.in_layer_successor_constraints(north).is_empty());
+        assert!(graph.in_layer_successor_constraints(node).is_empty());
         // The dummies still belong to the node's layout unit and its barycenter.
-        assert_eq!(
-            graph.layerless_nodes[south].in_layer_layout_unit,
-            Some(node)
-        );
-        assert_eq!(
-            graph.layerless_nodes[node].barycenter_associates,
-            vec![north, south]
-        );
+        assert_eq!(graph.in_layer_layout_unit(south), Some(node));
+        assert_eq!(graph.barycenter_associates(node), vec![north, south]);
     }
 
     // Mutation: also process a node whose port sides are free, or a dummy node.
@@ -812,7 +789,7 @@ mod tests {
 
         assert_eq!(layer(&graph, 1), vec![free, long_edge]);
         assert_eq!(graph.layerless_nodes.len(), 3);
-        assert_eq!(graph.layerless_nodes[free].in_layer_layout_unit, None);
+        assert_eq!(graph.in_layer_layout_unit(free), None);
     }
 
     // Mutation: use the index of the first node for every node of the layer, so that the dummies
@@ -855,10 +832,7 @@ mod tests {
             for port in [0, 1] {
                 let dummy = dummy_of(&graph, node, port);
                 assert_eq!(graph.layerless_nodes[dummy].layer_index(), Some(1));
-                assert_eq!(
-                    graph.layerless_nodes[dummy].in_layer_layout_unit,
-                    Some(node)
-                );
+                assert_eq!(graph.in_layer_layout_unit(dummy), Some(node));
             }
         }
     }

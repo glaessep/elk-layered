@@ -16,8 +16,8 @@ use crate::compound::{
 use crate::graph::{
     CompoundEdgeSegment, EdgeId, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge,
     HierarchyStep, LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId,
-    PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
-    is_across_flow, port_box, port_side_from_direction,
+    PortId, PortRef, PortSide, PortType, SelfLoopOptions, apply_port_index_to_dummy,
+    create_external_port_dummy, is_across_flow, port_box, port_side_from_direction,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
@@ -1379,12 +1379,14 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     }
     lnode.node_label_placement = node.node_label_placement;
     lnode.node_size = node.node_size;
-    lnode.self_loop_distribution = node.self_loop_distribution;
-    lnode.self_loop_ordering = node.self_loop_ordering;
     lnode.node_flexibility = node.node_flexibility;
     lnode.ports_surrounding = node.ports_surrounding;
     let node_size = lnode.size;
     let node_index = graph.push_node_with(|_| lnode);
+    *graph.self_loop_options.row_mut(node_index) = SelfLoopOptions {
+        distribution: node.self_loop_distribution,
+        ordering: node.self_loop_ordering,
+    };
 
     // A port gets a model order when its node does: `needsModelOrder` asks about the node's
     // parent, which also decides the node's own order.
@@ -2592,6 +2594,38 @@ mod tests {
             detect_parent_cycles(&input, &node_order),
             Err(ImportError::ParentCycle { node_id }) if node_id == "A"
         ));
+    }
+
+    // Mutation: in `transform_node`, write the self loop options of every node to the row of node 0.
+    #[test]
+    fn import_records_the_self_loop_options_of_each_node() {
+        let mut first = node("A");
+        first.self_loop_distribution = crate::options::SelfLoopDistributionStrategy::Equally;
+        first.self_loop_ordering = crate::options::SelfLoopOrderingStrategy::ReverseStacked;
+        let mut second = node("B");
+        second.self_loop_distribution = crate::options::SelfLoopDistributionStrategy::North;
+        second.self_loop_ordering = crate::options::SelfLoopOrderingStrategy::Sequenced;
+        let imported = import_graph(&graph(vec![first, second], vec![])).unwrap();
+
+        let root = imported.root();
+        let options = |name: &str| root.self_loop_options.get(root.node_named(name)).unwrap();
+
+        assert_eq!(
+            options("A").distribution,
+            crate::options::SelfLoopDistributionStrategy::Equally
+        );
+        assert_eq!(
+            options("A").ordering,
+            crate::options::SelfLoopOrderingStrategy::ReverseStacked
+        );
+        assert_eq!(
+            options("B").distribution,
+            crate::options::SelfLoopDistributionStrategy::North
+        );
+        assert_eq!(
+            options("B").ordering,
+            crate::options::SelfLoopOrderingStrategy::Sequenced
+        );
     }
 
     #[test]

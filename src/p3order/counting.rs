@@ -309,12 +309,13 @@ impl CrossingsCounter {
 
         for &current in nodes {
             let node = &graph.layerless_nodes[current];
-            if is_layout_unit_changed(last_layout_unit, current, node.in_layer_layout_unit) {
+            let layout_unit = graph.in_layer_layout_unit(current);
+            if is_layout_unit_changed(last_layout_unit, current, layout_unit) {
                 // Work the stack, which is full of southern dummies.
                 index = self.empty_stack(graph, &mut stack, &mut ports, STACK_SIDE, index);
             }
-            if node.in_layer_layout_unit.is_some() {
-                last_layout_unit = node.in_layer_layout_unit;
+            if layout_unit.is_some() {
+                last_layout_unit = layout_unit;
             }
 
             match node.kind() {

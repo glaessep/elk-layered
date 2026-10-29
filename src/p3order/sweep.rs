@@ -1500,7 +1500,7 @@ impl BarycenterHeuristic {
             .iter()
             .flat_map(|layer| layer.nodes().iter().copied())
         {
-            if let Some(unit) = graph.layerless_nodes[node].in_layer_layout_unit {
+            if let Some(unit) = graph.in_layer_layout_unit(node) {
                 layout_units.entry(unit).or_default().push(node);
             }
         }
@@ -1722,7 +1722,7 @@ impl BarycenterHeuristic {
             }
         }
 
-        for associate in graph.layerless_nodes[node].barycenter_associates.clone() {
+        for associate in graph.barycenter_associates(node).to_vec() {
             if graph.layerless_nodes[associate].layer_index()
                 == graph.layerless_nodes[node].layer_index()
             {
@@ -1939,7 +1939,7 @@ fn build_forster_constraints_graph(
             continue;
         }
 
-        for successor in &graph.layerless_nodes[node].in_layer_successor_constraints {
+        for successor in graph.in_layer_successor_constraints(node) {
             if only_between_normal_nodes
                 && graph.layerless_nodes[*successor].kind() != LNodeKind::Normal
             {
@@ -3953,8 +3953,8 @@ fn are_normal_and_north_south_port_dummy(
 
 /// `SwitchDecider.haveSuccessorConstraints`.
 fn have_successor_constraints(graph: &LGraph, upper_node: NodeId, lower_node: NodeId) -> bool {
-    graph.layerless_nodes[upper_node]
-        .in_layer_successor_constraints
+    graph
+        .in_layer_successor_constraints(upper_node)
         .contains(&lower_node)
 }
 
@@ -3965,8 +3965,8 @@ fn have_layout_unit_constraints(graph: &LGraph, upper_node: NodeId, lower_node: 
 
     // If the nodes are part of a layout unit with more nodes than themselves, the layout units
     // must be equal for a switch to be allowed.
-    let upper_layout_unit = graph.layerless_nodes[upper_node].in_layer_layout_unit;
-    let lower_layout_unit = graph.layerless_nodes[lower_node].in_layer_layout_unit;
+    let upper_layout_unit = graph.in_layer_layout_unit(upper_node);
+    let lower_layout_unit = graph.in_layer_layout_unit(lower_node);
     let are_in_different_layout_units = upper_layout_unit != lower_layout_unit;
 
     let part_of_multi_node_layout_unit =
@@ -5423,9 +5423,7 @@ mod tests {
         let c = graph.node_named("C");
         graph.set_layer_nodes(0, vec![c]);
         graph.set_layer_nodes(1, vec![b, a]);
-        graph.layerless_nodes[a]
-            .in_layer_successor_constraints
-            .push(b);
+        graph.in_layer.row_mut(a).successor_constraints.push(b);
 
         let mut order = graph
             .layers()
@@ -5703,8 +5701,10 @@ mod north_south_tests {
         // to a dummy that has no layout unit and no constraint.
         let first = add_node(&mut graph, "first", 1, &[]);
         let second = add_node(&mut graph, "second", 1, &[]);
-        graph.layerless_nodes[first]
-            .in_layer_successor_constraints
+        graph
+            .in_layer
+            .row_mut(first)
+            .successor_constraints
             .push(second);
         let plain = add_node(&mut graph, "plain", 1, &[]);
         let bare_dummy = add_node(&mut graph, "bare", 1, &[]);

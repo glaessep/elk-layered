@@ -147,7 +147,7 @@ fn correct_north_south_port_sides(graph: &mut LGraph) {
                 continue;
             }
             // The node the dummy was made for is in its layout unit, in the same layer.
-            let Some(origin) = graph.layerless_nodes[dummy].in_layer_layout_unit else {
+            let Some(origin) = graph.in_layer_layout_unit(dummy) else {
                 continue;
             };
             // `position` and `origin_position` are the final places in the layer. Java compares

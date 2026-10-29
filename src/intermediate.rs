@@ -3816,8 +3816,10 @@ fn process_east_west_hierarchical_port_constraints_for_layer(
         }
 
         if let Some(previous) = last_hierarchical_dummy {
-            graph.layerless_nodes[previous]
-                .in_layer_successor_constraints
+            graph
+                .in_layer
+                .row_mut(previous)
+                .successor_constraints
                 .push(node);
         }
         last_hierarchical_dummy = Some(node);
@@ -4009,13 +4011,19 @@ fn create_hierarchical_port_replacement_dummy(
         replacement.node_label_placement = original.node_label_placement;
         replacement.model_order = original.model_order;
         replacement.layer_constraint = original.layer_constraint;
-        replacement.in_layer_successor_constraints = original.in_layer_successor_constraints;
         replacement.layer_constraint_explicit = original.layer_constraint_explicit;
         replacement.compound = original.compound;
         replacement.port_constraints = PortConstraints::FixedPos;
         replacement.node_alignment = Alignment::Center;
         replacement
     });
+    // The replacement takes over the successors of the dummy it stands in for.
+    let successor_constraints = graph
+        .in_layer_successor_constraints(original_dummy)
+        .to_vec();
+    if !successor_constraints.is_empty() {
+        graph.in_layer.row_mut(node_index).successor_constraints = successor_constraints;
+    }
 
     let input = graph
         .add_port(
@@ -5583,14 +5591,10 @@ mod tests {
         process_hierarchical_port_constraints(&mut graph);
 
         assert_eq!(
-            graph.layerless_nodes[west_early].in_layer_successor_constraints,
+            graph.in_layer_successor_constraints(west_early),
             vec![west_late]
         );
-        assert!(
-            graph.layerless_nodes[west_late]
-                .in_layer_successor_constraints
-                .is_empty()
-        );
+        assert!(graph.in_layer_successor_constraints(west_late).is_empty());
     }
 
     #[test]
@@ -5768,6 +5772,8 @@ mod tests {
         assert_eq!(graph.edges[outgoing_to_north].target().port, PortId::new(0));
     }
 
+    // Mutation: in `create_hierarchical_port_replacement_dummy`, leave out the copy of the
+    // successor constraints to the replacement dummy.
     #[test]
     fn hierarchical_port_constraint_processor_copies_replacement_dummy_metadata() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
@@ -5791,6 +5797,12 @@ mod tests {
             .unwrap()
             .in_layer_constraint = InLayerConstraint::Top;
 
+        graph
+            .in_layer
+            .row_mut(north)
+            .successor_constraints
+            .push(target);
+
         graph.set_node_layer(north, 0);
         graph.set_node_layer(target, 0);
         add_test_edge(&mut graph, "north-target", north, 0, target, 0);
@@ -5808,6 +5820,7 @@ mod tests {
             })
             .unwrap();
         let node = &graph.layerless_nodes[replacement];
+        assert_eq!(graph.in_layer_successor_constraints(replacement), [target]);
         assert_eq!(node.external_port().unwrap().ratio_or_position, 0.42);
         assert_eq!(node.external_port().unwrap().origin_port, Some(origin));
         assert_eq!(node.model_order, Some(17));
