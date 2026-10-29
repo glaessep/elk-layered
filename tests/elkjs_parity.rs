@@ -516,6 +516,11 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 76. In `CrossingMatrixFiller::new` (src/p3order/sweep.rs), never count one side only
 //    (`one_sided: false`): 150 cases, 148 of random-one-sided, such as random-one-sided/r000,
 //    and the two cases above.
+// 77. In `AdjacencyList::new` (src/p3order/sweep.rs), walk the ports of the side in reverse
+//    (`ports_in_north_south_east_west_order(..).into_iter().rev()`): 1 case,
+//    greedy-switch-one-sided-port-order. Its node n1 has two free ports with edges to one port of
+//    the next layer, so the order of collection decides which entries merge.
+// 78. In the same function, walk the edges of each port in reverse: the same 1 case.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
