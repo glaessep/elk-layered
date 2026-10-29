@@ -894,8 +894,7 @@ impl GraphPortIndex {
     fn new(graph: &LGraph) -> Self {
         let mut nodes = HashMap::with_capacity(graph.layerless_nodes.len());
         let mut ports = HashMap::new();
-        for node in graph.node_ids() {
-            let data = &graph.layerless_nodes[node];
+        for (node, data) in graph.nodes_with_ids() {
             nodes.entry(data.id.clone()).or_insert(node);
             for (port, data) in data.ports.iter_with_ids() {
                 for &port_type in lookup_types(data) {

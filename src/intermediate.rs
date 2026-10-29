@@ -1326,8 +1326,7 @@ fn port_exists_in_graph(graph: &LGraph, port_ref: PortRef) -> bool {
 
 fn index_all_incoming_edges(graph: &LGraph) -> HashMap<EdgeId, (PortRef, usize)> {
     let mut positions = HashMap::with_capacity(graph.edges.len());
-    for node_index in graph.node_ids() {
-        let node = &graph.layerless_nodes[node_index];
+    for (node_index, node) in graph.nodes_with_ids() {
         for (port_index, port) in node.ports.iter_with_ids() {
             let target = PortRef {
                 node: node_index,
