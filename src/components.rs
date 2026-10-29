@@ -344,7 +344,7 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
         }
         map_labels(&mut edge.labels, edges)?;
     }
-    for layer in &mut graph.layers {
+    for layer in graph.layers_mut() {
         layer.map_nodes(|node| map_id(nodes, node, "layer node"))?;
     }
     map_list(&mut graph.hidden_nodes, nodes, "hidden node")?;
@@ -606,7 +606,7 @@ pub(crate) fn combine(
     let target = graphs.root_mut();
     target.layerless_nodes = layerless_nodes.into();
     target.edges = edges.into();
-    target.layers.clear();
+    target.clear_layers();
     target.hidden_nodes = hidden;
     target.replaced_external_port_dummies = replaced;
     target.self_loop_holders = self_loops;

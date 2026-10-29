@@ -35,7 +35,9 @@ pub struct LGraph {
     pub padding: LPadding,
     pub offset: LPoint,
     pub layerless_nodes: IdVec<NodeId, LNode>,
-    pub layers: Vec<Layer>,
+    /// Private: only the methods below add, remove or reorder layers, so `LNode::layer_index`
+    /// and each layer's list stay in step.
+    layers: Vec<Layer>,
     pub edges: IdVec<EdgeId, LayeredEdge>,
     pub graph_properties: GraphProperties,
     pub cyclic: bool,
@@ -177,7 +179,8 @@ pub struct LNode {
     pub nested_graph: Option<GraphId>,
     pub model_order: Option<usize>,
     pub component_priority: i32,
-    pub layer_index: Option<usize>,
+    /// The layer the node sits in. Private: `LGraph` sets it together with the layer's list.
+    layer_index: Option<usize>,
     pub layer_constraint: super::options::LayerConstraint,
     pub node_alignment: Alignment,
     pub port_constraints: PortConstraints,
@@ -209,6 +212,11 @@ pub struct LNode {
 }
 
 impl LNode {
+    /// The index of the layer the node sits in, or `None` while it is layerless.
+    pub fn layer_index(&self) -> Option<usize> {
+        self.layer_index
+    }
+
     pub fn new(id: impl Into<String>, width: f64, height: f64, model_order: Option<usize>) -> Self {
         Self {
             id: id.into(),
@@ -813,6 +821,22 @@ impl LGraph {
             port.node = id;
         }
         self.layerless_nodes.push(node)
+    }
+
+    /// The layers, left to right.
+    pub fn layers(&self) -> &[Layer] {
+        &self.layers
+    }
+
+    /// The layers, for a phase that sets a layer's size. It cannot reach a layer's node list.
+    pub(crate) fn layers_mut(&mut self) -> &mut [Layer] {
+        &mut self.layers
+    }
+
+    /// Adds an empty layer at the right end and returns its index.
+    pub fn push_layer(&mut self) -> usize {
+        self.layers.push(Layer::new());
+        self.layers.len() - 1
     }
 
     pub fn clear_layers(&mut self) {

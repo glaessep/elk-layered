@@ -25,13 +25,13 @@ use crate::options::PortConstraints;
 /// in its layer, and one per connected south port goes below. The edges of the port move to the
 /// dummy, so the layering and the crossing minimization see edges along the flow.
 pub fn preprocess_north_south_ports(graph: &mut LGraph) {
-    for layer_index in 0..graph.layers.len() {
+    for layer_index in 0..graph.layers().len() {
         // The index of the current node while the north ports are processed, and the index of the
         // dummy placed last while the south ports are processed.
         let mut pointer: isize = -1;
 
         // A copy, because the loop inserts dummies into the layer.
-        let node_array = graph.layers[layer_index].nodes().to_vec();
+        let node_array = graph.layers()[layer_index].nodes().to_vec();
         for node in node_array {
             pointer += 1;
 
@@ -300,9 +300,9 @@ fn push_dummy_port(
 /// Each edge gets a bend point at the height of the dummy, above or below the node, straight
 /// over or under the port.
 pub fn postprocess_north_south_ports(graph: &mut LGraph) {
-    for layer_index in 0..graph.layers.len() {
+    for layer_index in 0..graph.layers().len() {
         // A copy, because the loop takes nodes out of the layer.
-        let node_array = graph.layers[layer_index].nodes().to_vec();
+        let node_array = graph.layers()[layer_index].nodes().to_vec();
         for node in node_array {
             if graph.layerless_nodes[node].kind != LNodeKind::NorthSouthPort {
                 continue;
@@ -480,7 +480,7 @@ mod tests {
     }
 
     fn layer(graph: &LGraph, index: usize) -> Vec<NodeId> {
-        graph.layers[index].nodes().to_vec()
+        graph.layers()[index].nodes().to_vec()
     }
 
     fn dummy_of(graph: &LGraph, node: NodeId, port: usize) -> NodeId {
@@ -869,7 +869,7 @@ mod tests {
         for node in [first, second] {
             for port in [0, 1] {
                 let dummy = dummy_of(&graph, node, port);
-                assert_eq!(graph.layerless_nodes[dummy].layer_index, Some(1));
+                assert_eq!(graph.layerless_nodes[dummy].layer_index(), Some(1));
                 assert_eq!(
                     graph.layerless_nodes[dummy].in_layer_layout_unit,
                     Some(node)
@@ -930,7 +930,7 @@ mod tests {
             edges
         );
         assert_eq!(layer(&graph, 1), vec![node]);
-        assert_eq!(graph.layerless_nodes[dummy].layer_index, None);
+        assert_eq!(graph.layerless_nodes[dummy].layer_index(), None);
     }
 
     // Mutation: add the new bend point last instead of first.

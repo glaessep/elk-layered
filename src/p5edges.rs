@@ -17,15 +17,15 @@ pub fn route_edges_orthogonal(graph: &mut LGraph) {
     let mut xpos = 0.0;
     let mut left_layer_nodes: Option<Vec<NodeId>> = None;
 
-    for layer_index in 0..=graph.layers.len() {
+    for layer_index in 0..=graph.layers().len() {
         let right_layer_nodes = graph
-            .layers
+            .layers()
             .get(layer_index)
             .map(|layer| layer.nodes().to_vec());
 
         if let Some(nodes) = left_layer_nodes.as_ref() {
             place_nodes_horizontally(graph, nodes, xpos);
-            xpos += graph.layers[layer_index - 1].size.width;
+            xpos += graph.layers()[layer_index - 1].size.width;
         }
 
         let start_pos = if left_layer_nodes.is_none() {
@@ -94,9 +94,9 @@ fn place_nodes_horizontally(graph: &mut LGraph, nodes: &[NodeId], xoffset: f64) 
         .fold(0.0, f64::max);
     let layer_width = nodes
         .iter()
-        .filter_map(|node| graph.layerless_nodes[*node].layer_index)
+        .filter_map(|node| graph.layerless_nodes[*node].layer_index())
         .next()
-        .and_then(|layer| graph.layers.get(layer))
+        .and_then(|layer| graph.layers().get(layer))
         .map(|layer| layer.size.width)
         .unwrap_or(0.0);
 
@@ -179,8 +179,8 @@ mod tests {
         graph.layerless_nodes.push(target_node);
         graph.set_node_layer(source, 0);
         graph.set_node_layer(target, 1);
-        graph.layers[0].size.width = 40.0;
-        graph.layers[1].size.width = 40.0;
+        graph.layers_mut()[0].size.width = 40.0;
+        graph.layers_mut()[1].size.width = 40.0;
 
         let source_port = graph
             .add_port(
@@ -242,8 +242,8 @@ mod tests {
             .push(LNode::new("narrow", 20.0, 20.0, Some(1)));
         graph.set_node_layer(wide, 0);
         graph.set_node_layer(narrow, 1);
-        graph.layers[0].size.width = 80.0;
-        graph.layers[1].size.width = 80.0;
+        graph.layers_mut()[0].size.width = 80.0;
+        graph.layers_mut()[1].size.width = 80.0;
 
         route_edges_orthogonal(&mut graph);
 

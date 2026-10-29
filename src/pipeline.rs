@@ -1041,15 +1041,7 @@ fn execute_processor(
 }
 
 fn resize_hierarchical_node_graph(graph: &mut LGraph) -> PipelineResult<()> {
-    let layered_nodes = graph
-        .layers
-        .iter()
-        .flat_map(|layer| layer.nodes().iter().copied())
-        .collect::<Vec<_>>();
-    for node in layered_nodes {
-        graph.layerless_nodes[node].layer_index = None;
-    }
-    graph.layers.clear();
+    graph.clear_layers();
     resize_graph_to_minimum(graph)
 }
 
@@ -2801,7 +2793,7 @@ mod tests {
         assert!(executed.contains(&ProcessorKind::LabelDummyRemover));
         assert!(
             !graph
-                .layers
+                .layers()
                 .iter()
                 .flat_map(|layer| layer.nodes().iter().copied())
                 .any(|node| graph.layerless_nodes[node].kind == crate::graph::LNodeKind::Label)
@@ -3130,12 +3122,12 @@ mod tests {
             executed.last(),
             Some(&ProcessorKind::DirectionPostprocessor)
         );
-        assert!(graph.layers.is_empty());
+        assert!(graph.layers().is_empty());
         assert!(
             graph
                 .layerless_nodes
                 .iter()
-                .all(|node| node.layer_index.is_none())
+                .all(|node| node.layer_index().is_none())
         );
         assert!(graph.size.height > 0.0);
         assert!(graph.size.width > 0.0);
@@ -3189,7 +3181,7 @@ mod tests {
         let nested = &graph[cluster.nested_graph.unwrap()];
         assert!(cluster.size.width >= nested.size.width);
         assert!(cluster.size.height >= nested.size.height);
-        assert!(nested.layers.is_empty());
+        assert!(nested.layers().is_empty());
     }
 
     #[test]
@@ -3235,7 +3227,7 @@ mod tests {
             .unwrap();
         assert!(cluster.size.width > 1.0);
         assert!(cluster.size.height > 1.0);
-        assert!(graph[cluster.nested_graph.unwrap()].layers.is_empty());
+        assert!(graph[cluster.nested_graph.unwrap()].layers().is_empty());
     }
 
     #[test]
@@ -3260,7 +3252,7 @@ mod tests {
                 .layerless_nodes
                 .iter()
                 .filter(|node| node.kind == crate::graph::LNodeKind::ExternalPort)
-                .all(|node| node.layer_index.is_none())
+                .all(|node| node.layer_index().is_none())
         );
         assert!(graph.size.width > 0.0);
         assert!(graph.size.height > 0.0);

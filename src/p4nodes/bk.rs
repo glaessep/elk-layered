@@ -17,7 +17,7 @@ use crate::options::{EdgeStraighteningStrategy, FixedAlignment};
 const MIN_LAYERS_FOR_CONFLICTS: usize = 3;
 
 pub fn place_nodes_brandes_koepf(graph: &mut LGraph) {
-    if graph.layers.is_empty() {
+    if graph.layers().is_empty() {
         return;
     }
 
@@ -105,7 +105,7 @@ impl BKAlignedLayout {
             max - min
         } else {
             graph
-                .layers
+                .layers()
                 .iter()
                 .flat_map(|layer| layer.nodes().iter().copied())
                 .map(|node| graph.layerless_nodes[node].size.height)
@@ -133,14 +133,14 @@ struct NeighborhoodInformation {
 
 impl NeighborhoodInformation {
     fn build_for(graph: &LGraph) -> Self {
-        let node_count = graph.layers.iter().map(|layer| layer.nodes().len()).sum();
+        let node_count = graph.layers().iter().map(|layer| layer.nodes().len()).sum();
         let mut node_id = IdVec::filled(graph.layerless_nodes.len(), usize::MAX);
         let mut id_to_node = Vec::with_capacity(node_count);
-        let mut layer_index = vec![usize::MAX; graph.layers.len()];
+        let mut layer_index = vec![usize::MAX; graph.layers().len()];
         let mut node_index = vec![usize::MAX; node_count];
 
         let mut next_id = 0usize;
-        for (layer_idx, layer) in graph.layers.iter().enumerate() {
+        for (layer_idx, layer) in graph.layers().iter().enumerate() {
             layer_index[layer_idx] = layer_idx;
             for (node_idx, node) in layer.nodes().iter().copied().enumerate() {
                 node_id[node] = next_id;
@@ -262,20 +262,20 @@ fn layouts_for_fixed_alignment(
 }
 
 fn mark_conflicts(graph: &LGraph, ni: &NeighborhoodInformation) -> HashSet<EdgeId> {
-    let number_of_layers = graph.layers.len();
+    let number_of_layers = graph.layers().len();
     let mut marked_edges = HashSet::new();
     if number_of_layers < MIN_LAYERS_FOR_CONFLICTS {
         return marked_edges;
     }
 
     let layer_sizes = graph
-        .layers
+        .layers()
         .iter()
         .map(|layer| layer.nodes().len())
         .collect::<Vec<_>>();
 
     for i in 1..number_of_layers - 1 {
-        let current_layer = &graph.layers[i + 1];
+        let current_layer = &graph.layers()[i + 1];
         let mut k_0 = 0usize;
         let mut l = 0usize;
 
@@ -326,8 +326,8 @@ fn incident_to_inner_segment(
     for edge in graph.node_incoming_edges(node) {
         let source = graph.edges[edge].source.node;
         if graph.layerless_nodes[source].kind == LNodeKind::LongEdge
-            && graph.layerless_nodes[source].layer_index == Some(layer2)
-            && graph.layerless_nodes[node].layer_index == Some(layer1)
+            && graph.layerless_nodes[source].layer_index() == Some(layer2)
+            && graph.layerless_nodes[node].layer_index() == Some(layer1)
             && ni.layer_index.get(layer2).copied() == Some(layer2)
         {
             return true;
@@ -352,12 +352,12 @@ fn vertical_alignment(
     }
 
     let layer_iter: Box<dyn Iterator<Item = usize>> = match layout.hdir {
-        HDirection::Left => Box::new((0..graph.layers.len()).rev()),
-        HDirection::Right => Box::new(0..graph.layers.len()),
+        HDirection::Left => Box::new((0..graph.layers().len()).rev()),
+        HDirection::Right => Box::new(0..graph.layers().len()),
     };
 
     for layer_index in layer_iter {
-        let layer = &graph.layers[layer_index];
+        let layer = &graph.layers()[layer_index];
         let mut r = match layout.vdir {
             VDirection::Up => isize::MAX,
             VDirection::Down => -1,
@@ -479,7 +479,7 @@ fn horizontal_compaction(
     let mut threshold = ThresholdStrategy::for_graph(graph);
 
     for layer_index in layers {
-        let nodes = node_order_for_direction(graph.layers[layer_index].nodes(), layout.vdir);
+        let nodes = node_order_for_direction(graph.layers()[layer_index].nodes(), layout.vdir);
         for v in nodes {
             let id = ni.node_id[v];
             if layout.root[id] == id {
@@ -492,7 +492,7 @@ fn horizontal_compaction(
 
     let layers = layer_indices(graph, layout.hdir);
     for layer_index in layers {
-        for v in graph.layers[layer_index].nodes() {
+        for v in graph.layers()[layer_index].nodes() {
             let id = ni.node_id[*v];
             let root = layout.root[id];
             layout.y[id] = layout.y[root];
@@ -536,8 +536,8 @@ fn place_block(
     loop {
         let current_node = ni.id_to_node[current];
         let current_index = ni.node_index[current];
-        let current_layer_size = graph.layers
-            [graph.layerless_nodes[current_node].layer_index.unwrap()]
+        let current_layer_size = graph.layers()
+            [graph.layerless_nodes[current_node].layer_index().unwrap()]
         .nodes()
         .len();
 
@@ -547,7 +547,7 @@ fn place_block(
         };
 
         if needs_neighbor {
-            let layer = &graph.layers[graph.layerless_nodes[current_node].layer_index.unwrap()];
+            let layer = &graph.layers()[graph.layerless_nodes[current_node].layer_index().unwrap()];
             let neighbor_node = match layout.vdir {
                 VDirection::Up => layer.nodes()[current_index + 1],
                 VDirection::Down => layer.nodes()[current_index - 1],
@@ -1116,7 +1116,7 @@ fn check_order_constraint(
     ni: &NeighborhoodInformation,
     layout: &BKAlignedLayout,
 ) -> bool {
-    for layer in &graph.layers {
+    for layer in graph.layers() {
         let mut pos = f64::NEG_INFINITY;
         for node in layer.nodes() {
             let id = ni.node_id[*node];
@@ -1149,8 +1149,8 @@ fn apply_layout(graph: &mut LGraph, ni: &NeighborhoodInformation, layout: &BKAli
 
 fn layer_indices(graph: &LGraph, hdir: HDirection) -> Vec<usize> {
     match hdir {
-        HDirection::Left => (0..graph.layers.len()).rev().collect(),
-        HDirection::Right => (0..graph.layers.len()).collect(),
+        HDirection::Left => (0..graph.layers().len()).rev().collect(),
+        HDirection::Right => (0..graph.layers().len()).collect(),
     }
 }
 
@@ -1332,16 +1332,16 @@ fn max_y(
 }
 
 fn lower_neighbor(graph: &LGraph, ni: &NeighborhoodInformation, node: NodeId) -> Option<NodeId> {
-    let layer = graph.layerless_nodes[node].layer_index?;
+    let layer = graph.layerless_nodes[node].layer_index()?;
     let index = ni.node_index[ni.node_id[node]];
-    graph.layers[layer].nodes().get(index + 1).copied()
+    graph.layers()[layer].nodes().get(index + 1).copied()
 }
 
 fn upper_neighbor(graph: &LGraph, ni: &NeighborhoodInformation, node: NodeId) -> Option<NodeId> {
-    let layer = graph.layerless_nodes[node].layer_index?;
+    let layer = graph.layerless_nodes[node].layer_index()?;
     let index = ni.node_index[ni.node_id[node]];
     if index > 0 {
-        graph.layers[layer].nodes().get(index - 1).copied()
+        graph.layers()[layer].nodes().get(index - 1).copied()
     } else {
         None
     }
@@ -1367,8 +1367,8 @@ fn is_self_loop_or_in_layer_edge(graph: &LGraph, edge: EdgeId) -> bool {
 }
 
 fn is_in_layer_edge(graph: &LGraph, edge: &LayeredEdge) -> bool {
-    graph.layerless_nodes[edge.source.node].layer_index
-        == graph.layerless_nodes[edge.target.node].layer_index
+    graph.layerless_nodes[edge.source.node].layer_index()
+        == graph.layerless_nodes[edge.target.node].layer_index()
 }
 
 fn is_in_layer_edge_index(graph: &LGraph, edge: EdgeId) -> bool {
@@ -1443,8 +1443,8 @@ mod tests {
         run_processors_until_phase(&mut graph, LayeredPhase::P4NodePlacement).unwrap();
 
         // Every layer must keep its nodes apart in y, margins included.
-        assert!(!graph.layers.is_empty());
-        for layer in &graph.layers {
+        assert!(!graph.layers().is_empty());
+        for layer in graph.layers() {
             let mut bottom = f64::NEG_INFINITY;
             for node in layer.nodes() {
                 let lnode = &graph.layerless_nodes[*node];

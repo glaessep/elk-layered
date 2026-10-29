@@ -2245,8 +2245,8 @@ mod tests {
     #[test]
     fn route_edges_west_to_east_writes_orthogonal_bendpoints_for_non_straight_edge() {
         let mut graph = route_test_graph(0.0, 30.0);
-        let left = graph.layers[0].nodes().to_vec();
-        let right = graph.layers[1].nodes().to_vec();
+        let left = graph.layers()[0].nodes().to_vec();
+        let right = graph.layers()[1].nodes().to_vec();
 
         let slots = route_edges_west_to_east(&mut graph, Some(&left), Some(&right), 50.0, 10.0);
 
@@ -2262,8 +2262,8 @@ mod tests {
         let mut graph = route_test_graph(0.0, 30.0);
         let source_port = graph.edges[EdgeId::new(0)].source;
         graph.layerless_nodes[source_port.node].ports[source_port.port].port_type = PortType::Input;
-        let left = graph.layers[0].nodes().to_vec();
-        let right = graph.layers[1].nodes().to_vec();
+        let left = graph.layers()[0].nodes().to_vec();
+        let right = graph.layers()[1].nodes().to_vec();
 
         let slots = route_edges_west_to_east(&mut graph, Some(&left), Some(&right), 50.0, 10.0);
 
@@ -2277,8 +2277,8 @@ mod tests {
     #[test]
     fn route_edges_west_to_east_leaves_straight_edge_without_bendpoints() {
         let mut graph = route_test_graph(0.0, -10.0);
-        let left = graph.layers[0].nodes().to_vec();
-        let right = graph.layers[1].nodes().to_vec();
+        let left = graph.layers()[0].nodes().to_vec();
+        let right = graph.layers()[1].nodes().to_vec();
 
         let slots = route_edges_west_to_east(&mut graph, Some(&left), Some(&right), 50.0, 10.0);
 
@@ -2289,8 +2289,8 @@ mod tests {
     #[test]
     fn route_edges_north_to_south_writes_orthogonal_bendpoints_for_non_straight_edge() {
         let mut graph = vertical_route_test_graph(0.0, 30.0, PortSide::South);
-        let source = graph.layers[0].nodes().to_vec();
-        let target = graph.layers[1].nodes().to_vec();
+        let source = graph.layers()[0].nodes().to_vec();
+        let target = graph.layers()[1].nodes().to_vec();
 
         let slots = route_edges(
             &mut graph,
@@ -2311,8 +2311,8 @@ mod tests {
     #[test]
     fn route_edges_south_to_north_writes_orthogonal_bendpoints_for_non_straight_edge() {
         let mut graph = vertical_route_test_graph(0.0, 30.0, PortSide::North);
-        let source = graph.layers[0].nodes().to_vec();
-        let target = graph.layers[1].nodes().to_vec();
+        let source = graph.layers()[0].nodes().to_vec();
+        let target = graph.layers()[1].nodes().to_vec();
 
         let slots = route_edges(
             &mut graph,

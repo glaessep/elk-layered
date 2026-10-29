@@ -107,7 +107,7 @@ pub(crate) fn layer_with_strategy(
     };
     graph.clear_layers();
     for nodes in layers {
-        let index = graph.layers.len();
+        let index = graph.layers().len();
         graph.set_layer_nodes(index, nodes);
     }
     Ok(())
@@ -160,7 +160,7 @@ pub fn layer_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexErr
         if connected_components.len() > 1 {
             previous_layering_node_counts = Some(
                 graph
-                    .layers
+                    .layers()
                     .iter()
                     .map(|layer| layer.nodes().len())
                     .collect(),
@@ -346,7 +346,7 @@ mod tests {
 
         layer_network_simplex(&mut graph).unwrap();
 
-        assert_eq!(graph.layers.len(), 3);
+        assert_eq!(graph.layers().len(), 3);
         assert_layer_order(&graph, "A", "B");
         assert_layer_order(&graph, "B", "C");
     }
@@ -374,7 +374,7 @@ mod tests {
 
         assert_layer_order(&graph, "A", "B");
         assert_layer_order(&graph, "C", "D");
-        assert_eq!(graph.layers[0].nodes().len(), 2);
+        assert_eq!(graph.layers()[0].nodes().len(), 2);
     }
 
     #[test]
@@ -395,8 +395,12 @@ mod tests {
             if edge.source.node == edge.target.node {
                 continue;
             }
-            let source_layer = graph.layerless_nodes[edge.source.node].layer_index.unwrap();
-            let target_layer = graph.layerless_nodes[edge.target.node].layer_index.unwrap();
+            let source_layer = graph.layerless_nodes[edge.source.node]
+                .layer_index()
+                .unwrap();
+            let target_layer = graph.layerless_nodes[edge.target.node]
+                .layer_index()
+                .unwrap();
             assert!(
                 target_layer > source_layer,
                 "edge {} should point from an earlier layer to a later layer",
@@ -416,6 +420,6 @@ mod tests {
             .iter()
             .find(|node| node.id == target)
             .unwrap();
-        assert!(target.layer_index.unwrap() > source.layer_index.unwrap());
+        assert!(target.layer_index().unwrap() > source.layer_index().unwrap());
     }
 }

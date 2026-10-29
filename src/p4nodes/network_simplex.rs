@@ -30,7 +30,7 @@ struct Auxiliary {
 
 pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexError> {
     let order: Vec<_> = graph
-        .layers
+        .layers()
         .iter()
         .flat_map(|layer| layer.nodes().iter().copied())
         .filter(|node| !graph.layerless_nodes[*node].hidden)
@@ -62,7 +62,7 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
             .collect(),
         edges: IdVec::filled(graph.edges.len(), None),
     };
-    for layer in &graph.layers {
+    for layer in graph.layers() {
         let mut previous: Option<NodeId> = None;
         for &node in layer.nodes() {
             if graph.layerless_nodes[node].hidden {
@@ -302,8 +302,8 @@ fn transform_ports(
 fn handled_edge(graph: &LGraph, edge: EdgeId) -> bool {
     let data = &graph.edges[edge];
     data.source.node != data.target.node
-        && graph.layerless_nodes[data.source.node].layer_index
-            != graph.layerless_nodes[data.target.node].layer_index
+        && graph.layerless_nodes[data.source.node].layer_index()
+            != graph.layerless_nodes[data.target.node].layer_index()
 }
 
 fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[NodeId]) {
@@ -331,7 +331,7 @@ fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[Nod
         }
     }
     let mut position = IdVec::filled(graph.layerless_nodes.len(), 0);
-    for layer in &graph.layers {
+    for layer in graph.layers() {
         for (index, &node) in layer.nodes().iter().enumerate() {
             position[node] = index;
         }
@@ -343,8 +343,8 @@ fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[Nod
         for edge in graph.node_connected_edges(node) {
             let edge = &graph.edges[edge];
             if edge.source.node == edge.target.node
-                || graph.layerless_nodes[edge.source.node].layer_index
-                    != graph.layerless_nodes[edge.target.node].layer_index
+                || graph.layerless_nodes[edge.source.node].layer_index()
+                    != graph.layerless_nodes[edge.target.node].layer_index()
             {
                 continue;
             }
@@ -504,7 +504,7 @@ fn prefer_straight_edges(
 
 fn mark_crossings(graph: &LGraph) -> IdVec<EdgeId, bool> {
     let mut crossing = IdVec::filled(graph.edges.len(), false);
-    for (layer_index, layers) in graph.layers.windows(2).enumerate() {
+    for (layer_index, layers) in graph.layers().windows(2).enumerate() {
         let mut open = Vec::new();
         for &node in layers[0].nodes() {
             for port in graph.layerless_nodes[node]
@@ -514,7 +514,7 @@ fn mark_crossings(graph: &LGraph) -> IdVec<EdgeId, bool> {
             {
                 open.extend(port.outgoing_edges.iter().copied().filter(|edge| {
                     handled_edge(graph, *edge)
-                        && graph.layerless_nodes[graph.edges[*edge].target.node].layer_index
+                        && graph.layerless_nodes[graph.edges[*edge].target.node].layer_index()
                             == Some(layer_index + 1)
                 }));
             }
@@ -527,7 +527,7 @@ fn mark_crossings(graph: &LGraph) -> IdVec<EdgeId, bool> {
             {
                 for &edge in &port.incoming_edges {
                     if !handled_edge(graph, edge)
-                        || graph.layerless_nodes[graph.edges[edge].source.node].layer_index
+                        || graph.layerless_nodes[graph.edges[edge].source.node].layer_index()
                             != Some(layer_index)
                         || open.is_empty()
                     {
@@ -575,7 +575,7 @@ fn improve_two_path(
         return Ok(false);
     }
     let data = &graph.layerless_nodes[center];
-    let layer = graph.layers[data.layer_index.unwrap()].nodes();
+    let layer = graph.layers()[data.layer_index().unwrap()].nodes();
     let index = layer.iter().position(|node| *node == center).unwrap();
     let y = aux.graph.nodes[rep.head].layer as f64;
     let mut above = f64::INFINITY;

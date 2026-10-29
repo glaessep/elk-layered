@@ -51,7 +51,7 @@ fn assert_oracle(
     // Run what elkjs ran: the configurator and every processor scheduled up to the layerer.
     run_processors_until_phase(&mut graph, LayeredPhase::P2Layering).unwrap();
     let actual = graph
-        .layers
+        .layers()
         .iter()
         .map(|layer| {
             layer
