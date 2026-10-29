@@ -242,19 +242,36 @@ impl Id for EdgeId {
     }
 }
 
-fn map_id<I: Id>(map: &[Option<I>], id: I, kind: &'static str) -> Result<I, ComponentError> {
+/// One entry of a map from old ids to new ones. `split` maps through `Option<I>`, because a node
+/// can stay behind. `combine` maps through plain `I`, because every node of a component has a new id.
+trait Slot<I> {
+    fn mapped(&self) -> Option<I>;
+}
+
+impl<I: Id> Slot<I> for I {
+    fn mapped(&self) -> Option<I> {
+        Some(*self)
+    }
+}
+
+impl<I: Id> Slot<I> for Option<I> {
+    fn mapped(&self) -> Option<I> {
+        *self
+    }
+}
+
+fn map_id<I: Id, S: Slot<I>>(map: &[S], id: I, kind: &'static str) -> Result<I, ComponentError> {
     map.get(id.index())
-        .copied()
-        .flatten()
+        .and_then(Slot::mapped)
         .ok_or(ComponentError::InvalidReference {
             kind,
             index: id.index(),
         })
 }
 
-fn map_optional<I: Id>(
+fn map_optional<I: Id, S: Slot<I>>(
     value: &mut Option<I>,
-    map: &[Option<I>],
+    map: &[S],
     kind: &'static str,
 ) -> Result<(), ComponentError> {
     if let Some(id) = value {
@@ -263,9 +280,9 @@ fn map_optional<I: Id>(
     Ok(())
 }
 
-fn map_list<I: Id>(
+fn map_list<I: Id, S: Slot<I>>(
     values: &mut [I],
-    map: &[Option<I>],
+    map: &[S],
     kind: &'static str,
 ) -> Result<(), ComponentError> {
     for id in values {
@@ -274,12 +291,12 @@ fn map_list<I: Id>(
     Ok(())
 }
 
-fn map_port(port: &mut PortRef, nodes: &[Option<NodeId>]) -> Result<(), ComponentError> {
+fn map_port<N: Slot<NodeId>>(port: &mut PortRef, nodes: &[N]) -> Result<(), ComponentError> {
     port.node = map_id(nodes, port.node, "port node")?;
     Ok(())
 }
 
-fn map_labels(labels: &mut [LLabel], edges: &[Option<EdgeId>]) -> Result<(), ComponentError> {
+fn map_labels<E: Slot<EdgeId>>(labels: &mut [LLabel], edges: &[E]) -> Result<(), ComponentError> {
     for label in labels {
         map_optional(&mut label.end_label_edge, edges, "label edge")?;
     }
@@ -288,10 +305,10 @@ fn map_labels(labels: &mut [LLabel], edges: &[Option<EdgeId>]) -> Result<(), Com
 
 /// Maps every arena reference, including processor-created dummies and detached edges.
 /// Port ids are node-local and are deliberately unchanged.
-fn remap_references(
+fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     graph: &mut LGraph,
-    nodes: &[Option<NodeId>],
-    edges: &[Option<EdgeId>],
+    nodes: &[N],
+    edges: &[E],
 ) -> Result<(), ComponentError> {
     for node in &mut graph.layerless_nodes {
         map_optional(
@@ -362,11 +379,11 @@ fn remap_references(
 /// Maps the references that the graphs inside the component's nodes hold to the component's
 /// graph: the origin of an external port dummy, and the cross-hierarchy edges that name an edge
 /// of it. `graph` is the component, and the graphs it holds are in `graphs`.
-fn remap_nested_references(
+fn remap_nested_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     graphs: &mut GraphArena,
     graph: &LGraph,
-    nodes: &[Option<NodeId>],
-    edges: &[Option<EdgeId>],
+    nodes: &[N],
+    edges: &[E],
 ) -> Result<(), ComponentError> {
     let nested = graph
         .layerless_nodes
@@ -381,11 +398,11 @@ fn remap_nested_references(
 }
 
 /// Maps the references in `current` that name the graph `graph_id`.
-fn remap_graph_references(
+fn remap_graph_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     current: &mut LGraph,
     graph_id: GraphId,
-    nodes: &[Option<NodeId>],
-    edges: &[Option<EdgeId>],
+    nodes: &[N],
+    edges: &[E],
 ) -> Result<(), ComponentError> {
     for node in &mut current.layerless_nodes {
         if let Some(origin) = &mut node.origin_port
@@ -564,10 +581,8 @@ pub(crate) fn combine(
         edge_map.extend((next_edge..next_edge + added_edges).map(EdgeId::new));
         next_edge += added_edges;
         component.graph.clear_layers();
-        let node_lookup = node_map.iter().copied().map(Some).collect::<Vec<_>>();
-        let edge_lookup = edge_map.iter().copied().map(Some).collect::<Vec<_>>();
-        remap_references(&mut component.graph, &node_lookup, &edge_lookup)?;
-        remap_nested_references(graphs, &component.graph, &node_lookup, &edge_lookup)?;
+        remap_references(&mut component.graph, &node_map, &edge_map)?;
+        remap_nested_references(graphs, &component.graph, &node_map, &edge_map)?;
         for (index, node) in node_map.into_iter().zip(component.graph.layerless_nodes) {
             nodes[index.index()] = Some(node);
         }
