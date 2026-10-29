@@ -4412,7 +4412,9 @@ mod tests {
             // Run every processor the schedule has before the sweep, as the full runner does.
             crate::pipeline::run_processors_until(
                 &mut graph,
-                crate::pipeline::ProcessorKind::SortByInputModelProcessor,
+                crate::pipeline::Processor::Intermediate(
+                    crate::pipeline::IntermediateProcessor::SortByInputModelProcessor,
+                ),
             )
             .unwrap();
 

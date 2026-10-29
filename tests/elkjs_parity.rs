@@ -351,7 +351,7 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    ports-group-ratio-sized and ports-group-separate-zero-flow.
 // 18. In `apply_parent_node_layout` (src/layout.rs), never move the ports of a node whose graph
 //    has no external ports: 1 case, ports-root-idle.
-// 19. In `transfer_external_port_dummy_layout_to_parent_node` (src/pipeline.rs), take the size of
+// 19. In `transfer_external_port_dummy_layout_to_parent_node` (src/pipeline/compound.rs), take the size of
 //    the port from the dummy instead of from the port of the turned parent graph: 3 cases,
 //    ports-group-include-down-flat-ports, random-group-ports/r026 and r109.
 // 20. In `run_layered` (src/layout.rs), leave out `define_port_sides` for a node with children
