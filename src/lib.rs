@@ -41,21 +41,16 @@ mod configurator;
 mod error;
 mod export;
 mod graph;
+mod gwt;
 mod importer;
 mod intermediate;
 mod layout;
 mod layout_options;
-mod north_south;
 mod options;
-mod p1cycles;
-mod p2layers;
-mod p3order;
-mod p4nodes;
-mod p5edges;
+mod phase;
 mod pipeline;
 mod random;
-mod selfloops;
-mod transform;
+mod selfloop;
 
 #[cfg(test)]
 mod snapshot_tests;

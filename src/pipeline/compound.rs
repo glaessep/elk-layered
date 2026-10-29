@@ -4,7 +4,7 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/ElkLayered.java
 
 use super::assembler::{IntermediateProcessor, Processor, Strategies, assemble_graph};
-use super::execute::{execute_processor, resize_layered_node};
+use super::execute::{execute_in_arena, resize_layered_node};
 use super::{
     PipelineError, PipelineResult, actual_graph_size, check_external_port_sides,
     validate_node_size_minima,
@@ -15,7 +15,6 @@ use crate::graph::{
     GraphArena, GraphId, GraphParent, LGraph, LNodeKind, LPoint, LSize, NodeId, PortSide,
 };
 use crate::options::PortConstraints;
-use crate::p3order::sweep::minimize_crossings_layer_sweep_hierarchical_with_type;
 
 /// What ran on one graph of a compound run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,12 +157,7 @@ fn execute_compound_algorithm_until_pause(
             break;
         }
 
-        if let Some(sweep) = hierarchy_aware {
-            minimize_crossings_layer_sweep_hierarchical_with_type(graphs, sweep);
-        } else {
-            let (graph, others) = graphs.split_mut(algorithm.execution.graph);
-            execute_processor(graph, others, processor)?;
-        }
+        execute_in_arena(graphs, algorithm.execution.graph, true, processor)?;
         if processor == Processor::Intermediate(IntermediateProcessor::HierarchicalNodeResizer)
             && let Some(parent) = algorithm.execution.parent
         {

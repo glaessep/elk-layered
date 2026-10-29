@@ -4,11 +4,11 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/ElkLayered.java
 
 use super::assembler::{Processor, Strategies, assemble_graph};
-use super::execute::{execute_processor, resize_graph_to_minimum};
+use super::execute::execute_in_arena;
 use super::{PipelineResult, check_external_port_sides, validate_node_size_minima};
 use crate::configurator::{check_random_seeds, configure_graph_properties};
-#[cfg(test)]
-use crate::graph::OtherGraphs;
+use crate::intermediate::hierarchical_node_resizing_processor::resize_graph_to_minimum;
+
 use crate::graph::{GraphArena, GraphId};
 
 /// Execute all currently source-ported processors assembled for this graph.
@@ -30,22 +30,24 @@ pub(crate) fn execute_ported_processors(graphs: &mut GraphArena) -> PipelineResu
         // ComponentsProcessor copies the configured properties shallowly. Its Java Random
         // is one shared object, so later components continue the previous component's stream.
         let mut random = graphs.root().random.clone();
-        // The components stand in for the root, so only the graphs below it are left to read.
-        let others = graphs.others(GraphId::ROOT);
+        // The components stand in for the root: each takes the root's place while it runs, so
+        // the graphs below the root are the others it reads.
         for component in &mut components {
             component.graph.random = random;
-            for &processor in &processors {
-                execute_processor(&mut component.graph, others, processor)?;
-            }
+            std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
+            let result = processors.iter().try_for_each(|&processor| {
+                execute_in_arena(graphs, GraphId::ROOT, false, processor)
+            });
+            std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
+            result?;
             random = component.graph.random.clone();
         }
         crate::components::combine(graphs, components)?;
         graphs.root_mut().random = random;
         executed.extend(processors);
     } else {
-        let (graph, others) = graphs.split_mut(GraphId::ROOT);
         for processor in processors {
-            execute_processor(graph, others, processor)?;
+            execute_in_arena(graphs, GraphId::ROOT, false, processor)?;
             executed.push(processor);
         }
     }
@@ -88,7 +90,7 @@ fn run_processors_until_processor(
     let mut executed = Vec::new();
     prepare_single_graph_processors(graphs).and_then(|processors| {
         for processor in processors {
-            execute_processor(graphs.root_mut(), OtherGraphs::none(), processor)?;
+            execute_in_arena(graphs, GraphId::ROOT, false, processor)?;
             executed.push(processor);
             if is_last(processor) {
                 break;

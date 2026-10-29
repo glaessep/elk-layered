@@ -19,7 +19,7 @@ mod tests;
 
 use crate::graph::{GraphArena, GraphId, LGraph, LSize, PortSide, is_across_flow};
 use crate::intermediate::IntermediateError;
-use crate::p2layers::LayeringError;
+use crate::phase::layering::LayeringError;
 use crate::random::RandomSeedError;
 
 pub use assembler::UnportedProcessor;
@@ -63,6 +63,10 @@ pub enum PipelineError {
     /// A layerer failed.
     #[error(transparent)]
     Layering(#[from] LayeringError),
+    /// A layer sweep reached `execute_processor`, which has no arena to run it on. The sweep runs
+    /// through `execute_in_arena`; reaching this is a bug in the run, never caller input.
+    #[error("the layer sweep was run outside the graph arena")]
+    SweepOutsideArena,
 }
 
 /// The result of a step of a layered run.
@@ -109,7 +113,7 @@ pub(super) fn validate_node_size_minima(graphs: &GraphArena) -> PipelineResult<(
     Ok(())
 }
 
-pub(super) fn actual_graph_size(graph: &LGraph) -> LSize {
+pub(crate) fn actual_graph_size(graph: &LGraph) -> LSize {
     LSize {
         width: graph.size.width + graph.padding.left + graph.padding.right,
         height: graph.size.height + graph.padding.top + graph.padding.bottom,

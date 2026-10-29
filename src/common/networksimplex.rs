@@ -387,11 +387,20 @@ impl<'a> NetworkSimplex<'a> {
         Ok(())
     }
 
-    fn tight_tree_dfs(&mut self, node: usize) -> usize {
+    // Java: `NetworkSimplex.tightTreeDFS`, which recurses and returns the number of calls. The
+    // explicit stack visits the edges in the same order, and a deep graph cannot overflow it.
+    fn tight_tree_dfs(&mut self, start: usize) -> usize {
         let mut node_count = 1;
-        self.graph.nodes[node].tree_node = true;
-
-        for edge in self.graph.connected_edges(node) {
+        self.graph.nodes[start].tree_node = true;
+        // Each entry is a node, its edges, and the index of the next edge to look at.
+        let mut stack = vec![(start, self.graph.connected_edges(start), 0)];
+        while let Some((node, edges, next)) = stack.last_mut() {
+            let node = *node;
+            let Some(&edge) = edges.get(*next) else {
+                stack.pop();
+                continue;
+            };
+            *next += 1;
             let edge_id = self.graph.edges[edge].internal_id;
             if self.edge_visited[edge_id] {
                 continue;
@@ -401,8 +410,8 @@ impl<'a> NetworkSimplex<'a> {
                 continue;
             };
 
-            if self.graph.edges[edge].tree_edge {
-                node_count += self.tight_tree_dfs(opposite);
+            let follow = if self.graph.edges[edge].tree_edge {
+                true
             } else if !self.graph.nodes[opposite].tree_node
                 && i64::from(self.graph.edges[edge].delta)
                     == self.graph.edges[edge].target_layer(self.graph)
@@ -410,7 +419,14 @@ impl<'a> NetworkSimplex<'a> {
             {
                 self.graph.edges[edge].tree_edge = true;
                 push_unique(&mut self.tree_edges, edge);
-                node_count += self.tight_tree_dfs(opposite);
+                true
+            } else {
+                false
+            };
+            if follow {
+                node_count += 1;
+                self.graph.nodes[opposite].tree_node = true;
+                stack.push((opposite, self.graph.connected_edges(opposite), 0));
             }
         }
 
@@ -438,24 +454,42 @@ impl<'a> NetworkSimplex<'a> {
         min_slack_edge
     }
 
-    fn postorder_traversal(&mut self, node: usize) -> i32 {
-        let mut lowest = i32::MAX;
-        for edge in self.graph.connected_edges(node) {
-            let edge_id = self.graph.edges[edge].internal_id;
-            if self.graph.edges[edge].tree_edge && !self.edge_visited[edge_id] {
-                self.edge_visited[edge_id] = true;
-                let opposite = self.graph.edges[edge]
-                    .other(node)
-                    .expect("tree edge should connect to current node");
-                lowest = lowest.min(self.postorder_traversal(opposite));
+    // Java: `NetworkSimplex.postorderTraversal`, which recurses. The explicit stack numbers the
+    // nodes in the same order, and a deep graph cannot overflow it.
+    fn postorder_traversal(&mut self, start: usize) -> i32 {
+        // Each entry is a node, its edges, the index of the next edge to look at, and the lowest
+        // number its finished subtrees returned.
+        let mut stack = vec![(start, self.graph.connected_edges(start), 0, i32::MAX)];
+        loop {
+            let Some((node, edges, next, lowest)) = stack.last_mut() else {
+                unreachable!("the loop returns when it pops the start node");
+            };
+            let node = *node;
+            if let Some(&edge) = edges.get(*next) {
+                *next += 1;
+                let edge_id = self.graph.edges[edge].internal_id;
+                if self.graph.edges[edge].tree_edge && !self.edge_visited[edge_id] {
+                    self.edge_visited[edge_id] = true;
+                    let opposite = self.graph.edges[edge]
+                        .other(node)
+                        .expect("tree edge should connect to current node");
+                    stack.push((opposite, self.graph.connected_edges(opposite), 0, i32::MAX));
+                }
+                continue;
+            }
+
+            let lowest = *lowest;
+            stack.pop();
+            let node_id = self.graph.nodes[node].internal_id;
+            self.po_id[node_id] = self.post_order;
+            self.lowest_po_id[node_id] = lowest.min(self.post_order);
+            self.post_order += 1;
+            let returned = self.lowest_po_id[node_id];
+            match stack.last_mut() {
+                Some((_, _, _, parent_lowest)) => *parent_lowest = (*parent_lowest).min(returned),
+                None => return returned,
             }
         }
-
-        let node_id = self.graph.nodes[node].internal_id;
-        self.po_id[node_id] = self.post_order;
-        self.lowest_po_id[node_id] = lowest.min(self.post_order);
-        self.post_order += 1;
-        self.lowest_po_id[node_id]
     }
 
     fn is_in_head(&self, node: usize, edge: usize) -> bool {
@@ -731,120 +765,4 @@ fn push_unique(items: &mut Vec<usize>, item: usize) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn node_coordinates_do_not_allocate_a_dense_layer_count() {
-        let mut graph = NGraph::new();
-        let top = graph.add_node(None);
-        let bottom = graph.add_node(None);
-        graph
-            .add_edge(None, top, bottom, 10_000.0, i32::MAX)
-            .unwrap();
-
-        NetworkSimplex::for_graph(&mut graph)
-            .with_balancing(false)
-            .execute()
-            .unwrap();
-
-        assert_eq!(graph.nodes[top].layer, 0);
-        assert_eq!(graph.nodes[bottom].layer, i32::MAX);
-    }
-
-    #[test]
-    fn coordinate_overflow_is_an_error_instead_of_wrapped_geometry() {
-        let mut graph = NGraph::new();
-        let a = graph.add_node(None);
-        let b = graph.add_node(None);
-        let c = graph.add_node(None);
-        graph.add_edge(None, a, b, 1.0, i32::MAX).unwrap();
-        graph.add_edge(None, b, c, 1.0, 1).unwrap();
-
-        assert_eq!(
-            NetworkSimplex::for_graph(&mut graph).execute(),
-            Err(NetworkSimplexError::CoordinateOutOfRange),
-        );
-    }
-
-    // Mutation: add_node drops the origin it is given (stores None).
-    #[test]
-    fn nodes_and_edges_keep_the_origin_ids_they_are_given() {
-        let mut graph = NGraph::new();
-        let a = graph.add_node(Some(NodeId::new(7)));
-        let b = graph.add_node(None);
-        let edge = graph.add_edge(Some(EdgeId::new(3)), a, b, 1.0, 1).unwrap();
-
-        assert_eq!(graph.nodes[a].origin, Some(NodeId::new(7)));
-        assert_eq!(graph.nodes[b].origin, None);
-        assert_eq!(graph.edges[edge].origin, Some(EdgeId::new(3)));
-    }
-
-    // Mutation: `normalize` shifts the layers by the highest layer instead of the lowest.
-    #[test]
-    fn network_simplex_assigns_layers_to_dag() {
-        let mut graph = NGraph::new();
-        let a = graph.add_node(None);
-        let b = graph.add_node(None);
-        let c = graph.add_node(None);
-        graph.add_edge(None, a, b, 1.0, 1).unwrap();
-        graph.add_edge(None, b, c, 1.0, 1).unwrap();
-
-        NetworkSimplex::for_graph(&mut graph)
-            .with_iteration_limit(28)
-            .with_balancing(true)
-            .execute()
-            .unwrap();
-
-        assert_eq!(graph.nodes[a].layer, 0);
-        assert!(graph.nodes[b].layer > graph.nodes[a].layer);
-        assert!(graph.nodes[c].layer > graph.nodes[b].layer);
-    }
-
-    // Mutation: `normalize` shifts the layers by the highest layer instead of the lowest.
-    #[test]
-    fn network_simplex_balances_equal_degree_node() {
-        let mut graph = NGraph::new();
-        let a = graph.add_node(None);
-        let b = graph.add_node(None);
-        let c = graph.add_node(None);
-        graph.add_edge(None, a, c, 1.0, 1).unwrap();
-        graph.add_edge(None, b, c, 1.0, 1).unwrap();
-
-        NetworkSimplex::for_graph(&mut graph)
-            .with_iteration_limit(28)
-            .with_balancing(true)
-            .execute()
-            .unwrap();
-
-        assert_eq!(graph.nodes[a].layer, 0);
-        assert_eq!(graph.nodes[b].layer, 0);
-        assert!(graph.nodes[c].layer > graph.nodes[a].layer);
-    }
-
-    // Mutation: `reattach_subtrees` does not call `add_active_node` for the node it puts back.
-    #[test]
-    fn network_simplex_reattaches_removed_subtrees() {
-        let mut graph = NGraph::new();
-        let mut nodes = Vec::new();
-        for _ in 0..41 {
-            nodes.push(graph.add_node(None));
-        }
-        for index in 0..40 {
-            graph
-                .add_edge(None, nodes[index], nodes[index + 1], 1.0, 1)
-                .unwrap();
-        }
-
-        NetworkSimplex::for_graph(&mut graph)
-            .with_iteration_limit(28)
-            .with_balancing(true)
-            .execute()
-            .unwrap();
-
-        assert_eq!(graph.active_nodes().len(), 41);
-        for edge in &graph.edges {
-            assert!(graph.nodes[edge.target].layer > graph.nodes[edge.source].layer);
-        }
-    }
-}
+mod tests;
