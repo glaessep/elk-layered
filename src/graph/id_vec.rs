@@ -131,21 +131,6 @@ impl<I: VecId, T> IdVec<I, T> {
         self.items.last()
     }
 
-    /// Keeps the items the test accepts, in their order. Every later item gets a new id.
-    pub fn retain(&mut self, keep: impl FnMut(&T) -> bool) {
-        self.items.retain(keep);
-    }
-
-    /// Drops every item.
-    pub fn clear(&mut self) {
-        self.items.clear();
-    }
-
-    /// Removes every item and returns them in order. Ids restart at 0.
-    pub fn take_all(&mut self) -> Vec<T> {
-        std::mem::take(&mut self.items)
-    }
-
     /// The items as a plain slice. This is the way out of the typed ids: a place in the slice is
     /// a number, not an id.
     pub fn as_slice(&self) -> &[T] {
@@ -336,24 +321,6 @@ mod tests {
         assert_eq!(pairs, [(0, "a"), (1, "b"), (2, "c")]);
     }
 
-    // Mutation: make `retain` keep the items the test rejects.
-    #[test]
-    fn retain_keeps_the_accepted_items_in_order_and_renumbers_the_rest() {
-        let mut list = abc();
-        list.retain(|item| *item != "b");
-        assert_eq!(list.as_slice(), ["a", "c"]);
-        assert_eq!(list[NodeId::new(1)], "c");
-    }
-
-    // Mutation: make `take_all` return the items reversed.
-    #[test]
-    fn take_all_empties_the_list_and_hands_back_the_items() {
-        let mut list = abc();
-        assert_eq!(list.take_all(), ["a", "b", "c"]);
-        assert!(list.is_empty());
-        assert_eq!(list.push("d"), NodeId::new(0));
-    }
-
     // Mutation: make `extend` or `From<Vec>` drop or reorder items.
     #[test]
     fn extend_and_from_vec_keep_every_item_in_order() {
@@ -363,7 +330,5 @@ mod tests {
         assert_eq!((list.first(), list.last()), (Some(&1), Some(&4)));
         list.as_mut_slice()[0] = 9;
         assert_eq!(list[NodeId::new(0)], 9);
-        list.clear();
-        assert!(list.is_empty());
     }
 }
