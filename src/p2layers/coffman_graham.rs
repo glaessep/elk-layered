@@ -5,83 +5,83 @@
 //! Those ties are observable in node order, so a Rust heap's unspecified tie order is unsuitable.
 
 use super::{LayeringError, LayeringInput, LayeringResult};
-use crate::graph::NodeId;
+use crate::graph::{IdVec, NodeId};
 use std::cmp::Ordering;
 
 pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>>> {
     if input.nodes.is_empty() {
         return Ok(Vec::new());
     }
-    let mut marked_edges = vec![false; input.graph.edges.len()];
-    let mut visited = vec![false; input.len()];
-    let mut active = vec![false; input.len()];
+    let mut marked_edges = IdVec::filled(input.graph.edges.len(), false);
+    let mut visited = IdVec::filled(input.len(), false);
+    let mut active = IdVec::filled(input.len(), false);
     let mut stack = Vec::new();
     // Source transitive reduction marks edges; it does not remove them from the graph.
     for &start in &input.nodes {
-        visited.fill(false);
-        for &edge in &input.outgoing[start.index()] {
+        visited.as_mut_slice().fill(false);
+        for &edge in &input.outgoing[start] {
             let root = input.target(edge);
-            if visited[root.index()] {
+            if visited[root] {
                 continue;
             }
-            active[root.index()] = true;
+            active[root] = true;
             stack.push((root, 0usize));
             while let Some((node, cursor)) = stack.last_mut() {
-                if let Some(&edge) = input.outgoing[(*node).index()].get(*cursor) {
+                if let Some(&edge) = input.outgoing[*node].get(*cursor) {
                     *cursor += 1;
                     let next = input.target(edge);
-                    for &transitive in &input.incoming[next.index()] {
+                    for &transitive in &input.incoming[next] {
                         if input.source(transitive) == start {
-                            marked_edges[transitive.index()] = true;
+                            marked_edges[transitive] = true;
                         }
                     }
-                    if active[next.index()] {
+                    if active[next] {
                         return Err(LayeringError::CyclicGraph);
                     }
-                    if !visited[next.index()] {
-                        active[next.index()] = true;
+                    if !visited[next] {
+                        active[next] = true;
                         stack.push((next, 0));
                     }
                 } else {
                     let (node, _) = stack.pop().expect("the DFS frame exists");
-                    visited[node.index()] = true;
-                    active[node.index()] = false;
+                    visited[node] = true;
+                    active[node] = false;
                 }
             }
         }
     }
 
-    let mut incoming = vec![0usize; input.len()];
-    let mut predecessors = vec![Vec::new(); input.len()];
-    let mut topological = vec![0usize; input.len()];
+    let mut incoming = IdVec::filled(input.len(), 0usize);
+    let mut predecessors = IdVec::filled(input.len(), Vec::new());
+    let mut topological = IdVec::filled(input.len(), 0usize);
     let mut sources = Vec::new();
     for &node in &input.nodes {
-        incoming[node.index()] = input.incoming[node.index()]
+        incoming[node] = input.incoming[node]
             .iter()
-            .filter(|&&edge| !marked_edges[edge.index()])
+            .filter(|&&edge| !marked_edges[edge])
             .count();
-        if incoming[node.index()] == 0 {
+        if incoming[node] == 0 {
             push(&mut sources, node, |a, b| {
-                compare_topology(&predecessors[a.index()], &predecessors[b.index()])
+                compare_topology(&predecessors[a], &predecessors[b])
             });
         }
     }
     let mut count = 0;
     while let Some(node) = pop(&mut sources, |a, b| {
-        compare_topology(&predecessors[a.index()], &predecessors[b.index()])
+        compare_topology(&predecessors[a], &predecessors[b])
     }) {
-        topological[node.index()] = count;
+        topological[node] = count;
         count += 1;
-        for &edge in &input.outgoing[node.index()] {
-            if marked_edges[edge.index()] {
+        for &edge in &input.outgoing[node] {
+            if marked_edges[edge] {
                 continue;
             }
             let next = input.target(edge);
-            incoming[next.index()] -= 1;
-            predecessors[next.index()].push(topological[node.index()]);
-            if incoming[next.index()] == 0 {
+            incoming[next] -= 1;
+            predecessors[next].push(topological[node]);
+            if incoming[next] == 0 {
                 push(&mut sources, next, |a, b| {
-                    compare_topology(&predecessors[a.index()], &predecessors[b.index()])
+                    compare_topology(&predecessors[a], &predecessors[b])
                 });
             }
         }
@@ -90,45 +90,41 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
         return Err(LayeringError::CyclicGraph);
     }
 
-    let mut outgoing = vec![0usize; input.len()];
+    let mut outgoing = IdVec::filled(input.len(), 0usize);
     let mut sinks = Vec::new();
     for &node in &input.nodes {
-        outgoing[node.index()] = input.outgoing[node.index()]
+        outgoing[node] = input.outgoing[node]
             .iter()
-            .filter(|&&edge| !marked_edges[edge.index()])
+            .filter(|&&edge| !marked_edges[edge])
             .count();
-        if outgoing[node.index()] == 0 {
-            push(&mut sinks, node, |a, b| {
-                topological[b.index()].cmp(&topological[a.index()])
-            });
+        if outgoing[node] == 0 {
+            push(&mut sinks, node, |a, b| topological[b].cmp(&topological[a]));
         }
     }
     let mut layers: Vec<Vec<NodeId>> = vec![Vec::new()];
-    let mut assigned = vec![None; input.len()];
+    let mut assigned = IdVec::filled(input.len(), None);
     let bound = input.graph.options.layering_coffman_graham_layer_bound;
-    while let Some(node) = pop(&mut sinks, |a, b| {
-        topological[b.index()].cmp(&topological[a.index()])
-    }) {
+    while let Some(node) = pop(&mut sinks, |a, b| topological[b].cmp(&topological[a])) {
         let mut layer = layers.len() - 1;
         if layers[layer].len() as i64 >= i64::from(bound)
-            || input.outgoing[node.index()]
+            || input.outgoing[node]
                 .iter()
-                .any(|&edge| assigned[input.target(edge).index()] == Some(layer))
+                .any(|&edge| assigned[input.target(edge)] == Some(layer))
         {
             layers.push(Vec::new());
             layer += 1;
         }
-        assigned[node.index()] = Some(layer);
+        assigned[node] = Some(layer);
         layers[layer].push(node);
-        for &edge in &input.incoming[node.index()] {
-            if marked_edges[edge.index()] {
+        for &edge in &input.incoming[node] {
+            if marked_edges[edge] {
                 continue;
             }
             let source = input.source(edge);
-            outgoing[source.index()] -= 1;
-            if outgoing[source.index()] == 0 {
+            outgoing[source] -= 1;
+            if outgoing[source] == 0 {
                 push(&mut sinks, source, |a, b| {
-                    topological[b.index()].cmp(&topological[a.index()])
+                    topological[b].cmp(&topological[a])
                 });
             }
         }

@@ -5,14 +5,14 @@
 //! (`LongestPathLayerer.java`, `LongestPathSourceLayerer.java`).
 
 use super::{LayeringError, LayeringInput, LayeringResult};
-use crate::graph::NodeId;
+use crate::graph::{IdVec, NodeId};
 
 pub(super) fn layer(
     input: &LayeringInput<'_>,
     from_sources: bool,
 ) -> LayeringResult<Vec<Vec<NodeId>>> {
-    let mut heights = vec![0usize; input.len()];
-    let mut visiting = vec![false; input.len()];
+    let mut heights = IdVec::filled(input.len(), 0usize);
+    let mut visiting = IdVec::filled(input.len(), false);
     let mut finished = Vec::with_capacity(input.nodes.len());
     let mut stack = Vec::new();
     let adjacency = if from_sources {
@@ -21,14 +21,14 @@ pub(super) fn layer(
         &input.outgoing
     };
     for &root in &input.nodes {
-        if heights[root.index()] != 0 {
+        if heights[root] != 0 {
             continue;
         }
-        visiting[root.index()] = true;
+        visiting[root] = true;
         stack.push((root, 0usize, 1usize));
         // An explicit DFS stack preserves Java's postorder without depending on native stack depth.
         while let Some((node, cursor, height)) = stack.last_mut() {
-            if let Some(&edge) = adjacency[(*node).index()].get(*cursor) {
+            if let Some(&edge) = adjacency[*node].get(*cursor) {
                 let next = if from_sources {
                     input.source(edge)
                 } else {
@@ -38,19 +38,19 @@ pub(super) fn layer(
                     *cursor += 1;
                     continue;
                 }
-                if heights[next.index()] != 0 {
-                    *height = (*height).max(heights[next.index()] + 1);
+                if heights[next] != 0 {
+                    *height = (*height).max(heights[next] + 1);
                     *cursor += 1;
-                } else if visiting[next.index()] {
+                } else if visiting[next] {
                     return Err(LayeringError::CyclicGraph);
                 } else {
-                    visiting[next.index()] = true;
+                    visiting[next] = true;
                     stack.push((next, 0, 1));
                 }
             } else {
                 let (node, _, height) = stack.pop().expect("the DFS frame exists");
-                heights[node.index()] = height;
-                visiting[node.index()] = false;
+                heights[node] = height;
+                visiting[node] = false;
                 finished.push(node);
             }
         }
@@ -59,9 +59,9 @@ pub(super) fn layer(
     let mut layers = vec![Vec::new(); count];
     for node in finished {
         let index = if from_sources {
-            heights[node.index()] - 1
+            heights[node] - 1
         } else {
-            count - heights[node.index()]
+            count - heights[node]
         };
         layers[index].push(node);
     }

@@ -7,7 +7,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::common::networksimplex::{NGraph, NetworkSimplex, NetworkSimplexError};
-use crate::graph::{EdgeId, LGraph, LayeredEdge, NodeId};
+use crate::graph::{EdgeId, IdVec, LGraph, LayeredEdge, NodeId};
 
 mod coffman_graham;
 #[cfg(test)]
@@ -40,8 +40,8 @@ type LayeringResult<T> = Result<T, LayeringError>;
 struct LayeringInput<'a> {
     graph: &'a LGraph,
     nodes: Vec<NodeId>,
-    incoming: Vec<Vec<EdgeId>>,
-    outgoing: Vec<Vec<EdgeId>>,
+    incoming: IdVec<NodeId, Vec<EdgeId>>,
+    outgoing: IdVec<NodeId, Vec<EdgeId>>,
 }
 
 impl<'a> LayeringInput<'a> {
@@ -171,11 +171,11 @@ pub fn layer_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexErr
 }
 
 fn connected_components(graph: &LGraph, nodes: &[NodeId]) -> Vec<Vec<NodeId>> {
-    let mut visited = vec![false; graph.layerless_nodes.len()];
+    let mut visited = IdVec::filled(graph.layerless_nodes.len(), false);
     let mut components: VecDeque<Vec<NodeId>> = VecDeque::new();
 
     for node in nodes.iter().copied() {
-        if visited[node.index()] {
+        if visited[node] {
             continue;
         }
 
@@ -198,17 +198,17 @@ fn connected_components(graph: &LGraph, nodes: &[NodeId]) -> Vec<Vec<NodeId>> {
 fn connected_components_dfs(
     graph: &LGraph,
     node: NodeId,
-    visited: &mut [bool],
+    visited: &mut IdVec<NodeId, bool>,
     component: &mut Vec<NodeId>,
 ) {
-    visited[node.index()] = true;
+    visited[node] = true;
     component.push(node);
 
     for edge_index in graph.node_connected_edges(node) {
         let Some(opposite) = opposite_node(graph, node, edge_index) else {
             continue;
         };
-        if !visited[opposite.index()] {
+        if !visited[opposite] {
             connected_components_dfs(graph, opposite, visited, component);
         }
     }

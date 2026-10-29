@@ -56,6 +56,15 @@ impl<I: VecId, T> IdVec<I, T> {
         Self::default()
     }
 
+    /// A list of `len` copies of `value`, one per id from 0 up to `len - 1`. Side tables use it:
+    /// `IdVec::filled(graph.layerless_nodes.len(), false)` has one flag for each node.
+    pub fn filled(len: usize, value: T) -> Self
+    where
+        T: Clone,
+    {
+        vec![value; len].into()
+    }
+
     /// The item with this id, if the list holds one.
     pub fn get(&self, id: I) -> Option<&T> {
         self.items.get(id.to_index())
@@ -264,6 +273,17 @@ mod tests {
         assert_eq!((first, second), (EdgeId::new(0), EdgeId::new(1)));
         assert_eq!(list[second], "q");
         assert_eq!(list.next_id(), EdgeId::new(2));
+    }
+
+    // Mutation: make `filled` build `len - 1` copies, or fill every slot but the last with `value`.
+    #[test]
+    fn filled_holds_one_copy_per_id() {
+        let mut list = IdVec::<NodeId, u8>::filled(3, 7);
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.as_slice(), [7, 7, 7]);
+        list[NodeId::new(2)] = 1;
+        assert_eq!(list[NodeId::new(0)], 7);
+        assert!(IdVec::<EdgeId, u8>::filled(0, 7).is_empty());
     }
 
     // Mutation: make `len` return `items.len() - 1`, or `is_empty` always false.
