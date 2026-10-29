@@ -2123,6 +2123,9 @@ mod tests {
         work
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, give the segment between the two paths
+    // the depth `common_depth + 1`. The sorted depths then read 2, 1, 1, input 1, not 2, 1, 0,
+    // input 1.
     #[test]
     fn source_ported_segments_sort_like_cross_hierarchy_edge_comparator() {
         let segments = source_ported_cross_hierarchy_segments(
@@ -2151,6 +2154,9 @@ mod tests {
         );
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, set `connects_parent_node` to `true`
+    // for the output steps. The boundary of `inner` then claims to connect the parent node, which
+    // it does not.
     #[test]
     fn source_ported_segments_mark_parent_boundary_endpoints() {
         let segments = source_ported_cross_hierarchy_segments(
@@ -2276,6 +2282,8 @@ mod tests {
         assert_eq!(flows[&("G".to_string(), "G:2".to_string(), false)], 1);
     }
 
+    // Mutation: in `materialize_hierarchy_edge_segments`, insert each label at the front of its
+    // segment's list (`insert(0, label)`). The labels then come out in reverse order.
     #[test]
     fn compound_label_buckets_preserve_order_identity_and_single_ownership() {
         for depth in [1, 16, 128] {
@@ -2332,6 +2340,8 @@ mod tests {
         }
     }
 
+    // Mutation: in `center_segment_index`, keep the deepest output segment (`depth >= current`).
+    // The label then lands on the output segment of depth 2, not depth 0.
     #[test]
     fn center_label_uses_shallowest_segment() {
         let segments = source_ported_cross_hierarchy_segments(
@@ -2351,6 +2361,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `center_segment_index`, keep the deepest output segment (`depth >= current`).
+    // The center label then picks a different segment than the sorted reference does.
     #[test]
     fn allocation_free_label_selection_matches_stable_sorted_identity() {
         let segments = source_ported_cross_hierarchy_segments(
@@ -2506,6 +2518,8 @@ mod tests {
         }
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the output segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn nested_exports_publish_child_ports_and_dummies_before_parent_edges() {
         // Minimal State007 provider oracle, including the reversed input direction:
@@ -2680,6 +2694,8 @@ mod tests {
         }
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the input segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn scoped_publication_uses_local_input_side_without_changing_absolute_side() {
         for source_is_boundary in [false, true] {
@@ -2814,6 +2830,8 @@ mod tests {
         (graph, original_key)
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the output segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn parent_border_offsets_survive_alongside_crossing_spacing_margins() {
         // Captured elkjs oracle: spacing 20/40 never changes a direct parent's offset;
@@ -2923,6 +2941,8 @@ mod tests {
         }
     }
 
+    // Mutation: in `hierarchy_port_key`, write the key as `node:role:order` instead of
+    // `node:order:role`. The dummy then reads `cluster:source:0`, not `cluster:0:source`.
     #[test]
     fn parent_end_external_dummy_uses_fixed_parent_port_side() {
         let mut cluster = node("cluster");
@@ -2973,6 +2993,8 @@ mod tests {
         assert_eq!(external.ports[PortId::new(0)].side, PortSide::North);
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the input segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn parent_end_external_dummy_uses_parent_port_net_flow() {
         let mut cluster = node("cluster");
@@ -3054,6 +3076,8 @@ mod tests {
         assert_eq!(external.external_port_side, PortSide::North);
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the output segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn nested_graph_hierarchy_edges_resolve_their_relative_root_scope() {
         let mut group = node("group");
@@ -3113,6 +3137,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the output segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn compound_external_ports_are_small_stack_safe_for_deep_mixed_hierarchy() {
         const DEPTH: usize = 512;

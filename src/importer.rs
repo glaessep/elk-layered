@@ -2616,6 +2616,9 @@ mod tests {
         );
     }
 
+    // Mutation: in `import_hierarchical_graph`, queue the children of a node with the graph slot of
+    // the node itself (`parent_slot`), not the slot of its nested graph. The chain then stays in
+    // one graph.
     #[test]
     fn hierarchical_import_uses_linear_graph_slots_for_deep_chains() {
         for node_count in [1usize, 4, 16, 64, 256] {
@@ -2726,6 +2729,8 @@ mod tests {
         assert!(!queries.is_ancestor(root_b, left_leaf));
     }
 
+    // Mutation: in `import_hierarchical_graph`, queue the children of every node that gets a nested
+    // graph (`if true`). The dummy-only graph of `group` then holds `child`.
     #[test]
     fn separate_children_self_loop_graph_does_not_materialize_regular_children() {
         let mut group = node("group");
@@ -2862,6 +2867,8 @@ mod tests {
         input
     }
 
+    // Mutation: in `ensure_hierarchy_endpoint_port`, skip the shared-port branch (`if false && …`).
+    // Each of the 32 edges then gets its own port.
     #[test]
     fn merged_cross_edges_share_one_port_per_endpoint() {
         let edge_count = 32usize;
@@ -2899,6 +2906,8 @@ mod tests {
         assert_eq!(imported.hierarchy_edges.len(), edge_count);
     }
 
+    // Mutation: in `ensure_inside_self_loop_dummy`, ignore the dummy found in the port index. Each
+    // loop then makes two new dummies, not one pair for all.
     #[test]
     fn inside_self_loops_share_one_dummy_per_node_and_role() {
         let edge_count = 32usize;
@@ -3006,6 +3015,8 @@ mod tests {
         assert!(node.nested_graph.is_some());
     }
 
+    // Mutation: in `ensure_inside_self_loop_dummy`, ignore the dummy found in the port index. Each
+    // loop then makes two new dummies, not one pair for all.
     #[test]
     fn importer_reuses_inside_self_loop_dummies_per_node_role() {
         let mut graph = graph(
@@ -3053,6 +3064,7 @@ mod tests {
         assert_eq!(output_dummy.ports[PortId::new(0)].outgoing_edges.len(), 2);
     }
 
+    // Mutation: in `transform_inside_self_loop`, drop `graph_properties.self_loops = true`.
     #[test]
     fn importer_marks_inside_self_loops_as_graph_self_loops() {
         let mut graph = graph(
@@ -3096,6 +3108,8 @@ mod tests {
         assert_eq!(lgraph.padding.left, 10.0);
     }
 
+    // Mutation: in `import_hierarchical_graph`, drop the `apply_graph_padding_from_options` call
+    // for the nested graph.
     #[test]
     fn importer_applies_layered_padding_option_to_nested_graphs() {
         let mut cluster = node("cluster");
@@ -3112,6 +3126,8 @@ mod tests {
         assert_eq!(nested.padding.left, 12.0);
     }
 
+    // Mutation: in `import_hierarchical_graph`, drop the `add_padding` call with
+    // `inside_node_label_padding`.
     #[test]
     fn importer_adds_inside_top_node_label_padding_to_nested_graphs() {
         let mut cluster = node("cluster");
@@ -3136,6 +3152,8 @@ mod tests {
         assert_eq!(nested.padding.left, 12.0);
     }
 
+    // Mutation: in `nested_graph_options`, ignore `node.nested_options` and start from the default
+    // options.
     #[test]
     fn importer_applies_nested_hierarchy_merge_without_cloning_root_options() {
         let mut cluster = node("cluster");
@@ -3173,6 +3191,8 @@ mod tests {
         assert_eq!(nested.options.random_seed, 17);
     }
 
+    // Mutation: in `nested_graph_options`, set `port_constraints` to `Free` whatever the node says.
+    // The nested options then lose `FixedSide`.
     #[test]
     fn importer_copies_node_port_constraints_to_nested_graph_options() {
         let mut cluster = node("cluster");
@@ -3187,6 +3207,8 @@ mod tests {
         assert_eq!(nested.options.port_constraints, PortConstraints::FixedSide);
     }
 
+    // Mutation: in `nested_graph_options`, drop the line that sets `options.direction` from the
+    // parent.
     #[test]
     fn importer_forces_nested_direction_to_parent_direction() {
         let mut cluster = node("cluster");
@@ -3203,6 +3225,7 @@ mod tests {
         assert_eq!(nested.options.direction, ElkDirection::Down);
     }
 
+    // Mutation: in `resolve_root_hierarchy_handling`, resolve `Inherit` to `IncludeChildren`.
     #[test]
     fn importer_resolves_root_hierarchy_inherit_to_separate_children() {
         let mut input = graph(vec![node("cluster"), node("A")], vec![]);
@@ -3283,6 +3306,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `hierarchy_port_key`, write the key as `node:role:order` instead of
+    // `node:order:role`. The port then reads `A:source:0`, not `A:0:source`.
     #[test]
     fn cross_hierarchy_import_creates_endpoint_ports_in_input_order() {
         let mut cluster = node("cluster");
@@ -3324,6 +3349,8 @@ mod tests {
         assert_eq!(lgraph.hierarchy_edges[0].source_port_key, "A:0:source");
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, set `connects_parent_node` to `true`
+    // for the output steps.
     #[test]
     fn source_ported_compound_metadata_links_parent_port_and_external_dummy() {
         let mut cluster = node("cluster");
@@ -3371,6 +3398,8 @@ mod tests {
         assert_eq!(origin.port.port, PortId::new(0));
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the input segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn source_ported_compound_does_not_duplicate_existing_parent_dummy() {
         let mut cluster = node("cluster");
@@ -3418,6 +3447,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the input segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn source_ported_compound_metadata_links_parent_to_child_external_dummy() {
         let mut cluster = node("cluster");
@@ -3460,6 +3491,8 @@ mod tests {
         assert_eq!(origin.port.port, PortId::new(0));
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the input segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn source_ported_compound_parent_boundary_segments_use_external_port_dummies() {
         let mut cluster = node("cluster");
@@ -3492,6 +3525,8 @@ mod tests {
         assert_eq!(nested.layerless_nodes[segment.target.node].id, "A");
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, give the segment between the two paths
+    // the depth `common_depth + 1`.
     #[test]
     fn source_ported_compound_import_records_cross_hierarchy_segments() {
         let mut outer = node("outer");
@@ -3540,6 +3575,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `hierarchy_port_key`, never use the shared `node:collector:type` key (`if
+    // false`).
     #[test]
     fn source_ported_compound_reuses_exported_external_port_when_hierarchy_edges_merge() {
         let mut cluster = node("cluster");
@@ -3592,6 +3629,8 @@ mod tests {
         assert!(nested.graph_properties.end_labels);
     }
 
+    // Mutation: in `hierarchy_port_key`, never use the shared `node:collector:type` key (`if
+    // false`).
     #[test]
     fn source_ported_compound_keeps_nested_hierarchy_merge_default_when_root_disables_merge() {
         let mut cluster = node("cluster");
@@ -3627,6 +3666,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the input segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn source_ported_compound_parent_end_segments_are_not_reused() {
         let mut cluster = node("cluster");
@@ -3898,6 +3939,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, give the segment between the two paths
+    // the depth `common_depth + 1`.
     #[test]
     fn scoped_segment_import_accepts_a_materialized_owner_scope() {
         let mut group = node("group");
@@ -3962,6 +4005,8 @@ mod tests {
         );
     }
 
+    // Mutation: in `source_ported_cross_hierarchy_segments`, let the input segments land in
+    // `GraphId::ROOT` instead of the graph of their step.
     #[test]
     fn scoped_input_segment_rebases_every_materialized_hierarchy_level() {
         let mut group = node("group");
