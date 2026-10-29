@@ -663,8 +663,9 @@ fn hierarchical_offset(
     }
     // Otherwise the coordinates belong to the edge's container: the root graph, or the graph
     // inside the container's node. The import names it by id; no graph is looked up by name.
-    // Every edge written has a container. A miss would put the edge at the wrong place, so it
-    // is an error, not a zero offset.
+    // The import gives every edge it keeps a container, or refuses the edge. A miss here means
+    // the map and the graphs disagree. It would put the edge at the wrong place, so it is an
+    // error, not a zero offset.
     let Some(&target_graph) = input.edge_containers.get(edge_id) else {
         return Err(Error::Internal {
             message: format!("edge \"{edge_id}\" has no container"),

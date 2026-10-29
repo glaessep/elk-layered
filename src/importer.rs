@@ -207,6 +207,9 @@ pub enum ImportError {
     /// An edge ends at a port of the node the run lays out, but no child connects to a port of it.
     #[error("ELK edge `{edge_id}` ends at a port of its graph, which has no external ports")]
     ScopePortWithoutDummy { edge_id: String },
+    /// An edge names a container node that holds no graph, so the edge has no graph to belong to.
+    #[error("ELK edge `{edge_id}` is contained by node `{container}`, which holds no graph")]
+    ContainerWithoutGraph { edge_id: String, container: String },
     #[error("ELK edge `{edge_id}` names port `{port_id}`, which is no port of node `{node_id}`")]
     MissingPort {
         edge_id: String,
@@ -320,14 +323,10 @@ pub(crate) fn import_scope(
         };
 
     check_north_south_ports(&graphs)?;
-    // The graph inside a node. A node without one reads as the root, as `graph_slot_for_parent`
-    // does.
-    let graph_of = |node: &str| {
-        index
-            .node_index(node)
-            .and_then(|node| nested_graphs[node])
-            .unwrap_or(GraphId::ROOT)
-    };
+    // The graph inside a node, if it has one.
+    let nested_of = |node: &str| index.node_index(node).and_then(|node| nested_graphs[node]);
+    // A node without a graph reads as the root, as `graph_slot_for_parent` does.
+    let graph_of = |node: &str| nested_of(node).unwrap_or(GraphId::ROOT);
     let prepared_segments =
         materialize_scoped_edge_segments(&index, segments, input.options.merge_edges, &graph_of);
     introduce_source_ported_scoped_edge_segments(
@@ -338,14 +337,22 @@ pub(crate) fn import_scope(
 
     graphs.sync_graph_properties_to_options();
     // The same container the edges were grouped by above, now as the graph that holds it.
-    let edge_containers = input
-        .edges
-        .iter()
-        .map(|edge| {
-            let container = input_edge_containing_parent(&index, edge);
-            (edge.id.clone(), container.map_or(GraphId::ROOT, &graph_of))
-        })
-        .collect();
+    let mut edge_containers = HashMap::new();
+    for edge in &input.edges {
+        let graph = match input_edge_containing_parent(&index, edge) {
+            // The scope itself holds the edge.
+            None => GraphId::ROOT,
+            // A named container without a graph is not the root. Reading it as the root would
+            // give the edge the wrong coordinates.
+            Some(container) => {
+                nested_of(container).ok_or_else(|| ImportError::ContainerWithoutGraph {
+                    edge_id: edge.id.clone(),
+                    container: container.to_string(),
+                })?
+            }
+        };
+        edge_containers.insert(edge.id.clone(), graph);
+    }
     Ok(ImportedScope {
         graphs,
         edge_containers,
@@ -2766,6 +2773,28 @@ mod tests {
         assert_ne!(group_graph, GraphId::ROOT);
         assert_eq!(imported.edge_containers["inner"], group_graph);
         assert_eq!(imported.edge_containers["top"], GraphId::ROOT);
+    }
+
+    // Mutation: read a named container without a graph as `GraphId::ROOT` again, as
+    // `graph_of` does. The import then succeeds and the edge gets the root's coordinates.
+    #[test]
+    fn an_edge_whose_container_holds_no_graph_is_refused() {
+        let mut contained = edge("e", "a", "b");
+        contained.container = Some("a".to_string());
+        // Flat hierarchy handling: no node gets a graph.
+        let input = graph(vec![node("a"), node("b")], vec![contained]);
+
+        let error = import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::NONE)
+            .err()
+            .expect("an error");
+
+        assert_eq!(
+            error,
+            ImportError::ContainerWithoutGraph {
+                edge_id: "e".to_string(),
+                container: "a".to_string(),
+            }
+        );
     }
 
     #[test]
