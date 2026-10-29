@@ -14,7 +14,7 @@ pub(super) fn layer(input: &LayeringInput<'_>) -> LayeringResult<Vec<Vec<NodeId>
         .iter()
         .filter_map(|&node| {
             let data = &input.graph.layerless_nodes[node];
-            (data.kind == LNodeKind::Normal).then_some(data.size.height)
+            (data.kind() == LNodeKind::Normal).then_some(data.size.height)
         })
         .fold(f64::INFINITY, f64::min)
         .max(1.0);

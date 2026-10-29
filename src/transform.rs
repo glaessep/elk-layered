@@ -5,7 +5,8 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/options/DirectionCongruency.java
 
 use crate::graph::{
-    InLayerConstraint, LGraph, LLabel, LNode, LNodeKind, LPadding, LPoint, LPort, LSize, PortSide,
+    ExternalPortData, InLayerConstraint, LGraph, LLabel, LNode, LPadding, LPoint, LPort, LSize,
+    PortSide,
 };
 use crate::options::{Alignment, DirectionCongruency, ElkDirection, ElkPadding, LayerConstraint};
 
@@ -100,9 +101,9 @@ fn mirror_node_x(node: &mut LNode, offset: f64) {
     for port in node.ports.slots_mut() {
         mirror_port_x(port, node.size.width);
     }
-    if node.kind == LNodeKind::ExternalPort {
-        node.layer_constraint = mirror_layer_constraint_x(node.layer_constraint);
-        node.external_port_side = mirror_port_side_x(node.external_port_side);
+    if let Some((external, layer_constraint)) = node.external_port_and_layer_constraint_mut() {
+        *layer_constraint = mirror_layer_constraint_x(*layer_constraint);
+        external.side = mirror_port_side_x(external.side);
     }
     for label in &mut node.labels {
         label.node_label_placement = label.node_label_placement.map(|p| p.mirror_x());
@@ -147,13 +148,13 @@ fn mirror_node_y(node: &mut LNode, offset: f64) {
     node.padding.swap_top_bottom();
     node.node_label_placement = node.node_label_placement.mirror_y();
     node.node_alignment = mirror_alignment_y(node.node_alignment);
-    node.in_layer_constraint = match node.in_layer_constraint {
-        InLayerConstraint::Top => InLayerConstraint::Bottom,
-        InLayerConstraint::Bottom => InLayerConstraint::Top,
-        InLayerConstraint::None => InLayerConstraint::None,
-    };
-    if node.kind == LNodeKind::ExternalPort {
-        node.external_port_side = mirror_port_side_y(node.external_port_side);
+    if let Some(external) = node.external_port_mut() {
+        external.in_layer_constraint = match external.in_layer_constraint {
+            InLayerConstraint::Top => InLayerConstraint::Bottom,
+            InLayerConstraint::Bottom => InLayerConstraint::Top,
+            InLayerConstraint::None => InLayerConstraint::None,
+        };
+        external.side = mirror_port_side_y(external.side);
     }
     for port in node.ports.slots_mut() {
         mirror_port_y(port, node.size.height);
@@ -209,9 +210,9 @@ fn transpose_node(node: &mut LNode) {
     for port in node.ports.slots_mut() {
         transpose_port(port);
     }
-    if node.kind == LNodeKind::ExternalPort {
-        transpose_layer_constraint_for_external_port(node);
-        node.external_port_side = transpose_port_side(node.external_port_side);
+    if let Some((external, layer_constraint)) = node.external_port_and_layer_constraint_mut() {
+        transpose_layer_constraint_for_external_port(external, layer_constraint);
+        external.side = transpose_port_side(external.side);
     }
     for label in &mut node.labels {
         label.node_label_placement = label.node_label_placement.map(|p| p.transpose());
@@ -339,19 +340,22 @@ fn mirror_layer_constraint_x(layer_constraint: LayerConstraint) -> LayerConstrai
     }
 }
 
-fn transpose_layer_constraint_for_external_port(node: &mut LNode) {
-    if node.layer_constraint == LayerConstraint::FirstSeparate {
-        node.layer_constraint = LayerConstraint::None;
-        node.in_layer_constraint = InLayerConstraint::Top;
-    } else if node.layer_constraint == LayerConstraint::LastSeparate {
-        node.layer_constraint = LayerConstraint::None;
-        node.in_layer_constraint = InLayerConstraint::Bottom;
-    } else if node.in_layer_constraint == InLayerConstraint::Top {
-        node.layer_constraint = LayerConstraint::FirstSeparate;
-        node.in_layer_constraint = InLayerConstraint::None;
-    } else if node.in_layer_constraint == InLayerConstraint::Bottom {
-        node.layer_constraint = LayerConstraint::LastSeparate;
-        node.in_layer_constraint = InLayerConstraint::None;
+fn transpose_layer_constraint_for_external_port(
+    external: &mut ExternalPortData,
+    layer_constraint: &mut LayerConstraint,
+) {
+    if *layer_constraint == LayerConstraint::FirstSeparate {
+        *layer_constraint = LayerConstraint::None;
+        external.in_layer_constraint = InLayerConstraint::Top;
+    } else if *layer_constraint == LayerConstraint::LastSeparate {
+        *layer_constraint = LayerConstraint::None;
+        external.in_layer_constraint = InLayerConstraint::Bottom;
+    } else if external.in_layer_constraint == InLayerConstraint::Top {
+        *layer_constraint = LayerConstraint::FirstSeparate;
+        external.in_layer_constraint = InLayerConstraint::None;
+    } else if external.in_layer_constraint == InLayerConstraint::Bottom {
+        *layer_constraint = LayerConstraint::LastSeparate;
+        external.in_layer_constraint = InLayerConstraint::None;
     }
 }
 
@@ -1051,9 +1055,9 @@ mod tests {
     fn left_transform_mirrors_external_port_layer_constraint() {
         let mut graph = graph(ElkDirection::Left);
         let mut node = LNode::new("external", 0.0, 0.0, None);
-        node.kind = LNodeKind::ExternalPort;
+        node.set_kind(crate::graph::LNodeKind::ExternalPort);
         node.layer_constraint = LayerConstraint::FirstSeparate;
-        node.external_port_side = PortSide::West;
+        node.external_port_mut().unwrap().side = PortSide::West;
         let node = graph.add_node_for_test(node);
 
         transform_graph_direction(&mut graph, GraphTransformMode::ToInputDirection);
@@ -1063,7 +1067,7 @@ mod tests {
             LayerConstraint::LastSeparate
         );
         assert_eq!(
-            graph.layerless_nodes[node].external_port_side,
+            graph.layerless_nodes[node].external_port().unwrap().side,
             PortSide::East
         );
     }
@@ -1072,9 +1076,9 @@ mod tests {
     fn transpose_preserves_external_port_layer_constraint_through_in_layer_constraint() {
         let mut graph = graph(ElkDirection::Down);
         let mut node = LNode::new("external", 0.0, 0.0, None);
-        node.kind = LNodeKind::ExternalPort;
+        node.set_kind(crate::graph::LNodeKind::ExternalPort);
         node.layer_constraint = LayerConstraint::FirstSeparate;
-        node.external_port_side = PortSide::South;
+        node.external_port_mut().unwrap().side = PortSide::South;
         let node = graph.add_node_for_test(node);
 
         transform_graph_direction(&mut graph, GraphTransformMode::ToInputDirection);
@@ -1084,11 +1088,14 @@ mod tests {
             LayerConstraint::None
         );
         assert_eq!(
-            graph.layerless_nodes[node].in_layer_constraint,
+            graph.layerless_nodes[node]
+                .external_port()
+                .unwrap()
+                .in_layer_constraint,
             InLayerConstraint::Top
         );
         assert_eq!(
-            graph.layerless_nodes[node].external_port_side,
+            graph.layerless_nodes[node].external_port().unwrap().side,
             PortSide::East
         );
 
@@ -1099,11 +1106,14 @@ mod tests {
             LayerConstraint::FirstSeparate
         );
         assert_eq!(
-            graph.layerless_nodes[node].in_layer_constraint,
+            graph.layerless_nodes[node]
+                .external_port()
+                .unwrap()
+                .in_layer_constraint,
             InLayerConstraint::None
         );
         assert_eq!(
-            graph.layerless_nodes[node].external_port_side,
+            graph.layerless_nodes[node].external_port().unwrap().side,
             PortSide::South
         );
     }
@@ -1125,13 +1135,15 @@ mod tests {
             PortSide::West,
             LPoint { x: 0.0, y: 5.0 },
         );
-        let edge = LayeredEdge {
-            id: "A-B".to_string(),
-            source: source_port.unwrap(),
-            target: target_port.unwrap(),
-            source_node_id: "A".to_string(),
-            target_node_id: "B".to_string(),
-            labels: vec![LLabel {
+        let edge = {
+            let mut built_edge = LayeredEdge::new(
+                "A-B".to_string(),
+                source_port.unwrap(),
+                target_port.unwrap(),
+            );
+            built_edge.source_node_id = "A".to_string();
+            built_edge.target_node_id = "B".to_string();
+            built_edge.labels = vec![LLabel {
                 text: "label".to_string(),
                 size: LSize {
                     width: 12.0,
@@ -1145,18 +1157,10 @@ mod tests {
                 original_label_edge: None,
                 source_index: None,
                 node_label_placement: None,
-            }],
-            minlen: 1,
-            reversed: false,
-            bend_points: vec![LPoint { x: 1.0, y: 2.0 }],
-            junction_points: vec![LPoint { x: 3.0, y: 4.0 }],
-            model_order: None,
-            priority_direction: 0,
-            priority_shortness: 0,
-            priority_straightness: 0,
-            thickness: 0.0,
-            original_opposite_port: None,
-            compound_segment: None,
+            }];
+            built_edge.bend_points = vec![LPoint { x: 1.0, y: 2.0 }];
+            built_edge.junction_points = vec![LPoint { x: 3.0, y: 4.0 }];
+            built_edge
         };
         graph.add_edge(edge);
 
@@ -1213,24 +1217,14 @@ mod tests {
                         LPoint { x: 0.0, y: 5.0 },
                     );
                     let point = LPoint { x: 30.0, y: 20.0 };
-                    graph.add_edge(LayeredEdge {
-                        id: "e".to_string(),
-                        source: from.unwrap(),
-                        target: to.unwrap(),
-                        source_node_id: "A".to_string(),
-                        target_node_id: "B".to_string(),
-                        labels: Vec::new(),
-                        minlen: 1,
-                        reversed: false,
-                        bend_points: vec![point],
-                        junction_points: vec![point],
-                        model_order: None,
-                        priority_direction: 0,
-                        priority_shortness: 0,
-                        priority_straightness: 0,
-                        thickness: 0.0,
-                        original_opposite_port: None,
-                        compound_segment: None,
+                    graph.add_edge({
+                        let mut built_edge =
+                            LayeredEdge::new("e".to_string(), from.unwrap(), to.unwrap());
+                        built_edge.source_node_id = "A".to_string();
+                        built_edge.target_node_id = "B".to_string();
+                        built_edge.bend_points = vec![point];
+                        built_edge.junction_points = vec![point];
+                        built_edge
                     });
 
                     transform_graph_direction(&mut graph, mode);

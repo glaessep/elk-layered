@@ -11,7 +11,7 @@
 mod group;
 
 use crate::graph::{
-    EdgeId, GraphArena, GraphId, IdVec, LGraph, LLabel, LNodeKind, LPoint, LSize, NodeId, PortRef,
+    EdgeId, GraphArena, GraphId, IdVec, LGraph, LLabel, LPoint, LSize, NodeId, NodeTables, PortRef,
     VecId,
 };
 use crate::options::{HierarchyHandling, PortConstraints};
@@ -101,7 +101,7 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
             // LPort.getConnectedPorts visits incoming then outgoing edges; reverse the
             // pushes so this iterative traversal retains the source recursive DFS order.
             for port in node.ports.iter().rev() {
-                for &edge in port.outgoing_edges.iter().rev() {
+                for &edge in port.outgoing_edges().iter().rev() {
                     let edge = graph
                         .edges
                         .get(edge)
@@ -109,9 +109,9 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
                             kind: "edge",
                             index: edge.index(),
                         })?;
-                    stack.push(edge.target.node);
+                    stack.push(edge.target().node);
                 }
-                for &edge in port.incoming_edges.iter().rev() {
+                for &edge in port.incoming_edges().iter().rev() {
                     let edge = graph
                         .edges
                         .get(edge)
@@ -119,7 +119,7 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
                             kind: "edge",
                             index: edge.index(),
                         })?;
-                    stack.push(edge.source.node);
+                    stack.push(edge.source().node);
                 }
             }
         }
@@ -134,17 +134,17 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
                 .iter()
                 .map(|&node| graph.layerless_nodes[node].clone())
                 .collect();
-            let priority = component
-                .layerless_nodes
-                .iter()
-                .fold(0i32, |sum, node| sum.wrapping_add(node.component_priority));
+            component.tables = graph.tables.subset(&original_nodes);
+            // The importer reads no node priority yet, so every component has priority 0. A
+            // port of ELK's node priority adds the sum over the component's nodes here.
+            let priority = 0i32;
             // ComponentsProcessor.dfs: the side of every external port dummy of the component.
             let ext_port_sides = component
                 .layerless_nodes
                 .iter()
-                .filter(|node| node.kind == LNodeKind::ExternalPort)
-                .fold(group::SIDES_NONE, |sides, node| {
-                    sides | group::side_bit(node.external_port_side)
+                .filter_map(|node| node.external_port())
+                .fold(group::SIDES_NONE, |sides, external| {
+                    sides | group::side_bit(external.side)
                 });
             Component {
                 graph: component,
@@ -157,15 +157,15 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
         .collect::<Vec<_>>();
     for (index, edge) in graph.edges_with_ids() {
         let owner = *owners
-            .get(edge.source.node)
+            .get(edge.source().node)
             .ok_or(ComponentError::InvalidReference {
                 kind: "source node",
-                index: edge.source.node.index(),
+                index: edge.source().node.index(),
             })?;
-        if owners.get(edge.target.node) != Some(&owner) {
+        if owners.get(edge.target().node) != Some(&owner) {
             return Err(ComponentError::InvalidReference {
                 kind: "target node",
-                index: edge.target.node.index(),
+                index: edge.target().node.index(),
             }
             .into());
         }
@@ -303,50 +303,47 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     nodes: &IdVec<NodeId, N>,
     edges: &IdVec<EdgeId, E>,
 ) -> Result<(), ComponentError> {
+    graph
+        .tables
+        .map_node_ids(|node, kind| map_id(nodes, node, kind))?;
     for node in &mut graph.layerless_nodes {
-        map_optional(
-            &mut node.replaced_external_port_dummy,
-            nodes,
-            "replaced dummy",
-        )?;
-        map_list(&mut node.in_layer_successor_constraints, nodes, "successor")?;
-        map_optional(&mut node.in_layer_layout_unit, nodes, "layout unit")?;
-        map_list(
-            &mut node.barycenter_associates,
-            nodes,
-            "barycenter associate",
-        )?;
-        map_optional(&mut node.origin_edge, edges, "origin edge")?;
-        for port in [&mut node.long_edge_source, &mut node.long_edge_target]
-            .into_iter()
-            .flatten()
-        {
-            map_port(port, nodes)?;
+        if let Some(external) = node.external_port_mut() {
+            map_optional(&mut external.replaced_dummy, nodes, "replaced dummy")?;
+        }
+        if let Some(ends) = node.long_edge_ends_mut() {
+            for port in [&mut ends.source, &mut ends.target].into_iter().flatten() {
+                map_port(port, nodes)?;
+            }
+        }
+        if let Some(long_edge) = node.long_edge_mut() {
+            map_optional(&mut long_edge.origin_edge, edges, "origin edge")?;
+        }
+        if let Some(label) = node.label_dummy_mut() {
+            map_optional(&mut label.origin_edge, edges, "origin edge")?;
+            map_labels(&mut label.represented_labels, edges)?;
         }
         map_labels(&mut node.labels, edges)?;
-        map_labels(&mut node.represented_labels, edges)?;
         for port in node.ports.slots_mut() {
-            port.node = map_id(nodes, port.node, "port owner")?;
+            port.map_ids(
+                |node| map_id(nodes, node, "port owner"),
+                |edge| map_id(edges, edge, "incoming edge"),
+                |edge| map_id(edges, edge, "outgoing edge"),
+            )?;
             map_optional(&mut port.long_edge_target_node, nodes, "long edge target")?;
             if let Some(origin) = &mut port.origin_port {
                 map_port(origin, nodes)?;
             }
-            map_list(&mut port.incoming_edges, edges, "incoming edge")?;
-            map_list(&mut port.outgoing_edges, edges, "outgoing edge")?;
             map_labels(&mut port.labels, edges)?;
         }
     }
     for edge in &mut graph.edges {
-        map_port(&mut edge.source, nodes)?;
-        map_port(&mut edge.target, nodes)?;
+        edge.map_ports(|port| map_port(port, nodes))?;
         if let Some(port) = &mut edge.original_opposite_port {
             map_port(port, nodes)?;
         }
         map_labels(&mut edge.labels, edges)?;
     }
-    for layer in &mut graph.layers {
-        map_list(&mut layer.nodes, nodes, "layer node")?;
-    }
+    graph.map_layer_nodes(|node| map_id(nodes, node, "layer node"))?;
     map_list(&mut graph.hidden_nodes, nodes, "hidden node")?;
     map_list(
         &mut graph.replaced_external_port_dummies,
@@ -398,7 +395,9 @@ fn remap_graph_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     edges: &IdVec<EdgeId, E>,
 ) -> Result<(), ComponentError> {
     for node in &mut current.layerless_nodes {
-        if let Some(origin) = &mut node.origin_port
+        if let Some(origin) = node
+            .external_port_mut()
+            .and_then(|external| external.origin_port.as_mut())
             && origin.graph_id == graph_id
         {
             map_port(&mut origin.port, nodes)?;
@@ -424,7 +423,7 @@ fn offset_graph(graph: &mut LGraph, delta: LPoint) {
         node.position.x += delta.x;
         node.position.y += delta.y;
         for port in &node.ports {
-            for &edge in &port.outgoing_edges {
+            for &edge in port.outgoing_edges() {
                 let edge = &mut graph.edges[edge];
                 for point in &mut edge.bend_points {
                     point.x += delta.x;
@@ -559,6 +558,7 @@ pub(crate) fn combine(
     let mut hidden = Vec::new();
     let mut replaced = Vec::new();
     let mut self_loops = Vec::new();
+    let mut tables = NodeTables::default();
     let mut cyclic = false;
     for mut component in components {
         let mut node_map = component.original_nodes;
@@ -572,6 +572,7 @@ pub(crate) fn combine(
         component.graph.clear_layers();
         remap_references(&mut component.graph, &node_map, &edge_map)?;
         remap_nested_references(graphs, &component.graph, &node_map, &edge_map)?;
+        tables.absorb(&node_map, component.graph.tables);
         for (index, node) in node_map.into_iter().zip(component.graph.layerless_nodes) {
             nodes[index] = Some(node);
         }
@@ -604,9 +605,10 @@ pub(crate) fn combine(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let target = graphs.root_mut();
+    target.tables = tables;
     target.layerless_nodes = layerless_nodes.into();
     target.edges = edges.into();
-    target.layers.clear();
+    target.clear_layers();
     target.hidden_nodes = hidden;
     target.replaced_external_port_dummies = replaced;
     target.self_loop_holders = self_loops;
@@ -638,7 +640,7 @@ mod tests {
             .layerless_nodes
             .push(LNode::new("a", 10.0, 10.0, None));
         let mut dummy = LNode::new("dummy", 0.0, 0.0, None);
-        dummy.kind = LNodeKind::NorthSouthPort;
+        dummy.set_kind(crate::graph::LNodeKind::NorthSouthPort);
         graph.layerless_nodes.push(dummy);
         let north = graph
             .add_port(
@@ -670,24 +672,10 @@ mod tests {
             node: NodeId::new(2),
         });
         graph
-            .add_edge(LayeredEdge {
-                id: "e".to_string(),
-                source: out,
-                target: west,
-                source_node_id: String::new(),
-                target_node_id: String::new(),
-                labels: Vec::new(),
-                minlen: 1,
-                reversed: false,
-                bend_points: Vec::new(),
-                junction_points: Vec::new(),
-                model_order: None,
-                priority_direction: 0,
-                priority_shortness: 0,
-                priority_straightness: 0,
-                thickness: 1.0,
-                original_opposite_port: None,
-                compound_segment: None,
+            .add_edge({
+                let mut built_edge = LayeredEdge::new("e".to_string(), out, west);
+                built_edge.thickness = 1.0;
+                built_edge
             })
             .unwrap();
 
@@ -714,25 +702,9 @@ mod tests {
     }
 
     fn edge_between(id: &str, source: PortRef, target: PortRef) -> LayeredEdge {
-        LayeredEdge {
-            id: id.to_string(),
-            source,
-            target,
-            source_node_id: String::new(),
-            target_node_id: String::new(),
-            labels: Vec::new(),
-            minlen: 1,
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order: None,
-            priority_direction: 0,
-            priority_shortness: 0,
-            priority_straightness: 0,
-            thickness: 1.0,
-            original_opposite_port: None,
-            compound_segment: None,
-        }
+        let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
+        built_edge.thickness = 1.0;
+        built_edge
     }
 
     // Mutation: leave out the `remap_nested_references` call in `split`. The nested graph then
@@ -799,7 +771,11 @@ mod tests {
             )
             .unwrap();
         // The dummy stands for the port of `holder`, and holds the dummy made for `c`'s port.
-        inside.layerless_nodes[NodeId::new(0)].origin_port = Some(GraphPortRef {
+        inside.layerless_nodes[NodeId::new(0)].set_kind(crate::graph::LNodeKind::ExternalPort);
+        inside.layerless_nodes[NodeId::new(0)]
+            .external_port_mut()
+            .unwrap()
+            .origin_port = Some(GraphPortRef {
             graph_id: GraphId::ROOT,
             port: holder_out,
         });
@@ -830,6 +806,8 @@ mod tests {
         let between = &graphs[inside_id];
         assert_eq!(
             between.layerless_nodes[NodeId::new(0)]
+                .external_port()
+                .unwrap()
                 .origin_port
                 .map(|o| o.port.node),
             Some(crate::graph::NodeId::new(0)),
@@ -858,5 +836,179 @@ mod tests {
         combine(&mut graphs, components).unwrap();
 
         assert_eq!(graphs[inside_id], before);
+    }
+
+    // Mutation: in `split`, leave out `tables` of a component. In `remap_references`, leave out
+    // `map_node_ids`. In `combine`, leave the root's `tables` as they were. In `NodeTables`, leave
+    // one of the five tables out of `subset` or `absorb`.
+    #[test]
+    fn the_side_tables_of_nodes_follow_them_through_split_and_combine() {
+        let mut graph = LGraph::new("g", LayeredOptions::default());
+        for id in ["a", "b", "c", "d"] {
+            graph.layerless_nodes.push(LNode::new(id, 10.0, 10.0, None));
+        }
+        // The first component is nodes 0 and 1, the second is nodes 2 and 3. The second one
+        // moves down: node 2 to 0, and node 3 to 1.
+        for (source, target) in [(0, 1), (2, 3)] {
+            let out = graph
+                .add_port(
+                    NodeId::new(source),
+                    PortType::Output,
+                    PortSide::East,
+                    LPoint::default(),
+                )
+                .unwrap();
+            let into = graph
+                .add_port(
+                    NodeId::new(target),
+                    PortType::Input,
+                    PortSide::West,
+                    LPoint::default(),
+                )
+                .unwrap();
+            graph
+                .add_edge(edge_between(&format!("e{source}"), out, into))
+                .unwrap();
+        }
+        let row = graph.tables.in_layer.row_mut(NodeId::new(3));
+        row.layout_unit = Some(NodeId::new(2));
+        row.successor_constraints = vec![NodeId::new(2)];
+        row.barycenter_associates = vec![NodeId::new(2)];
+        graph
+            .tables
+            .self_loop_options
+            .row_mut(NodeId::new(3))
+            .ordering = crate::options::SelfLoopOrderingStrategy::Sequenced;
+        *graph.tables.port_alignment.row_mut(NodeId::new(3)) = crate::options::PortAlignment::End;
+        graph
+            .tables
+            .placement_options
+            .row_mut(NodeId::new(3))
+            .flexibility = crate::options::NodeFlexibility::PortPosition;
+        graph.mark_layer_constraint_explicit(NodeId::new(3));
+        let mut graphs = GraphArena::new(graph);
+
+        let components = split(&mut graphs).unwrap().unwrap();
+
+        let second = &components[1].graph;
+        let row = second.tables.in_layer.get(NodeId::new(1)).unwrap();
+        assert_eq!(row.layout_unit, Some(NodeId::new(0)));
+        assert_eq!(row.successor_constraints, [NodeId::new(0)]);
+        assert_eq!(row.barycenter_associates, [NodeId::new(0)]);
+        assert_eq!(
+            second
+                .tables
+                .self_loop_options
+                .get(NodeId::new(1))
+                .unwrap()
+                .ordering,
+            crate::options::SelfLoopOrderingStrategy::Sequenced
+        );
+        assert_eq!(
+            second.port_alignment_of(NodeId::new(1)),
+            Some(crate::options::PortAlignment::End)
+        );
+        assert_eq!(
+            second
+                .tables
+                .placement_options
+                .get(NodeId::new(1))
+                .unwrap()
+                .flexibility,
+            crate::options::NodeFlexibility::PortPosition
+        );
+        assert!(second.is_layer_constraint_explicit(NodeId::new(1)));
+        assert!(
+            !components[0]
+                .graph
+                .is_layer_constraint_explicit(NodeId::new(1))
+        );
+        assert_eq!(
+            components[0].graph.in_layer_layout_unit(NodeId::new(1)),
+            None
+        );
+
+        // A processor of the second component records a row and an option for its node 0.
+        let mut components = components;
+        components[1]
+            .graph
+            .tables
+            .in_layer
+            .row_mut(NodeId::new(0))
+            .successor_constraints = vec![NodeId::new(1)];
+        components[1]
+            .graph
+            .tables
+            .self_loop_options
+            .row_mut(NodeId::new(0))
+            .distribution = crate::options::SelfLoopDistributionStrategy::Equally;
+        *components[1]
+            .graph
+            .tables
+            .port_alignment
+            .row_mut(NodeId::new(0)) = crate::options::PortAlignment::Begin;
+        components[1]
+            .graph
+            .tables
+            .placement_options
+            .row_mut(NodeId::new(0))
+            .flexibility = crate::options::NodeFlexibility::PortPosition;
+        components[1]
+            .graph
+            .mark_layer_constraint_explicit(NodeId::new(0));
+
+        combine(&mut graphs, components).unwrap();
+
+        let root = graphs.root();
+        assert_eq!(
+            root.in_layer_layout_unit(NodeId::new(3)),
+            Some(NodeId::new(2))
+        );
+        assert_eq!(
+            root.in_layer_successor_constraints(NodeId::new(3)),
+            [NodeId::new(2)]
+        );
+        assert_eq!(root.barycenter_associates(NodeId::new(3)), [NodeId::new(2)]);
+        assert_eq!(
+            root.tables
+                .self_loop_options
+                .get(NodeId::new(3))
+                .unwrap()
+                .ordering,
+            crate::options::SelfLoopOrderingStrategy::Sequenced
+        );
+        assert_eq!(root.in_layer_layout_unit(NodeId::new(1)), None);
+        // The rows a processor wrote are back at the original node.
+        assert_eq!(
+            root.in_layer_successor_constraints(NodeId::new(2)),
+            [NodeId::new(3)]
+        );
+        assert_eq!(
+            root.tables
+                .self_loop_options
+                .get(NodeId::new(2))
+                .unwrap()
+                .distribution,
+            crate::options::SelfLoopDistributionStrategy::Equally
+        );
+        assert_eq!(
+            root.port_alignment_of(NodeId::new(2)),
+            Some(crate::options::PortAlignment::Begin)
+        );
+        assert_eq!(
+            root.port_alignment_of(NodeId::new(3)),
+            Some(crate::options::PortAlignment::End)
+        );
+        assert_eq!(
+            root.tables
+                .placement_options
+                .get(NodeId::new(2))
+                .unwrap()
+                .flexibility,
+            crate::options::NodeFlexibility::PortPosition
+        );
+        assert!(root.is_layer_constraint_explicit(NodeId::new(2)));
+        assert!(root.is_layer_constraint_explicit(NodeId::new(3)));
+        assert!(!root.is_layer_constraint_explicit(NodeId::new(0)));
     }
 }

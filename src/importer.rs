@@ -14,10 +14,11 @@ use crate::compound::{
     source_ported_cross_hierarchy_segments,
 };
 use crate::graph::{
-    CompoundEdgeSegment, EdgeId, EdgeLabelPlacement, GraphArena, GraphId, HierarchyEdge,
-    HierarchyStep, LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId,
-    PortId, PortRef, PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
-    is_across_flow, port_box, port_side_from_direction,
+    CompoundEdgeSegment, EdgeId, EdgeLabelPlacement, ExternalPortData, GraphArena, GraphId,
+    HierarchyEdge, HierarchyStep, LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize,
+    LayeredEdge, NodeId, PlacementOptions, PortId, PortRef, PortSide, PortType, SelfLoopOptions,
+    apply_port_index_to_dummy, create_external_port_dummy, is_across_flow, port_box,
+    port_side_from_direction,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
@@ -439,12 +440,15 @@ fn import_external_ports(
                 scope.node_size,
                 border_offset,
                 direction,
+                ExternalPortData {
+                    scope_port: Some(position),
+                    ..ExternalPortData::default()
+                },
             );
             apply_port_index_to_dummy(&mut dummy, constraints, port.index.map(|i| i as isize));
             let dummy_port = &mut dummy.ports[PortId::new(0)];
             dummy_port.named = true;
             dummy_port.connected_to_external_nodes = port.connected_to_external_nodes;
-            dummy.scope_port = Some(position);
             dummy
         });
         dummies.insert(port.id.clone(), node);
@@ -496,7 +500,7 @@ fn has_children(graphs: &GraphArena, node: &LNode) -> bool {
         graphs[nested]
             .layerless_nodes
             .iter()
-            .any(|child| child.kind == LNodeKind::Normal)
+            .any(|child| child.kind() == LNodeKind::Normal)
     })
 }
 
@@ -992,7 +996,6 @@ fn import_hierarchical_graph(
                     let horizontal = !node.parent_settings.direction.is_vertical();
                     include_minimum_graph_size(&mut nested_graph.options, &cell_node, horizontal);
                 }
-                parent_graph.layerless_nodes[node_index].compound = true;
                 Some((node_index, nested_graph, materializes_children))
             } else {
                 None
@@ -1111,24 +1114,18 @@ fn transform_inside_self_loop(
     }
 
     let edge_index = graph
-        .add_edge(LayeredEdge {
-            id: edge.id.clone(),
-            source,
-            target,
-            source_node_id: edge.source.clone(),
-            target_node_id: edge.target.clone(),
-            labels,
-            minlen: edge.minlen.max(1),
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order,
-            priority_direction: edge.priority_direction,
-            priority_shortness: edge.priority_shortness,
-            priority_straightness: edge.priority_straightness,
-            thickness: ELK_DEFAULT_EDGE_THICKNESS,
-            original_opposite_port: None,
-            compound_segment: None,
+        .add_edge({
+            let mut built_edge = LayeredEdge::new(edge.id.clone(), source, target);
+            built_edge.source_node_id = edge.source.clone();
+            built_edge.target_node_id = edge.target.clone();
+            built_edge.labels = labels;
+            built_edge.minlen = edge.minlen.max(1);
+            built_edge.model_order = model_order;
+            built_edge.priority_direction = edge.priority_direction;
+            built_edge.priority_shortness = edge.priority_shortness;
+            built_edge.priority_straightness = edge.priority_straightness;
+            built_edge.thickness = ELK_DEFAULT_EDGE_THICKNESS;
+            built_edge
         })
         .expect("inside self-loop dummies were created before adding edge");
 
@@ -1158,7 +1155,7 @@ fn ensure_inside_self_loop_dummy(
     let dummy_id = format!("external:{parent_node_id}");
     let direction = graph.options.direction;
     let node = graph.push_node_with(|node| {
-        let mut dummy = create_external_port_dummy(
+        create_external_port_dummy(
             node,
             dummy_id,
             parent_port_key.to_string(),
@@ -1174,10 +1171,12 @@ fn ensure_inside_self_loop_dummy(
             LSize::default(),
             0.0,
             direction,
-        );
-        dummy.parent_port_key = Some(parent_port_key.to_string());
-        dummy.parent_port_type = Some(port_type);
-        dummy
+            ExternalPortData {
+                parent_port_key: Some(parent_port_key.to_string()),
+                parent_port_type: Some(port_type),
+                ..ExternalPortData::default()
+            },
+        )
     });
     let port = PortRef {
         node,
@@ -1370,10 +1369,8 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     ) {
         graph.graph_properties.non_free_ports = true;
     }
-    lnode.port_alignment = node.port_alignment;
     if let Some(layer_constraint) = node.layer_constraint {
         lnode.layer_constraint = layer_constraint;
-        lnode.layer_constraint_explicit = true;
     }
     // `ElkGraphImporter.transformNode` skips labels without text.
     for label in node.labels.iter().filter(|label| !label.text.is_empty()) {
@@ -1381,12 +1378,22 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     }
     lnode.node_label_placement = node.node_label_placement;
     lnode.node_size = node.node_size;
-    lnode.self_loop_distribution = node.self_loop_distribution;
-    lnode.self_loop_ordering = node.self_loop_ordering;
-    lnode.node_flexibility = node.node_flexibility;
-    lnode.ports_surrounding = node.ports_surrounding;
     let node_size = lnode.size;
     let node_index = graph.push_node_with(|_| lnode);
+    if node.layer_constraint.is_some() {
+        graph.mark_layer_constraint_explicit(node_index);
+    }
+    if let Some(alignment) = node.port_alignment {
+        *graph.tables.port_alignment.row_mut(node_index) = alignment;
+    }
+    *graph.tables.placement_options.row_mut(node_index) = PlacementOptions {
+        flexibility: node.node_flexibility,
+        ports_surrounding: node.ports_surrounding,
+    };
+    *graph.tables.self_loop_options.row_mut(node_index) = SelfLoopOptions {
+        distribution: node.self_loop_distribution,
+        ordering: node.self_loop_ordering,
+    };
 
     // A port gets a model order when its node does: `needsModelOrder` asks about the node's
     // parent, which also decides the node's own order.
@@ -1571,24 +1578,18 @@ fn transform_edge(
     }
 
     let edge_index = graph
-        .add_edge(LayeredEdge {
-            id: edge.id.clone(),
-            source,
-            target,
-            source_node_id: edge.source.clone(),
-            target_node_id: edge.target.clone(),
-            labels,
-            minlen: edge.minlen.max(1),
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order,
-            priority_direction: edge.priority_direction,
-            priority_shortness: edge.priority_shortness,
-            priority_straightness: edge.priority_straightness,
-            thickness: ELK_DEFAULT_EDGE_THICKNESS,
-            original_opposite_port: None,
-            compound_segment: None,
+        .add_edge({
+            let mut built_edge = LayeredEdge::new(edge.id.clone(), source, target);
+            built_edge.source_node_id = edge.source.clone();
+            built_edge.target_node_id = edge.target.clone();
+            built_edge.labels = labels;
+            built_edge.minlen = edge.minlen.max(1);
+            built_edge.model_order = model_order;
+            built_edge.priority_direction = edge.priority_direction;
+            built_edge.priority_shortness = edge.priority_shortness;
+            built_edge.priority_straightness = edge.priority_straightness;
+            built_edge.thickness = ELK_DEFAULT_EDGE_THICKNESS;
+            built_edge
         })
         .expect("ports were created before adding edge");
 
@@ -1598,7 +1599,7 @@ fn transform_edge(
         let node = &graph.layerless_nodes[end.node];
         let port = &node.ports[end.port];
         let (incoming, outgoing) = port_index.crossing_at(&node.id, &port.id, port.named);
-        port.incoming_edges.len() + incoming > 1 || port.outgoing_edges.len() + outgoing > 1
+        port.incoming_edges().len() + incoming > 1 || port.outgoing_edges().len() + outgoing > 1
     };
     if parallel_at(graph, source) || parallel_at(graph, target) {
         graph.graph_properties.hyperedges = true;
@@ -1863,7 +1864,7 @@ fn hierarchy_edge_end(
             node_id: dummy.id.clone(),
             port_key: port.id.clone(),
             named: port.named,
-            attached: (port.incoming_edges.len(), port.outgoing_edges.len()),
+            attached: (port.incoming_edges().len(), port.outgoing_edges().len()),
         });
     }
     let slot = arena.graph_slot_for_parent(index, graph_parent);
@@ -1873,7 +1874,10 @@ fn hierarchy_edge_end(
             node_id: node_id.to_string(),
             port_key: port_id.to_string(),
             named: true,
-            attached: (attached.incoming_edges.len(), attached.outgoing_edges.len()),
+            attached: (
+                attached.incoming_edges().len(),
+                attached.outgoing_edges().len(),
+            ),
         });
     }
     let port_key = hierarchy_port_key(node_id, edge_order, role, merge_edges, port_type);
@@ -1888,7 +1892,7 @@ fn hierarchy_edge_end(
     )
     .ok_or_else(missing_endpoint)?;
     let port = &arena.graphs[slot].layerless_nodes[end.node].ports[end.port];
-    let attached = (port.incoming_edges.len(), port.outgoing_edges.len());
+    let attached = (port.incoming_edges().len(), port.outgoing_edges().len());
     Ok(HierarchyEdgeEnd {
         node_id: node_id.to_string(),
         port_key,
@@ -2007,7 +2011,7 @@ fn ensure_port_at_node(
 /// `ElkGraphImporter.transformEdge` marks hyperedges when a port has more than one incoming
 /// or more than one outgoing edge. One of each is not a hyperedge.
 fn has_parallel_port_edges(port: &LPort) -> bool {
-    port.incoming_edges.len() > 1 || port.outgoing_edges.len() > 1
+    port.incoming_edges().len() > 1 || port.outgoing_edges().len() > 1
 }
 
 fn label_to_lgraph(label: &ElkInputLabel) -> LLabel {
@@ -2599,6 +2603,85 @@ mod tests {
         ));
     }
 
+    // Mutation: in `transform_node`, write the self loop options of every node to the row of node 0.
+    #[test]
+    fn import_records_the_self_loop_options_of_each_node() {
+        let mut first = node("A");
+        first.self_loop_distribution = crate::options::SelfLoopDistributionStrategy::Equally;
+        first.self_loop_ordering = crate::options::SelfLoopOrderingStrategy::ReverseStacked;
+        let mut second = node("B");
+        second.self_loop_distribution = crate::options::SelfLoopDistributionStrategy::North;
+        second.self_loop_ordering = crate::options::SelfLoopOrderingStrategy::Sequenced;
+        let imported = import_graph(&graph(vec![first, second], vec![])).unwrap();
+
+        let root = imported.root();
+        let options = |name: &str| {
+            root.tables
+                .self_loop_options
+                .get(root.node_named(name))
+                .unwrap()
+        };
+
+        assert_eq!(
+            options("A").distribution,
+            crate::options::SelfLoopDistributionStrategy::Equally
+        );
+        assert_eq!(
+            options("A").ordering,
+            crate::options::SelfLoopOrderingStrategy::ReverseStacked
+        );
+        assert_eq!(
+            options("B").distribution,
+            crate::options::SelfLoopDistributionStrategy::North
+        );
+        assert_eq!(
+            options("B").ordering,
+            crate::options::SelfLoopOrderingStrategy::Sequenced
+        );
+    }
+
+    // Mutation: in `transform_node`, write the port alignment, the placement options or the
+    // explicit layer constraint of every node to the row of node 0.
+    #[test]
+    fn import_records_the_options_the_processors_read() {
+        let mut first = node("A");
+        first.port_alignment = Some(crate::options::PortAlignment::End);
+        first.node_flexibility = crate::options::NodeFlexibility::PortPosition;
+        first.ports_surrounding = Some(crate::options::SpacingMargin {
+            top: 1.0,
+            right: 2.0,
+            bottom: 3.0,
+            left: 4.0,
+        });
+        first.layer_constraint = Some(crate::options::LayerConstraint::First);
+        let second = node("B");
+        let imported = import_graph(&graph(vec![first, second], vec![])).unwrap();
+
+        let root = imported.root();
+        let (a, b) = (root.node_named("A"), root.node_named("B"));
+
+        assert_eq!(
+            root.port_alignment_of(a),
+            Some(crate::options::PortAlignment::End)
+        );
+        assert_eq!(root.port_alignment_of(b), None);
+        let placement = root.tables.placement_options.get(a).unwrap();
+        assert_eq!(
+            placement.flexibility,
+            crate::options::NodeFlexibility::PortPosition
+        );
+        assert_eq!(
+            placement.ports_surrounding.map(|margin| margin.left),
+            Some(4.0)
+        );
+        assert_eq!(
+            root.tables.placement_options.get(b).unwrap().flexibility,
+            crate::options::NodeFlexibility::None
+        );
+        assert!(root.is_layer_constraint_explicit(a));
+        assert!(!root.is_layer_constraint_explicit(b));
+    }
+
     #[test]
     fn import_rejects_duplicate_input_edge_ids_before_endpoint_validation() {
         let input = graph(
@@ -3061,20 +3144,20 @@ mod tests {
         let external_dummies = nested
             .layerless_nodes
             .iter()
-            .filter(|candidate| candidate.kind == LNodeKind::ExternalPort)
+            .filter(|candidate| candidate.kind() == LNodeKind::ExternalPort)
             .collect::<Vec<_>>();
 
         assert_eq!(external_dummies.len(), 2);
         let input_dummy = external_dummies
             .iter()
-            .find(|dummy| dummy.parent_port_type == Some(PortType::Input))
+            .find(|dummy| dummy.external_port().unwrap().parent_port_type == Some(PortType::Input))
             .expect("inside self-loop input dummy should exist");
         let output_dummy = external_dummies
             .iter()
-            .find(|dummy| dummy.parent_port_type == Some(PortType::Output))
+            .find(|dummy| dummy.external_port().unwrap().parent_port_type == Some(PortType::Output))
             .expect("inside self-loop output dummy should exist");
-        assert_eq!(input_dummy.ports[PortId::new(0)].incoming_edges.len(), 2);
-        assert_eq!(output_dummy.ports[PortId::new(0)].outgoing_edges.len(), 2);
+        assert_eq!(input_dummy.ports[PortId::new(0)].incoming_edges().len(), 2);
+        assert_eq!(output_dummy.ports[PortId::new(0)].outgoing_edges().len(), 2);
     }
 
     // Mutation: in `transform_inside_self_loop`, drop `graph_properties.self_loops = true`.
@@ -3251,7 +3334,12 @@ mod tests {
             lgraph.options.hierarchy_handling,
             HierarchyHandling::SeparateChildren
         );
-        assert!(lgraph.layerless_nodes.iter().all(|node| !node.compound));
+        assert!(
+            lgraph
+                .layerless_nodes
+                .iter()
+                .all(|node| node.nested_graph.is_none())
+        );
     }
 
     // Mutation: let `GraphArena::nest` record the node after the holder (`node + 1`) as the parent.
@@ -3360,7 +3448,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["A:0:source", "A:1"]
         );
-        assert_eq!(nested.edges[EdgeId::new(0)].source.port, PortId::new(1));
+        assert_eq!(nested.edges[EdgeId::new(0)].source().port, PortId::new(1));
         assert_eq!(lgraph.hierarchy_edges[0].source_port_key, "A:0:source");
     }
 
@@ -3391,7 +3479,7 @@ mod tests {
         let nested = &lgraph[cluster.nested_graph.unwrap()];
         assert_eq!(port_dummy.graph_id, nested.id);
         let external = &nested.layerless_nodes[port_dummy.node];
-        assert_eq!(external.external_port_side, PortSide::South);
+        assert_eq!(external.external_port().unwrap().side, PortSide::South);
         assert_eq!(
             parent_port.border_offset,
             external.ports[PortId::new(0)].border_offset
@@ -3401,6 +3489,8 @@ mod tests {
             Some(nested.options.spacing.edge_edge / 2.0)
         );
         let origin = external
+            .external_port()
+            .unwrap()
             .origin_port
             .as_ref()
             .expect("external dummy should point back to parent port");
@@ -3434,7 +3524,7 @@ mod tests {
         let external_dummies = nested
             .nodes_with_ids()
             .filter(|(_, node)| {
-                node.kind == LNodeKind::ExternalPort && node.id == "external:cluster"
+                node.kind() == LNodeKind::ExternalPort && node.id == "external:cluster"
             })
             .collect::<Vec<_>>();
 
@@ -3442,7 +3532,7 @@ mod tests {
         let (dummy_node, external_dummy) = external_dummies[0];
         let dummy_port = external_dummy.ports.first().unwrap();
         assert_eq!(
-            dummy_port.incoming_edges.len() + dummy_port.outgoing_edges.len(),
+            dummy_port.incoming_edges().len() + dummy_port.outgoing_edges().len(),
             1
         );
         assert_eq!(cluster.ports.len(), 1);
@@ -3488,6 +3578,8 @@ mod tests {
         assert_eq!(port_dummy.graph_id, nested.id);
         let external = &nested.layerless_nodes[port_dummy.node];
         let origin = external
+            .external_port()
+            .unwrap()
             .origin_port
             .as_ref()
             .expect("external dummy should point back to parent port");
@@ -3524,10 +3616,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            nested.layerless_nodes[segment.source.node].kind,
+            nested.layerless_nodes[segment.source().node].kind(),
             LNodeKind::ExternalPort
         );
-        assert_eq!(nested.layerless_nodes[segment.target.node].id, "A");
+        assert_eq!(nested.layerless_nodes[segment.target().node].id, "A");
     }
 
     // Mutation: in `source_ported_cross_hierarchy_segments`, give the segment between the two paths
@@ -3709,11 +3801,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![EdgeId::new(0), EdgeId::new(1)]
         );
-        assert!(
-            nested.edges.iter().all(
-                |edge| nested.layerless_nodes[edge.source.node].kind == LNodeKind::ExternalPort
-            )
-        );
+        assert!(nested.edges.iter().all(
+            |edge| nested.layerless_nodes[edge.source().node].kind() == LNodeKind::ExternalPort
+        ));
     }
 
     #[test]
@@ -3733,7 +3823,7 @@ mod tests {
             Some(PortType::Output)
         );
         assert_eq!(
-            lgraph.layerless_nodes[a].ports[PortId::new(0)].outgoing_edges,
+            lgraph.layerless_nodes[a].ports[PortId::new(0)].outgoing_edges(),
             vec![EdgeId::new(0), EdgeId::new(1)]
         );
         assert!(lgraph.graph_properties.hyperedges);
@@ -3832,8 +3922,14 @@ mod tests {
                 let port = PortId::new(index);
                 assert_eq!(source.ports[port].side, output_side, "{direction:?}");
                 assert_eq!(target.ports[port].side, input_side, "{direction:?}");
-                assert_eq!(source.ports[port].outgoing_edges, vec![EdgeId::new(index)]);
-                assert_eq!(target.ports[port].incoming_edges, vec![EdgeId::new(index)]);
+                assert_eq!(
+                    source.ports[port].outgoing_edges(),
+                    vec![EdgeId::new(index)]
+                );
+                assert_eq!(
+                    target.ports[port].incoming_edges(),
+                    vec![EdgeId::new(index)]
+                );
             }
         }
     }
@@ -4336,15 +4432,15 @@ mod tests {
         assert_eq!(layered_node(&lgraph, "B").ports.len(), 1);
         assert!(
             layered_node(&lgraph, "A").ports[PortId::new(0)]
-                .outgoing_edges
+                .outgoing_edges()
                 .is_empty()
         );
         assert_eq!(
-            layered_node(&lgraph, "A").ports[PortId::new(1)].outgoing_edges,
+            layered_node(&lgraph, "A").ports[PortId::new(1)].outgoing_edges(),
             vec![EdgeId::new(0)]
         );
         assert_eq!(
-            layered_node(&lgraph, "B").ports[PortId::new(0)].incoming_edges,
+            layered_node(&lgraph, "B").ports[PortId::new(0)].incoming_edges(),
             vec![EdgeId::new(0)]
         );
     }

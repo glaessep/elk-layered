@@ -671,15 +671,15 @@ fn calculate_bend_points(
     for port_ref in &segment.ports {
         let source_anchor = absolute_anchor(graph, *port_ref);
         let outgoing_edges = graph.layerless_nodes[port_ref.node].ports[port_ref.port]
-            .outgoing_edges
-            .clone();
+            .outgoing_edges()
+            .to_vec();
 
         for edge_index in outgoing_edges {
             if is_self_loop(graph, edge_index) {
                 continue;
             }
 
-            let target = graph.edges[edge_index].target;
+            let target = graph.edges[edge_index].target();
             let target_anchor = absolute_anchor(graph, target);
 
             if bend_point_axis_delta(direction, source_anchor, target_anchor).abs() <= TOLERANCE {
@@ -1414,13 +1414,13 @@ fn connected_ports(graph: &LGraph, port_ref: PortRef) -> Vec<PortRef> {
         return Vec::new();
     };
 
-    port.incoming_edges
+    port.incoming_edges()
         .iter()
-        .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.source))
+        .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.source()))
         .chain(
-            port.outgoing_edges
+            port.outgoing_edges()
                 .iter()
-                .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.target)),
+                .filter_map(|edge| graph.edges.get(*edge).map(|edge| edge.target())),
         )
         .filter(|other| *other != port_ref)
         .collect()
@@ -1500,7 +1500,7 @@ fn target_bend_point(
 }
 
 fn is_self_loop(graph: &LGraph, edge_index: EdgeId) -> bool {
-    graph.edges[edge_index].source.node == graph.edges[edge_index].target.node
+    graph.edges[edge_index].source().node == graph.edges[edge_index].target().node
 }
 
 /// Ports `BaseRoutingDirectionStrategy.addJunctionPointIfNecessary`: a bend point needs a junction
@@ -1886,24 +1886,12 @@ mod tests {
             )
             .unwrap();
 
-        graph.add_edge(LayeredEdge {
-            id: "A-B".to_string(),
-            source: source_port,
-            target: target_port,
-            source_node_id: "A".to_string(),
-            target_node_id: "B".to_string(),
-            labels: Vec::new(),
-            minlen: 1,
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order: Some(0),
-            priority_direction: 0,
-            priority_shortness: 0,
-            priority_straightness: 0,
-            thickness: 0.0,
-            original_opposite_port: None,
-            compound_segment: None,
+        graph.add_edge({
+            let mut built_edge = LayeredEdge::new("A-B".to_string(), source_port, target_port);
+            built_edge.source_node_id = "A".to_string();
+            built_edge.target_node_id = "B".to_string();
+            built_edge.model_order = Some(0);
+            built_edge
         });
 
         graph
@@ -1960,24 +1948,12 @@ mod tests {
             )
             .unwrap();
 
-        graph.add_edge(LayeredEdge {
-            id: "A-B".to_string(),
-            source: source_port,
-            target: target_port,
-            source_node_id: "A".to_string(),
-            target_node_id: "B".to_string(),
-            labels: Vec::new(),
-            minlen: 1,
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order: Some(0),
-            priority_direction: 0,
-            priority_shortness: 0,
-            priority_straightness: 0,
-            thickness: 0.0,
-            original_opposite_port: None,
-            compound_segment: None,
+        graph.add_edge({
+            let mut built_edge = LayeredEdge::new("A-B".to_string(), source_port, target_port);
+            built_edge.source_node_id = "A".to_string();
+            built_edge.target_node_id = "B".to_string();
+            built_edge.model_order = Some(0);
+            built_edge
         });
 
         graph
@@ -2245,8 +2221,8 @@ mod tests {
     #[test]
     fn route_edges_west_to_east_writes_orthogonal_bendpoints_for_non_straight_edge() {
         let mut graph = route_test_graph(0.0, 30.0);
-        let left = graph.layers[0].nodes.clone();
-        let right = graph.layers[1].nodes.clone();
+        let left = graph.layers()[0].nodes().to_vec();
+        let right = graph.layers()[1].nodes().to_vec();
 
         let slots = route_edges_west_to_east(&mut graph, Some(&left), Some(&right), 50.0, 10.0);
 
@@ -2260,10 +2236,10 @@ mod tests {
     #[test]
     fn route_edges_west_to_east_uses_actual_outgoing_edges_for_output_ports() {
         let mut graph = route_test_graph(0.0, 30.0);
-        let source_port = graph.edges[EdgeId::new(0)].source;
+        let source_port = graph.edges[EdgeId::new(0)].source();
         graph.layerless_nodes[source_port.node].ports[source_port.port].port_type = PortType::Input;
-        let left = graph.layers[0].nodes.clone();
-        let right = graph.layers[1].nodes.clone();
+        let left = graph.layers()[0].nodes().to_vec();
+        let right = graph.layers()[1].nodes().to_vec();
 
         let slots = route_edges_west_to_east(&mut graph, Some(&left), Some(&right), 50.0, 10.0);
 
@@ -2277,8 +2253,8 @@ mod tests {
     #[test]
     fn route_edges_west_to_east_leaves_straight_edge_without_bendpoints() {
         let mut graph = route_test_graph(0.0, -10.0);
-        let left = graph.layers[0].nodes.clone();
-        let right = graph.layers[1].nodes.clone();
+        let left = graph.layers()[0].nodes().to_vec();
+        let right = graph.layers()[1].nodes().to_vec();
 
         let slots = route_edges_west_to_east(&mut graph, Some(&left), Some(&right), 50.0, 10.0);
 
@@ -2289,8 +2265,8 @@ mod tests {
     #[test]
     fn route_edges_north_to_south_writes_orthogonal_bendpoints_for_non_straight_edge() {
         let mut graph = vertical_route_test_graph(0.0, 30.0, PortSide::South);
-        let source = graph.layers[0].nodes.clone();
-        let target = graph.layers[1].nodes.clone();
+        let source = graph.layers()[0].nodes().to_vec();
+        let target = graph.layers()[1].nodes().to_vec();
 
         let slots = route_edges(
             &mut graph,
@@ -2311,8 +2287,8 @@ mod tests {
     #[test]
     fn route_edges_south_to_north_writes_orthogonal_bendpoints_for_non_straight_edge() {
         let mut graph = vertical_route_test_graph(0.0, 30.0, PortSide::North);
-        let source = graph.layers[0].nodes.clone();
-        let target = graph.layers[1].nodes.clone();
+        let source = graph.layers()[0].nodes().to_vec();
+        let target = graph.layers()[1].nodes().to_vec();
 
         let slots = route_edges(
             &mut graph,

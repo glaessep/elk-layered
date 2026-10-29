@@ -520,7 +520,8 @@ mod tests {
         for (position, side) in [PortSide::North, PortSide::South].into_iter().enumerate() {
             let mut nested = graph("same", 0);
             let mut dummy = LNode::new("external", 0.0, 0.0, None);
-            dummy.external_port_side = side;
+            dummy.set_kind(crate::graph::LNodeKind::ExternalPort);
+            dummy.external_port_mut().unwrap().side = side;
             nested.layerless_nodes.push(dummy);
             sides.push(graphs.nest(GraphId::ROOT, NodeId::new(position), nested));
         }

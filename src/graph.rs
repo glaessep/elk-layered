@@ -15,10 +15,12 @@ use crate::random::JavaRandom;
 mod arena;
 mod id_vec;
 mod ids;
+mod node_table;
 mod ports;
 pub use arena::{GraphArena, GraphId, GraphParent, OtherGraphs};
 pub use id_vec::{IdVec, VecId};
 pub use ids::{EdgeId, NodeId};
+pub use node_table::NodeTable;
 #[cfg(test)]
 pub(crate) use ports::port_ids;
 pub use ports::{NodePorts, PortId};
@@ -26,28 +28,168 @@ pub use ports::{NodePorts, PortId};
 #[derive(Debug, Clone, PartialEq)]
 pub struct LGraph {
     /// Names this graph in its hierarchy.
-    pub id: GraphId,
+    ///
+    /// Crate-visible: The arena sets it once; every phase names the graph by it.
+    pub(crate) id: GraphId,
     /// The caller's id of the node this graph belongs to. It only labels errors and results;
     /// nothing looks a graph up by it.
-    pub name: String,
-    pub options: LayeredOptions,
-    pub size: LSize,
-    pub padding: LPadding,
-    pub offset: LPoint,
-    pub layerless_nodes: IdVec<NodeId, LNode>,
-    pub layers: Vec<Layer>,
-    pub edges: IdVec<EdgeId, LayeredEdge>,
-    pub graph_properties: GraphProperties,
-    pub cyclic: bool,
+    ///
+    /// Crate-visible: It only labels errors and results; no invariant ties it to another field.
+    pub(crate) name: String,
+    /// Crate-visible: Every phase reads the configured options, and the importer and configurator
+    /// fill them before the run.
+    pub(crate) options: LayeredOptions,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) size: LSize,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) padding: LPadding,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) offset: LPoint,
+    /// Crate-visible: Every phase indexes the nodes by `NodeId`. The `IdVec` keeps the ids typed,
+    /// and the private fields of `LNode` keep the node invariants.
+    pub(crate) layerless_nodes: IdVec<NodeId, LNode>,
+    /// Private: only the methods below add, remove or reorder layers, so `LNode::layer_index`
+    /// and each layer's list stay in step.
+    layers: Vec<Layer>,
+    /// Crate-visible: Every phase indexes the edges by `EdgeId`. The `IdVec` keeps the ids typed,
+    /// and the private fields of `LayeredEdge` keep the edge invariants.
+    pub(crate) edges: IdVec<EdgeId, LayeredEdge>,
+    /// Crate-visible: The importer and the configurator write it and later phases read it; no
+    /// invariant ties it to another field.
+    pub(crate) graph_properties: GraphProperties,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) cyclic: bool,
+    /// Crate-visible: The configurator seeds it, and the processors that draw random numbers
+    /// advance it in place. `JavaRandom` keeps its own state.
     pub(crate) random: JavaRandom,
     /// The node this graph lies in, set when the graph joins a [`GraphArena`] with `nest`.
-    pub parent: Option<GraphParent>,
-    pub hidden_nodes: Vec<NodeId>,
-    pub replaced_external_port_dummies: Vec<NodeId>,
-    pub hierarchy_edges: Vec<HierarchyEdge>,
-    pub cross_hierarchy_edges: Vec<CrossHierarchyEdge>,
-    pub self_loop_holders: Vec<SelfLoopHolder>,
-    pub in_layer_successor_constraints_between_non_dummies: bool,
+    ///
+    /// Crate-visible: `GraphArena::nest` sets it and the phases read it to reach the node the graph
+    /// lies in.
+    pub(crate) parent: Option<GraphParent>,
+    /// Crate-visible: The layer constraint processors fill and empty it, and a component split and
+    /// combine carry it; `hidden_mask` is the reader.
+    pub(crate) hidden_nodes: Vec<NodeId>,
+    /// Crate-visible: The hierarchical port processors fill it, and a component split and combine
+    /// carry it.
+    pub(crate) replaced_external_port_dummies: Vec<NodeId>,
+    /// Crate-visible: Records of the compound preprocessing; each record holds its own ids.
+    pub(crate) hierarchy_edges: Vec<HierarchyEdge>,
+    /// Crate-visible: A record list that the compound preprocessing writes and the export reads;
+    /// each record holds its own ids.
+    pub(crate) cross_hierarchy_edges: Vec<CrossHierarchyEdge>,
+    /// Crate-visible: The self loop processors install and read it, and a component split and
+    /// combine carry it.
+    pub(crate) self_loop_holders: Vec<SelfLoopHolder>,
+    /// Crate-visible: The crossing minimization reads it. Nothing sets it yet.
+    pub(crate) in_layer_successor_constraints_between_non_dummies: bool,
+    /// The side tables of the nodes: the data that one processor owns.
+    ///
+    /// Crate-visible: the processors that own a table read and write it directly, and a component
+    /// split and combine carry it as a whole.
+    pub(crate) tables: NodeTables,
+}
+
+/// The side tables of the nodes of one graph. Each table belongs to one processor, as its doc
+/// says. A component split and combine move all of them through `subset` and `absorb`, so a new
+/// table needs its edits only here: the field, `subset`, `absorb`, and `map_node_ids` if its rows
+/// hold node ids.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct NodeTables {
+    /// What `NorthSouthPortPreprocessor` tells the crossing minimization about a node. Only the
+    /// nodes with fixed port sides and their dummies have a row.
+    pub(crate) in_layer: NodeTable<InLayerLayout>,
+    /// `layered.edgeRouting.selfLoopDistribution` and `selfLoopOrdering` of the nodes the importer
+    /// read them for. The self loop processors are the only readers.
+    pub(crate) self_loop_options: NodeTable<SelfLoopOptions>,
+    /// `portAlignment` of the nodes that set it. The node size and port placement is the only
+    /// reader. A node without a row follows the graph's default.
+    pub(crate) port_alignment: NodeTable<PortAlignment>,
+    /// The options only the node placement reads, of the nodes the importer read them for.
+    pub(crate) placement_options: NodeTable<PlacementOptions>,
+    /// A node has a row when its layer constraint was set by the caller or by a hierarchical
+    /// port dummy, not derived. Only the layer constraint preprocessing reads it.
+    pub(crate) layer_constraint_explicit: NodeTable<()>,
+}
+
+impl NodeTables {
+    /// The tables of a graph made from just `nodes`, in this order.
+    pub(crate) fn subset(&self, nodes: &IdVec<NodeId, NodeId>) -> Self {
+        Self {
+            in_layer: self.in_layer.subset(nodes),
+            self_loop_options: self.self_loop_options.subset(nodes),
+            port_alignment: self.port_alignment.subset(nodes),
+            placement_options: self.placement_options.subset(nodes),
+            layer_constraint_explicit: self.layer_constraint_explicit.subset(nodes),
+        }
+    }
+
+    /// Renames the node ids that rows hold, `kind` naming the id for an error. Used when graphs
+    /// split or merge and their node ids change.
+    pub(crate) fn map_node_ids<E>(
+        &mut self,
+        mut map: impl FnMut(NodeId, &'static str) -> Result<NodeId, E>,
+    ) -> Result<(), E> {
+        for row in self.in_layer.rows_mut() {
+            if let Some(unit) = &mut row.layout_unit {
+                *unit = map(*unit, "layout unit")?;
+            }
+            for node in &mut row.successor_constraints {
+                *node = map(*node, "successor")?;
+            }
+            for node in &mut row.barycenter_associates {
+                *node = map(*node, "barycenter associate")?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Moves every row of the tables `other` of a component into these tables: row `local` lands
+    /// at `node_map[local]`.
+    pub(crate) fn absorb(&mut self, node_map: &IdVec<NodeId, NodeId>, other: NodeTables) {
+        self.in_layer.absorb(node_map, other.in_layer);
+        self.self_loop_options
+            .absorb(node_map, other.self_loop_options);
+        self.port_alignment.absorb(node_map, other.port_alignment);
+        self.placement_options
+            .absorb(node_map, other.placement_options);
+        self.layer_constraint_explicit
+            .absorb(node_map, other.layer_constraint_explicit);
+    }
+}
+
+/// The node options that only the node placement (`NetworkSimplexPlacer`) reads.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlacementOptions {
+    /// `nodeFlexibility`.
+    pub(crate) flexibility: super::options::NodeFlexibility,
+    /// `portsSurrounding`: the margin the ports leave around a node, if the node sets it.
+    pub(crate) ports_surrounding: Option<super::options::SpacingMargin>,
+}
+
+/// What `NorthSouthPortPreprocessor` records for one node, for the crossing minimization.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InLayerLayout {
+    /// `InternalProperties.IN_LAYER_LAYOUT_UNIT`: the node a dummy and the node itself form a
+    /// layout unit under.
+    pub(crate) layout_unit: Option<NodeId>,
+    /// `InternalProperties.IN_LAYER_SUCCESSOR_CONSTRAINTS`.
+    pub(crate) successor_constraints: Vec<NodeId>,
+    /// `InternalProperties.BARYCENTER_ASSOCIATES`.
+    pub(crate) barycenter_associates: Vec<NodeId>,
+}
+
+/// The self loop options of one node.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SelfLoopOptions {
+    /// `layered.edgeRouting.selfLoopDistribution`.
+    pub(crate) distribution: super::options::SelfLoopDistributionStrategy,
+    /// `layered.edgeRouting.selfLoopOrdering`.
+    pub(crate) ordering: super::options::SelfLoopOrderingStrategy,
 }
 
 impl LGraph {
@@ -90,6 +232,7 @@ impl LGraph {
             cross_hierarchy_edges: Vec::new(),
             self_loop_holders: Vec::new(),
             in_layer_successor_constraints_between_non_dummies: false,
+            tables: NodeTables::default(),
         }
     }
 
@@ -111,8 +254,12 @@ impl LGraph {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
-    pub nodes: Vec<NodeId>,
-    pub size: LSize,
+    /// The layer's nodes in order. Private so a node cannot join or leave a layer without its
+    /// `layer_index` following: `LGraph` owns every change, as `LNode#setLayer` does in ELK.
+    nodes: Vec<NodeId>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) size: LSize,
 }
 
 impl AsRef<[NodeId]> for Layer {
@@ -128,6 +275,11 @@ impl Layer {
             size: LSize::default(),
         }
     }
+
+    /// The layer's nodes, top to bottom.
+    pub fn nodes(&self) -> &[NodeId] {
+        &self.nodes
+    }
 }
 
 impl Default for Layer {
@@ -138,103 +290,340 @@ impl Default for Layer {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LNode {
-    pub id: String,
-    pub kind: LNodeKind,
-    pub size: LSize,
-    pub position: LPoint,
-    pub margin: LMargin,
-    pub padding: LPadding,
-    pub labels: Vec<LLabel>,
-    pub represented_labels: Vec<LLabel>,
-    pub node_label_placement: NodeLabelPlacement,
+    /// Crate-visible: The caller's id of the node; it labels results and no invariant ties it to
+    /// another field.
+    pub(crate) id: String,
+    /// What the node is, and the data only that kind of node has. `None` for a node of the
+    /// input. Private so the data always fits the kind: see [`Self::kind`] and the accessors.
+    dummy: Option<DummyData>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) size: LSize,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) position: LPoint,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) margin: LMargin,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) padding: LPadding,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) labels: Vec<LLabel>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) node_label_placement: NodeLabelPlacement,
     /// The node's own size options. ELK's `LabelAndNodeSizeProcessor` sizes the node by them.
-    pub node_size: NodeSizing,
-    /// `layered.edgeRouting.selfLoopDistribution`, which ELK reads from each node.
-    pub self_loop_distribution: super::options::SelfLoopDistributionStrategy,
-    /// `layered.edgeRouting.selfLoopOrdering`, which ELK reads from each node.
-    pub self_loop_ordering: super::options::SelfLoopOrderingStrategy,
-    pub ports: NodePorts,
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) node_size: NodeSizing,
+    /// Crate-visible: `NodePorts` keeps the port order and the port ids in step; the node reaches
+    /// it directly.
+    pub(crate) ports: NodePorts,
     /// The graph inside this node, which the layout's [`GraphArena`] holds.
-    pub nested_graph: Option<GraphId>,
-    pub model_order: Option<usize>,
-    pub component_priority: i32,
-    pub layer_index: Option<usize>,
-    pub layer_constraint: super::options::LayerConstraint,
-    pub node_alignment: Alignment,
-    pub port_constraints: PortConstraints,
-    pub port_alignment: Option<PortAlignment>,
-    pub node_flexibility: super::options::NodeFlexibility,
-    pub ports_surrounding: Option<super::options::SpacingMargin>,
-    pub external_port_side: PortSide,
-    pub external_port_size: LSize,
+    ///
+    /// Crate-visible: `GraphArena::nest` sets it, and the compound phases and the pipeline read it
+    /// to reach the inner graph.
+    pub(crate) nested_graph: Option<GraphId>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) model_order: Option<usize>,
+    /// The layer the node sits in. Private: `LGraph` sets it together with the layer's list.
+    layer_index: Option<usize>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) layer_constraint: super::options::LayerConstraint,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) node_alignment: Alignment,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) port_constraints: PortConstraints,
+}
+
+/// The data that only one kind of dummy node has. ELK keeps these as properties that are set
+/// where they apply; here the node's kind and its data are one value, so a long edge dummy
+/// cannot carry a label side and a reader of the wrong kind gets `None`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DummyData {
+    /// `NodeType.LONG_EDGE`.
+    LongEdge(LongEdgeData),
+    /// `NodeType.LABEL`.
+    Label(LabelData),
+    /// `NodeType.EXTERNAL_PORT`.
+    ExternalPort(ExternalPortData),
+    /// `NodeType.NORTH_SOUTH_PORT`. It has no data of its own: its ports carry the origins.
+    NorthSouthPort,
+    /// `NodeType.BREAKING_POINT`. ELK's graph wrapping makes these; wrapping is not ported, so no
+    /// processor builds one yet.
+    BreakingPoint,
+}
+
+impl DummyData {
+    fn kind(&self) -> LNodeKind {
+        match self {
+            Self::LongEdge(_) => LNodeKind::LongEdge,
+            Self::Label(_) => LNodeKind::Label,
+            Self::ExternalPort(_) => LNodeKind::ExternalPort,
+            Self::NorthSouthPort => LNodeKind::NorthSouthPort,
+            Self::BreakingPoint => LNodeKind::BreakingPoint,
+        }
+    }
+}
+
+/// The ports at the two ends of the long edge that a long edge dummy or a label dummy belongs
+/// to. ELK sets both properties on both kinds of dummy.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct LongEdgeEnds {
+    /// `InternalProperties.LONG_EDGE_SOURCE`.
+    pub source: Option<PortRef>,
+    /// `InternalProperties.LONG_EDGE_TARGET`.
+    pub target: Option<PortRef>,
+}
+
+/// Data of a long edge dummy.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LongEdgeData {
+    /// The ports at the ends of the long edge.
+    pub ends: LongEdgeEnds,
+    /// `InternalProperties.LONG_EDGE_HAS_LABEL_DUMMIES`.
+    pub has_label_dummies: bool,
+    /// The edge the dummy was made from: ELK keeps it in `InternalProperties.ORIGIN`.
+    pub origin_edge: Option<EdgeId>,
+}
+
+/// Data of a label dummy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LabelData {
+    /// The ports at the ends of the long edge the label sits on.
+    pub ends: LongEdgeEnds,
+    /// `InternalProperties.LABEL_SIDE`.
+    pub side: LabelSide,
+    /// The edge the labels belong to: ELK keeps it in `InternalProperties.ORIGIN`.
+    pub origin_edge: Option<EdgeId>,
+    /// The labels the dummy stands for, as `InternalProperties.REPRESENTED_LABELS`.
+    pub represented_labels: Vec<LLabel>,
+}
+
+impl Default for LabelData {
+    fn default() -> Self {
+        Self {
+            ends: LongEdgeEnds::default(),
+            side: LabelSide::Below,
+            origin_edge: None,
+            represented_labels: Vec::new(),
+        }
+    }
+}
+
+/// Data of an external port dummy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternalPortData {
+    /// `InternalProperties.EXT_PORT_SIDE`.
+    pub side: PortSide,
+    /// `InternalProperties.EXT_PORT_SIZE`.
+    pub size: LSize,
+    /// `InternalProperties.PORT_RATIO_OR_POSITION`.
+    pub ratio_or_position: f64,
     /// For the dummy of a port of the graph's own node: the position of that port among the
     /// node's input ports. ELK keeps the port in `InternalProperties.ORIGIN`.
     pub scope_port: Option<usize>,
-    pub port_ratio_or_position: f64,
-    pub replaced_external_port_dummy: Option<NodeId>,
-    pub in_layer_successor_constraints: Vec<NodeId>,
-    pub in_layer_layout_unit: Option<NodeId>,
-    pub barycenter_associates: Vec<NodeId>,
-    pub origin_port: Option<GraphPortRef>,
-    pub origin_edge: Option<EdgeId>,
+    /// The dummy that an `HierarchicalPortOrthogonalEdgeRouter` replacement stands in for.
+    pub replaced_dummy: Option<NodeId>,
+    /// The id of the parent node's port the dummy was made for.
     pub parent_port_key: Option<String>,
+    /// The type of that port.
     pub parent_port_type: Option<PortType>,
-    pub long_edge_source: Option<PortRef>,
-    pub long_edge_target: Option<PortRef>,
-    pub long_edge_has_label_dummies: bool,
-    pub label_side: LabelSide,
+    /// The port of the parent graph's node, as `InternalProperties.ORIGIN`.
+    pub origin_port: Option<GraphPortRef>,
+    /// `InternalProperties.IN_LAYER_CONSTRAINT`.
     pub in_layer_constraint: InLayerConstraint,
+    /// Whether ELK sets the layer constraint of the dummy on purpose, as it does for a west or
+    /// east dummy. Such a constraint counts as explicit.
     pub layer_constraint_explicit: bool,
-    pub hidden: bool,
-    pub compound: bool,
+}
+
+impl Default for ExternalPortData {
+    fn default() -> Self {
+        Self {
+            side: PortSide::Undefined,
+            size: LSize::default(),
+            ratio_or_position: 0.0,
+            scope_port: None,
+            replaced_dummy: None,
+            parent_port_key: None,
+            parent_port_type: None,
+            origin_port: None,
+            in_layer_constraint: InLayerConstraint::None,
+            layer_constraint_explicit: false,
+        }
+    }
 }
 
 impl LNode {
+    /// The index of the layer the node sits in, or `None` while it is layerless.
+    pub fn layer_index(&self) -> Option<usize> {
+        self.layer_index
+    }
+
+    /// What the node is.
+    pub fn kind(&self) -> LNodeKind {
+        self.dummy
+            .as_ref()
+            .map_or(LNodeKind::Normal, DummyData::kind)
+    }
+
+    /// Makes the node a dummy of the kind `kind`, with the data of a new dummy of that kind.
+    /// [`LNodeKind::Normal`] makes it a node of the input again.
+    pub fn set_kind(&mut self, kind: LNodeKind) {
+        self.dummy = match kind {
+            LNodeKind::Normal => None,
+            LNodeKind::LongEdge => Some(DummyData::LongEdge(LongEdgeData::default())),
+            LNodeKind::Label => Some(DummyData::Label(LabelData::default())),
+            LNodeKind::ExternalPort => Some(DummyData::ExternalPort(ExternalPortData::default())),
+            LNodeKind::NorthSouthPort => Some(DummyData::NorthSouthPort),
+            LNodeKind::BreakingPoint => Some(DummyData::BreakingPoint),
+        };
+    }
+
+    /// Makes the node a dummy that holds `data`.
+    pub fn set_dummy(&mut self, data: DummyData) {
+        self.dummy = Some(data);
+    }
+
+    /// The data of a long edge dummy, or `None` for any other node.
+    pub fn long_edge(&self) -> Option<&LongEdgeData> {
+        match &self.dummy {
+            Some(DummyData::LongEdge(data)) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// The data of a long edge dummy for change, or `None` for any other node.
+    pub fn long_edge_mut(&mut self) -> Option<&mut LongEdgeData> {
+        match &mut self.dummy {
+            Some(DummyData::LongEdge(data)) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// The data of a label dummy, or `None` for any other node.
+    pub fn label_dummy(&self) -> Option<&LabelData> {
+        match &self.dummy {
+            Some(DummyData::Label(data)) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// The data of a label dummy for change, or `None` for any other node.
+    pub fn label_dummy_mut(&mut self) -> Option<&mut LabelData> {
+        match &mut self.dummy {
+            Some(DummyData::Label(data)) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// The side of the node the external port dummy stands for. A node that is no external port
+    /// dummy stands for none, so it has no side: [`PortSide::Undefined`].
+    pub fn external_port_side(&self) -> PortSide {
+        self.external_port()
+            .map_or(PortSide::Undefined, |external| external.side)
+    }
+
+    /// The in-layer constraint of an external port dummy. A node that is no external port dummy
+    /// has none: [`InLayerConstraint::None`].
+    pub fn in_layer_constraint(&self) -> InLayerConstraint {
+        self.external_port()
+            .map_or(InLayerConstraint::None, |external| {
+                external.in_layer_constraint
+            })
+    }
+
+    /// The data of an external port dummy together with the layer constraint of the node, both
+    /// for change, or `None` for any other node. A layer constraint and an external port's side
+    /// change together in the graph transformations.
+    pub fn external_port_and_layer_constraint_mut(
+        &mut self,
+    ) -> Option<(&mut ExternalPortData, &mut super::options::LayerConstraint)> {
+        match &mut self.dummy {
+            Some(DummyData::ExternalPort(data)) => Some((data, &mut self.layer_constraint)),
+            _ => None,
+        }
+    }
+
+    /// The ports at the ends of the long edge that a long edge dummy or a label dummy belongs
+    /// to, or `None` for any other node.
+    pub fn long_edge_ends(&self) -> Option<LongEdgeEnds> {
+        match &self.dummy {
+            Some(DummyData::LongEdge(data)) => Some(data.ends),
+            Some(DummyData::Label(data)) => Some(data.ends),
+            _ => None,
+        }
+    }
+
+    /// The same for change.
+    pub fn long_edge_ends_mut(&mut self) -> Option<&mut LongEdgeEnds> {
+        match &mut self.dummy {
+            Some(DummyData::LongEdge(data)) => Some(&mut data.ends),
+            Some(DummyData::Label(data)) => Some(&mut data.ends),
+            _ => None,
+        }
+    }
+
+    /// The labels a label dummy stands for. A node that is no label dummy stands for none.
+    pub fn represented_labels(&self) -> &[LLabel] {
+        match &self.dummy {
+            Some(DummyData::Label(data)) => &data.represented_labels,
+            _ => &[],
+        }
+    }
+
+    /// The edge a long edge dummy or a label dummy was made from, or `None` for any other node
+    /// and for a dummy without one.
+    pub fn origin_edge(&self) -> Option<EdgeId> {
+        match &self.dummy {
+            Some(DummyData::LongEdge(data)) => data.origin_edge,
+            Some(DummyData::Label(data)) => data.origin_edge,
+            _ => None,
+        }
+    }
+
+    /// The data of an external port dummy, or `None` for any other node.
+    pub fn external_port(&self) -> Option<&ExternalPortData> {
+        match &self.dummy {
+            Some(DummyData::ExternalPort(data)) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// The data of an external port dummy for change, or `None` for any other node.
+    pub fn external_port_mut(&mut self) -> Option<&mut ExternalPortData> {
+        match &mut self.dummy {
+            Some(DummyData::ExternalPort(data)) => Some(data),
+            _ => None,
+        }
+    }
+
     pub fn new(id: impl Into<String>, width: f64, height: f64, model_order: Option<usize>) -> Self {
         Self {
             id: id.into(),
-            kind: LNodeKind::Normal,
+            dummy: None,
             size: LSize { width, height },
             position: LPoint::default(),
             margin: LMargin::default(),
             padding: LPadding::default(),
             labels: Vec::new(),
-            represented_labels: Vec::new(),
             node_label_placement: NodeLabelPlacement::FIXED,
             node_size: NodeSizing::default(),
-            self_loop_distribution: Default::default(),
-            self_loop_ordering: Default::default(),
             ports: NodePorts::default(),
             nested_graph: None,
             model_order,
-            component_priority: 0,
             layer_index: None,
             layer_constraint: super::options::LayerConstraint::None,
             node_alignment: Alignment::Automatic,
             port_constraints: PortConstraints::Undefined,
-            port_alignment: None,
-            node_flexibility: super::options::NodeFlexibility::None,
-            ports_surrounding: None,
-            external_port_side: PortSide::Undefined,
-            external_port_size: LSize::default(),
-            scope_port: None,
-            port_ratio_or_position: 0.0,
-            replaced_external_port_dummy: None,
-            in_layer_successor_constraints: Vec::new(),
-            in_layer_layout_unit: None,
-            barycenter_associates: Vec::new(),
-            origin_port: None,
-            origin_edge: None,
-            parent_port_key: None,
-            parent_port_type: None,
-            long_edge_source: None,
-            long_edge_target: None,
-            long_edge_has_label_dummies: false,
-            label_side: LabelSide::Below,
-            in_layer_constraint: InLayerConstraint::None,
-            layer_constraint_explicit: false,
-            hidden: false,
-            compound: false,
         }
     }
 }
@@ -262,42 +651,99 @@ pub enum InLayerConstraint {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LPort {
-    pub id: String,
-    pub crossing_minimization_id: Option<usize>,
-    pub node: NodeId,
-    pub port_type: PortType,
-    pub side: PortSide,
-    pub size: LSize,
-    pub position: LPoint,
-    pub anchor: LPoint,
-    pub margin: LMargin,
-    pub labels: Vec<LLabel>,
-    pub model_order: Option<usize>,
-    pub long_edge_target_node: Option<NodeId>,
+    /// Crate-visible: The caller's id of the port; it labels results and no invariant ties it to
+    /// another field.
+    pub(crate) id: String,
+    /// Crate-visible: The crossing minimization numbers the ports and is the only writer and
+    /// reader.
+    pub(crate) crossing_minimization_id: Option<usize>,
+    /// The node that owns the port. Private: `LGraph::push_node_with` sets it.
+    node: NodeId,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) port_type: PortType,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) side: PortSide,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) size: LSize,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) position: LPoint,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) anchor: LPoint,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) margin: LMargin,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) labels: Vec<LLabel>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) model_order: Option<usize>,
+    /// Crate-visible: The crossing minimization sets and reads it, and a component split and combine
+    /// remap it.
+    pub(crate) long_edge_target_node: Option<NodeId>,
     /// The position of the input port this port was made from, among its node's ports. `None` for
     /// a port ELK makes up. ELK keeps the input port in `InternalProperties.ORIGIN`.
-    pub input_index: Option<usize>,
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) input_index: Option<usize>,
     /// Whether the caller named this port, so an edge finds it by its id alone. A port that
     /// ELK makes up is found by its id and type. An external port dummy's port counts as named.
-    pub named: bool,
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) named: bool,
     /// `CompoundGraphPreprocessor.calculateNetFlow` for a port the caller named: the votes of
     /// every edge at the port, those outside its node too. `None` for a port ELK makes up.
-    pub hierarchy_net_flow: Option<isize>,
-    pub port_index: Option<isize>,
-    pub border_offset: Option<f64>,
-    pub ratio_or_position: f64,
-    pub connected_to_external_nodes: bool,
-    pub port_dummy: Option<GraphNodeRef>,
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) hierarchy_net_flow: Option<isize>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) port_index: Option<isize>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) border_offset: Option<f64>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) ratio_or_position: f64,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) connected_to_external_nodes: bool,
+    /// Crate-visible: The hierarchical port processors set it, and a component split and combine
+    /// remap it.
+    pub(crate) port_dummy: Option<GraphNodeRef>,
     /// `InternalProperties.ORIGIN` of a port on a north or south port dummy: the port of the
     /// node whose edges `NorthSouthPortPreprocessor` moved here.
-    pub origin_port: Option<PortRef>,
+    ///
+    /// Crate-visible: The north/south port processors set it, and a component split and combine
+    /// remap it.
+    pub(crate) origin_port: Option<PortRef>,
     /// `LayeredOptions.ALLOW_NON_FLOW_PORTS_TO_SWITCH_SIDES`, which only a port can set.
-    pub allow_non_flow_ports_to_switch_sides: bool,
-    pub inside_connections: bool,
-    pub collector_type: Option<PortType>,
-    pub end_label_cell: Option<LabelCellLayout>,
-    pub incoming_edges: Vec<EdgeId>,
-    pub outgoing_edges: Vec<EdgeId>,
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) allow_non_flow_ports_to_switch_sides: bool,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) inside_connections: bool,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) collector_type: Option<PortType>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) end_label_cell: Option<LabelCellLayout>,
+    /// The edges that enter the port. Private: it must match each edge's `target`, so
+    /// `LGraph` changes it together with the edge.
+    incoming_edges: Vec<EdgeId>,
+    /// The edges that leave the port. Private for the same reason, against `source`.
+    outgoing_edges: Vec<EdgeId>,
 }
 
 impl LPort {
@@ -356,6 +802,49 @@ impl LPort {
         };
     }
 
+    /// A copy of the port that no edge is attached to.
+    #[cfg(test)]
+    pub(crate) fn clone_without_edges(&self) -> Self {
+        Self {
+            incoming_edges: Vec::new(),
+            outgoing_edges: Vec::new(),
+            ..self.clone()
+        }
+    }
+
+    /// Renames the port's owner and its edges in place, keeping the order. Used when graphs
+    /// merge and their ids change.
+    pub(crate) fn map_ids<E>(
+        &mut self,
+        map_node: impl FnOnce(NodeId) -> Result<NodeId, E>,
+        mut map_incoming: impl FnMut(EdgeId) -> Result<EdgeId, E>,
+        mut map_outgoing: impl FnMut(EdgeId) -> Result<EdgeId, E>,
+    ) -> Result<(), E> {
+        self.node = map_node(self.node)?;
+        for edge in &mut self.incoming_edges {
+            *edge = map_incoming(*edge)?;
+        }
+        for edge in &mut self.outgoing_edges {
+            *edge = map_outgoing(*edge)?;
+        }
+        Ok(())
+    }
+
+    /// The node that owns the port.
+    pub fn node(&self) -> NodeId {
+        self.node
+    }
+
+    /// The edges that enter the port, in the port's order.
+    pub fn incoming_edges(&self) -> &[EdgeId] {
+        &self.incoming_edges
+    }
+
+    /// The edges that leave the port, in the port's order.
+    pub fn outgoing_edges(&self) -> &[EdgeId] {
+        &self.outgoing_edges
+    }
+
     pub fn net_flow(&self) -> isize {
         self.incoming_edges.len() as isize - self.outgoing_edges.len() as isize
     }
@@ -363,25 +852,125 @@ impl LPort {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayeredEdge {
-    pub id: String,
-    pub source: PortRef,
-    pub target: PortRef,
-    pub source_node_id: String,
-    pub target_node_id: String,
-    pub labels: Vec<LLabel>,
-    pub minlen: usize,
-    pub reversed: bool,
-    pub bend_points: Vec<LPoint>,
+    /// Crate-visible: The caller's id of the edge; it labels results and no invariant ties it to
+    /// another field.
+    pub(crate) id: String,
+    /// The source port. Private: it must match the `outgoing_edges` of that port, so
+    /// `LGraph::set_edge_source` is the only way to change it, as `LEdge#setSource` is in ELK.
+    source: PortRef,
+    /// The target port. Private for the same reason, against `incoming_edges`.
+    target: PortRef,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) source_node_id: String,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) target_node_id: String,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) labels: Vec<LLabel>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) minlen: usize,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) reversed: bool,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) bend_points: Vec<LPoint>,
     /// `LayeredOptions.JUNCTION_POINTS` of the edge. ELK keeps `null` until a router adds one, so
     /// an empty list stands for `null`.
-    pub junction_points: Vec<LPoint>,
-    pub model_order: Option<usize>,
-    pub priority_direction: i32,
-    pub priority_shortness: i32,
-    pub priority_straightness: i32,
-    pub thickness: f64,
-    pub original_opposite_port: Option<PortRef>,
-    pub compound_segment: Option<CompoundEdgeSegment>,
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) junction_points: Vec<LPoint>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) model_order: Option<usize>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) priority_direction: i32,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) priority_shortness: i32,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) priority_straightness: i32,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) thickness: f64,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) original_opposite_port: Option<PortRef>,
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) compound_segment: Option<CompoundEdgeSegment>,
+}
+
+impl LayeredEdge {
+    /// An edge between two ports with no labels, no bend points and a thickness of 0. ELK's
+    /// default thickness is 1, as the importer sets it: a caller that wants it sets it on the
+    /// edge. `LGraph::add_edge` attaches the edge to its ports.
+    pub fn new(id: impl Into<String>, source: PortRef, target: PortRef) -> Self {
+        Self {
+            id: id.into(),
+            source,
+            target,
+            source_node_id: String::new(),
+            target_node_id: String::new(),
+            labels: Vec::new(),
+            minlen: 1,
+            reversed: false,
+            bend_points: Vec::new(),
+            junction_points: Vec::new(),
+            model_order: None,
+            priority_direction: 0,
+            priority_shortness: 0,
+            priority_straightness: 0,
+            thickness: 0.0,
+            original_opposite_port: None,
+            compound_segment: None,
+        }
+    }
+
+    /// Renames the ports' nodes in place. Used when graphs merge and their ids change.
+    pub(crate) fn map_ports<E>(
+        &mut self,
+        mut map: impl FnMut(&mut PortRef) -> Result<(), E>,
+    ) -> Result<(), E> {
+        map(&mut self.source)?;
+        map(&mut self.target)
+    }
+
+    /// The next piece of an edge that is split or copied between two new ports: it keeps the
+    /// id, the node ids, the minimum length, the direction, the model order, the priorities, the
+    /// thickness, the opposite port and the compound segment of `old`. It has no labels, bend
+    /// points or junction points.
+    pub fn segment_of(old: &LayeredEdge, source: PortRef, target: PortRef) -> Self {
+        let mut segment = Self::new(old.id.clone(), source, target);
+        segment.source_node_id = old.source_node_id.clone();
+        segment.target_node_id = old.target_node_id.clone();
+        segment.minlen = old.minlen;
+        segment.reversed = old.reversed;
+        segment.model_order = old.model_order;
+        segment.priority_direction = old.priority_direction;
+        segment.priority_shortness = old.priority_shortness;
+        segment.priority_straightness = old.priority_straightness;
+        segment.thickness = old.thickness;
+        segment.original_opposite_port = old.original_opposite_port;
+        segment.compound_segment = old.compound_segment;
+        segment
+    }
+
+    /// The port the edge leaves.
+    pub fn source(&self) -> PortRef {
+        self.source
+    }
+
+    /// The port the edge enters.
+    pub fn target(&self) -> PortRef {
+        self.target
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -796,6 +1385,91 @@ impl LGraph {
         self.layerless_nodes.push(node)
     }
 
+    /// The node that `node` forms an in-layer layout unit under, if the north/south port
+    /// preprocessing recorded one.
+    pub(crate) fn in_layer_layout_unit(&self, node: NodeId) -> Option<NodeId> {
+        self.tables
+            .in_layer
+            .get(node)
+            .and_then(|row| row.layout_unit)
+    }
+
+    /// The nodes that must stay below `node` in its layer. Empty if none were recorded.
+    pub(crate) fn in_layer_successor_constraints(&self, node: NodeId) -> &[NodeId] {
+        self.tables
+            .in_layer
+            .get(node)
+            .map_or(&[], |row| row.successor_constraints.as_slice())
+    }
+
+    /// The nodes whose positions pull `node` in the crossing minimization. Empty if none were
+    /// recorded.
+    pub(crate) fn barycenter_associates(&self, node: NodeId) -> &[NodeId] {
+        self.tables
+            .in_layer
+            .get(node)
+            .map_or(&[], |row| row.barycenter_associates.as_slice())
+    }
+
+    /// The `portAlignment` the node sets, or `None` if it sets none.
+    pub(crate) fn port_alignment_of(&self, node: NodeId) -> Option<PortAlignment> {
+        self.tables.port_alignment.get(node).copied()
+    }
+
+    /// Whether the caller, or a hierarchical port dummy, set the layer constraint of `node`.
+    pub(crate) fn is_layer_constraint_explicit(&self, node: NodeId) -> bool {
+        self.tables.layer_constraint_explicit.get(node).is_some()
+            || self.layerless_nodes[node]
+                .external_port()
+                .is_some_and(|external| external.layer_constraint_explicit)
+    }
+
+    /// Records that the layer constraint of `node` is explicit.
+    pub(crate) fn mark_layer_constraint_explicit(&mut self, node: NodeId) {
+        self.tables.layer_constraint_explicit.row_mut(node);
+    }
+
+    /// Which nodes the layer constraint preprocessing has hidden from the layering. A node is
+    /// hidden while it is in [`Self::hidden_nodes`].
+    pub fn hidden_mask(&self) -> IdVec<NodeId, bool> {
+        let mut mask = IdVec::filled(self.layerless_nodes.len(), false);
+        for &node in &self.hidden_nodes {
+            mask[node] = true;
+        }
+        mask
+    }
+
+    /// The layers, left to right.
+    pub fn layers(&self) -> &[Layer] {
+        &self.layers
+    }
+
+    /// The size of layer `layer_index` for change. The size is plain data, and this is the only
+    /// way to a layer for change that cannot touch its node list.
+    pub(crate) fn layer_size_mut(&mut self, layer_index: usize) -> &mut LSize {
+        &mut self.layers[layer_index].size
+    }
+
+    /// Renames every node id in the layers in place, keeping the order. Used when graphs merge
+    /// and their node ids change; no node's `layer_index` moves.
+    pub(crate) fn map_layer_nodes<E>(
+        &mut self,
+        mut map: impl FnMut(NodeId) -> Result<NodeId, E>,
+    ) -> Result<(), E> {
+        for layer in &mut self.layers {
+            for node in &mut layer.nodes {
+                *node = map(*node)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Adds an empty layer at the right end and returns its index.
+    pub fn push_layer(&mut self) -> usize {
+        self.layers.push(Layer::new());
+        self.layers.len() - 1
+    }
+
     pub fn clear_layers(&mut self) {
         self.layers.clear();
         for node in &mut self.layerless_nodes {
@@ -818,6 +1492,78 @@ impl LGraph {
         self.layers[layer_index].nodes.push(node_index);
     }
 
+    /// Puts a node into layer `layer_index` at `position`, as `LNode#setLayer(int, Layer)` does.
+    /// The node leaves the layer it was in. A `position` past the end appends.
+    pub fn insert_node_into_layer(
+        &mut self,
+        node_index: NodeId,
+        layer_index: usize,
+        position: usize,
+    ) {
+        self.remove_node_from_layer(node_index);
+        while self.layers.len() <= layer_index {
+            self.layers.push(Layer::new());
+        }
+        let nodes = &mut self.layers[layer_index].nodes;
+        nodes.insert(position.min(nodes.len()), node_index);
+        self.layerless_nodes[node_index].layer_index = Some(layer_index);
+    }
+
+    /// Swaps the places of two nodes that sit in layers: each takes the other's layer and
+    /// position. Does nothing unless both are in a layer.
+    pub fn swap_layer_places(&mut self, first: NodeId, second: NodeId) {
+        let (Some(first_layer), Some(second_layer)) = (
+            self.layerless_nodes[first].layer_index,
+            self.layerless_nodes[second].layer_index,
+        ) else {
+            return;
+        };
+        let Some(first_position) = self.layers[first_layer]
+            .nodes
+            .iter()
+            .position(|n| *n == first)
+        else {
+            return;
+        };
+        let Some(second_position) = self.layers[second_layer]
+            .nodes
+            .iter()
+            .position(|n| *n == second)
+        else {
+            return;
+        };
+        self.layers[first_layer].nodes[first_position] = second;
+        self.layers[second_layer].nodes[second_position] = first;
+        self.layerless_nodes[first].layer_index = Some(second_layer);
+        self.layerless_nodes[second].layer_index = Some(first_layer);
+    }
+
+    /// Makes layer `layer_index` hold exactly `nodes`, in this order.
+    ///
+    /// Mirrors `LNode#setLayer`, which ELK calls once per node: a node that joins gets
+    /// `layer_index`, leaves its old layer, and a node that no longer appears becomes layerless.
+    /// Use it to reorder a layer, or to drop nodes from one in a single step.
+    pub fn set_layer_nodes(&mut self, layer_index: usize, nodes: Vec<NodeId>) {
+        while self.layers.len() <= layer_index {
+            self.layers.push(Layer::new());
+        }
+
+        let old_nodes = std::mem::take(&mut self.layers[layer_index].nodes);
+        for node in old_nodes {
+            self.layerless_nodes[node].layer_index = None;
+        }
+        for &node in &nodes {
+            if let Some(other) = self.layerless_nodes[node].layer_index
+                && other != layer_index
+                && let Some(layer) = self.layers.get_mut(other)
+            {
+                remove_node(&mut layer.nodes, node);
+            }
+            self.layerless_nodes[node].layer_index = Some(layer_index);
+        }
+        self.layers[layer_index].nodes = nodes;
+    }
+
     pub fn insert_layer(&mut self, layer_index: usize) {
         self.layers.insert(layer_index, Layer::new());
         for node in &mut self.layerless_nodes {
@@ -838,12 +1584,25 @@ impl LGraph {
         }
     }
 
+    /// Takes the node at `position` out of layer `layer_index` and makes it layerless. Unlike
+    /// [`Self::remove_node_from_layer`] it works by place, so a loop over a layer always makes
+    /// progress. Returns `None` if the layer has no node there.
+    pub fn remove_node_at(&mut self, layer_index: usize, position: usize) -> Option<NodeId> {
+        let layer = self.layers.get_mut(layer_index)?;
+        if position >= layer.nodes.len() {
+            return None;
+        }
+        let node = layer.nodes.remove(position);
+        self.layerless_nodes[node].layer_index = None;
+        Some(node)
+    }
+
     pub fn compact_empty_layers(&mut self) {
         let mut layer_map = vec![None; self.layers.len()];
         let mut compacted = Vec::new();
 
         for (old_index, layer) in self.layers.iter().enumerate() {
-            if !layer.nodes.is_empty() {
+            if !layer.nodes().is_empty() {
                 layer_map[old_index] = Some(compacted.len());
                 compacted.push(layer.clone());
             }
@@ -967,6 +1726,74 @@ impl LGraph {
         }
         self.edges[edge_index].target = target;
         true
+    }
+
+    /// Puts `edge` into incoming-edge slot `position` of `port`, in place of the edge there, and
+    /// makes `port` the target of `edge`. ELK does this with a `ListIterator#set` in
+    /// `LongEdgeJoiner#joinAt`, so the edge keeps the exact slot and the other edges do not shift.
+    ///
+    /// The replaced edge still names `port` as its target but is no longer in its list. Drop it.
+    pub(crate) fn replace_incoming_edge_at(
+        &mut self,
+        port: PortRef,
+        position: usize,
+        edge: EdgeId,
+    ) {
+        self.layerless_nodes[port.node].ports[port.port].incoming_edges[position] = edge;
+        self.edges[edge].target = port;
+    }
+
+    /// Removes the first `count` incoming edges of `port`, as `LongEdgeJoiner#joinAt` does with
+    /// the edges it has moved to another target.
+    ///
+    /// Each removed edge must name another target already, or be dropped by the caller.
+    pub(crate) fn remove_leading_incoming_edges(&mut self, port: PortRef, count: usize) {
+        self.layerless_nodes[port.node].ports[port.port]
+            .incoming_edges
+            .drain(..count);
+    }
+
+    /// Removes the first `count` outgoing edges of `port`. The same rule holds as for
+    /// [`Self::remove_leading_incoming_edges`]: the caller drops each removed edge.
+    pub(crate) fn remove_leading_outgoing_edges(&mut self, port: PortRef, count: usize) {
+        self.layerless_nodes[port.node].ports[port.port]
+            .outgoing_edges
+            .drain(..count);
+    }
+
+    /// Puts the incoming edges of `port` in this order, as sorting `LPort#getIncomingEdges()`
+    /// does in ELK. Returns `false` and changes nothing unless `order` names each edge of the
+    /// port exactly once.
+    #[cfg(test)]
+    pub fn reorder_incoming_edges(&mut self, port: PortRef, order: Vec<EdgeId>) -> bool {
+        match self
+            .layerless_nodes
+            .get_mut(port.node)
+            .and_then(|node| node.ports.get_mut(port.port))
+        {
+            Some(port) if same_edges(&port.incoming_edges, &order) => {
+                port.incoming_edges = order;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Puts the outgoing edges of `port` in this order. The rule is the one of
+    /// [`Self::reorder_incoming_edges`].
+    #[cfg(test)]
+    pub fn reorder_outgoing_edges(&mut self, port: PortRef, order: Vec<EdgeId>) -> bool {
+        match self
+            .layerless_nodes
+            .get_mut(port.node)
+            .and_then(|node| node.ports.get_mut(port.port))
+        {
+            Some(port) if same_edges(&port.outgoing_edges, &order) => {
+                port.outgoing_edges = order;
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn detach_edge_source(&mut self, edge_index: EdgeId) -> Option<PortRef> {
@@ -1206,6 +2033,16 @@ fn centered_port_position(node_size: LSize, side: PortSide) -> LPoint {
     }
 }
 
+/// Whether two lists hold the same edges, in any order, each as often as the other.
+#[cfg(test)]
+fn same_edges(left: &[EdgeId], right: &[EdgeId]) -> bool {
+    let mut left = left.to_vec();
+    let mut right = right.to_vec();
+    left.sort_unstable();
+    right.sort_unstable();
+    left == right
+}
+
 fn remove_edge(edges: &mut Vec<EdgeId>, edge_index: EdgeId) {
     if let Some(position) = edges.iter().position(|candidate| *candidate == edge_index) {
         edges.remove(position);
@@ -1224,6 +2061,10 @@ fn remove_node(nodes: &mut Vec<NodeId>, node_index: NodeId) {
 /// https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/graph/LGraphUtil.java
 ///
 /// `node` is the id the dummy will have in its graph. The dummy's one port names it as its owner.
+///
+/// `data` holds what the caller knows about the dummy and ELK's method does not take: the scope
+/// port and the parent port key and type. The method sets the side, the size, the ratio or
+/// position and the in-layer constraint itself, so it replaces those four fields of `data`.
 #[allow(clippy::too_many_arguments)]
 pub fn create_external_port_dummy(
     node: NodeId,
@@ -1238,6 +2079,7 @@ pub fn create_external_port_dummy(
     port_node_size: LSize,
     border_offset: f64,
     layout_direction: ElkDirection,
+    data: ExternalPortData,
 ) -> LNode {
     let external_side = if port_constraints.is_side_fixed() {
         port_side
@@ -1248,10 +2090,15 @@ pub fn create_external_port_dummy(
     };
 
     let mut dummy = LNode::new(id, 0.0, 0.0, None);
-    dummy.kind = LNodeKind::ExternalPort;
+    let mut external = ExternalPortData {
+        side: external_side,
+        size: port_size,
+        ratio_or_position: 0.0,
+        in_layer_constraint: InLayerConstraint::None,
+        layer_constraint_explicit: false,
+        ..data
+    };
     dummy.port_constraints = PortConstraints::FixedPos;
-    dummy.external_port_side = external_side;
-    dummy.external_port_size = port_size;
 
     let position = match external_side {
         PortSide::West | PortSide::East => LPoint {
@@ -1272,7 +2119,7 @@ pub fn create_external_port_dummy(
     match external_side {
         PortSide::West => {
             dummy.layer_constraint = LayerConstraint::FirstSeparate;
-            dummy.layer_constraint_explicit = true;
+            external.layer_constraint_explicit = true;
             dummy.size.height = port_size.height;
             if border_offset < 0.0 {
                 dummy.size.width = -border_offset;
@@ -1280,21 +2127,21 @@ pub fn create_external_port_dummy(
         }
         PortSide::East => {
             dummy.layer_constraint = LayerConstraint::LastSeparate;
-            dummy.layer_constraint_explicit = true;
+            external.layer_constraint_explicit = true;
             dummy.size.height = port_size.height;
             if border_offset < 0.0 {
                 dummy.size.width = -border_offset;
             }
         }
         PortSide::North => {
-            dummy.in_layer_constraint = InLayerConstraint::Top;
+            external.in_layer_constraint = InLayerConstraint::Top;
             dummy.size.width = port_size.width;
             if border_offset < 0.0 {
                 dummy.size.height = -border_offset;
             }
         }
         PortSide::South => {
-            dummy.in_layer_constraint = InLayerConstraint::Bottom;
+            external.in_layer_constraint = InLayerConstraint::Bottom;
             dummy.size.width = port_size.width;
             if border_offset < 0.0 {
                 dummy.size.height = -border_offset;
@@ -1311,13 +2158,14 @@ pub fn create_external_port_dummy(
     port.set_side(dummy_port_side);
     port.border_offset = Some(border_offset);
     if port_constraints.is_order_fixed() {
-        dummy.port_ratio_or_position = port_ratio_or_position(
+        external.ratio_or_position = port_ratio_or_position(
             external_side,
             port_position,
             port_node_size,
             port_constraints.is_ratio_fixed(),
         );
     }
+    dummy.set_dummy(DummyData::ExternalPort(external));
     dummy.ports.push(port);
     dummy
 }
@@ -1336,7 +2184,11 @@ pub fn apply_port_index_to_dummy(
     if port_constraints != PortConstraints::FixedOrder {
         return;
     }
-    dummy.port_ratio_or_position = match dummy.external_port_side {
+    // A node that is no external port dummy has no port ratio or position to set.
+    let Some(external) = dummy.external_port_mut() else {
+        return;
+    };
+    external.ratio_or_position = match external.side {
         PortSide::North | PortSide::East => index as f64,
         PortSide::South | PortSide::West => -(index as f64),
         PortSide::Undefined => 0.0,
@@ -1400,6 +2252,755 @@ fn port_ratio_or_position(
 mod tests {
     use super::*;
 
+    fn graph_with_nodes(count: usize) -> LGraph {
+        let mut graph = LGraph::new("root", LayeredOptions::default());
+        for index in 0..count {
+            graph.push_node_with(|_| LNode::new(format!("n{index}"), 10.0, 10.0, Some(index)));
+        }
+        graph
+    }
+
+    /// Every node that names a layer sits in it exactly once, and every layer lists only nodes
+    /// that name it.
+    fn assert_layers_agree_with_nodes(graph: &LGraph) {
+        for (id, node) in graph.nodes_with_ids() {
+            if let Some(layer) = node.layer_index {
+                let places = graph.layers[layer]
+                    .nodes()
+                    .iter()
+                    .filter(|listed| **listed == id)
+                    .count();
+                assert_eq!(places, 1, "{} is not listed once in layer {layer}", node.id);
+            }
+        }
+        for (index, layer) in graph.layers.iter().enumerate() {
+            for listed in layer.nodes() {
+                assert_eq!(
+                    graph.layerless_nodes[*listed].layer_index,
+                    Some(index),
+                    "layer {index} lists {}",
+                    graph.layerless_nodes[*listed].id
+                );
+            }
+        }
+    }
+
+    fn ids(graph: &LGraph, indexes: &[usize]) -> Vec<NodeId> {
+        let all = graph.node_ids().collect::<Vec<_>>();
+        indexes.iter().map(|index| all[*index]).collect()
+    }
+
+    // Mutation: in `set_layer_nodes`, skip clearing `layer_index` of the nodes that leave.
+    #[test]
+    fn set_layer_nodes_makes_a_node_that_no_longer_appears_layerless() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        graph.set_layer_nodes(0, all.clone());
+
+        graph.set_layer_nodes(0, vec![all[2], all[0]]);
+
+        assert_eq!(graph.layers[0].nodes(), [all[2], all[0]]);
+        assert_eq!(graph.layerless_nodes[all[1]].layer_index, None);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `set_layer_nodes`, skip removing a joining node from the layer it was in.
+    #[test]
+    fn set_layer_nodes_takes_a_node_out_of_its_old_layer() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        graph.set_layer_nodes(0, vec![all[0], all[1]]);
+        graph.set_layer_nodes(1, vec![all[2]]);
+
+        graph.set_layer_nodes(1, vec![all[1], all[2]]);
+
+        assert_eq!(graph.layers[0].nodes(), [all[0]]);
+        assert_eq!(graph.layers[1].nodes(), [all[1], all[2]]);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `set_layer_nodes`, do not add the missing layers.
+    #[test]
+    fn set_layer_nodes_adds_the_layers_up_to_the_one_it_fills() {
+        let mut graph = graph_with_nodes(1);
+        let all = ids(&graph, &[0]);
+
+        graph.set_layer_nodes(2, all.clone());
+
+        assert_eq!(graph.layers.len(), 3);
+        assert!(graph.layers[0].nodes().is_empty());
+        assert_eq!(graph.layers[2].nodes(), all);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `insert_node_into_layer`, leave `layer_index` unset.
+    #[test]
+    fn insert_node_into_layer_places_the_node_at_the_position() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        graph.set_layer_nodes(0, vec![all[0], all[1]]);
+
+        graph.insert_node_into_layer(all[2], 0, 1);
+
+        assert_eq!(graph.layers[0].nodes(), [all[0], all[2], all[1]]);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `insert_node_into_layer`, skip removing the node from its old layer.
+    #[test]
+    fn insert_node_into_layer_moves_a_node_that_is_in_another_layer() {
+        let mut graph = graph_with_nodes(2);
+        let all = ids(&graph, &[0, 1]);
+        graph.set_layer_nodes(0, vec![all[0]]);
+        graph.set_layer_nodes(1, vec![all[1]]);
+
+        graph.insert_node_into_layer(all[0], 1, 0);
+
+        assert!(graph.layers[0].nodes().is_empty());
+        assert_eq!(graph.layers[1].nodes(), [all[0], all[1]]);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `insert_node_into_layer`, insert at `position` without capping it to the
+    // layer's length. The call then panics.
+    #[test]
+    fn insert_node_into_layer_appends_when_the_position_is_past_the_end() {
+        let mut graph = graph_with_nodes(2);
+        let all = ids(&graph, &[0, 1]);
+        graph.set_layer_nodes(0, vec![all[0]]);
+
+        graph.insert_node_into_layer(all[1], 0, 9);
+
+        assert_eq!(graph.layers[0].nodes(), [all[0], all[1]]);
+    }
+
+    // Mutation: in `swap_layer_places`, swap the two list slots but not the two `layer_index`
+    // values.
+    #[test]
+    fn swap_layer_places_exchanges_layer_and_position() {
+        let mut graph = graph_with_nodes(4);
+        let all = ids(&graph, &[0, 1, 2, 3]);
+        graph.set_layer_nodes(0, vec![all[0], all[1]]);
+        graph.set_layer_nodes(1, vec![all[2], all[3]]);
+
+        graph.swap_layer_places(all[1], all[2]);
+
+        assert_eq!(graph.layers[0].nodes(), [all[0], all[2]]);
+        assert_eq!(graph.layers[1].nodes(), [all[1], all[3]]);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `swap_layer_places`, read a missing layer or position as 0 instead of
+    // returning. The layerless node then swaps with the first node of layer 0.
+    #[test]
+    fn swap_layer_places_does_nothing_for_a_node_without_a_layer() {
+        let mut graph = graph_with_nodes(2);
+        let all = ids(&graph, &[0, 1]);
+        graph.set_layer_nodes(0, vec![all[0]]);
+        let before = graph.clone();
+
+        graph.swap_layer_places(all[0], all[1]);
+
+        assert_eq!(graph, before);
+    }
+
+    // Mutation: in `set_node_layer`, leave the node in its old layer when it joins the new one.
+    #[test]
+    fn set_node_layer_moves_the_node_to_the_end_of_the_new_layer() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        graph.set_node_layer(all[0], 0);
+        graph.set_node_layer(all[1], 1);
+        graph.set_node_layer(all[2], 1);
+
+        graph.set_node_layer(all[0], 1);
+
+        assert!(graph.layers[0].nodes().is_empty());
+        assert_eq!(graph.layers[1].nodes(), [all[1], all[2], all[0]]);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `remove_node_at`, keep `layer_index` set.
+    #[test]
+    fn remove_node_at_takes_out_the_node_at_the_position() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        graph.set_layer_nodes(0, all.clone());
+
+        assert_eq!(graph.remove_node_at(0, 1), Some(all[1]));
+
+        assert_eq!(graph.layers()[0].nodes(), [all[0], all[2]]);
+        assert_eq!(graph.layerless_nodes[all[1]].layer_index(), None);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `remove_node_at`, index the layer's list without checking the position. The
+    // call then panics.
+    #[test]
+    fn remove_node_at_returns_none_past_the_end_or_for_a_missing_layer() {
+        let mut graph = graph_with_nodes(1);
+        let all = ids(&graph, &[0]);
+        graph.set_layer_nodes(0, all);
+        let before = graph.clone();
+
+        assert_eq!(graph.remove_node_at(0, 1), None);
+        assert_eq!(graph.remove_node_at(5, 0), None);
+
+        assert_eq!(graph, before);
+    }
+
+    // Mutation: in `layer_size_mut`, answer with the size of layer 0 for every layer.
+    #[test]
+    fn layer_size_mut_changes_the_size_of_that_layer_only() {
+        let mut graph = graph_with_nodes(2);
+        let all = ids(&graph, &[0, 1]);
+        graph.set_layer_nodes(0, vec![all[0]]);
+        graph.set_layer_nodes(1, vec![all[1]]);
+
+        graph.layer_size_mut(1).width = 7.0;
+
+        assert_eq!(graph.layers()[0].size.width, 0.0);
+        assert_eq!(graph.layers()[1].size.width, 7.0);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    // Mutation: in `remove_node_from_layer`, keep `layer_index` set.
+    #[test]
+    fn remove_node_from_layer_makes_the_node_layerless() {
+        let mut graph = graph_with_nodes(2);
+        let all = ids(&graph, &[0, 1]);
+        graph.set_layer_nodes(0, all.clone());
+
+        graph.remove_node_from_layer(all[0]);
+        graph.remove_node_from_layer(all[0]);
+
+        assert_eq!(graph.layers[0].nodes(), [all[1]]);
+        assert_eq!(graph.layerless_nodes[all[0]].layer_index, None);
+        assert_layers_agree_with_nodes(&graph);
+    }
+
+    /// Two nodes, `a` with two output ports and `b` with two input ports.
+    struct EdgeFixture {
+        graph: LGraph,
+        a: [PortRef; 2],
+        b: [PortRef; 2],
+    }
+
+    fn edge_fixture() -> EdgeFixture {
+        let mut graph = graph_with_nodes(2);
+        let nodes = ids(&graph, &[0, 1]);
+        let mut port = |node: NodeId, port_type, side| {
+            graph
+                .add_port(node, port_type, side, LPoint::default())
+                .unwrap()
+        };
+        let a = [
+            port(nodes[0], PortType::Output, PortSide::East),
+            port(nodes[0], PortType::Output, PortSide::East),
+        ];
+        let b = [
+            port(nodes[1], PortType::Input, PortSide::West),
+            port(nodes[1], PortType::Input, PortSide::West),
+        ];
+        EdgeFixture { graph, a, b }
+    }
+
+    /// Every edge sits once in the list of the port it names, and every port lists only edges
+    /// that name it.
+    fn assert_edges_agree_with_ports(graph: &LGraph) {
+        for (id, edge) in graph.edges_with_ids() {
+            let source = &graph.layerless_nodes[edge.source().node].ports[edge.source().port];
+            let target = &graph.layerless_nodes[edge.target().node].ports[edge.target().port];
+            let at_source = source.outgoing_edges().iter().filter(|e| **e == id).count();
+            let at_target = target.incoming_edges().iter().filter(|e| **e == id).count();
+            assert_eq!((at_source, at_target), (1, 1), "edge {}", edge.id);
+        }
+        for node in graph.node_ids() {
+            for (port, data) in graph.layerless_nodes[node].ports.iter_with_ids() {
+                let this = PortRef { node, port };
+                for edge in data.outgoing_edges() {
+                    assert_eq!(graph.edges[*edge].source(), this);
+                }
+                for edge in data.incoming_edges() {
+                    assert_eq!(graph.edges[*edge].target(), this);
+                }
+            }
+        }
+    }
+
+    fn outgoing(graph: &LGraph, port: PortRef) -> Vec<EdgeId> {
+        graph.layerless_nodes[port.node].ports[port.port]
+            .outgoing_edges()
+            .to_vec()
+    }
+
+    fn incoming(graph: &LGraph, port: PortRef) -> Vec<EdgeId> {
+        graph.layerless_nodes[port.node].ports[port.port]
+            .incoming_edges()
+            .to_vec()
+    }
+
+    // Mutation: in `add_edge`, skip pushing the edge to the incoming list of its target.
+    #[test]
+    fn add_edge_attaches_the_edge_to_both_ports() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+
+        let first = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let second = graph.add_edge(LayeredEdge::new("e1", a[0], b[0])).unwrap();
+
+        assert_eq!(outgoing(&graph, a[0]), [first, second]);
+        assert_eq!(incoming(&graph, b[0]), [first, second]);
+        assert_edges_agree_with_ports(&graph);
+    }
+
+    // Mutation: in `add_edge`, check only the source port and push to a target port that is
+    // missing. The call then panics.
+    #[test]
+    fn add_edge_refuses_an_edge_whose_port_is_missing() {
+        let EdgeFixture { mut graph, a, .. } = edge_fixture();
+        let missing = PortRef {
+            node: a[0].node,
+            port: PortId::new(99),
+        };
+
+        assert_eq!(graph.add_edge(LayeredEdge::new("e0", a[0], missing)), None);
+        assert_eq!(graph.add_edge(LayeredEdge::new("e1", missing, a[0])), None);
+
+        assert!(graph.edges.is_empty());
+        assert!(outgoing(&graph, a[0]).is_empty());
+        assert!(incoming(&graph, a[0]).is_empty());
+    }
+
+    // Mutation: in `set_edge_source`, skip removing the edge from the old source port.
+    #[test]
+    fn set_edge_source_moves_the_edge_to_the_end_of_the_new_port() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let moved = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let stays = graph.add_edge(LayeredEdge::new("e1", a[1], b[0])).unwrap();
+
+        assert!(graph.set_edge_source(moved, a[1]));
+
+        assert!(outgoing(&graph, a[0]).is_empty());
+        assert_eq!(outgoing(&graph, a[1]), [stays, moved]);
+        assert_eq!(graph.edges[moved].source(), a[1]);
+        assert_edges_agree_with_ports(&graph);
+    }
+
+    // Mutation: in `set_edge_source`, skip the check that the new port exists.
+    #[test]
+    fn set_edge_source_changes_nothing_for_a_missing_port_or_edge() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let edge = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let missing = PortRef {
+            node: a[0].node,
+            port: PortId::new(99),
+        };
+        let before = graph.clone();
+
+        assert!(!graph.set_edge_source(edge, missing));
+        assert!(!graph.set_edge_source(EdgeId::new(99), a[1]));
+
+        assert_eq!(graph, before);
+    }
+
+    // Mutation: in `set_edge_target_at`, ignore `insert_at` and always push.
+    #[test]
+    fn set_edge_target_at_inserts_at_the_position_and_caps_it() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let first = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let second = graph.add_edge(LayeredEdge::new("e1", a[0], b[0])).unwrap();
+        let moved = graph.add_edge(LayeredEdge::new("e2", a[1], b[1])).unwrap();
+        let capped = graph.add_edge(LayeredEdge::new("e3", a[1], b[1])).unwrap();
+
+        assert!(graph.set_edge_target_at(moved, b[0], Some(1)));
+        assert!(graph.set_edge_target_at(capped, b[0], Some(99)));
+
+        assert_eq!(incoming(&graph, b[0]), [first, moved, second, capped]);
+        assert!(incoming(&graph, b[1]).is_empty());
+        assert_edges_agree_with_ports(&graph);
+    }
+
+    // Mutation: in `set_edge_target`, skip removing the edge from the old target port.
+    #[test]
+    fn set_edge_target_moves_the_edge_to_the_end_of_the_new_port() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let moved = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let stays = graph.add_edge(LayeredEdge::new("e1", a[0], b[1])).unwrap();
+
+        assert!(graph.set_edge_target(moved, b[1]));
+
+        assert!(incoming(&graph, b[0]).is_empty());
+        assert_eq!(incoming(&graph, b[1]), [stays, moved]);
+        assert_edges_agree_with_ports(&graph);
+    }
+
+    // Mutation: in `detach_edge_target`, leave the edge in the incoming list of its target.
+    #[test]
+    fn detach_edge_removes_the_edge_from_both_ports_and_keeps_its_ends() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let edge = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+
+        assert_eq!(graph.detach_edge(edge), Some((a[0], b[0])));
+
+        assert!(outgoing(&graph, a[0]).is_empty());
+        assert!(incoming(&graph, b[0]).is_empty());
+        assert!(!graph.edge_source_attached(edge));
+        assert!(!graph.edge_target_attached(edge));
+        assert_eq!(graph.edges[edge].source(), a[0]);
+        assert_eq!(graph.detach_edge(EdgeId::new(99)), None);
+    }
+
+    // Mutation: in `replace_incoming_edge_at`, leave the target of the new edge unchanged.
+    #[test]
+    fn replace_incoming_edge_at_gives_the_edge_the_exact_slot() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let first = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let replaced = graph.add_edge(LayeredEdge::new("e1", a[0], b[0])).unwrap();
+        let last = graph.add_edge(LayeredEdge::new("e2", a[0], b[0])).unwrap();
+        let newcomer = graph.add_edge(LayeredEdge::new("e3", a[1], b[1])).unwrap();
+        graph.remove_leading_incoming_edges(b[1], 1);
+
+        graph.replace_incoming_edge_at(b[0], 1, newcomer);
+
+        assert_eq!(incoming(&graph, b[0]), [first, newcomer, last]);
+        assert_eq!(graph.edges[newcomer].target(), b[0]);
+        // The replaced edge is left for the caller to drop.
+        assert_eq!(graph.edges[replaced].target(), b[0]);
+        assert!(!graph.edge_target_attached(replaced));
+    }
+
+    // Mutation: in `remove_leading_incoming_edges`, drain no edge.
+    #[test]
+    fn remove_leading_edges_removes_the_first_ones_of_a_port() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let edges = (0..3)
+            .map(|index| {
+                graph
+                    .add_edge(LayeredEdge::new(format!("e{index}"), a[0], b[0]))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        graph.remove_leading_incoming_edges(b[0], 2);
+        graph.remove_leading_outgoing_edges(a[0], 1);
+
+        assert_eq!(incoming(&graph, b[0]), [edges[2]]);
+        assert_eq!(outgoing(&graph, a[0]), [edges[1], edges[2]]);
+    }
+
+    // Mutation: in `reorder_incoming_edges`, skip the check that the order names each edge once.
+    #[test]
+    fn reorder_edges_accepts_only_a_permutation_of_the_ports_edges() {
+        let EdgeFixture { mut graph, a, b } = edge_fixture();
+        let first = graph.add_edge(LayeredEdge::new("e0", a[0], b[0])).unwrap();
+        let second = graph.add_edge(LayeredEdge::new("e1", a[0], b[0])).unwrap();
+
+        assert!(graph.reorder_incoming_edges(b[0], vec![second, first]));
+        assert!(graph.reorder_outgoing_edges(a[0], vec![second, first]));
+        assert_eq!(incoming(&graph, b[0]), [second, first]);
+        assert_eq!(outgoing(&graph, a[0]), [second, first]);
+
+        assert!(!graph.reorder_incoming_edges(b[0], vec![first]));
+        assert!(!graph.reorder_incoming_edges(b[0], vec![first, first]));
+        assert!(!graph.reorder_outgoing_edges(a[0], vec![first, EdgeId::new(99)]));
+        assert_eq!(incoming(&graph, b[0]), [second, first]);
+        assert_eq!(outgoing(&graph, a[0]), [second, first]);
+    }
+
+    fn dummy_of(kind: LNodeKind) -> LNode {
+        let mut node = LNode::new("dummy", 0.0, 0.0, None);
+        node.set_kind(kind);
+        node
+    }
+
+    // Mutation: in `set_kind`, make a `Label` dummy hold the data of a long edge dummy, or make a
+    // `BreakingPoint` node a plain node again.
+    #[test]
+    fn set_kind_gives_the_node_the_data_of_its_kind() {
+        for kind in [
+            LNodeKind::Normal,
+            LNodeKind::LongEdge,
+            LNodeKind::Label,
+            LNodeKind::ExternalPort,
+            LNodeKind::NorthSouthPort,
+            LNodeKind::BreakingPoint,
+        ] {
+            assert_eq!(dummy_of(kind).kind(), kind, "{kind:?}");
+        }
+    }
+
+    // Mutation: in `origin_edge`, answer `Some(EdgeId::new(0))` for an external port dummy.
+    #[test]
+    fn dummy_data_of_another_kind_reads_as_none() {
+        let normal = dummy_of(LNodeKind::Normal);
+        let long_edge = dummy_of(LNodeKind::LongEdge);
+        let label = dummy_of(LNodeKind::Label);
+        let external = dummy_of(LNodeKind::ExternalPort);
+        let north_south = dummy_of(LNodeKind::NorthSouthPort);
+
+        for node in [&normal, &label, &external, &north_south] {
+            assert!(node.long_edge().is_none(), "{:?}", node.kind());
+        }
+        for node in [&normal, &long_edge, &external, &north_south] {
+            assert!(node.label_dummy().is_none(), "{:?}", node.kind());
+        }
+        for node in [&normal, &long_edge, &label, &north_south] {
+            assert!(node.external_port().is_none(), "{:?}", node.kind());
+        }
+        for node in [&normal, &external, &north_south] {
+            assert!(node.long_edge_ends().is_none(), "{:?}", node.kind());
+            assert_eq!(node.origin_edge(), None, "{:?}", node.kind());
+        }
+        for node in [&normal, &long_edge, &external, &north_south] {
+            assert!(node.represented_labels().is_empty(), "{:?}", node.kind());
+        }
+    }
+
+    // Mutation: in `long_edge_ends`, answer for a long edge dummy only, not for a label dummy.
+    #[test]
+    fn long_edge_dummies_and_label_dummies_share_the_ends_of_their_long_edge() {
+        let ends = LongEdgeEnds {
+            source: Some(PortRef {
+                node: NodeId::new(0),
+                port: PortId::new(0),
+            }),
+            target: Some(PortRef {
+                node: NodeId::new(1),
+                port: PortId::new(0),
+            }),
+        };
+        for kind in [LNodeKind::LongEdge, LNodeKind::Label] {
+            let mut node = dummy_of(kind);
+            assert_eq!(node.long_edge_ends(), Some(LongEdgeEnds::default()));
+
+            node.long_edge_ends_mut().unwrap().source = ends.source;
+            node.long_edge_ends_mut().unwrap().target = ends.target;
+
+            assert_eq!(node.long_edge_ends(), Some(ends), "{kind:?}");
+        }
+    }
+
+    // Mutation: in `origin_edge`, read the label dummy's edge from the long edge arm.
+    #[test]
+    fn origin_edge_is_the_edge_a_long_edge_dummy_or_label_dummy_was_made_from() {
+        let mut long_edge = dummy_of(LNodeKind::LongEdge);
+        long_edge.long_edge_mut().unwrap().origin_edge = Some(EdgeId::new(3));
+        let mut label = dummy_of(LNodeKind::Label);
+        label.label_dummy_mut().unwrap().origin_edge = Some(EdgeId::new(4));
+
+        assert_eq!(long_edge.origin_edge(), Some(EdgeId::new(3)));
+        assert_eq!(label.origin_edge(), Some(EdgeId::new(4)));
+        assert_eq!(dummy_of(LNodeKind::LongEdge).origin_edge(), None);
+    }
+
+    // Mutation: in `set_kind`, keep the data of the old kind when the kind changes.
+    #[test]
+    fn set_kind_replaces_the_data_of_the_old_kind() {
+        let mut node = dummy_of(LNodeKind::ExternalPort);
+        node.external_port_mut().unwrap().side = PortSide::North;
+
+        node.set_kind(LNodeKind::LongEdge);
+
+        assert!(node.external_port().is_none());
+        assert_eq!(node.long_edge_ends(), Some(LongEdgeEnds::default()));
+        node.set_kind(LNodeKind::ExternalPort);
+        assert_eq!(node.external_port().unwrap().side, PortSide::Undefined);
+    }
+
+    // Mutation: in `apply_port_index_to_dummy`, set the ratio on a node that is no external
+    // port dummy by making it one.
+    #[test]
+    fn apply_port_index_to_dummy_leaves_a_node_that_is_no_external_port_dummy_alone() {
+        let mut node = dummy_of(LNodeKind::Normal);
+
+        apply_port_index_to_dummy(&mut node, PortConstraints::FixedOrder, Some(2));
+
+        assert_eq!(node.kind(), LNodeKind::Normal);
+        assert!(node.external_port().is_none());
+    }
+
+    // Mutation: in `hidden_mask`, set the flag of the first node instead of the listed ones.
+    #[test]
+    fn hidden_mask_marks_the_listed_hidden_nodes() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        graph.hidden_nodes = vec![all[2]];
+
+        let mask = graph.hidden_mask();
+
+        assert_eq!(
+            [mask[all[0]], mask[all[1]], mask[all[2]]],
+            [false, false, true]
+        );
+        assert!(graph.layerless_nodes.iter().count() == mask.len());
+    }
+
+    fn external_dummy_on(side: PortSide) -> LNode {
+        create_external_port_dummy(
+            NodeId::new(0),
+            "dummy",
+            "port",
+            PortType::Output,
+            PortConstraints::FixedSide,
+            side,
+            0,
+            LPoint::default(),
+            LSize::default(),
+            LSize::default(),
+            0.0,
+            ElkDirection::Right,
+            ExternalPortData::default(),
+        )
+    }
+
+    // Mutation: in `create_external_port_dummy`, leave out `..data`, or keep the side of `data`
+    // instead of the one the method works out.
+    #[test]
+    fn create_external_port_dummy_keeps_the_callers_data_and_sets_its_own() {
+        let dummy = create_external_port_dummy(
+            NodeId::new(0),
+            "dummy",
+            "port",
+            PortType::Output,
+            PortConstraints::FixedSide,
+            PortSide::West,
+            0,
+            LPoint::default(),
+            LSize::default(),
+            LSize::default(),
+            0.0,
+            ElkDirection::Right,
+            ExternalPortData {
+                side: PortSide::North,
+                scope_port: Some(3),
+                parent_port_key: Some("key".to_string()),
+                parent_port_type: Some(PortType::Input),
+                ..ExternalPortData::default()
+            },
+        );
+
+        let external = dummy.external_port().unwrap();
+        assert_eq!(external.side, PortSide::West);
+        assert_eq!(external.scope_port, Some(3));
+        assert_eq!(external.parent_port_key.as_deref(), Some("key"));
+        assert_eq!(external.parent_port_type, Some(PortType::Input));
+    }
+
+    // Mutation: in `external_port_side`, answer `North` for a node that is no external port
+    // dummy, or in `in_layer_constraint`, answer `Top`.
+    #[test]
+    fn a_node_that_is_no_external_port_dummy_has_no_side_and_no_in_layer_constraint() {
+        let mut external = dummy_of(LNodeKind::ExternalPort);
+        let data = external.external_port_mut().unwrap();
+        data.side = PortSide::South;
+        data.in_layer_constraint = InLayerConstraint::Bottom;
+
+        assert_eq!(external.external_port_side(), PortSide::South);
+        assert_eq!(external.in_layer_constraint(), InLayerConstraint::Bottom);
+        for kind in [
+            LNodeKind::Normal,
+            LNodeKind::LongEdge,
+            LNodeKind::NorthSouthPort,
+        ] {
+            let node = dummy_of(kind);
+            assert_eq!(node.external_port_side(), PortSide::Undefined, "{kind:?}");
+            assert_eq!(
+                node.in_layer_constraint(),
+                InLayerConstraint::None,
+                "{kind:?}"
+            );
+        }
+    }
+
+    // Mutation: in `external_port_and_layer_constraint_mut`, answer `Some` for a long edge
+    // dummy too, or hand out the constraint of another node.
+    #[test]
+    fn the_external_port_data_and_the_layer_constraint_change_together() {
+        let mut external = dummy_of(LNodeKind::ExternalPort);
+        external.layer_constraint = LayerConstraint::FirstSeparate;
+
+        let (data, constraint) = external.external_port_and_layer_constraint_mut().unwrap();
+        data.side = PortSide::East;
+        *constraint = LayerConstraint::LastSeparate;
+
+        assert_eq!(external.external_port_side(), PortSide::East);
+        assert_eq!(external.layer_constraint, LayerConstraint::LastSeparate);
+        assert!(
+            dummy_of(LNodeKind::LongEdge)
+                .external_port_and_layer_constraint_mut()
+                .is_none()
+        );
+    }
+
+    // Mutation: in `segment_of`, leave out the copy of one field of the old edge, or keep its
+    // labels or bend points.
+    #[test]
+    fn segment_of_keeps_the_fields_of_the_old_edge_but_not_its_geometry() {
+        let EdgeFixture { a, b, .. } = edge_fixture();
+        let mut old = LayeredEdge::new("old", a[0], b[0]);
+        old.source_node_id = "s".to_string();
+        old.target_node_id = "t".to_string();
+        old.minlen = 3;
+        old.reversed = true;
+        old.model_order = Some(4);
+        old.priority_direction = 1;
+        old.priority_shortness = 2;
+        old.priority_straightness = 3;
+        old.thickness = 5.0;
+        old.original_opposite_port = Some(a[1]);
+        old.compound_segment = Some(CompoundEdgeSegment::Output { depth: 2 });
+        old.labels.push(LLabel::new("label", 1.0, 1.0));
+        old.bend_points.push(LPoint { x: 1.0, y: 2.0 });
+        old.junction_points.push(LPoint { x: 3.0, y: 4.0 });
+
+        let segment = LayeredEdge::segment_of(&old, a[1], b[1]);
+
+        let mut expected = old.clone();
+        expected.labels.clear();
+        expected.bend_points.clear();
+        expected.junction_points.clear();
+        expected.source = a[1];
+        expected.target = b[1];
+        assert_eq!(segment, expected);
+    }
+
+    // Mutation: in `create_external_port_dummy`, mark the layer constraint of every dummy
+    // explicit, or of none. In `is_layer_constraint_explicit`, read only the table.
+    #[test]
+    fn a_west_or_east_external_port_dummy_has_an_explicit_layer_constraint() {
+        let mut graph = graph_with_nodes(0);
+        let nodes = [
+            (PortSide::West, true),
+            (PortSide::East, true),
+            (PortSide::North, false),
+            (PortSide::South, false),
+        ]
+        .map(|(side, explicit)| {
+            let dummy = graph.push_node_with(|_| external_dummy_on(side));
+            (dummy, explicit, side)
+        });
+
+        for (dummy, explicit, side) in nodes {
+            assert_eq!(
+                graph.is_layer_constraint_explicit(dummy),
+                explicit,
+                "{side:?}"
+            );
+        }
+    }
+
+    // Mutation: in `port_alignment_of`, read the row of node 0 for every node.
+    #[test]
+    fn port_alignment_of_is_none_for_a_node_that_sets_none() {
+        let mut graph = graph_with_nodes(3);
+        let all = ids(&graph, &[0, 1, 2]);
+        *graph.tables.port_alignment.row_mut(all[0]) = PortAlignment::End;
+
+        assert_eq!(graph.port_alignment_of(all[0]), Some(PortAlignment::End));
+        assert_eq!(graph.port_alignment_of(all[1]), None);
+        assert_eq!(graph.port_alignment_of(all[2]), None);
+    }
+
     // Mutation: swap `x` and `y`, or `width` and `height`, in `port_box`.
     #[test]
     fn port_box_reads_the_position_and_size_from_its_four_numbers() {
@@ -1461,10 +3062,14 @@ mod tests {
             LSize::default(),
             0.0,
             ElkDirection::Down,
+            ExternalPortData::default(),
         );
 
-        assert_eq!(dummy.kind, LNodeKind::ExternalPort);
-        assert_eq!(dummy.in_layer_constraint, InLayerConstraint::Bottom);
+        assert_eq!(dummy.kind(), LNodeKind::ExternalPort);
+        assert_eq!(
+            dummy.external_port().unwrap().in_layer_constraint,
+            InLayerConstraint::Bottom
+        );
         assert_eq!(dummy.port_constraints, PortConstraints::FixedPos);
         assert_eq!(dummy.ports[PortId::new(0)].side, PortSide::North);
         assert_eq!(
@@ -1495,11 +3100,12 @@ mod tests {
                 LSize::default(),
                 0.0,
                 ElkDirection::Right,
+                ExternalPortData::default(),
             )
         });
         assert_eq!(id, NodeId::new(2));
         assert_eq!(graph.layerless_nodes.len(), 3);
-        assert_eq!(graph.layerless_nodes[id].kind, LNodeKind::ExternalPort);
+        assert_eq!(graph.layerless_nodes[id].kind(), LNodeKind::ExternalPort);
         assert_eq!(graph.layerless_nodes[id].ports[PortId::new(0)].node, id);
     }
 
@@ -1519,6 +3125,7 @@ mod tests {
             LSize::default(),
             0.0,
             ElkDirection::Right,
+            ExternalPortData::default(),
         );
 
         assert_eq!(dummy.ports[PortId::new(0)].node, NodeId::new(5));
@@ -1545,6 +3152,7 @@ mod tests {
             },
             -3.0,
             ElkDirection::Right,
+            ExternalPortData::default(),
         );
 
         assert_eq!(dummy.layer_constraint, LayerConstraint::FirstSeparate);
@@ -1561,14 +3169,14 @@ mod tests {
         );
         assert_eq!(dummy.ports[PortId::new(0)].size, LSize::default());
         assert_eq!(
-            dummy.external_port_size,
+            dummy.external_port().unwrap().size,
             LSize {
                 width: 4.0,
                 height: 6.0
             }
         );
         assert_eq!(dummy.ports[PortId::new(0)].border_offset, Some(-3.0));
-        assert_eq!(dummy.port_ratio_or_position, 0.5);
+        assert_eq!(dummy.external_port().unwrap().ratio_or_position, 0.5);
     }
 
     // Mutation: look a port up by its place in the node's list instead of by its slot.
@@ -1585,7 +3193,7 @@ mod tests {
 
         let mut nested = LGraph::new("cluster", LayeredOptions::default());
         let mut dummy = LNode::new("external:cluster", 0.0, 0.0, None);
-        dummy.kind = LNodeKind::ExternalPort;
+        dummy.set_kind(LNodeKind::ExternalPort);
         let origin = GraphPortRef {
             graph_id: GraphId::ROOT,
             port: PortRef {
@@ -1593,7 +3201,7 @@ mod tests {
                 port: PortId::new(1),
             },
         };
-        dummy.origin_port = Some(origin);
+        dummy.external_port_mut().unwrap().origin_port = Some(origin);
         nested.layerless_nodes.push(dummy);
         parent.layerless_nodes.push(compound);
         let mut graphs = GraphArena::new(parent);
@@ -1608,7 +3216,10 @@ mod tests {
         let nested = &graphs[nested_id];
         let parent = graphs.root();
         assert_eq!(
-            nested.layerless_nodes[NodeId::new(0)].origin_port,
+            nested.layerless_nodes[NodeId::new(0)]
+                .external_port()
+                .unwrap()
+                .origin_port,
             Some(origin)
         );
         // The origin still names the port "p1", which now comes first.
@@ -1710,6 +3321,8 @@ mod tests {
 
     // Mutation: look a port up by its place in the node's list instead of by its slot. The edges
     // then name the port that stands in the old place.
+    // Mutation: in `reorder_node_ports`, clear `origin_port` of every external port dummy, or the
+    // `source` of every long edge dummy's ends.
     #[test]
     fn reordering_ports_changes_no_edge_and_no_other_reference() {
         let mut graph = LGraph::new("root", LayeredOptions::default());
@@ -1719,6 +3332,9 @@ mod tests {
         graph
             .layerless_nodes
             .push(LNode::new("B", 10.0, 10.0, Some(1)));
+        graph
+            .layerless_nodes
+            .push(LNode::new("C", 10.0, 10.0, Some(2)));
         let sides = [PortSide::East, PortSide::North, PortSide::South];
         let a = sides.map(|side| {
             graph
@@ -1755,20 +3371,35 @@ mod tests {
         graph.add_edge(edge("e0", a[0], b));
         graph.add_edge(edge("e1", a[2], b));
         graph.add_edge(edge("e2", a[1], a[2]));
-        graph.layerless_nodes[NodeId::new(1)].long_edge_source = Some(a[0]);
-        graph.layerless_nodes[NodeId::new(1)].long_edge_target = Some(a[2]);
-        graph.layerless_nodes[NodeId::new(1)].origin_port = Some(GraphPortRef {
+        graph.layerless_nodes[NodeId::new(1)].set_kind(LNodeKind::LongEdge);
+        graph.layerless_nodes[NodeId::new(1)]
+            .long_edge_ends_mut()
+            .unwrap()
+            .source = Some(a[0]);
+        graph.layerless_nodes[NodeId::new(1)]
+            .long_edge_ends_mut()
+            .unwrap()
+            .target = Some(a[2]);
+        graph.layerless_nodes[NodeId::new(2)].set_kind(LNodeKind::ExternalPort);
+        graph.layerless_nodes[NodeId::new(2)]
+            .external_port_mut()
+            .unwrap()
+            .origin_port = Some(GraphPortRef {
             graph_id: GraphId::ROOT,
             port: a[1],
         });
         let edges_before = graph.edges.clone();
-        let nodes_before = graph.layerless_nodes[NodeId::new(1)].clone();
+        let nodes_before = [
+            graph.layerless_nodes[NodeId::new(1)].clone(),
+            graph.layerless_nodes[NodeId::new(2)].clone(),
+        ];
 
         assert!(graph.reorder_node_ports(NodeId::new(0), [a[2].port, a[0].port, a[1].port]));
 
         // No edge and no reference of the other node changed.
         assert_eq!(graph.edges, edges_before);
-        assert_eq!(graph.layerless_nodes[NodeId::new(1)], nodes_before);
+        assert_eq!(graph.layerless_nodes[NodeId::new(1)], nodes_before[0]);
+        assert_eq!(graph.layerless_nodes[NodeId::new(2)], nodes_before[1]);
         // Each port still holds the edges it held, under the same id.
         for (port, outgoing) in [(a[0], "e0"), (a[2], "e1"), (a[1], "e2")] {
             let data = &graph.layerless_nodes[NodeId::new(0)].ports[port.port];

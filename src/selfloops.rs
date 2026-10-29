@@ -25,7 +25,8 @@ pub fn preprocess_self_loops(graph: &mut LGraph, others: OtherGraphs<'_>) {
     graph.self_loop_holders.clear();
 
     for node in graph.node_ids() {
-        if graph.layerless_nodes[node].kind != LNodeKind::Normal || !node_has_self_loop(graph, node)
+        if graph.layerless_nodes[node].kind() != LNodeKind::Normal
+            || !node_has_self_loop(graph, node)
         {
             continue;
         }
@@ -84,9 +85,9 @@ pub fn postprocess_self_loops(graph: &mut LGraph) {
 
 fn node_has_self_loop(graph: &LGraph, node: NodeId) -> bool {
     graph.layerless_nodes[node].ports.iter().any(|port| {
-        port.outgoing_edges
+        port.outgoing_edges()
             .iter()
-            .any(|edge| graph.edges[*edge].source.node == graph.edges[*edge].target.node)
+            .any(|edge| graph.edges[*edge].source().node == graph.edges[*edge].target().node)
     })
 }
 
@@ -94,16 +95,16 @@ fn install_self_loop_holder(graph: &LGraph, node: NodeId) -> SelfLoopHolder {
     let self_loop_edges = graph.layerless_nodes[node]
         .ports
         .iter()
-        .flat_map(|port| port.outgoing_edges.iter().copied())
-        .filter(|edge| graph.edges[*edge].source.node == graph.edges[*edge].target.node)
+        .flat_map(|port| port.outgoing_edges().iter().copied())
+        .filter(|edge| graph.edges[*edge].source().node == graph.edges[*edge].target().node)
         .collect::<Vec<_>>();
 
     let mut ports = Vec::<SelfLoopPort>::new();
     let mut edges = Vec::<SelfLoopEdge>::new();
 
     for edge in self_loop_edges {
-        let source_port = graph.edges[edge].source.port;
-        let target_port = graph.edges[edge].target.port;
+        let source_port = graph.edges[edge].source().port;
+        let target_port = graph.edges[edge].target().port;
         ensure_self_loop_port(graph, node, source_port, &mut ports);
         ensure_self_loop_port(graph, node, target_port, &mut ports);
         edges.push(SelfLoopEdge {
@@ -144,10 +145,10 @@ fn ensure_self_loop_port(
 fn port_had_only_self_loops(graph: &LGraph, node: NodeId, port: PortId) -> bool {
     let port_data = &graph.layerless_nodes[node].ports[port];
     port_data
-        .incoming_edges
+        .incoming_edges()
         .iter()
-        .chain(port_data.outgoing_edges.iter())
-        .all(|edge| graph.edges[*edge].source.node == graph.edges[*edge].target.node)
+        .chain(port_data.outgoing_edges().iter())
+        .all(|edge| graph.edges[*edge].source().node == graph.edges[*edge].target().node)
 }
 
 fn initialize_hyper_loops(
@@ -323,7 +324,12 @@ fn unhide_ports(graph: &mut LGraph, holder: &mut SelfLoopHolder) {
 }
 
 fn assign_hidden_port_sides(graph: &mut LGraph, holder: &SelfLoopHolder) {
-    match graph.layerless_nodes[holder.node].self_loop_distribution {
+    match graph
+        .tables
+        .self_loop_options
+        .get_or_default(holder.node)
+        .distribution
+    {
         SelfLoopDistributionStrategy::North => assign_hidden_ports_to_north(graph, holder),
         SelfLoopDistributionStrategy::NorthSouth => {
             assign_hidden_ports_to_north_or_south(graph, holder)
@@ -570,7 +576,11 @@ fn process_one_side_loops(
         .iter()
         .filter(|hyper_loop| hyper_loop.self_loop_type == Some(SelfLoopType::OneSide))
         .collect::<Vec<_>>();
-    if graph.layerless_nodes[holder.node].self_loop_ordering
+    if graph
+        .tables
+        .self_loop_options
+        .get_or_default(holder.node)
+        .ordering
         == SelfLoopOrderingStrategy::ReverseStacked
     {
         one_side_loops.reverse();
@@ -587,7 +597,12 @@ fn process_one_side_loops(
 
         let mut sorted_ports = hyper_loop.ports.clone();
         sorted_ports.sort_by_key(|port| self_loop_port_net_flow(hyper_loop, port.port));
-        match graph.layerless_nodes[holder.node].self_loop_ordering {
+        match graph
+            .tables
+            .self_loop_options
+            .get_or_default(holder.node)
+            .ordering
+        {
             SelfLoopOrderingStrategy::Sequenced => {
                 target_areas.add_port_list(
                     sorted_ports
@@ -1031,7 +1046,7 @@ fn north_south_port_connection_sides(
     // Only the ports of the dummy that were made for this port count:
     // `dummyLPort.getProperty(ORIGIN) == lPort` in Java.
     let origin = crate::graph::PortRef {
-        node: port.node,
+        node: port.node(),
         port: id,
     };
     let mut sides = dummy_node
@@ -1039,7 +1054,7 @@ fn north_south_port_connection_sides(
         .iter()
         .filter(|dummy_port| dummy_port.origin_port == Some(origin))
         .filter(|dummy_port| {
-            !dummy_port.incoming_edges.is_empty() || !dummy_port.outgoing_edges.is_empty()
+            !dummy_port.incoming_edges().is_empty() || !dummy_port.outgoing_edges().is_empty()
         })
         .map(|dummy_port| dummy_port.side)
         .collect::<Vec<_>>();
@@ -1641,7 +1656,7 @@ fn compute_port_penalties(graph: &LGraph, node: NodeId) -> Vec<usize> {
         .ports
         .iter()
         .map(|port| {
-            if port.incoming_edges.is_empty() && port.outgoing_edges.is_empty() {
+            if port.incoming_edges().is_empty() && port.outgoing_edges().is_empty() {
                 penalty_sum += UNCONNECTED_PORT_PENALTY;
             } else {
                 penalty_sum += CONNECTED_PORT_PENALTY;
@@ -2521,19 +2536,14 @@ fn reattach_self_loop_edge(graph: &mut LGraph, node: NodeId, sl_edge: &SelfLoopE
         port: sl_edge.target_port,
     };
 
+    // An edge that is still attached sits at these ports already; moving it would change its
+    // place in the port's edge list.
     if !graph.edge_source_attached(sl_edge.edge) {
-        graph.layerless_nodes[node].ports[sl_edge.source_port]
-            .outgoing_edges
-            .push(sl_edge.edge);
+        graph.set_edge_source(sl_edge.edge, source);
     }
     if !graph.edge_target_attached(sl_edge.edge) {
-        graph.layerless_nodes[node].ports[sl_edge.target_port]
-            .incoming_edges
-            .push(sl_edge.edge);
+        graph.set_edge_target(sl_edge.edge, target);
     }
-
-    graph.edges[sl_edge.edge].source = source;
-    graph.edges[sl_edge.edge].target = target;
 }
 
 fn offset_edge_bend_points(graph: &mut LGraph, edge: EdgeId, offset: LPoint) {
@@ -2623,25 +2633,10 @@ mod tests {
         source: PortRef,
         target: PortRef,
     ) -> LayeredEdge {
-        LayeredEdge {
-            id: id.to_string(),
-            source,
-            target,
-            source_node_id: source_node_id.to_string(),
-            target_node_id: target_node_id.to_string(),
-            labels: Vec::new(),
-            minlen: 1,
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order: None,
-            priority_direction: 0,
-            priority_shortness: 0,
-            priority_straightness: 0,
-            thickness: 0.0,
-            original_opposite_port: None,
-            compound_segment: None,
-        }
+        let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
+        built_edge.source_node_id = source_node_id.to_string();
+        built_edge.target_node_id = target_node_id.to_string();
+        built_edge
     }
 
     fn empty_self_loop_holder(node: NodeId, hyper_loop: SelfHyperLoop) -> SelfLoopHolder {
@@ -2721,8 +2716,9 @@ mod tests {
             LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         let node = add_node(&mut graph, "A");
-        graph.layerless_nodes[node].self_loop_distribution = SelfLoopDistributionStrategy::North;
-        graph.layerless_nodes[node].self_loop_ordering = SelfLoopOrderingStrategy::Sequenced;
+        graph.tables.self_loop_options.row_mut(node).distribution =
+            SelfLoopDistributionStrategy::North;
+        graph.tables.self_loop_options.row_mut(node).ordering = SelfLoopOrderingStrategy::Sequenced;
         let source = add_port(&mut graph, node, PortSide::North);
         let target = add_port(&mut graph, node, PortSide::North);
         graph.add_edge(self_loop_edge("loop", "A", source, target));
@@ -2745,8 +2741,10 @@ mod tests {
             LayeredOptions::flowchart_test_defaults(ElkDirection::Down),
         );
         let node = add_node(&mut graph, "A");
-        graph.layerless_nodes[node].self_loop_distribution = SelfLoopDistributionStrategy::North;
-        graph.layerless_nodes[node].self_loop_ordering = SelfLoopOrderingStrategy::ReverseStacked;
+        graph.tables.self_loop_options.row_mut(node).distribution =
+            SelfLoopDistributionStrategy::North;
+        graph.tables.self_loop_options.row_mut(node).ordering =
+            SelfLoopOrderingStrategy::ReverseStacked;
         let p0 = add_port(&mut graph, node, PortSide::North);
         let p1 = add_port(&mut graph, node, PortSide::North);
         let p2 = add_port(&mut graph, node, PortSide::North);
@@ -2904,7 +2902,8 @@ mod tests {
         // The Mermaid adapter default is node-scoped NORTH. Exercise the explicit
         // node strategy here so this test continues to cover EQUALLY assignment.
         let node = add_node(&mut graph, "A");
-        graph.layerless_nodes[node].self_loop_distribution = SelfLoopDistributionStrategy::Equally;
+        graph.tables.self_loop_options.row_mut(node).distribution =
+            SelfLoopDistributionStrategy::Equally;
         let single_port = graph
             .add_port(
                 node,
@@ -2940,15 +2939,15 @@ mod tests {
         restore_self_loop_ports(&mut graph, crate::graph::OtherGraphs::none());
 
         assert_eq!(
-            graph.layerless_nodes[node].ports[graph.edges[EdgeId::new(0)].source.port].side,
+            graph.layerless_nodes[node].ports[graph.edges[EdgeId::new(0)].source().port].side,
             PortSide::South
         );
         assert_eq!(
-            graph.layerless_nodes[node].ports[graph.edges[EdgeId::new(1)].source.port].side,
+            graph.layerless_nodes[node].ports[graph.edges[EdgeId::new(1)].source().port].side,
             PortSide::North
         );
         assert_eq!(
-            graph.layerless_nodes[node].ports[graph.edges[EdgeId::new(1)].target.port].side,
+            graph.layerless_nodes[node].ports[graph.edges[EdgeId::new(1)].target().port].side,
             PortSide::North
         );
     }

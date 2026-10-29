@@ -20,8 +20,8 @@ pub(crate) fn vertical_spacing(graph: &LGraph, first: NodeId, second: NodeId) ->
     use LNodeKind::*;
 
     match (
-        graph.layerless_nodes[first].kind,
-        graph.layerless_nodes[second].kind,
+        graph.layerless_nodes[first].kind(),
+        graph.layerless_nodes[second].kind(),
     ) {
         (Normal, Normal) | (Normal, Label) | (Label, Normal) => graph.options.spacing.node_node,
         (Normal, LongEdge)
@@ -59,14 +59,14 @@ pub(crate) fn vertical_spacing(graph: &LGraph, first: NodeId, second: NodeId) ->
 }
 
 pub fn process_in_layer_constraints(graph: &mut LGraph) {
-    for layer_index in 0..graph.layers.len() {
-        let nodes = graph.layers[layer_index].nodes.clone();
+    for layer_index in 0..graph.layers().len() {
+        let nodes = graph.layers()[layer_index].nodes().to_vec();
         let mut top_nodes = Vec::new();
         let mut middle_nodes = Vec::new();
         let mut bottom_nodes = Vec::new();
 
         for node in nodes {
-            match graph.layerless_nodes[node].in_layer_constraint {
+            match graph.layerless_nodes[node].in_layer_constraint() {
                 InLayerConstraint::Top => top_nodes.push(node),
                 InLayerConstraint::Bottom => bottom_nodes.push(node),
                 InLayerConstraint::None => middle_nodes.push(node),
@@ -75,19 +75,19 @@ pub fn process_in_layer_constraints(graph: &mut LGraph) {
 
         top_nodes.extend(middle_nodes);
         top_nodes.extend(bottom_nodes);
-        graph.layers[layer_index].nodes = top_nodes;
+        graph.set_layer_nodes(layer_index, top_nodes);
     }
 }
 
 pub fn calculate_label_and_node_sizes(graph: &mut LGraph) {
     let layered_nodes = graph
-        .layers
+        .layers()
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .collect::<Vec<_>>();
 
     for node in layered_nodes {
-        if graph.layerless_nodes[node].kind == LNodeKind::Normal {
+        if graph.layerless_nodes[node].kind() == LNodeKind::Normal {
             nodespacing::calculate_label_and_node_sizes(graph, [node]);
         }
     }
@@ -95,9 +95,9 @@ pub fn calculate_label_and_node_sizes(graph: &mut LGraph) {
 
 pub fn calculate_innermost_node_margins(graph: &mut LGraph) {
     let layered_nodes = graph
-        .layers
+        .layers()
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
+        .flat_map(|layer| layer.nodes().iter().copied())
         .collect::<Vec<_>>();
 
     nodespacing::calculate_node_margins(graph, layered_nodes);
@@ -173,22 +173,26 @@ mod tests {
             LayeredOptions::flowchart_test_defaults(ElkDirection::Right),
         );
         let mut dummy = crate::graph::LNode::new("label", 13.0, 24.0, None);
-        dummy.kind = LNodeKind::Label;
-        dummy.represented_labels.push(LLabel {
-            text: "edge label".to_string(),
-            size: LSize {
-                width: 13.0,
-                height: 24.0,
-            },
-            position: crate::graph::LPoint { x: 63.0, y: 0.0 },
-            placement: EdgeLabelPlacement::Center,
-            inline: true,
-            label_side: None,
-            end_label_edge: None,
-            original_label_edge: None,
-            source_index: None,
-            node_label_placement: None,
-        });
+        dummy.set_kind(LNodeKind::Label);
+        dummy
+            .label_dummy_mut()
+            .unwrap()
+            .represented_labels
+            .push(LLabel {
+                text: "edge label".to_string(),
+                size: LSize {
+                    width: 13.0,
+                    height: 24.0,
+                },
+                position: crate::graph::LPoint { x: 63.0, y: 0.0 },
+                placement: EdgeLabelPlacement::Center,
+                inline: true,
+                label_side: None,
+                end_label_edge: None,
+                original_label_edge: None,
+                source_index: None,
+                node_label_placement: None,
+            });
         graph.layerless_nodes.push(dummy);
         graph.set_node_layer(NodeId::new(0), 0);
 
@@ -200,19 +204,30 @@ mod tests {
         );
     }
 
+    // Mutation: in `process_in_layer_constraints`, put a node with the `Top` constraint in the
+    // middle group.
     #[test]
     fn in_layer_constraint_processor_moves_top_and_bottom_nodes() {
         let mut graph = graph(vec![node("A"), node("B"), node("C"), node("D")], vec![]);
         for index in graph.node_ids() {
             graph.set_node_layer(index, 0);
         }
-        graph.layerless_nodes[NodeId::new(2)].in_layer_constraint = InLayerConstraint::Top;
-        graph.layerless_nodes[NodeId::new(1)].in_layer_constraint = InLayerConstraint::Bottom;
+        for index in [1, 2] {
+            graph.layerless_nodes[NodeId::new(index)].set_kind(LNodeKind::ExternalPort);
+        }
+        graph.layerless_nodes[NodeId::new(2)]
+            .external_port_mut()
+            .unwrap()
+            .in_layer_constraint = InLayerConstraint::Top;
+        graph.layerless_nodes[NodeId::new(1)]
+            .external_port_mut()
+            .unwrap()
+            .in_layer_constraint = InLayerConstraint::Bottom;
 
         process_in_layer_constraints(&mut graph);
 
-        let order = graph.layers[0]
-            .nodes
+        let order = graph.layers()[0]
+            .nodes()
             .iter()
             .map(|node| graph.layerless_nodes[*node].id.as_str())
             .collect::<Vec<_>>();

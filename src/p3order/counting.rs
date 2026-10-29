@@ -138,9 +138,9 @@ impl CrossingsCounter {
         crate::p3order::initialize_crossing_minimization_port_ids(&mut graph);
         let graph = &graph;
         let current_order = graph
-            .layers
+            .layers()
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         self.count_all_crossings_in_order(graph, &current_order)
     }
@@ -236,7 +236,7 @@ impl CrossingsCounter {
             // Collect the edges of the port, which is a bit tedious: north and south ports
             // have no physical edge in the graph at this point.
             let node = &graph.layerless_nodes[port.node];
-            match node.kind {
+            match node.kind() {
                 LNodeKind::Normal => {
                     // The init step only numbers ports that have a dummy.
                     if let Some(dummy) = node.ports[port.port].port_dummy.as_ref()
@@ -309,15 +309,16 @@ impl CrossingsCounter {
 
         for &current in nodes {
             let node = &graph.layerless_nodes[current];
-            if is_layout_unit_changed(last_layout_unit, current, node.in_layer_layout_unit) {
+            let layout_unit = graph.in_layer_layout_unit(current);
+            if is_layout_unit_changed(last_layout_unit, current, layout_unit) {
                 // Work the stack, which is full of southern dummies.
                 index = self.empty_stack(graph, &mut stack, &mut ports, STACK_SIDE, index);
             }
-            if node.in_layer_layout_unit.is_some() {
-                last_layout_unit = node.in_layer_layout_unit;
+            if layout_unit.is_some() {
+                last_layout_unit = layout_unit;
             }
 
-            match node.kind {
+            match node.kind() {
                 LNodeKind::Normal => {
                     // The northern ports from west to east.
                     for port in
@@ -499,7 +500,7 @@ impl CrossingsCounter {
             for edge in connected_edges(graph, port) {
                 let data = &graph.edges[edge];
                 // A self-loop of a port.
-                if data.source == data.target {
+                if data.source() == data.target() {
                     continue;
                 }
                 if let Some(other_end) = other_end_of(graph, edge, port) {
@@ -662,7 +663,7 @@ impl CrossingsCounter {
         left_layer: &[NodeId],
         right_layer: &[NodeId],
     ) -> isize {
-        let layer_of = |node: NodeId| graph.layerless_nodes[node].layer_index;
+        let layer_of = |node: NodeId| graph.layerless_nodes[node].layer_index();
         let (Some(&left_first), Some(&right_first)) = (left_layer.first(), right_layer.first())
         else {
             return 0;
@@ -675,9 +676,9 @@ impl CrossingsCounter {
         for node in left_layer {
             for (port_index, port) in graph.layerless_nodes[*node].ports.iter_with_ids() {
                 let has_edge = port
-                    .outgoing_edges
+                    .outgoing_edges()
                     .iter()
-                    .any(|edge| layer_of(graph.edges[*edge].target.node) != layer_of(*node));
+                    .any(|edge| layer_of(graph.edges[*edge].target().node) != layer_of(*node));
                 if has_edge {
                     self.set_position(
                         graph,
@@ -697,9 +698,9 @@ impl CrossingsCounter {
         for node in right_layer {
             let ports = &graph.layerless_nodes[*node].ports;
             let enters_from_other_layer = |port: &crate::graph::LPort| {
-                port.incoming_edges
+                port.incoming_edges()
                     .iter()
-                    .any(|edge| layer_of(graph.edges[*edge].source.node) != layer_of(*node))
+                    .any(|edge| layer_of(graph.edges[*edge].source().node) != layer_of(*node))
             };
             // The leading north ports with an incoming edge.
             let north_input_ports = ports
@@ -741,8 +742,8 @@ impl CrossingsCounter {
                     node: *node,
                     port: port_index,
                 };
-                for edge in &port.outgoing_edges {
-                    let target_port = graph.edges[*edge].target;
+                for edge in port.outgoing_edges() {
+                    let target_port = graph.edges[*edge].target();
                     if layer_of(*node) == layer_of(target_port.node) {
                         continue;
                     }
@@ -896,7 +897,7 @@ pub(crate) fn port_degree(graph: &LGraph, port: PortRef) -> usize {
     else {
         return 0;
     };
-    port.incoming_edges.len() + port.outgoing_edges.len()
+    port.incoming_edges().len() + port.outgoing_edges().len()
 }
 
 /// `CrossingsCounter.isLayoutUnitChanged`.
@@ -929,7 +930,7 @@ fn has_north_south_ports(graph: &LGraph, order: &[Vec<NodeId>]) -> Vec<bool> {
         .map(|layer| {
             layer
                 .iter()
-                .any(|&node| graph.layerless_nodes[node].kind == LNodeKind::NorthSouthPort)
+                .any(|&node| graph.layerless_nodes[node].kind() == LNodeKind::NorthSouthPort)
         })
         .collect()
 }
@@ -942,7 +943,7 @@ fn has_hyperedges_east_of_index(graph: &LGraph, order: &[Vec<NodeId>]) -> Vec<bo
     for (layer_index, layer) in order.iter().enumerate() {
         for node in layer {
             for port in &graph.layerless_nodes[*node].ports {
-                if port.outgoing_edges.len() + port.incoming_edges.len() <= 1 {
+                if port.outgoing_edges().len() + port.incoming_edges().len() <= 1 {
                     continue;
                 }
                 if port.side == PortSide::East {
@@ -1039,17 +1040,17 @@ fn is_in_layer_edge(graph: &LGraph, edge: EdgeId) -> bool {
     let Some(edge) = graph.edges.get(edge) else {
         return false;
     };
-    graph.layerless_nodes[edge.source.node].layer_index
-        == graph.layerless_nodes[edge.target.node].layer_index
+    graph.layerless_nodes[edge.source().node].layer_index()
+        == graph.layerless_nodes[edge.target().node].layer_index()
 }
 
 fn connected_edges(graph: &LGraph, port: PortRef) -> impl Iterator<Item = EdgeId> + '_ {
     graph.layerless_nodes[port.node].ports[port.port]
-        .incoming_edges
+        .incoming_edges()
         .iter()
         .chain(
             graph.layerless_nodes[port.node].ports[port.port]
-                .outgoing_edges
+                .outgoing_edges()
                 .iter(),
         )
         .copied()
@@ -1057,10 +1058,10 @@ fn connected_edges(graph: &LGraph, port: PortRef) -> impl Iterator<Item = EdgeId
 
 fn other_end_of(graph: &LGraph, edge: EdgeId, port: PortRef) -> Option<PortRef> {
     let edge = graph.edges.get(edge)?;
-    if edge.source == port {
-        Some(edge.target)
-    } else if edge.target == port {
-        Some(edge.source)
+    if edge.source() == port {
+        Some(edge.target())
+    } else if edge.target() == port {
+        Some(edge.source())
     } else {
         None
     }
@@ -1134,25 +1135,9 @@ mod tests {
     }
 
     fn layered_edge(id: &str, source: PortRef, target: PortRef) -> LayeredEdge {
-        LayeredEdge {
-            id: id.to_string(),
-            source,
-            target,
-            source_node_id: String::new(),
-            target_node_id: String::new(),
-            labels: Vec::new(),
-            minlen: 1,
-            reversed: false,
-            bend_points: Vec::new(),
-            junction_points: Vec::new(),
-            model_order: None,
-            priority_direction: 0,
-            priority_shortness: 0,
-            priority_straightness: 0,
-            thickness: 1.0,
-            original_opposite_port: None,
-            compound_segment: None,
-        }
+        let mut built_edge = LayeredEdge::new(id.to_string(), source, target);
+        built_edge.thickness = 1.0;
+        built_edge
     }
 
     #[test]
@@ -1185,8 +1170,8 @@ mod tests {
         let bottom = graph.node_named("Bottom");
         let left = graph.node_named("Left");
         let right = graph.node_named("Right");
-        graph.layers[0].nodes = vec![top, bottom];
-        graph.layers[1].nodes = vec![left, right];
+        graph.set_layer_nodes(0, vec![top, bottom]);
+        graph.set_layer_nodes(1, vec![left, right]);
 
         let crossings = CrossingsCounter::default().count_all_crossings(&graph);
 
@@ -1206,8 +1191,8 @@ mod tests {
         let bottom = graph.node_named("Bottom");
         let left = graph.node_named("Left");
         let right = graph.node_named("Right");
-        graph.layers[0].nodes = vec![top, bottom];
-        graph.layers[1].nodes = vec![left, right];
+        graph.set_layer_nodes(0, vec![top, bottom]);
+        graph.set_layer_nodes(1, vec![left, right]);
 
         let crossings = CrossingsCounter::default().count_all_crossings(&graph);
 
@@ -1227,11 +1212,11 @@ mod tests {
         let bottom = graph.node_named("Bottom");
         let left = graph.node_named("Left");
         let right = graph.node_named("Right");
-        graph.layers[0].nodes = vec![top, bottom];
-        graph.layers[1].nodes = vec![left, right];
+        graph.set_layer_nodes(0, vec![top, bottom]);
+        graph.set_layer_nodes(1, vec![left, right]);
 
         let crossing_order = CrossingsCounter::default().count_all_crossings(&graph);
-        graph.layers[1].nodes = vec![right, left];
+        graph.set_layer_nodes(1, vec![right, left]);
         let improved_order = CrossingsCounter::default().count_all_crossings(&graph);
 
         assert_eq!(crossing_order, 1.0);
@@ -1489,7 +1474,7 @@ mod tests {
         assert_eq!(counter.has_north_south_ports, Some(vec![false]));
 
         // A dummy that shows up later is seen by a new counter at once.
-        graph.layerless_nodes[NodeId::new(0)].kind = LNodeKind::NorthSouthPort;
+        graph.layerless_nodes[NodeId::new(0)].set_kind(LNodeKind::NorthSouthPort);
         let mut fresh = CrossingsCounter::default();
         fresh.count_all_crossings_in_order(&graph, &order);
         assert_eq!(fresh.has_north_south_ports, Some(vec![true]));
@@ -1604,8 +1589,8 @@ mod tests {
 
     /// Sets the order of layer 1 to the given nodes.
     fn set_layer_order(graph: &mut LGraph, order: &[NodeId]) {
-        assert_eq!(graph.layers[1].nodes.len(), order.len());
-        graph.layers[1].nodes = order.to_vec();
+        assert_eq!(graph.layers()[1].nodes().len(), order.len());
+        graph.set_layer_nodes(1, order.to_vec());
     }
 
     fn dummy_for(graph: &LGraph, node: NodeId, port: usize) -> NodeId {
@@ -1618,7 +1603,7 @@ mod tests {
 
     fn ns_crossings(graph: &LGraph) -> f64 {
         let graph = numbered(graph);
-        let layer = graph.layers[1].nodes.clone();
+        let layer = graph.layers()[1].nodes().to_vec();
         CrossingsCounter::default().count_north_south_port_crossings_in_layer(&graph, &layer)
     }
 
@@ -1703,7 +1688,7 @@ mod tests {
     fn add_long_edge_dummy(graph: &mut LGraph, neighbour: NodeId) -> NodeId {
         let index = graph.next_node_id();
         let mut dummy = LNode::new("long", 0.0, 0.0, None);
-        dummy.kind = LNodeKind::LongEdge;
+        dummy.set_kind(LNodeKind::LongEdge);
         graph.layerless_nodes.push(dummy);
         graph.set_node_layer(index, 1);
         let west = graph
@@ -1813,7 +1798,7 @@ mod tests {
         // The first port of the list is the eastern one, which is port 1. Its dummy is the last in
         // the layer.
         let (east, west) = (dummy_for(&graph, a, 1), dummy_for(&graph, a, 0));
-        assert_eq!(graph.layers[1].nodes, vec![a, west, east]);
+        assert_eq!(graph.layers()[1].nodes(), vec![a, west, east]);
         assert_eq!(ns_crossings(&graph), 0.0);
 
         set_layer_order(&mut graph, &[a, east, west]);
@@ -1858,7 +1843,7 @@ mod tests {
 
         let graph = numbered(&graph);
         let mut counter = CrossingsCounter::default();
-        let layer = graph.layers[1].nodes.clone();
+        let layer = graph.layers()[1].nodes().to_vec();
         let ports = counter.init_positions_for_north_south_counting(&graph, &layer);
 
         // `a`'s southern port, the eastern port of its dummy, the western port of the dummy of
@@ -1891,9 +1876,9 @@ mod tests {
         let (mut graph, [a, b], [da, db]) = two_north_nodes(1);
         set_layer_order(&mut graph, &[da, db, a, b]);
         let order = graph
-            .layers
+            .layers()
             .iter()
-            .map(|layer| layer.nodes.clone())
+            .map(|layer| layer.nodes().to_vec())
             .collect::<Vec<_>>();
         let graph = numbered(&graph);
         let mut counter = CrossingsCounter::default();

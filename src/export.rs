@@ -216,8 +216,9 @@ impl<'a> Hierarchy<'a> {
                     port.node.index()
                 ),
             })?;
-        if node.kind == LNodeKind::ExternalPort
-            && let Some(origin) = &node.origin_port
+        if let Some(origin) = node
+            .external_port()
+            .and_then(|external| external.origin_port.as_ref())
         {
             self.checked_graph(origin.graph_id)?;
             return Ok(PortAt {
@@ -284,8 +285,8 @@ fn join_cross_hierarchy_edges(
         };
         let (first_graph, first_edge) = edge_of(&list[0])?;
         let (last_graph, last_edge) = edge_of(&list[list.len() - 1])?;
-        let source = hierarchy.actual_end(first_graph, first_edge.source)?;
-        let target = hierarchy.actual_end(last_graph, last_edge.target)?;
+        let source = hierarchy.actual_end(first_graph, first_edge.source())?;
+        let target = hierarchy.actual_end(last_graph, last_edge.target())?;
 
         let reference_node = (source.graph, source.port.node);
         let target_node = (target.graph, target.port.node);
@@ -315,13 +316,13 @@ fn join_cross_hierarchy_edges(
                 .collect();
             let mut source_point = hierarchy.absolute_anchor(PortAt {
                 graph,
-                port: edge.source,
+                port: edge.source(),
             });
             source_point.x += offset.x;
             source_point.y += offset.y;
             let mut target_point = hierarchy.absolute_anchor(PortAt {
                 graph,
-                port: edge.target,
+                port: edge.target(),
             });
             target_point.x += offset.x;
             target_point.y += offset.y;
@@ -345,7 +346,7 @@ fn join_cross_hierarchy_edges(
                 y: p.y + offset.y,
             }));
 
-            if hierarchy.actual_end(graph, edge.target)? == target {
+            if hierarchy.actual_end(graph, edge.target())? == target {
                 let target_graph = target.graph;
                 if target_graph != graph {
                     offset = LPoint::default();
@@ -402,17 +403,21 @@ pub(crate) fn apply_layout(
     // the edges that end at them read.
     let mut scope_ports = Vec::new();
     for index in root.node_ids() {
-        let Some(port) = root.layerless_nodes[index].scope_port else {
+        let Some(external) = root.layerless_nodes[index].external_port() else {
+            continue;
+        };
+        let Some(port) = external.scope_port else {
             continue;
         };
         // The port keeps its size, and every step of the run is over: no turn of the graph is left.
-        let size = root.layerless_nodes[index].external_port_size;
+        let size = external.size;
+        let side = external.side;
         let position = crate::pipeline::external_port_position(root, index, size);
         let dummy = &root.layerless_nodes[index];
         scope_ports.push(ScopePortLayout {
             index: port,
             position,
-            side: dummy.external_port_side,
+            side,
             border_offset: dummy
                 .ports
                 .first()
@@ -439,11 +444,11 @@ pub(crate) fn apply_layout(
                 id: edge.id.as_str(),
                 source: PortAt {
                     graph: graph_id,
-                    port: edge.source,
+                    port: edge.source(),
                 },
                 target: PortAt {
                     graph: graph_id,
-                    port: edge.target,
+                    port: edge.target(),
                 },
                 bend_points: edge.bend_points.clone(),
                 junction_points: edge.junction_points.clone(),
@@ -504,23 +509,25 @@ fn is_original_edge(graph: &LGraph, index: EdgeId, input: &TransferInput<'_>) ->
             .and_then(|node| node.ports.get(port.port))
             .is_some_and(|data| {
                 let list = if outgoing {
-                    &data.outgoing_edges
+                    data.outgoing_edges()
                 } else {
-                    &data.incoming_edges
+                    data.incoming_edges()
                 };
                 list.contains(&index)
             })
     };
-    attached(edge.source, true)
-        && attached(edge.target, false)
-        && is_input_end(&graph.layerless_nodes[edge.source.node])
-        && is_input_end(&graph.layerless_nodes[edge.target.node])
+    attached(edge.source(), true)
+        && attached(edge.target(), false)
+        && is_input_end(&graph.layerless_nodes[edge.source().node])
+        && is_input_end(&graph.layerless_nodes[edge.target().node])
 }
 
 /// Whether a node stands for something the input has: a node, or a port of the graph's own node.
 fn is_input_end(node: &LNode) -> bool {
-    node.kind == LNodeKind::Normal
-        || (node.kind == LNodeKind::ExternalPort && node.scope_port.is_some())
+    node.kind() == LNodeKind::Normal
+        || node
+            .external_port()
+            .is_some_and(|external| external.scope_port.is_some())
 }
 
 /// `LGraph.getActualSize`.
@@ -548,7 +555,7 @@ fn apply_graph_layout(
         y: graph.offset.y + graph.padding.top,
     };
     for (index, node) in graph.nodes_with_ids() {
-        if node.kind != LNodeKind::Normal || !input.parents.contains_key(&node.id) {
+        if node.kind() != LNodeKind::Normal || !input.parents.contains_key(&node.id) {
             continue;
         }
         result
@@ -837,7 +844,7 @@ mod tests {
         let origin = graph[nested]
             .layerless_nodes
             .iter_mut()
-            .find_map(|node| node.origin_port.as_mut())
+            .find_map(|node| node.external_port_mut()?.origin_port.as_mut())
             .expect("the edge leaves group through an external port dummy");
         origin.graph_id = GraphId::new(99);
 
@@ -870,8 +877,11 @@ mod tests {
             .collect();
         for (graph_id, edge) in records {
             let edge = &mut graph[graph_id].edges[edge];
-            edge.source.node = crate::graph::NodeId::new(99);
-            edge.target.node = crate::graph::NodeId::new(99);
+            edge.map_ports(|port| {
+                port.node = crate::graph::NodeId::new(99);
+                Ok::<(), std::convert::Infallible>(())
+            })
+            .unwrap();
         }
 
         let error = apply_to_edge_e(&mut graph).expect_err("an error");

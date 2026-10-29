@@ -46,17 +46,15 @@ struct LayeringInput<'a> {
 
 impl<'a> LayeringInput<'a> {
     fn new(graph: &'a LGraph) -> Self {
-        let nodes = graph
-            .node_ids()
-            .filter(|&node| !graph.layerless_nodes[node].hidden)
-            .collect();
+        let hidden = graph.hidden_mask();
+        let nodes = graph.node_ids().filter(|&node| !hidden[node]).collect();
         let incoming = graph
             .node_ids()
             .map(|node| {
                 graph
                     .node_incoming_edges(node)
                     .into_iter()
-                    .filter(|&edge| !graph.layerless_nodes[graph.edges[edge].source.node].hidden)
+                    .filter(|&edge| !hidden[graph.edges[edge].source().node])
                     .collect()
             })
             .collect();
@@ -66,7 +64,7 @@ impl<'a> LayeringInput<'a> {
                 graph
                     .node_outgoing_edges(node)
                     .into_iter()
-                    .filter(|&edge| !graph.layerless_nodes[graph.edges[edge].target.node].hidden)
+                    .filter(|&edge| !hidden[graph.edges[edge].target().node])
                     .collect()
             })
             .collect();
@@ -79,10 +77,10 @@ impl<'a> LayeringInput<'a> {
     }
 
     fn source(&self, edge: EdgeId) -> NodeId {
-        self.graph.edges[edge].source.node
+        self.graph.edges[edge].source().node
     }
     fn target(&self, edge: EdgeId) -> NodeId {
-        self.graph.edges[edge].target.node
+        self.graph.edges[edge].target().node
     }
     fn len(&self) -> usize {
         self.graph.layerless_nodes.len()
@@ -107,13 +105,8 @@ pub(crate) fn layer_with_strategy(
     };
     graph.clear_layers();
     for nodes in layers {
-        let index = graph.layers.len();
-        for &node in &nodes {
-            graph.layerless_nodes[node].layer_index = Some(index);
-        }
-        let mut layer = crate::graph::Layer::new();
-        layer.nodes = nodes;
-        graph.layers.push(layer);
+        let index = graph.layers().len();
+        graph.set_layer_nodes(index, nodes);
     }
     Ok(())
 }
@@ -134,9 +127,10 @@ fn iteration_limit(thoroughness: usize, component_len: usize) -> usize {
 
 pub fn layer_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexError> {
     graph.clear_layers();
+    let hidden = graph.hidden_mask();
     let nodes = graph
         .node_ids()
-        .filter(|&node| !graph.layerless_nodes[node].hidden)
+        .filter(|&node| !hidden[node])
         .collect::<Vec<_>>();
     if nodes.is_empty() {
         return Ok(());
@@ -163,8 +157,13 @@ pub fn layer_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexErr
         }
 
         if connected_components.len() > 1 {
-            previous_layering_node_counts =
-                Some(graph.layers.iter().map(|layer| layer.nodes.len()).collect());
+            previous_layering_node_counts = Some(
+                graph
+                    .layers()
+                    .iter()
+                    .map(|layer| layer.nodes().len())
+                    .collect(),
+            );
         }
     }
     Ok(())
@@ -226,14 +225,14 @@ fn initialize(graph: &LGraph, nodes: &[NodeId]) -> NGraph {
     for l_node in nodes {
         for edge_index in graph.node_outgoing_edges(*l_node) {
             let edge = &graph.edges[edge_index];
-            if edge.source.node == edge.target.node {
+            if edge.source().node == edge.target().node {
                 continue;
             }
 
-            let Some(source) = node_map.get(&edge.source.node).copied() else {
+            let Some(source) = node_map.get(&edge.source().node).copied() else {
                 continue;
             };
-            let Some(target) = node_map.get(&edge.target.node).copied() else {
+            let Some(target) = node_map.get(&edge.target().node).copied() else {
                 continue;
             };
             ngraph.add_edge(
@@ -251,10 +250,10 @@ fn initialize(graph: &LGraph, nodes: &[NodeId]) -> NGraph {
 
 fn opposite_node(graph: &LGraph, node: NodeId, edge_index: EdgeId) -> Option<NodeId> {
     let edge = graph.edges.get(edge_index)?;
-    if edge.source.node == node {
-        Some(edge.target.node)
-    } else if edge.target.node == node {
-        Some(edge.source.node)
+    if edge.source().node == node {
+        Some(edge.target().node)
+    } else if edge.target().node == node {
+        Some(edge.source().node)
     } else {
         None
     }
@@ -346,7 +345,7 @@ mod tests {
 
         layer_network_simplex(&mut graph).unwrap();
 
-        assert_eq!(graph.layers.len(), 3);
+        assert_eq!(graph.layers().len(), 3);
         assert_layer_order(&graph, "A", "B");
         assert_layer_order(&graph, "B", "C");
     }
@@ -374,7 +373,7 @@ mod tests {
 
         assert_layer_order(&graph, "A", "B");
         assert_layer_order(&graph, "C", "D");
-        assert_eq!(graph.layers[0].nodes.len(), 2);
+        assert_eq!(graph.layers()[0].nodes().len(), 2);
     }
 
     #[test]
@@ -392,11 +391,15 @@ mod tests {
         layer_network_simplex(&mut graph).unwrap();
 
         for edge in &graph.edges {
-            if edge.source.node == edge.target.node {
+            if edge.source().node == edge.target().node {
                 continue;
             }
-            let source_layer = graph.layerless_nodes[edge.source.node].layer_index.unwrap();
-            let target_layer = graph.layerless_nodes[edge.target.node].layer_index.unwrap();
+            let source_layer = graph.layerless_nodes[edge.source().node]
+                .layer_index()
+                .unwrap();
+            let target_layer = graph.layerless_nodes[edge.target().node]
+                .layer_index()
+                .unwrap();
             assert!(
                 target_layer > source_layer,
                 "edge {} should point from an earlier layer to a later layer",
@@ -416,6 +419,6 @@ mod tests {
             .iter()
             .find(|node| node.id == target)
             .unwrap();
-        assert!(target.layer_index.unwrap() > source.layer_index.unwrap());
+        assert!(target.layer_index().unwrap() > source.layer_index().unwrap());
     }
 }

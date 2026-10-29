@@ -25,18 +25,18 @@ use crate::options::PortConstraints;
 /// in its layer, and one per connected south port goes below. The edges of the port move to the
 /// dummy, so the layering and the crossing minimization see edges along the flow.
 pub fn preprocess_north_south_ports(graph: &mut LGraph) {
-    for layer_index in 0..graph.layers.len() {
+    for layer_index in 0..graph.layers().len() {
         // The index of the current node while the north ports are processed, and the index of the
         // dummy placed last while the south ports are processed.
         let mut pointer: isize = -1;
 
         // A copy, because the loop inserts dummies into the layer.
-        let node_array = graph.layers[layer_index].nodes.clone();
+        let node_array = graph.layers()[layer_index].nodes().to_vec();
         for node in node_array {
             pointer += 1;
 
             // Only regular nodes with fixed port sides.
-            if !(graph.layerless_nodes[node].kind == LNodeKind::Normal
+            if !(graph.layerless_nodes[node].kind() == LNodeKind::Normal
                 && graph.layerless_nodes[node].port_constraints.is_side_fixed())
             {
                 continue;
@@ -51,7 +51,7 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
             }
 
             // Nodes form their own layout unit.
-            graph.layerless_nodes[node].in_layer_layout_unit = Some(node);
+            graph.tables.in_layer.row_mut(node).layout_unit = Some(node);
 
             let mut barycenter_associates = Vec::new();
 
@@ -68,11 +68,14 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
                 pointer += 1;
 
                 // The dummies form a layout unit named by the node they were made for.
-                graph.layerless_nodes[dummy].in_layer_layout_unit = Some(node);
+                graph.tables.in_layer.row_mut(dummy).layout_unit = Some(node);
 
                 if !origin_allows_side_switch(graph, dummy) {
-                    graph.layerless_nodes[dummy]
-                        .in_layer_successor_constraints
+                    graph
+                        .tables
+                        .in_layer
+                        .row_mut(dummy)
+                        .successor_constraints
                         .push(node);
                 }
             }
@@ -87,18 +90,21 @@ pub fn preprocess_north_south_ports(graph: &mut LGraph) {
                 pointer += 1;
                 insert_into_layer(graph, dummy, layer_index, pointer as usize);
 
-                graph.layerless_nodes[dummy].in_layer_layout_unit = Some(node);
+                graph.tables.in_layer.row_mut(dummy).layout_unit = Some(node);
 
                 // The regular node has every southern dummy as its successor.
                 if !origin_allows_side_switch(graph, dummy) {
-                    graph.layerless_nodes[node]
-                        .in_layer_successor_constraints
+                    graph
+                        .tables
+                        .in_layer
+                        .row_mut(node)
+                        .successor_constraints
                         .push(dummy);
                 }
             }
 
             if !barycenter_associates.is_empty() {
-                graph.layerless_nodes[node].barycenter_associates = barycenter_associates;
+                graph.tables.in_layer.row_mut(node).barycenter_associates = barycenter_associates;
             }
         }
     }
@@ -117,8 +123,7 @@ fn origin_allows_side_switch(graph: &LGraph, dummy: NodeId) -> bool {
 }
 
 fn insert_into_layer(graph: &mut LGraph, node: NodeId, layer_index: usize, index: usize) {
-    graph.layers[layer_index].nodes.insert(index, node);
-    graph.layerless_nodes[node].layer_index = Some(layer_index);
+    graph.insert_node_into_layer(node, layer_index, index);
 }
 
 /// Ports `NorthSouthPortPreprocessor.sortPortList`: ports with only incoming edges end up left,
@@ -138,8 +143,8 @@ fn sort_port_list(graph: &mut LGraph, node: NodeId) {
         let id = match port.side {
             PortSide::East | PortSide::West => -1,
             PortSide::North | PortSide::South => {
-                let incoming = !port.incoming_edges.is_empty();
-                let outgoing = !port.outgoing_edges.is_empty();
+                let incoming = !port.incoming_edges().is_empty();
+                let outgoing = !port.outgoing_edges().is_empty();
                 let next = if incoming && outgoing {
                     &mut in_out_ports
                 } else if outgoing {
@@ -199,8 +204,8 @@ fn create_dummy_nodes(
     let mut in_out_ports = Vec::new();
     for &port in ports {
         let data = &graph.layerless_nodes[port.node].ports[port.port];
-        let incoming = !data.incoming_edges.is_empty();
-        let outgoing = !data.outgoing_edges.is_empty();
+        let incoming = !data.incoming_edges().is_empty();
+        let outgoing = !data.outgoing_edges().is_empty();
         if incoming && outgoing {
             in_out_ports.push(port);
         } else if incoming {
@@ -240,7 +245,7 @@ fn create_dummy_node(
 ) -> NodeId {
     let dummy_index = graph.push_node_with(|id| {
         let mut dummy = LNode::new(format!("northSouthPort:{}", id.index()), 0.0, 0.0, None);
-        dummy.kind = LNodeKind::NorthSouthPort;
+        dummy.set_kind(LNodeKind::NorthSouthPort);
         dummy.port_constraints = PortConstraints::FixedPos;
         dummy
     });
@@ -254,8 +259,8 @@ fn create_dummy_node(
         graph.layerless_nodes[dummy_index].ports[dummy_port.port].origin_port = Some(in_port);
 
         let edges = graph.layerless_nodes[in_port.node].ports[in_port.port]
-            .incoming_edges
-            .clone();
+            .incoming_edges()
+            .to_vec();
         for edge in edges {
             graph.set_edge_target(edge, dummy_port);
         }
@@ -267,8 +272,8 @@ fn create_dummy_node(
         graph.layerless_nodes[dummy_index].ports[dummy_port.port].origin_port = Some(out_port);
 
         let edges = graph.layerless_nodes[out_port.node].ports[out_port.port]
-            .outgoing_edges
-            .clone();
+            .outgoing_edges()
+            .to_vec();
         for edge in edges {
             graph.set_edge_source(edge, dummy_port);
         }
@@ -301,11 +306,11 @@ fn push_dummy_port(
 /// Each edge gets a bend point at the height of the dummy, above or below the node, straight
 /// over or under the port.
 pub fn postprocess_north_south_ports(graph: &mut LGraph) {
-    for layer_index in 0..graph.layers.len() {
+    for layer_index in 0..graph.layers().len() {
         // A copy, because the loop takes nodes out of the layer.
-        let node_array = graph.layers[layer_index].nodes.clone();
+        let node_array = graph.layers()[layer_index].nodes().to_vec();
         for node in node_array {
-            if graph.layerless_nodes[node].kind != LNodeKind::NorthSouthPort {
+            if graph.layerless_nodes[node].kind() != LNodeKind::NorthSouthPort {
                 continue;
             }
 
@@ -324,13 +329,13 @@ pub fn postprocess_north_south_ports(graph: &mut LGraph) {
                 };
                 let dummy_port = PortRef { node, port };
                 if !graph.layerless_nodes[node].ports[port]
-                    .incoming_edges
+                    .incoming_edges()
                     .is_empty()
                 {
                     process_input_port(graph, dummy_port, same_origin_port);
                 }
                 if !graph.layerless_nodes[node].ports[port]
-                    .outgoing_edges
+                    .outgoing_edges()
                     .is_empty()
                 {
                     process_output_port(graph, dummy_port, same_origin_port);
@@ -357,8 +362,8 @@ fn process_input_port(graph: &mut LGraph, input_port: PortRef, add_junction_poin
     let y = graph.layerless_nodes[input_port.node].position.y;
 
     let edges = graph.layerless_nodes[input_port.node].ports[input_port.port]
-        .incoming_edges
-        .clone();
+        .incoming_edges()
+        .to_vec();
     for edge in edges {
         graph.set_edge_target(edge, origin_port);
         graph.edges[edge].bend_points.push(LPoint { x, y });
@@ -380,8 +385,8 @@ fn process_output_port(graph: &mut LGraph, output_port: PortRef, add_junction_po
     let y = graph.layerless_nodes[output_port.node].position.y;
 
     let edges = graph.layerless_nodes[output_port.node].ports[output_port.port]
-        .outgoing_edges
-        .clone();
+        .outgoing_edges()
+        .to_vec();
     for edge in edges {
         graph.set_edge_source(edge, origin_port);
         graph.edges[edge].bend_points.insert(0, LPoint { x, y });
@@ -447,25 +452,7 @@ mod tests {
     fn connect(graph: &mut LGraph, source: PortRef, target: PortRef) -> EdgeId {
         let id = format!("e{}", graph.edges.len());
         graph
-            .add_edge(LayeredEdge {
-                id,
-                source,
-                target,
-                source_node_id: String::new(),
-                target_node_id: String::new(),
-                labels: Vec::new(),
-                minlen: 1,
-                reversed: false,
-                bend_points: Vec::new(),
-                junction_points: Vec::new(),
-                model_order: None,
-                priority_direction: 0,
-                priority_shortness: 0,
-                priority_straightness: 0,
-                thickness: 0.0,
-                original_opposite_port: None,
-                compound_segment: None,
-            })
+            .add_edge(LayeredEdge::new(id, source, target))
             .expect("both ports exist")
     }
 
@@ -481,7 +468,7 @@ mod tests {
     }
 
     fn layer(graph: &LGraph, index: usize) -> Vec<NodeId> {
-        graph.layers[index].nodes.clone()
+        graph.layers()[index].nodes().to_vec()
     }
 
     fn dummy_of(graph: &LGraph, node: NodeId, port: usize) -> NodeId {
@@ -512,7 +499,7 @@ mod tests {
         let dummy = dummy_of(&graph, node, 0);
         assert_eq!(layer(&graph, 1), vec![dummy, node]);
         let dummy_node = &graph.layerless_nodes[dummy];
-        assert_eq!(dummy_node.kind, LNodeKind::NorthSouthPort);
+        assert_eq!(dummy_node.kind(), LNodeKind::NorthSouthPort);
         assert_eq!(dummy_node.port_constraints, PortConstraints::FixedPos);
         assert_eq!(dummy_node.ports.len(), 1);
         assert_eq!(dummy_node.ports[PortId::new(0)].side, PortSide::West);
@@ -520,21 +507,21 @@ mod tests {
             dummy_node.ports[PortId::new(0)].origin_port,
             Some(port(node, 0))
         );
-        assert_eq!(graph.edges[edge].target, port(dummy, 0));
-        assert_eq!(dummy_node.ports[PortId::new(0)].incoming_edges, vec![edge]);
+        assert_eq!(graph.edges[edge].target(), port(dummy, 0));
+        assert_eq!(
+            dummy_node.ports[PortId::new(0)].incoming_edges(),
+            vec![edge]
+        );
         assert!(
             graph.layerless_nodes[node].ports[PortId::new(0)]
-                .incoming_edges
+                .incoming_edges()
                 .is_empty()
         );
         // The dummy and the node form one layout unit. The dummy must stay above the node.
-        assert_eq!(dummy_node.in_layer_layout_unit, Some(node));
-        assert_eq!(graph.layerless_nodes[node].in_layer_layout_unit, Some(node));
-        assert_eq!(dummy_node.in_layer_successor_constraints, vec![node]);
-        assert_eq!(
-            graph.layerless_nodes[node].barycenter_associates,
-            vec![dummy]
-        );
+        assert_eq!(graph.in_layer_layout_unit(dummy), Some(node));
+        assert_eq!(graph.in_layer_layout_unit(node), Some(node));
+        assert_eq!(graph.in_layer_successor_constraints(dummy), vec![node]);
+        assert_eq!(graph.barycenter_associates(node), vec![dummy]);
     }
 
     // Mutation: take the edge from the incoming list of the port in place of the outgoing one, or
@@ -559,10 +546,10 @@ mod tests {
         assert_eq!(dummy_node.ports.len(), 1);
         assert_eq!(dummy_node.ports[PortId::new(0)].side, PortSide::East);
         assert_eq!(dummy_node.ports[PortId::new(0)].port_type, PortType::Output);
-        assert_eq!(graph.edges[edge].source, port(dummy, 0));
+        assert_eq!(graph.edges[edge].source(), port(dummy, 0));
         assert!(
             graph.layerless_nodes[node].ports[PortId::new(0)]
-                .outgoing_edges
+                .outgoing_edges()
                 .is_empty()
         );
     }
@@ -592,18 +579,11 @@ mod tests {
         let second = dummy_of(&graph, node, 1);
         assert_eq!(layer(&graph, 1), vec![node, first, second]);
         assert_eq!(
-            graph.layerless_nodes[node].in_layer_successor_constraints,
+            graph.in_layer_successor_constraints(node),
             vec![first, second]
         );
-        assert!(
-            graph.layerless_nodes[first]
-                .in_layer_successor_constraints
-                .is_empty()
-        );
-        assert_eq!(
-            graph.layerless_nodes[node].barycenter_associates,
-            vec![first, second]
-        );
+        assert!(graph.in_layer_successor_constraints(first).is_empty());
+        assert_eq!(graph.barycenter_associates(node), vec![first, second]);
     }
 
     // Mutation: make one dummy for the two directions of a port, or give the second port of the
@@ -633,8 +613,8 @@ mod tests {
         );
         assert_eq!(ports[PortId::new(0)].origin_port, Some(port(node, 0)));
         assert_eq!(ports[PortId::new(1)].origin_port, Some(port(node, 0)));
-        assert_eq!(graph.edges[incoming].target, port(dummy, 0));
-        assert_eq!(graph.edges[outgoing].source, port(dummy, 1));
+        assert_eq!(graph.edges[incoming].target(), port(dummy, 0));
+        assert_eq!(graph.edges[outgoing].source(), port(dummy, 1));
         assert_eq!(layer(&graph, 1), vec![dummy, node]);
     }
 
@@ -666,10 +646,7 @@ mod tests {
         let out = dummy_of(&graph, node, 1);
         let incoming = dummy_of(&graph, node, 2);
         assert_eq!(layer(&graph, 1), vec![both, out, incoming, node]);
-        assert_eq!(
-            graph.layerless_nodes[node].barycenter_associates,
-            vec![incoming, out, both]
-        );
+        assert_eq!(graph.barycenter_associates(node), vec![incoming, out, both]);
     }
 
     // Mutation: sort the ports of a node whose port order is fixed.
@@ -753,8 +730,8 @@ mod tests {
                 .port_dummy
                 .is_none()
         );
-        assert!(graph.layerless_nodes[node].barycenter_associates.is_empty());
-        assert_eq!(graph.layerless_nodes[node].in_layer_layout_unit, Some(node));
+        assert!(graph.barycenter_associates(node).is_empty());
+        assert_eq!(graph.in_layer_layout_unit(node), Some(node));
     }
 
     // Mutation: ignore the option and always add the constraints.
@@ -780,25 +757,11 @@ mod tests {
 
         let north = dummy_of(&graph, node, 0);
         let south = dummy_of(&graph, node, 1);
-        assert!(
-            graph.layerless_nodes[north]
-                .in_layer_successor_constraints
-                .is_empty()
-        );
-        assert!(
-            graph.layerless_nodes[node]
-                .in_layer_successor_constraints
-                .is_empty()
-        );
+        assert!(graph.in_layer_successor_constraints(north).is_empty());
+        assert!(graph.in_layer_successor_constraints(node).is_empty());
         // The dummies still belong to the node's layout unit and its barycenter.
-        assert_eq!(
-            graph.layerless_nodes[south].in_layer_layout_unit,
-            Some(node)
-        );
-        assert_eq!(
-            graph.layerless_nodes[node].barycenter_associates,
-            vec![north, south]
-        );
+        assert_eq!(graph.in_layer_layout_unit(south), Some(node));
+        assert_eq!(graph.barycenter_associates(node), vec![north, south]);
     }
 
     // Mutation: also process a node whose port sides are free, or a dummy node.
@@ -820,7 +783,7 @@ mod tests {
             &[PortSide::North],
             1,
         );
-        graph.layerless_nodes[long_edge].kind = LNodeKind::LongEdge;
+        graph.layerless_nodes[long_edge].set_kind(LNodeKind::LongEdge);
         connect(&mut graph, port(neighbour, 0), port(free, 0));
         connect(&mut graph, port(neighbour, 0), port(long_edge, 0));
 
@@ -828,7 +791,7 @@ mod tests {
 
         assert_eq!(layer(&graph, 1), vec![free, long_edge]);
         assert_eq!(graph.layerless_nodes.len(), 3);
-        assert_eq!(graph.layerless_nodes[free].in_layer_layout_unit, None);
+        assert_eq!(graph.in_layer_layout_unit(free), None);
     }
 
     // Mutation: use the index of the first node for every node of the layer, so that the dummies
@@ -870,11 +833,8 @@ mod tests {
         for node in [first, second] {
             for port in [0, 1] {
                 let dummy = dummy_of(&graph, node, port);
-                assert_eq!(graph.layerless_nodes[dummy].layer_index, Some(1));
-                assert_eq!(
-                    graph.layerless_nodes[dummy].in_layer_layout_unit,
-                    Some(node)
-                );
+                assert_eq!(graph.layerless_nodes[dummy].layer_index(), Some(1));
+                assert_eq!(graph.in_layer_layout_unit(dummy), Some(node));
             }
         }
     }
@@ -919,7 +879,7 @@ mod tests {
         postprocess_north_south_ports(&mut graph);
 
         let edge = &graph.edges[edges[0]];
-        assert_eq!(edge.target, port(node, 0));
+        assert_eq!(edge.target(), port(node, 0));
         // x is the middle of the port, y the height of the dummy; the new point comes last.
         assert_eq!(
             edge.bend_points,
@@ -927,11 +887,11 @@ mod tests {
         );
         assert!(edge.junction_points.is_empty());
         assert_eq!(
-            graph.layerless_nodes[node].ports[PortId::new(0)].incoming_edges,
+            graph.layerless_nodes[node].ports[PortId::new(0)].incoming_edges(),
             edges
         );
         assert_eq!(layer(&graph, 1), vec![node]);
-        assert_eq!(graph.layerless_nodes[dummy].layer_index, None);
+        assert_eq!(graph.layerless_nodes[dummy].layer_index(), None);
     }
 
     // Mutation: add the new bend point last instead of first.
@@ -943,14 +903,14 @@ mod tests {
         postprocess_north_south_ports(&mut graph);
 
         let edge = &graph.edges[edges[0]];
-        assert_eq!(edge.source, port(node, 0));
+        assert_eq!(edge.source(), port(node, 0));
         assert_eq!(
             edge.bend_points,
             vec![LPoint { x: 108.5, y: 12.0 }, LPoint { x: 50.0, y: 40.0 }]
         );
         assert!(edge.junction_points.is_empty());
         assert_eq!(
-            graph.layerless_nodes[node].ports[PortId::new(0)].outgoing_edges,
+            graph.layerless_nodes[node].ports[PortId::new(0)].outgoing_edges(),
             edges
         );
     }
@@ -972,8 +932,8 @@ mod tests {
                 vec![LPoint { x: 108.5, y: 12.0 }]
             );
         }
-        assert_eq!(graph.edges[edges[0]].target, port(node, 0));
-        assert_eq!(graph.edges[edges[1]].source, port(node, 0));
+        assert_eq!(graph.edges[edges[0]].target(), port(node, 0));
+        assert_eq!(graph.edges[edges[1]].source(), port(node, 0));
     }
 
     // Mutation: replace the junction points the router made instead of adding to them.
@@ -1003,8 +963,8 @@ mod tests {
 
         postprocess_north_south_ports(&mut graph);
 
-        assert_eq!(graph.edges[edges[0]].target, port(node, 0));
-        assert_eq!(graph.edges[second].source, port(neighbour, 0));
+        assert_eq!(graph.edges[edges[0]].target(), port(node, 0));
+        assert_eq!(graph.edges[second].source(), port(neighbour, 0));
         assert!(graph.edges[edges[0]].junction_points.is_empty());
         assert!(graph.edges[second].junction_points.is_empty());
         assert_eq!(graph.edges[second].bend_points.len(), 1);

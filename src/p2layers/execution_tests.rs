@@ -52,7 +52,7 @@ fn empty_graphs_have_no_layers_for_every_added_strategy() {
     for strategy in STRATEGIES {
         let mut graph = LGraph::new("root", LayeredOptions::default());
         layer_with_strategy(&mut graph, strategy).unwrap();
-        assert!(graph.layers.is_empty());
+        assert!(graph.layers().is_empty());
     }
 }
 
@@ -132,10 +132,10 @@ fn longest_path_uses_an_explicit_stack_for_deep_graphs() {
                 LayeringStrategy::LongestPathSource,
             ] {
                 layer_with_strategy(&mut graph, strategy).unwrap();
-                assert_eq!(graph.layers.len(), COUNT);
-                assert_eq!(graph.layerless_nodes[NodeId::new(0)].layer_index, Some(0));
+                assert_eq!(graph.layers().len(), COUNT);
+                assert_eq!(graph.layerless_nodes[NodeId::new(0)].layer_index(), Some(0));
                 assert_eq!(
-                    graph.layerless_nodes[NodeId::new(COUNT - 1)].layer_index,
+                    graph.layerless_nodes[NodeId::new(COUNT - 1)].layer_index(),
                     Some(COUNT - 1)
                 );
             }

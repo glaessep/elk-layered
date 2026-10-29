@@ -357,7 +357,7 @@ fn dump(graphs: &GraphArena, id: GraphId, origin: LPoint, depth: usize, out: &mu
             out,
             "{pad}  node {} {:?} at {} size {:?}x{:?}",
             node.id,
-            node.kind,
+            node.kind(),
             point(at),
             node.size.width,
             node.size.height
@@ -382,8 +382,8 @@ fn dump(graphs: &GraphArena, id: GraphId, origin: LPoint, depth: usize, out: &mu
         }
     }
     for edge in &graph.edges {
-        let source = &graph.layerless_nodes[edge.source.node];
-        let target = &graph.layerless_nodes[edge.target.node];
+        let source = &graph.layerless_nodes[edge.source().node];
+        let target = &graph.layerless_nodes[edge.target().node];
         let end = |n: &LNode, p: crate::graph::PortId| {
             let port = &n.ports[p];
             add(add(add(origin, n.position), port.position), port.anchor)
@@ -397,9 +397,9 @@ fn dump(graphs: &GraphArena, id: GraphId, origin: LPoint, depth: usize, out: &mu
             out,
             "{pad}  edge {} from {} via [{}] to {}",
             edge.id,
-            point(end(source, edge.source.port)),
+            point(end(source, edge.source().port)),
             bends.join(", "),
-            point(end(target, edge.target.port))
+            point(end(target, edge.target().port))
         );
         for label in &edge.labels {
             let _ = writeln!(

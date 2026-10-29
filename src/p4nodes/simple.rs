@@ -7,23 +7,25 @@ use super::vertical_spacing;
 use crate::graph::LGraph;
 
 pub fn place_nodes_simple(graph: &mut LGraph) {
-    if graph.layers.is_empty() {
+    if graph.layers().is_empty() {
         return;
     }
 
     let mut max_layer_height: f64 = 0.0;
 
-    for layer_index in 0..graph.layers.len() {
+    for layer_index in 0..graph.layers().len() {
         let layer_height = layer_height(graph, layer_index);
-        graph.layers[layer_index].size.height = layer_height;
-        graph.layers[layer_index].size.width = layer_width(graph, layer_index);
+        let layer_width = layer_width(graph, layer_index);
+        let size = graph.layer_size_mut(layer_index);
+        size.height = layer_height;
+        size.width = layer_width;
         max_layer_height = max_layer_height.max(layer_height);
     }
 
-    for layer_index in 0..graph.layers.len() {
-        let mut y = (max_layer_height - graph.layers[layer_index].size.height) / 2.0;
+    for layer_index in 0..graph.layers().len() {
+        let mut y = (max_layer_height - graph.layers()[layer_index].size.height) / 2.0;
         let mut previous = None;
-        let nodes = graph.layers[layer_index].nodes.clone();
+        let nodes = graph.layers()[layer_index].nodes().to_vec();
 
         for node_index in nodes {
             if let Some(previous_index) = previous {
@@ -44,7 +46,7 @@ fn layer_height(graph: &LGraph, layer_index: usize) -> f64 {
     let mut height = 0.0;
     let mut previous = None;
 
-    for node_index in graph.layers[layer_index].nodes.iter().copied() {
+    for node_index in graph.layers()[layer_index].nodes().iter().copied() {
         if let Some(previous_index) = previous {
             height += vertical_spacing(graph, previous_index, node_index);
         }
@@ -58,8 +60,8 @@ fn layer_height(graph: &LGraph, layer_index: usize) -> f64 {
 }
 
 fn layer_width(graph: &LGraph, layer_index: usize) -> f64 {
-    graph.layers[layer_index]
-        .nodes
+    graph.layers()[layer_index]
+        .nodes()
         .iter()
         .map(|node_index| {
             let node = &graph.layerless_nodes[*node_index];
@@ -143,8 +145,8 @@ mod tests {
 
         place_nodes_simple(&mut graph);
 
-        assert_eq!(graph.layers[0].size.height, 80.0);
-        assert_eq!(graph.layers[1].size.height, 100.0);
+        assert_eq!(graph.layers()[0].size.height, 80.0);
+        assert_eq!(graph.layers()[1].size.height, 100.0);
         assert_eq!(graph.layerless_nodes[NodeId::new(0)].position.y, 10.0);
         assert_eq!(graph.layerless_nodes[NodeId::new(1)].position.y, 70.0);
         assert_eq!(graph.layerless_nodes[NodeId::new(2)].position.y, 0.0);
@@ -168,7 +170,7 @@ mod tests {
 
         place_nodes_simple(&mut graph);
 
-        assert_eq!(graph.layers[0].size.height, 106.0);
+        assert_eq!(graph.layers()[0].size.height, 106.0);
         assert_eq!(graph.layerless_nodes[NodeId::new(0)].position.y, 3.0);
         assert_eq!(graph.layerless_nodes[NodeId::new(1)].position.y, 75.0);
     }

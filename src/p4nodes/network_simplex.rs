@@ -29,11 +29,12 @@ struct Auxiliary {
 }
 
 pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimplexError> {
+    let hidden = graph.hidden_mask();
     let order: Vec<_> = graph
-        .layers
+        .layers()
         .iter()
-        .flat_map(|layer| layer.nodes.iter().copied())
-        .filter(|node| !graph.layerless_nodes[*node].hidden)
+        .flat_map(|layer| layer.nodes().iter().copied())
+        .filter(|node| !hidden[*node])
         .collect();
     if order.is_empty() {
         return Ok(());
@@ -62,10 +63,10 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
             .collect(),
         edges: IdVec::filled(graph.edges.len(), None),
     };
-    for layer in &graph.layers {
+    for layer in graph.layers() {
         let mut previous: Option<NodeId> = None;
-        for &node in &layer.nodes {
-            if graph.layerless_nodes[node].hidden {
+        for &node in layer.nodes() {
+            if hidden[node] {
                 continue;
             }
             let head = aux.graph.add_node(Some(node));
@@ -124,8 +125,8 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
             }
             let data = &graph.edges[edge];
             let (Some(source), Some(target)) = (
-                aux.ports[data.source.node][data.source.port.index()],
-                aux.ports[data.target.node][data.target.port.index()],
+                aux.ports[data.source().node][data.source().port.index()],
+                aux.ports[data.target().node][data.target().port.index()],
             ) else {
                 continue;
             };
@@ -138,13 +139,13 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
                         port.position.y
                     }
             };
-            let source_offset = offset(data.source);
-            let target_offset = offset(data.target);
+            let source_offset = offset(data.source());
+            let target_offset = offset(data.target());
             let dummy = aux.graph.add_node(None);
             let weight = data.priority_straightness.max(1) as f64
                 * edge_type_weight(
-                    graph.layerless_nodes[data.source.node].kind,
-                    graph.layerless_nodes[data.target.node].kind,
+                    graph.layerless_nodes[data.source().node].kind(),
+                    graph.layerless_nodes[data.target().node].kind(),
                 );
             let left = aux
                 .graph
@@ -237,17 +238,19 @@ pub fn place_nodes_network_simplex(graph: &mut LGraph) -> Result<(), NetworkSimp
 }
 
 fn is_flexible(graph: &LGraph, node: NodeId) -> bool {
+    // A node the importer made no row for, a dummy, has no flexibility.
+    let options = graph.tables.placement_options.get_or_default(node);
     let node = &graph.layerless_nodes[node];
-    if node.kind != LNodeKind::Normal
+    if node.kind() != LNodeKind::Normal
         || node.ports.len() <= 1
         || node.port_constraints.is_pos_fixed()
-        || node.node_flexibility == NodeFlexibility::None
+        || options.flexibility == NodeFlexibility::None
     {
         return false;
     }
     let spacing = graph.options.spacing.port_port;
     // Eligibility reads the node property, unlike transformPorts' inherited spacing.
-    let margins = node
+    let margins = options
         .ports_surrounding
         .map(|m| m.top + m.bottom)
         .unwrap_or(2.0 * spacing);
@@ -301,9 +304,9 @@ fn transform_ports(
 
 fn handled_edge(graph: &LGraph, edge: EdgeId) -> bool {
     let data = &graph.edges[edge];
-    data.source.node != data.target.node
-        && graph.layerless_nodes[data.source.node].layer_index
-            != graph.layerless_nodes[data.target.node].layer_index
+    data.source().node != data.target().node
+        && graph.layerless_nodes[data.source().node].layer_index()
+            != graph.layerless_nodes[data.target().node].layer_index()
 }
 
 fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[NodeId]) {
@@ -331,29 +334,29 @@ fn insert_port_auxiliary_edges(graph: &LGraph, aux: &mut Auxiliary, order: &[Nod
         }
     }
     let mut position = IdVec::filled(graph.layerless_nodes.len(), 0);
-    for layer in &graph.layers {
-        for (index, &node) in layer.nodes.iter().enumerate() {
+    for layer in graph.layers() {
+        for (index, &node) in layer.nodes().iter().enumerate() {
             position[node] = index;
         }
     }
     for &node in order {
-        if graph.layerless_nodes[node].kind != LNodeKind::Normal {
+        if graph.layerless_nodes[node].kind() != LNodeKind::Normal {
             continue;
         }
         for edge in graph.node_connected_edges(node) {
             let edge = &graph.edges[edge];
-            if edge.source.node == edge.target.node
-                || graph.layerless_nodes[edge.source.node].layer_index
-                    != graph.layerless_nodes[edge.target.node].layer_index
+            if edge.source().node == edge.target().node
+                || graph.layerless_nodes[edge.source().node].layer_index()
+                    != graph.layerless_nodes[edge.target().node].layer_index()
             {
                 continue;
             }
-            let (port, dummy) = if graph.layerless_nodes[edge.source.node].kind != LNodeKind::Normal
-            {
-                (edge.target, edge.source.node)
-            } else {
-                (edge.source, edge.target.node)
-            };
+            let (port, dummy) =
+                if graph.layerless_nodes[edge.source().node].kind() != LNodeKind::Normal {
+                    (edge.target(), edge.source().node)
+                } else {
+                    (edge.source(), edge.target().node)
+                };
             let (Some(port_rep), Some(dummy_rep)) =
                 (aux.ports[port.node][port.port.index()], aux.nodes[dummy])
             else {
@@ -414,12 +417,12 @@ fn prefer_straight_edges(
         let incoming = graph
             .node_incoming_edges(node)
             .into_iter()
-            .filter(|edge| graph.edges[*edge].source.node != graph.edges[*edge].target.node)
+            .filter(|edge| graph.edges[*edge].source().node != graph.edges[*edge].target().node)
             .count();
         let outgoing = graph
             .node_outgoing_edges(node)
             .into_iter()
-            .filter(|edge| graph.edges[*edge].source.node != graph.edges[*edge].target.node)
+            .filter(|edge| graph.edges[*edge].source().node != graph.edges[*edge].target().node)
             .count();
         if incoming > 1 || outgoing > 1 || incoming + outgoing == 1 {
             state[node] = 2;
@@ -440,10 +443,10 @@ fn prefer_straight_edges(
             loop {
                 path.push(edge);
                 let data = &graph.edges[edge];
-                let other = if data.source.node == current {
-                    data.target.node
+                let other = if data.source().node == current {
+                    data.target().node
                 } else {
-                    data.source.node
+                    data.source().node
                 };
                 if state[other] == -1 || state[other] == 2 || crossing[edge] {
                     break;
@@ -470,19 +473,19 @@ fn prefer_straight_edges(
             continue;
         }
         if path.len() == 2 {
-            if graph.edges[path[0]].target.node != graph.edges[path[1]].source.node {
+            if graph.edges[path[0]].target().node != graph.edges[path[1]].source().node {
                 path.swap(0, 1);
             }
-            if !aux.nodes[graph.edges[path[0]].target.node]
+            if !aux.nodes[graph.edges[path[0]].target().node]
                 .unwrap()
                 .flexible
             {
                 two_paths.push([path[0], path[1]]);
             }
         } else {
-            let long_dummy = std::iter::once(graph.edges[path[0]].source.node)
-                .chain(path.iter().map(|edge| graph.edges[*edge].target.node))
-                .any(|node| graph.layerless_nodes[node].kind == LNodeKind::LongEdge);
+            let long_dummy = std::iter::once(graph.edges[path[0]].source().node)
+                .chain(path.iter().map(|edge| graph.edges[*edge].target().node))
+                .any(|node| graph.layerless_nodes[node].kind() == LNodeKind::LongEdge);
             if long_dummy {
                 continue;
             }
@@ -504,30 +507,30 @@ fn prefer_straight_edges(
 
 fn mark_crossings(graph: &LGraph) -> IdVec<EdgeId, bool> {
     let mut crossing = IdVec::filled(graph.edges.len(), false);
-    for (layer_index, layers) in graph.layers.windows(2).enumerate() {
+    for (layer_index, layers) in graph.layers().windows(2).enumerate() {
         let mut open = Vec::new();
-        for &node in &layers[0].nodes {
+        for &node in layers[0].nodes() {
             for port in graph.layerless_nodes[node]
                 .ports
                 .iter()
                 .filter(|port| port.side == PortSide::East)
             {
-                open.extend(port.outgoing_edges.iter().copied().filter(|edge| {
+                open.extend(port.outgoing_edges().iter().copied().filter(|edge| {
                     handled_edge(graph, *edge)
-                        && graph.layerless_nodes[graph.edges[*edge].target.node].layer_index
+                        && graph.layerless_nodes[graph.edges[*edge].target().node].layer_index()
                             == Some(layer_index + 1)
                 }));
             }
         }
-        for &node in layers[1].nodes.iter().rev() {
+        for &node in layers[1].nodes().iter().rev() {
             for port in graph.layerless_nodes[node]
                 .ports
                 .iter()
                 .filter(|port| port.side == PortSide::West)
             {
-                for &edge in &port.incoming_edges {
+                for &edge in port.incoming_edges() {
                     if !handled_edge(graph, edge)
-                        || graph.layerless_nodes[graph.edges[edge].source.node].layer_index
+                        || graph.layerless_nodes[graph.edges[edge].source().node].layer_index()
                             != Some(layer_index)
                         || open.is_empty()
                     {
@@ -569,13 +572,13 @@ fn improve_two_path(
     if left_bend == 0 && right_bend == 0 {
         return Ok(false);
     }
-    let center = graph.edges[path[0]].target.node;
+    let center = graph.edges[path[0]].target().node;
     let rep = aux.nodes[center].unwrap();
     if rep.flexible {
         return Ok(false);
     }
     let data = &graph.layerless_nodes[center];
-    let layer = &graph.layers[data.layer_index.unwrap()].nodes;
+    let layer = graph.layers()[data.layer_index().unwrap()].nodes();
     let index = layer.iter().position(|node| *node == center).unwrap();
     let y = aux.graph.nodes[rep.head].layer as f64;
     let mut above = f64::INFINITY;
@@ -775,6 +778,40 @@ mod tests {
         assert!(graph.layerless_nodes[NodeId::new(0)].position.y.is_finite());
     }
 
+    // Mutation: in `is_flexible`, take the margins from the default instead of the node's own
+    // `ports_surrounding`.
+    #[test]
+    fn a_node_whose_own_ports_surrounding_leave_no_room_is_not_flexible() {
+        let mut graph = graph(
+            vec![
+                node("A", 40.0, 20.0),
+                node("B", 40.0, 20.0),
+                node("X", 80.0, 160.0),
+            ],
+            vec![edge("A-X", "A", "X"), edge("B-X", "B", "X")],
+        );
+        let x = NodeId::new(2);
+        graph.tables.placement_options.row_mut(x).flexibility = NodeFlexibility::PortPosition;
+
+        graph.tables.placement_options.row_mut(x).ports_surrounding =
+            Some(crate::options::SpacingMargin {
+                top: 5.0,
+                right: 0.0,
+                bottom: 5.0,
+                left: 0.0,
+            });
+        assert!(is_flexible(&graph, x));
+
+        graph.tables.placement_options.row_mut(x).ports_surrounding =
+            Some(crate::options::SpacingMargin {
+                top: 100.0,
+                right: 0.0,
+                bottom: 100.0,
+                left: 0.0,
+            });
+        assert!(!is_flexible(&graph, x));
+    }
+
     #[test]
     fn fixed_or_crowded_ports_preserve_their_precomputed_positions() {
         let mut graph = graph(
@@ -785,7 +822,11 @@ mod tests {
             ],
             vec![edge("A-X", "A", "X"), edge("B-X", "B", "X")],
         );
-        graph.layerless_nodes[NodeId::new(2)].node_flexibility = NodeFlexibility::PortPosition;
+        graph
+            .tables
+            .placement_options
+            .row_mut(NodeId::new(2))
+            .flexibility = NodeFlexibility::PortPosition;
         assert!(is_flexible(&graph, NodeId::new(2)));
         graph.layerless_nodes[NodeId::new(2)].port_constraints =
             crate::options::PortConstraints::FixedPos;
@@ -914,10 +955,10 @@ mod tests {
                 .edges
                 .iter()
                 .filter(|edge| {
-                    let source = &graph.layerless_nodes[edge.source.node];
-                    let target = &graph.layerless_nodes[edge.target.node];
-                    source.position.y + source.ports[edge.source.port].position.y
-                        == target.position.y + target.ports[edge.target.port].position.y
+                    let source = &graph.layerless_nodes[edge.source().node];
+                    let target = &graph.layerless_nodes[edge.target().node];
+                    source.position.y + source.ports[edge.source().port].position.y
+                        == target.position.y + target.ports[edge.target().port].position.y
                 })
                 .count();
             assert_eq!(
