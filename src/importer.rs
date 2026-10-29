@@ -256,6 +256,16 @@ pub fn import_graph_with_segments(
     segments: &[ElkInputEdgeSegment],
 ) -> ImportResult<GraphArena> {
     import_scope(input, segments, ElkPadding::uniform(0.0), ScopePorts::NONE)
+        .map(|imported| imported.graphs)
+}
+
+/// What importing a scope makes.
+pub(crate) struct ImportedScope {
+    /// Every graph of the scope.
+    pub(crate) graphs: GraphArena,
+    /// The graph each input edge belongs to, by the edge's id: the root, or the graph inside the
+    /// node that contains the edge. A later step never has to look a graph up by its name.
+    pub(crate) edge_containers: HashMap<String, GraphId>,
 }
 
 /// The ports of the node a run lays out, which ELK sees as the external ports of the graph.
@@ -286,7 +296,7 @@ pub(crate) fn import_scope(
     segments: &[ElkInputEdgeSegment],
     root_label_padding: ElkPadding,
     scope: ScopePorts<'_>,
-) -> ImportResult<GraphArena> {
+) -> ImportResult<ImportedScope> {
     let mut index = InputIndex::new(input, scope.ports)?;
     validate_scoped_edge_segments(&index, segments)?;
     let mut root = LGraph::new(input.id.clone(), input.options.clone());
@@ -327,7 +337,19 @@ pub(crate) fn import_scope(
     );
 
     graphs.sync_graph_properties_to_options();
-    Ok(graphs)
+    // The same container the edges were grouped by above, now as the graph that holds it.
+    let edge_containers = input
+        .edges
+        .iter()
+        .map(|edge| {
+            let container = input_edge_containing_parent(&index, edge);
+            (edge.id.clone(), container.map_or(GraphId::ROOT, &graph_of))
+        })
+        .collect();
+    Ok(ImportedScope {
+        graphs,
+        edge_containers,
+    })
 }
 
 /// Makes the external port dummy of each port of the graph's node, if the graph has external
@@ -2715,6 +2737,35 @@ mod tests {
             .map(|id| &imported[id])
             .expect("inside self-loop creates a nested graph");
         assert!(nested.layerless_nodes.iter().all(|node| node.id != "child"));
+    }
+
+    // Mutation: put every edge in `GraphId::ROOT`, or look the container up by the scope's id
+    // first. The edge between the children of `group` then maps to the root, not to the graph
+    // inside `group`. The scope is named "group" too, as a Mermaid adapter root may be.
+    #[test]
+    fn an_edge_maps_to_the_graph_of_its_container_even_when_the_scope_has_that_name() {
+        let mut group = node("group");
+        group.hierarchy_handling = Some(HierarchyHandling::IncludeChildren);
+        let mut a = node("a");
+        a.parent = Some("group".to_string());
+        let mut b = node("b");
+        b.parent = Some("group".to_string());
+        let mut input = graph(
+            vec![group, a, b, node("outside")],
+            vec![edge("inner", "a", "b"), edge("top", "group", "outside")],
+        );
+        input.id = "group".to_string();
+        input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
+
+        let imported =
+            import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::NONE).unwrap();
+
+        let group_graph = imported.graphs.root().layerless_nodes[0]
+            .nested_graph
+            .expect("group holds a graph");
+        assert_ne!(group_graph, GraphId::ROOT);
+        assert_eq!(imported.edge_containers["inner"], group_graph);
+        assert_eq!(imported.edge_containers["top"], GraphId::ROOT);
     }
 
     #[test]

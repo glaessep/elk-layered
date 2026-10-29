@@ -29,9 +29,9 @@ pub(crate) struct TransferInput<'a> {
     /// The ids of the nodes whose ELK size constraints are not empty. ELK writes the size of
     /// those nodes back.
     pub(crate) sized_nodes: &'a HashSet<String>,
-    /// The ids of the input edges laid out in this run, each with the id of the node ELK
+    /// The ids of the input edges laid out in this run, each with the graph of the node ELK
     /// chose to contain it.
-    pub(crate) edge_containers: &'a HashMap<String, String>,
+    pub(crate) edge_containers: &'a HashMap<String, GraphId>,
 }
 
 /// A node's new position, relative to its parent, and its size when ELK writes it.
@@ -99,8 +99,6 @@ struct Hierarchy<'a> {
     order: Vec<GraphId>,
     /// For each graph, by slot, the graph and node index of the node it is inside.
     parents: Vec<Option<(GraphId, usize)>>,
-    /// The graph of each container the caller names, by the caller's id of the node it is in.
-    by_name: HashMap<&'a str, GraphId>,
 }
 
 impl<'a> Hierarchy<'a> {
@@ -112,15 +110,10 @@ impl<'a> Hierarchy<'a> {
         for &graph in &order {
             parents[graph.index()] = arena[graph].parent.map(|p| (p.graph, p.node));
         }
-        let by_name = order
-            .iter()
-            .map(|&graph| (arena[graph].name.as_str(), graph))
-            .collect();
         Self {
             arena,
             order,
             parents,
-            by_name,
         }
     }
 
@@ -656,17 +649,12 @@ fn hierarchical_offset(
         return Ok(LPoint::default());
     }
     // Otherwise the coordinates belong to the edge's container: the root graph, or the graph
-    // inside the container's node.
-    // Every edge written has a container, and the container's graph is in the hierarchy. A
-    // miss would put the edge at the wrong place, so it is an error, not a zero offset.
-    let Some(container) = input.edge_containers.get(edge_id) else {
+    // inside the container's node. The import names it by id; no graph is looked up by name.
+    // Every edge written has a container. A miss would put the edge at the wrong place, so it
+    // is an error, not a zero offset.
+    let Some(&target_graph) = input.edge_containers.get(edge_id) else {
         return Err(Error::Internal {
             message: format!("edge \"{edge_id}\" has no container"),
-        });
-    };
-    let Some(&target_graph) = hierarchy.by_name.get(container.as_str()) else {
-        return Err(Error::Internal {
-            message: format!("the container \"{container}\" of edge \"{edge_id}\" has no graph"),
         });
     };
     let mut result = LPoint::default();
@@ -713,7 +701,7 @@ mod tests {
         graphs
     }
 
-    fn offset_error(containers: &HashMap<String, String>) -> Option<Error> {
+    fn offset_error(containers: &HashMap<String, GraphId>) -> Option<Error> {
         let root = two_nested_graphs();
         let hierarchy = Hierarchy::new(&root);
         let parents = HashMap::new();
@@ -764,7 +752,7 @@ mod tests {
 
         let parents = HashMap::new();
         let sized_nodes = HashSet::new();
-        let containers = HashMap::from([("e".to_string(), "root".to_string())]);
+        let containers = HashMap::from([("e".to_string(), GraphId::ROOT)]);
         let input = TransferInput {
             parents: &parents,
             sized_nodes: &sized_nodes,
@@ -788,18 +776,45 @@ mod tests {
         assert!(matches!(error, Error::Internal { ref message } if message.contains("\"e\"")));
     }
 
-    // Mutation: return `Ok(LPoint::default())` when the container has no graph.
+    // Mutation: look the container up by the name of its graph again (`Hierarchy::by_name`, with
+    // the edge's container as a node id). The graph in node `a` is named like the root, so the
+    // root's edge then reads as an edge of that graph and gets no offset.
+    //
+    // `layout()` refuses a node with the root's id, so only a hand-built arena shows this.
     #[test]
-    fn a_container_without_a_graph_is_an_internal_error() {
-        let containers = HashMap::from([("e".to_string(), "nowhere".to_string())]);
-        let error = offset_error(&containers).expect("an error");
-        assert!(matches!(error, Error::Internal { ref message } if message.contains("nowhere")));
+    fn a_nested_graph_named_like_the_root_does_not_take_the_roots_edges() {
+        let mut graphs = two_nested_graphs();
+        graphs[GraphId::new(1)].name = "root".to_string();
+        graphs.root_mut().layerless_nodes[0].position = LPoint { x: 5.0, y: 7.0 };
+        graphs.root_mut().padding.left = 3.0;
+        graphs.root_mut().padding.top = 4.0;
+        let hierarchy = Hierarchy::new(&graphs);
+        let parents = HashMap::new();
+        let sized_nodes = HashSet::new();
+        let containers = HashMap::from([("e".to_string(), GraphId::ROOT)]);
+        let input = TransferInput {
+            parents: &parents,
+            sized_nodes: &sized_nodes,
+            edge_containers: &containers,
+        };
+
+        let offset = hierarchical_offset(
+            &hierarchy,
+            (GraphId::new(1), 0),
+            (GraphId::new(2), 0),
+            "e",
+            &input,
+        )
+        .expect("the container has a graph");
+
+        // From the graph in `a` up to the root: the node's position plus the root's padding.
+        assert_eq!((offset.x, offset.y), (8.0, 11.0));
     }
 
     // Mutation: return an error whenever the container is found.
     #[test]
     fn a_known_container_gives_no_error() {
-        let containers = HashMap::from([("e".to_string(), "root".to_string())]);
+        let containers = HashMap::from([("e".to_string(), GraphId::ROOT)]);
         assert!(offset_error(&containers).is_none());
     }
 }
