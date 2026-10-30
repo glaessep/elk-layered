@@ -10,8 +10,8 @@ use crate::graph::{
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeId, EdgeLabelPlacement, ExternalPortData,
     GraphArena, GraphId, GraphNodeRef, GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep,
     IdVec, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, PortId, PortRef,
-    PortSide, PortType, apply_port_index_to_dummy, compute_inside_part, create_external_port_dummy,
-    port_side_from_direction,
+    PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
+    outside_dummy_label_size, port_side_from_direction,
 };
 use crate::options::{ElkDirection, PortConstraints, PortLabelPlacement};
 
@@ -475,10 +475,12 @@ fn original_net_flows(graphs: &GraphArena) -> HashMap<OriginalNetFlowKey, isize>
     flows
 }
 
-/// The side of each port of the graph's nodes.
+/// The side of each port of the graph's nodes that hold a graph.
 fn port_sides_of(graph: &LGraph) -> HashMap<(NodeId, PortId), PortSide> {
+    // Only the ports of a node with a graph inside are ever looked up.
     graph
         .nodes_with_ids()
+        .filter(|(_, node)| node.nested_graph.is_some())
         .flat_map(|(node_id, node)| {
             node.ports
                 .iter_with_ids()
@@ -1610,7 +1612,11 @@ fn reserve_room_for_port_labels(
 ) {
     let node_data = &graph.layerless_nodes[node];
     let port_data = &node_data.ports[port];
-    let Some(dummy) = port_data.port_dummy else {
+    // The port may have been linked to a dummy in another graph by an earlier step.
+    let Some(dummy) = port_data
+        .port_dummy
+        .filter(|dummy| dummy.graph_id == nested_graph.id)
+    else {
         return;
     };
     let inside_port_labels = node_data
@@ -1623,19 +1629,15 @@ fn reserve_room_for_port_labels(
         // At this point the side of the port may not be known if the port constraints are free.
         // Then the port ends up on the east or west side (ELK issue 596).
         if !inside_port_labels {
-            let inside_part = if placement_fixed {
-                // Border offset 0: only the part of the label inside the node "after" the port.
-                compute_inside_part(label.position, label.size, port_data.size, 0.0, side)
-            } else {
-                0.0
-            };
-            if parent_constraints == PortConstraints::Free
-                || matches!(side, PortSide::East | PortSide::West)
-            {
-                dummy_label.size.width = inside_part;
-            } else {
-                dummy_label.size.height = inside_part;
-            }
+            dummy_label.size = outside_dummy_label_size(
+                label.position,
+                label.size,
+                port_data.size,
+                side,
+                placement_fixed,
+                parent_constraints == PortConstraints::Free
+                    || matches!(side, PortSide::East | PortSide::West),
+            );
         }
         labels.push(dummy_label);
     }

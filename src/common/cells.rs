@@ -1404,22 +1404,23 @@ impl<'a> Context<'a> {
         bounds.unwrap_or_default()
     }
 
-    /// Source: `ElkUtil.computeInsidePart(PortAdapter, double)`.
+    /// Source: `ElkUtil.computeInsidePart(PortAdapter, double)`, which hands the bounds of the
+    /// labels to the overload for a position and a size.
     fn compute_inside_part(port: &CellPort, port_border_offset: f64) -> f64 {
         let bounds = Self::labels_bounds(port);
-        match port.side {
-            PortSide::North => f64::max(
-                0.0,
-                bounds.height + bounds.y - (port.size.height + port_border_offset),
-            ),
-            PortSide::South => f64::max(0.0, -bounds.y - port_border_offset),
-            PortSide::East => f64::max(0.0, -bounds.x - port_border_offset),
-            PortSide::West => f64::max(
-                0.0,
-                bounds.width + bounds.x - (port.size.width + port_border_offset),
-            ),
-            PortSide::Undefined => 0.0,
-        }
+        crate::graph::compute_inside_part(
+            LPoint {
+                x: bounds.x,
+                y: bounds.y,
+            },
+            LSize {
+                width: bounds.width,
+                height: bounds.height,
+            },
+            port.size,
+            port_border_offset,
+            port.side,
+        )
     }
 
     /// Source: `NodeLabelAndSizeUtilities.setupNodePaddingForPortsWithOffset`.

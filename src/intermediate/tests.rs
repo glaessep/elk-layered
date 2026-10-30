@@ -1815,7 +1815,7 @@ fn hierarchical_port_position_processor_sets_fixed_ratio_east_west_y_coordinates
     assert_eq!(graph.layerless_nodes[north].position.y, 0.0);
 }
 
-// Mutation: in `border_to_content_area_y`, subtract `padding.top + offset.y` in one step. Java
+// Mutation: in `border_to_content_area` (vertical), subtract `padding.top + offset.y` in one step. Java
 // subtracts them one after the other, and the two roundings differ here: elkjs 0.9.3 gives the
 // port of the group in case random-group-port-sizes/r193 the value that follows from this order.
 #[test]
@@ -2291,7 +2291,7 @@ fn hierarchical_port_orthogonal_router_places_fixed_ratio_north_south_dummies() 
     assert_eq!(graph.layerless_nodes[south].position.x, 53.0);
 }
 
-// Mutation: in `border_to_content_area_x`, subtract `padding.left + offset.x` in one step. Java
+// Mutation: in `border_to_content_area` (horizontal), subtract `padding.left + offset.x` in one step. Java
 // subtracts them one after the other. See the same test for the y coordinate.
 #[test]
 fn hierarchical_port_orthogonal_router_subtracts_padding_and_offset_one_after_the_other() {

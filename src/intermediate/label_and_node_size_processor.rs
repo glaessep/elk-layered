@@ -6,6 +6,11 @@ use crate::common::nodespacing;
 use crate::graph::{LGraph, LNodeKind, LPoint, NodeId, OtherGraphs, PortId, PortSide};
 use crate::options::PortLabelPlacement;
 
+/// Sizes the nodes of the graph and places their ports and labels, then places the labels of the
+/// external port dummies.
+///
+/// Ports `LabelAndNodeSizeProcessor.process`. `others` are the graphs inside the nodes of
+/// `graph`: the edges at the dummy of a port, inside its node, count as edges of the port.
 pub fn calculate_label_and_node_sizes(graph: &mut LGraph, others: OtherGraphs<'_>) {
     let layered_nodes = graph
         .layers()

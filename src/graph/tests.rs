@@ -1226,3 +1226,75 @@ fn the_inside_part_of_a_label_on_a_west_port_is_what_reaches_right_of_the_port()
 fn a_port_without_a_side_has_no_inside_part() {
     assert_eq!(inside_part(PortSide::Undefined, (-10.0, 1.0), 0.0), 0.0);
 }
+
+// --- Label spacings of an external port dummy. ---
+
+// Mutation: write a default into `DummyLabelSpacings::DEFAULT` that differs from the option's.
+#[test]
+fn the_default_label_spacings_of_a_dummy_are_those_of_the_options() {
+    assert_eq!(
+        DummyLabelSpacings::DEFAULT,
+        DummyLabelSpacings::from(&SpacingOptions::default())
+    );
+    assert_eq!(DummyLabelSpacings::default(), DummyLabelSpacings::DEFAULT);
+}
+
+// Mutation: read `label_node` for the horizontal spacing, or swap the two port spacings.
+#[test]
+fn the_label_spacings_of_a_dummy_come_from_the_three_options() {
+    let options = SpacingOptions {
+        label_port_horizontal: 7.0,
+        label_port_vertical: 8.0,
+        label_label: 9.0,
+        label_node: 100.0,
+        ..SpacingOptions::default()
+    };
+    let spacings = DummyLabelSpacings::from(&options);
+    assert_eq!(
+        (
+            spacings.label_port_horizontal,
+            spacings.label_port_vertical,
+            spacings.label_label
+        ),
+        (7.0, 8.0, 9.0)
+    );
+}
+
+// --- `outside_dummy_label_size`. ---
+
+fn dummy_label_size(fixed: bool, reduce_width: bool, x: f64, y: f64) -> LSize {
+    outside_dummy_label_size(
+        LPoint { x, y },
+        LSize {
+            width: 30.0,
+            height: 14.0,
+        },
+        LSize {
+            width: 6.0,
+            height: 4.0,
+        },
+        PortSide::West,
+        fixed,
+        reduce_width,
+    )
+}
+
+// Mutation: reduce the height when asked for the width, or the other way round.
+#[test]
+fn a_label_outside_keeps_nothing_along_the_axis_that_is_reduced() {
+    let width = dummy_label_size(false, true, 0.0, 0.0);
+    assert_eq!((width.width, width.height), (0.0, 14.0));
+    let height = dummy_label_size(false, false, 0.0, 0.0);
+    assert_eq!((height.width, height.height), (30.0, 0.0));
+}
+
+// Mutation: ignore `fixed` and compute the inside part for every placement.
+#[test]
+fn a_fixed_label_keeps_the_part_that_reaches_into_the_node() {
+    // West port: 30 + 2 - 6 = 26 of the label lie behind the port.
+    let width = dummy_label_size(true, true, 2.0, 0.0);
+    assert_eq!((width.width, width.height), (26.0, 14.0));
+    // The same label under a placement that is not fixed keeps none of it.
+    let none = dummy_label_size(false, true, 2.0, 0.0);
+    assert_eq!(none.width, 0.0);
+}

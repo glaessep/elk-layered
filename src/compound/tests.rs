@@ -1433,6 +1433,7 @@ mod port_label_room {
         outer.layerless_nodes[node].ports[port.port].labels = labels;
 
         let mut inner = LGraph::new("inner", LayeredOptions::default());
+        inner.id = GraphId::new(1);
         let dummy = inner.push_node_with(|id| {
             create_external_port_dummy(
                 id,
@@ -1617,6 +1618,37 @@ mod port_label_room {
         );
         let at = &inner.layerless_nodes[dummy].ports[PortId::new(0)].labels[0];
         assert_eq!((at.size.width, at.size.height), (20.0, 0.0));
+    }
+
+    // Mutation: leave out the `filter` on the graph of the dummy. A port whose dummy an earlier
+    // step put into another graph would give its labels to an unrelated node there.
+    #[test]
+    fn a_dummy_in_another_graph_gets_no_labels() {
+        let (mut outer, mut inner, dummy) = setup(
+            PortSide::East,
+            PortLabelPlacement::INSIDE,
+            vec![label(20.0, 10.0, 0.0, 0.0)],
+            PortConstraints::FixedSide,
+        );
+        outer.layerless_nodes[NodeId::new(0)].ports[PortId::new(0)].port_dummy =
+            Some(GraphNodeRef {
+                graph_id: GraphId::new(7),
+                node: dummy,
+            });
+        inner.id = GraphId::new(1);
+        reserve_room_for_port_labels(
+            &outer,
+            NodeId::new(0),
+            PortId::new(0),
+            &mut inner,
+            PortConstraints::FixedSide,
+            PortSide::East,
+        );
+        assert!(
+            inner.layerless_nodes[dummy].ports[PortId::new(0)]
+                .labels
+                .is_empty()
+        );
     }
 
     // Mutation: copy the labels in reverse, or only the first one.

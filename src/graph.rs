@@ -8,7 +8,7 @@
 
 use super::options::{
     Alignment, ElkDirection, LayerConstraint, LayeredOptions, NodeLabelPlacement, NodeSizing,
-    PortAlignment, PortConstraints, PortLabelPlacement,
+    PortAlignment, PortConstraints, PortLabelPlacement, SpacingOptions,
 };
 use crate::random::JavaRandom;
 
@@ -482,13 +482,29 @@ pub struct DummyLabelSpacings {
     pub label_label: f64,
 }
 
+impl DummyLabelSpacings {
+    /// The defaults of the three options. A test holds them to those of [`SpacingOptions`].
+    pub(crate) const DEFAULT: Self = Self {
+        label_port_horizontal: 1.0,
+        label_port_vertical: 1.0,
+        label_label: 0.0,
+    };
+}
+
 impl Default for DummyLabelSpacings {
     /// The defaults of the three options, for a dummy that was given none.
     fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+impl From<&SpacingOptions> for DummyLabelSpacings {
+    /// The spacings a node's parent sets: what `transformExternalPort` copies to the dummy.
+    fn from(spacing: &SpacingOptions) -> Self {
         Self {
-            label_port_horizontal: 1.0,
-            label_port_vertical: 1.0,
-            label_label: 0.0,
+            label_port_horizontal: spacing.label_port_horizontal,
+            label_port_vertical: spacing.label_port_vertical,
+            label_label: spacing.label_label,
         }
     }
 }
@@ -514,6 +530,40 @@ pub(crate) fn compute_inside_part(
             label_size.width + label_position.x - (port_size.width + port_border_offset),
         ),
         PortSide::Undefined => 0.0,
+    }
+}
+
+/// The size of the label a dummy gets for a port label that sits outside the node: it keeps the
+/// size along the side's axis only as far as it reaches into the node.
+///
+/// Ports the label loops of `ElkGraphImporter.transformExternalPort` and
+/// `CompoundGraphPreprocessor.transformHierarchyEdges`. `fixed` says the port labels have a fixed
+/// placement: then the label keeps the part that lies inside the node "after" the port, with
+/// border offset 0. `reduce_width` says which axis goes: the width for a port on an east or west
+/// side, the height otherwise.
+pub(crate) fn outside_dummy_label_size(
+    label_position: LPoint,
+    label_size: LSize,
+    port_size: LSize,
+    side: PortSide,
+    fixed: bool,
+    reduce_width: bool,
+) -> LSize {
+    let inside_part = if fixed {
+        compute_inside_part(label_position, label_size, port_size, 0.0, side)
+    } else {
+        0.0
+    };
+    if reduce_width {
+        LSize {
+            width: inside_part,
+            height: label_size.height,
+        }
+    } else {
+        LSize {
+            width: label_size.width,
+            height: inside_part,
+        }
     }
 }
 

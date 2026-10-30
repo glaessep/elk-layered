@@ -470,6 +470,12 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 95. In `cell_ports` (src/importer.rs), leave `has_edges` or `has_compound_connections` false:
 //    no case fails. The group's graph holds a dummy with the same labels, and its size agrees with
 //    the cells in every case the corpus has. Unit tests in src/importer/tests.rs hold both.
+// 96. In `run_layered` (src/layout.rs), hand the dummies the label spacings of the scope's own
+//    options instead of those of its parent (`scope_info.settings.options.spacing`), or the
+//    defaults: 2 cases, ports-group-label-spacings-of-the-parent and its outside twin.
+// 97. In the function that makes the dummy of an edge across a level (src/compound.rs), give the
+//    dummy label spacings of 7, 5 and 3 instead of the defaults: 7 cases, such as
+//    ports-group-label-spacings-of-the-parent-include and ports-group-label-inside-child-edge-include.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

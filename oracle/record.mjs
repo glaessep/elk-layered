@@ -60,8 +60,25 @@ if (one) {
   console.log(`recorded ${out}`);
   // JSON writes a NaN as null. A graph elkjs lays out with NaN has no layout to hold elk-layered
   // to, unless the case is on purpose: the parent decides.
+  const isNaNIn = (shape) =>
+    shape !== undefined &&
+    ["x", "y", "width", "height"].some((key) => Number.isNaN(shape[key]));
+  const pointHasNaN = (point) => point !== undefined && isNaNIn(point);
   const hasNaN = (node) =>
-    ["x", "y", "width", "height"].some((key) => Number.isNaN(node[key])) ||
+    isNaNIn(node) ||
+    (node.labels ?? []).some(isNaNIn) ||
+    (node.ports ?? []).some((port) => isNaNIn(port) || (port.labels ?? []).some(isNaNIn)) ||
+    (node.edges ?? []).some(
+      (edge) =>
+        (edge.labels ?? []).some(isNaNIn) ||
+        (edge.sections ?? []).some(
+          (section) =>
+            pointHasNaN(section.startPoint) ||
+            pointHasNaN(section.endPoint) ||
+            (section.bendPoints ?? []).some(pointHasNaN),
+        ) ||
+        (edge.junctionPoints ?? []).some(pointHasNaN),
+    ) ||
     (node.children ?? []).some(hasNaN);
   if (hasNaN(laid)) {
     console.error(`${one}: elkjs laid it out with a NaN coordinate`);
@@ -84,7 +101,9 @@ if (one) {
       const stderr = String(error.stderr ?? "").trim();
       if (error.status === NOT_A_NUMBER && !dropCrashes) {
         // Only the corpora that drop crashes also drop these: a case on purpose, such as
-        // `ports-root-idle`, keeps its NaN.
+        // `ports-root-idle`, keeps its NaN. The warning shows, so a NaN by accident does not slip
+        // into an expected file unseen.
+        console.warn(`warning: ${stderr}`);
         continue;
       }
       if (error.status === NOT_A_NUMBER) {

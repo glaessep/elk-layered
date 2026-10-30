@@ -8,7 +8,7 @@ use crate::graph::{
 };
 use crate::intermediate::end_label_postprocessor::hand_back_end_labels;
 use crate::intermediate::hierarchical_port_position_processor::{
-    actual_graph_height, border_to_content_area_y, external_port_anchor,
+    actual_graph_height, border_to_content_area, external_port_anchor,
 };
 use crate::intermediate::long_edge_joiner::first_port_on_side;
 use crate::options::{PortConstraints, PortLabelPlacement, SizeConstraints};
@@ -207,12 +207,12 @@ fn set_north_south_dummy_coordinates(graph: &mut LGraph, north_south_dummies: &[
             PortConstraints::FixedRatio => {
                 graph.layerless_nodes[*dummy].position.x =
                     graph_width * ratio_or_position - external_port_anchor(graph, *dummy).x;
-                border_to_content_area_x(graph, *dummy);
+                border_to_content_area(graph, *dummy, true, false);
             }
             PortConstraints::FixedPos => {
                 graph.layerless_nodes[*dummy].position.x =
                     ratio_or_position - external_port_anchor(graph, *dummy).x;
-                border_to_content_area_x(graph, *dummy);
+                border_to_content_area(graph, *dummy, true, false);
                 let required_width = graph.layerless_nodes[*dummy].position.x
                     + graph.layerless_nodes[*dummy].size.width / 2.0;
                 graph.size.width = graph.size.width.max(required_width);
@@ -277,13 +277,6 @@ fn calculate_north_south_dummy_position(graph: &mut LGraph, dummy: NodeId) {
         .sum::<f64>();
     graph.layerless_nodes[dummy].position.x =
         pos_sum / connected_ports.len() as f64 - external_port_anchor(graph, dummy).x;
-}
-
-/// Ports `LNode.borderToContentAreaCoordinates(true, false)`, which subtracts the padding and then
-/// the offset, one after the other. See `border_to_content_area_y`.
-fn border_to_content_area_x(graph: &mut LGraph, node: NodeId) {
-    let position = &mut graph.layerless_nodes[node].position;
-    position.x = position.x - graph.padding.left - graph.offset.x;
 }
 
 fn ensure_unique_north_south_positions(graph: &mut LGraph, dummies: &mut [NodeId]) {
@@ -613,12 +606,12 @@ fn fix_hierarchical_port_east_west_y_coordinate(
         graph.layerless_nodes[node].position.y =
             graph_actual_height * ratio_or_position - external_port_anchor(graph, node).y;
         required_actual_graph_height = graph.layerless_nodes[node].position.y + external_height;
-        border_to_content_area_y(graph, node);
+        border_to_content_area(graph, node, false, true);
     } else if graph.options.port_constraints.is_pos_fixed() {
         graph.layerless_nodes[node].position.y =
             ratio_or_position - external_port_anchor(graph, node).y;
         required_actual_graph_height = graph.layerless_nodes[node].position.y + external_height;
-        border_to_content_area_y(graph, node);
+        border_to_content_area(graph, node, false, true);
     }
 
     required_actual_graph_height

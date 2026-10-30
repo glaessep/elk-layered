@@ -17,8 +17,8 @@ use crate::graph::{
     CompoundEdgeSegment, DummyLabelSpacings, EdgeId, EdgeLabelPlacement, ExternalPortData,
     GraphArena, GraphId, HierarchyEdge, HierarchyStep, LGraph, LLabel, LNode, LPoint, LPort, LSize,
     LayeredEdge, NodeId, PlacementOptions, PortId, PortRef, PortSide, PortType, SelfLoopOptions,
-    apply_port_index_to_dummy, compute_inside_part, create_external_port_dummy, is_across_flow,
-    port_box, port_side_from_direction,
+    apply_port_index_to_dummy, create_external_port_dummy, is_across_flow,
+    outside_dummy_label_size, port_box, port_side_from_direction,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
@@ -324,11 +324,7 @@ impl ScopePorts<'_> {
             width: 0.0,
             height: 0.0,
         },
-        label_spacings: DummyLabelSpacings {
-            label_port_horizontal: 1.0,
-            label_port_vertical: 1.0,
-            label_label: 0.0,
-        },
+        label_spacings: DummyLabelSpacings::DEFAULT,
     };
 }
 
@@ -489,30 +485,15 @@ fn import_external_ports(
                     x: label.x,
                     y: label.y,
                 };
-                if !inside_port_labels {
-                    let inside_part = if placement.is_fixed() {
-                        // Border offset 0: only the part inside the node "after" the port.
-                        compute_inside_part(
-                            LPoint {
-                                x: label.x,
-                                y: label.y,
-                            },
-                            LSize {
-                                width: label.width,
-                                height: label.height,
-                            },
-                            port_size,
-                            0.0,
-                            port.side,
-                        )
-                    } else {
-                        0.0
-                    };
-                    match port.side {
-                        PortSide::East | PortSide::West => llabel.size.width = inside_part,
-                        PortSide::North | PortSide::South => llabel.size.height = inside_part,
-                        PortSide::Undefined => {}
-                    }
+                if !inside_port_labels && port.side != PortSide::Undefined {
+                    llabel.size = outside_dummy_label_size(
+                        llabel.position,
+                        llabel.size,
+                        port_size,
+                        port.side,
+                        placement.is_fixed(),
+                        matches!(port.side, PortSide::East | PortSide::West),
+                    );
                 }
                 dummy_port.labels.push(llabel);
             }

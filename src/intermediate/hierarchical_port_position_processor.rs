@@ -37,7 +37,7 @@ fn process_hierarchical_port_positions_for_layer(graph: &mut LGraph, layer_index
 
         let port_anchor_y = external_port_anchor(graph, node).y;
         graph.layerless_nodes[node].position.y = final_y_coordinate - port_anchor_y;
-        border_to_content_area_y(graph, node);
+        border_to_content_area(graph, node, false, true);
     }
 }
 
@@ -56,10 +56,20 @@ pub(crate) fn external_port_anchor(graph: &LGraph, node: NodeId) -> LPoint {
         .map_or(LPoint::default(), |external| external.anchor)
 }
 
-/// Ports `LNode.borderToContentAreaCoordinates(false, true)`. Java subtracts the padding and then
-/// the offset, one after the other: `pos.y - padding.top - offset.y`. Adding them first can round
-/// differently.
-pub(crate) fn border_to_content_area_y(graph: &mut LGraph, node: NodeId) {
+/// Ports `LNode.borderToContentAreaCoordinates(horizontal, vertical)`. Java subtracts the padding
+/// and then the offset, one after the other: `pos - padding - offset`. Adding them first can
+/// round differently.
+pub(crate) fn border_to_content_area(
+    graph: &mut LGraph,
+    node: NodeId,
+    horizontal: bool,
+    vertical: bool,
+) {
     let position = &mut graph.layerless_nodes[node].position;
-    position.y = position.y - graph.padding.top - graph.offset.y;
+    if horizontal {
+        position.x = position.x - graph.padding.left - graph.offset.x;
+    }
+    if vertical {
+        position.y = position.y - graph.padding.top - graph.offset.y;
+    }
 }

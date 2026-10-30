@@ -22,7 +22,7 @@ use crate::components::ComponentError;
 use crate::compound::calc_port_side;
 use crate::error::Error;
 use crate::export::{self, LayoutResult, TransferInput};
-use crate::graph::{DummyLabelSpacings, LPoint, LSize, PortSide, port_side_from_direction};
+use crate::graph::{LPoint, LSize, PortSide, port_side_from_direction};
 use crate::importer::{
     self, ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, ElkInputPort, ParentSettings,
 };
@@ -898,19 +898,7 @@ impl<'a, 't> Work<'a, 't> {
                 ports: &scope_ports,
                 node_size: scope_size,
                 // `transformExternalPort` reads the label spacings from the parent of the node.
-                label_spacings: DummyLabelSpacings {
-                    label_port_horizontal: scope_input
-                        .parent_settings
-                        .options
-                        .spacing
-                        .label_port_horizontal,
-                    label_port_vertical: scope_input
-                        .parent_settings
-                        .options
-                        .spacing
-                        .label_port_vertical,
-                    label_label: scope_input.parent_settings.options.spacing.label_label,
-                },
+                label_spacings: (&scope_input.parent_settings.options.spacing).into(),
             },
         )
         .map_err(|error| {
