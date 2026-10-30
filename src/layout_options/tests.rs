@@ -347,7 +347,6 @@ fn options_with_unported_values_are_refused_only_for_those_values() {
             "NODE_SIZE",
         ),
         ("elk.insideSelfLoops.activate", "true"),
-        ("elk.nodeSize.constraints", "[PORT_LABELS]"),
         ("elk.port.side", "WEST"),
     ] {
         assert!(

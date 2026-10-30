@@ -25,6 +25,8 @@ fn node(id: &str) -> ElkInputNode {
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
         self_loop_ordering: Default::default(),
+        port_label_placement: Default::default(),
+        port_labels_treat_as_group: true,
     }
 }
 
@@ -1662,6 +1664,7 @@ fn input_port(id: &str, side: PortSide) -> ElkInputPort {
         net_flow: 0,
         child_edges: 0,
         connected_to_external_nodes: false,
+        labels: Vec::new(),
     }
 }
 

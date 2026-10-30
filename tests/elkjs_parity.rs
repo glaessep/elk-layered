@@ -131,8 +131,9 @@ fn cases_dir() -> PathBuf {
 /// edges may also end at a group, `tests/elkjs/random-ports/`, whose nodes have ports, and
 /// `tests/elkjs/random-group-ports/`, whose groups have ports too, and
 /// `tests/elkjs/random-cross-ports/`, whose ports sit on all four sides,
-/// `tests/elkjs/random-inline-labels/`, whose centre labels are often inline, and
-/// `tests/elkjs/random-one-sided/`, which use the one-sided greedy switch.
+/// `tests/elkjs/random-inline-labels/`, whose centre labels are often inline,
+/// `tests/elkjs/random-one-sided/`, which use the one-sided greedy switch, and
+/// `tests/elkjs/random-port-labels/`, whose ports have labels.
 fn cases() -> Vec<PathBuf> {
     let mut inputs = Vec::new();
     for dir in [
@@ -144,6 +145,7 @@ fn cases() -> Vec<PathBuf> {
         cases_dir().join("random-cross-ports"),
         cases_dir().join("random-inline-labels"),
         cases_dir().join("random-one-sided"),
+        cases_dir().join("random-port-labels"),
     ] {
         let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|_| panic!("{} exists", dir.display()))

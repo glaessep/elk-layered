@@ -71,6 +71,8 @@ fn node(id: &str) -> ElkInputNode {
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
         self_loop_ordering: Default::default(),
+        port_label_placement: Default::default(),
+        port_labels_treat_as_group: true,
     }
 }
 
@@ -805,6 +807,8 @@ fn graph_properties_insert_label_self_loop_and_external_port_processors() {
                 node_size: Default::default(),
                 self_loop_distribution: Default::default(),
                 self_loop_ordering: Default::default(),
+                port_label_placement: Default::default(),
+                port_labels_treat_as_group: true,
             },
             ElkInputNode {
                 ports: Vec::new(),
@@ -826,6 +830,8 @@ fn graph_properties_insert_label_self_loop_and_external_port_processors() {
                 node_size: Default::default(),
                 self_loop_distribution: Default::default(),
                 self_loop_ordering: Default::default(),
+                port_label_placement: Default::default(),
+                port_labels_treat_as_group: true,
             },
         ],
         edges: vec![
@@ -923,6 +929,8 @@ fn inside_self_loops_enable_self_loop_processors_on_nested_graphs() {
             node_size: Default::default(),
             self_loop_distribution: Default::default(),
             self_loop_ordering: Default::default(),
+            port_label_placement: Default::default(),
+            port_labels_treat_as_group: true,
         }],
         edges: vec![ElkInputEdge {
             source_port: None,

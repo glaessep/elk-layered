@@ -38,7 +38,7 @@ fn apply_end_label_cell_layout(
     cell: LabelCellLayout,
 ) {
     let label_label_spacing = graph.options.spacing.label_label;
-    let mut labels = std::mem::take(&mut graph.layerless_nodes[node].ports[port_index].labels);
+    let mut labels = std::mem::take(&mut graph.layerless_nodes[node].ports[port_index].end_labels);
     let mut cursor = cell.position;
     cursor.x += node_position.x;
     cursor.y += node_position.y;

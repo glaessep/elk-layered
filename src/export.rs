@@ -45,6 +45,9 @@ pub(crate) struct NodeLayout {
     pub(crate) ports: Vec<(usize, LPoint)>,
     /// New positions and sizes by label index.
     pub(crate) labels: Vec<(usize, LPoint, LSize)>,
+    /// New positions and sizes of port labels, by input port index and label index, relative
+    /// to the port.
+    pub(crate) port_labels: Vec<(usize, usize, LPoint, LSize)>,
 }
 
 /// An edge's route and label positions, relative to its container.
@@ -600,6 +603,22 @@ fn node_layout(
         .iter()
         .filter_map(|port| port.input_index.map(|index| (index, port.position)))
         .collect();
+    // Port label positions, if they were not fixed.
+    let port_labels = if node.port_label_placement.is_fixed() {
+        Vec::new()
+    } else {
+        node.ports
+            .iter()
+            .filter_map(|port| port.input_index.map(|index| (index, port)))
+            .flat_map(|(port_index, port)| {
+                port.labels.iter().filter_map(move |label| {
+                    label
+                        .source_index
+                        .map(|index| (port_index, index, label.position, label.size))
+                })
+            })
+            .collect()
+    };
     NodeLayout {
         id: node.id.clone(),
         position: LPoint {
@@ -609,6 +628,7 @@ fn node_layout(
         size,
         ports,
         labels,
+        port_labels,
     }
 }
 

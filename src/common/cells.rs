@@ -1,21 +1,25 @@
-//! ELK's cell system for node labels and node sizes.
+//! ELK's cell system for node labels, ports, port labels and node sizes.
 //!
-//! This ports the part of `NodeLabelAndSizeCalculator` that a node without ports needs: the
-//! cells that hold node labels, the node size they ask for, and where they put the labels.
-//! The cells for ports and port labels exist, as in ELK, but stay empty. A node whose size
-//! constraints include `PORTS` or `PORT_LABELS` is refused before it gets here.
+//! This ports `NodeLabelAndSizeCalculator`: the cells that hold node labels and port labels, the
+//! node size they ask for, where the ports go, and where the labels go.
 //!
 //! Source references, all under
 //! `plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/`:
 //! - `NodeLabelAndSizeCalculator.java`
 //! - `cellsystem/{Cell,AtomicCell,LabelCell,ContainerCell,GridContainerCell,StripContainerCell}.java`
-//! - `internal/NodeContext.java`, `internal/NodeLabelLocation.java`
-//! - `internal/algorithm/{NodeLabelCellCreator,InsidePortLabelCellCreator,CellSystemConfigurator,
-//!   NodeSizeCalculator,NodeLabelAndSizeUtilities,LabelPlacer}.java`
+//! - `internal/{NodeContext,PortContext,NodeLabelLocation}.java`
+//! - `internal/algorithm/{PortContextCreator,NodeLabelCellCreator,InsidePortLabelCellCreator,
+//!   HorizontalPortPlacementSizeCalculator,VerticalPortPlacementSizeCalculator,
+//!   CellSystemConfigurator,NodeSizeCalculator,PortPlacementCalculator,
+//!   PortLabelPlacementCalculator,NodeLabelAndSizeUtilities,LabelPlacer}.java`
+//!
+//! and `plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/overlaps/`
+//! `{RectangleStripOverlapRemover,GreedyRectangleStripOverlapRemover}.java`.
 
-use crate::graph::{LPoint, LSize};
+use crate::graph::{LPoint, LSize, PortSide};
 use crate::options::{
-    ElkPadding, NodeLabelLocation, NodeLabelPlacement, NodeSizing, SizeConstraints, SizeOptions,
+    ElkPadding, NodeLabelLocation, NodeLabelPlacement, NodeSizing, PortAlignment, PortConstraints,
+    PortLabelPlacement, SizeConstraints, SizeOptions,
 };
 
 /// Source: `LabelCell.addLabel`, the part that grows the cell's minimum content size.
@@ -69,6 +73,80 @@ pub(crate) struct CellNode {
     pub(crate) label_label_spacing: f64,
     /// `nodeSize.fixedGraphSize` of the graph the node is in.
     pub(crate) fixed_graph_size: bool,
+    /// The node's ports and what `NodeContext` reads about them.
+    pub(crate) ports: CellPorts,
+}
+
+/// One label of a port, as the cell system sees it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CellPortLabel {
+    pub(crate) size: LSize,
+    /// Relative to the port. `ElkUtil.getLabelsBounds` reads it when the port labels are fixed.
+    pub(crate) position: LPoint,
+}
+
+/// One port, as `PortContext` reads it through its `PortAdapter`.
+#[derive(Debug, Clone)]
+pub(crate) struct CellPort {
+    /// Never `Undefined`: `PortContextCreator` throws for such a port, and every caller assigns
+    /// sides first.
+    pub(crate) side: PortSide,
+    pub(crate) size: LSize,
+    /// Relative to the node. A port the cells do not place keeps it.
+    pub(crate) position: LPoint,
+    /// `port.borderOffset`, when set.
+    pub(crate) border_offset: Option<f64>,
+    /// `PortPlacementCalculator.PORT_RATIO_OR_POSITION`.
+    pub(crate) ratio_or_position: f64,
+    pub(crate) labels: Vec<CellPortLabel>,
+    /// Whether an edge starts or ends at the port.
+    pub(crate) has_edges: bool,
+    /// `PortAdapter.hasCompoundConnections`: an edge connects the port to a descendant of its node.
+    pub(crate) has_compound_connections: bool,
+}
+
+/// What `NodeContext` reads about a node's ports.
+#[derive(Debug, Clone)]
+pub(crate) struct CellPorts {
+    /// In the order of the node's port list.
+    pub(crate) ports: Vec<CellPort>,
+    pub(crate) constraints: PortConstraints,
+    /// `portLabels.placement`.
+    pub(crate) label_placement: PortLabelPlacement,
+    /// `portLabels.treatAsGroup`.
+    pub(crate) treat_as_group: bool,
+    /// `NodeContext.treatAsCompoundNode`: the node has children.
+    pub(crate) compound: bool,
+    /// `spacing.portPort`.
+    pub(crate) port_port_spacing: f64,
+    /// `spacing.labelPortHorizontal`.
+    pub(crate) label_port_horizontal: f64,
+    /// `spacing.labelPortVertical`.
+    pub(crate) label_port_vertical: f64,
+    /// `spacing.portsSurrounding`.
+    pub(crate) surrounding: ElkPadding,
+    /// `portAlignment.default`. The alignments by side are refused before this runs.
+    pub(crate) alignment: PortAlignment,
+}
+
+#[cfg(test)]
+impl Default for CellPorts {
+    /// No ports, with ELK's defaults for the rest.
+    fn default() -> Self {
+        let spacing = crate::options::SpacingOptions::default();
+        Self {
+            ports: Vec::new(),
+            constraints: PortConstraints::Free,
+            label_placement: PortLabelPlacement::OUTSIDE,
+            treat_as_group: true,
+            compound: false,
+            port_port_spacing: spacing.port_port,
+            label_port_horizontal: spacing.label_port_horizontal,
+            label_port_vertical: spacing.label_port_vertical,
+            surrounding: spacing.ports_surrounding.into(),
+            alignment: PortAlignment::Distributed,
+        }
+    }
 }
 
 /// The result of `NodeLabelAndSizeCalculator.process`.
@@ -81,14 +159,43 @@ pub(crate) struct CellResult {
     pub(crate) label_positions: Vec<Option<LPoint>>,
     /// The node padding, when the size options ask to compute it.
     pub(crate) padding: Option<ElkPadding>,
+    /// The position of each port, by port index, relative to the node. Empty when the cells
+    /// stopped before they placed the ports.
+    pub(crate) port_positions: Vec<LPoint>,
+    /// A new position for each label of each port, relative to the port, by port index and
+    /// label index. `None` for a label the cells did not place.
+    pub(crate) port_label_positions: Vec<Vec<Option<LPoint>>>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-struct Rect {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
+/// Source: `ElkRectangle`. `NodeMarginCalculator` in `nodespacing.rs` uses it too.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(super) struct Rect {
+    pub(super) x: f64,
+    pub(super) y: f64,
+    pub(super) width: f64,
+    pub(super) height: f64,
+}
+
+impl Rect {
+    /// Source: `ElkRectangle.union`.
+    pub(super) fn union(&mut self, other: Self) {
+        let mut x1 = f64::min(self.x, other.x);
+        let mut y1 = f64::min(self.y, other.y);
+        let mut x2 = f64::max(self.x + self.width, other.x + other.width);
+        let mut y2 = f64::max(self.y + self.height, other.y + other.height);
+        if x2 < x1 {
+            std::mem::swap(&mut x1, &mut x2);
+        }
+        if y2 < y1 {
+            std::mem::swap(&mut y1, &mut y2);
+        }
+        *self = Self {
+            x: x1,
+            y: y1,
+            width: x2 - x1,
+            height: y2 - y1,
+        };
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,12 +264,13 @@ fn zero_padding() -> ElkPadding {
 }
 
 /// The cells of one node, in an arena.
-struct Cells<'a> {
+struct Cells {
     cells: Vec<Cell>,
-    label_sizes: &'a [CellLabel],
+    /// The sizes of the node's labels, then those of each port's labels, port by port.
+    label_sizes: Vec<LSize>,
 }
 
-impl Cells<'_> {
+impl Cells {
     fn add(&mut self, kind: Kind) -> CellId {
         self.cells.push(Cell {
             padding: zero_padding(),
@@ -737,7 +845,7 @@ impl Cells<'_> {
 
     /// Source: `LabelCell.addLabel`.
     fn add_label(&mut self, id: CellId, label: usize) {
-        let label_size = self.label_sizes[label].size;
+        let label_size = self.label_sizes[label];
         if let Kind::Label {
             horizontal_layout_mode,
             gap,
@@ -781,7 +889,7 @@ impl Cells<'_> {
                 y += rect.height - minimum_content.height;
             }
             for &label in labels {
-                let size = self.label_sizes[label].size;
+                let size = self.label_sizes[label];
                 let label_y = y;
                 y += size.height + gap;
                 let x = match horizontal {
@@ -799,7 +907,7 @@ impl Cells<'_> {
                 x += rect.width - minimum_content.width;
             }
             for &label in labels {
-                let size = self.label_sizes[label].size;
+                let size = self.label_sizes[label];
                 let label_x = x;
                 x += size.width + gap;
                 let y = match vertical {
@@ -810,6 +918,20 @@ impl Cells<'_> {
                 positions[label] = Some(LPoint { x: label_x, y });
             }
         }
+    }
+}
+
+/// Whether ports on the side line up along the width of the node.
+fn is_horizontal_side(side: PortSide) -> bool {
+    matches!(side, PortSide::North | PortSide::South)
+}
+
+/// Source: `HorizontalPortPlacementSizeCalculator.minSizeRequiredToRespectSpacing`.
+fn min_size_required_to_respect_spacing(spacing: f64, first_ratio: f64, second_ratio: f64) -> f64 {
+    if fuzzy_equals(first_ratio, second_ratio, 0.01) {
+        0.0
+    } else {
+        spacing / (second_ratio - first_ratio)
     }
 }
 
@@ -882,7 +1004,7 @@ fn outside_side(location: NodeLabelLocation) -> Option<Side> {
 struct Context<'a> {
     node: &'a CellNode,
     node_size: LSize,
-    cells: Cells<'a>,
+    cells: Cells,
     node_container: CellId,
     node_container_middle_row: CellId,
     inside_node_label_container: CellId,
@@ -890,6 +1012,53 @@ struct Context<'a> {
     outside_containers: Option<[CellId; 4]>,
     /// Indexed by `NodeLabelLocation as usize`; the order of `values()` is ELK's.
     label_cells: Vec<(NodeLabelLocation, CellId)>,
+    /// `NodeContext.portContexts`: sorted by side, then as `comparePortContexts` orders them.
+    port_contexts: Vec<PortContext>,
+    /// The range of `port_contexts` that holds the ports of each side, by `side_ordinal`.
+    side_ranges: [std::ops::Range<usize>; 5],
+    /// `NodeContext.insidePortLabelCells`, by `side_slot`.
+    inside_port_label_cells: [CellId; 4],
+    /// `NodeContext.labelCellSpacing`.
+    label_cell_spacing: f64,
+}
+
+/// Source: `PortContext`.
+#[derive(Debug, Clone)]
+struct PortContext {
+    /// The index of the port in `CellPorts::ports`.
+    port: usize,
+    position: LPoint,
+    labels_next_to_port: bool,
+    /// `portMargin`, an `ElkMargin`.
+    margin: ElkPadding,
+    /// `portLabelCell`, absent when the labels are fixed or ignored.
+    label_cell: Option<CellId>,
+}
+
+/// The slot of a side in `Context::inside_port_label_cells`.
+fn side_slot(side: PortSide) -> usize {
+    match side {
+        PortSide::North => 0,
+        PortSide::East => 1,
+        PortSide::South => 2,
+        PortSide::West | PortSide::Undefined => 3,
+    }
+}
+
+/// Source: `NodeContext.comparePortSides`, by `PortSide.ordinal()`.
+fn side_ordinal(side: PortSide) -> usize {
+    match side {
+        PortSide::Undefined => 0,
+        PortSide::North => 1,
+        PortSide::East => 2,
+        PortSide::South => 3,
+        PortSide::West => 4,
+    }
+}
+
+/// Source: Guava's `DoubleMath.fuzzyEquals`.
+fn fuzzy_equals(a: f64, b: f64, tolerance: f64) -> bool {
+    (a - b).abs() <= tolerance || a == b
 }
 
 impl<'a> Context<'a> {
@@ -901,9 +1070,13 @@ impl<'a> Context<'a> {
             .options
             .contains(SizeOptions::FORCE_TABULAR_NODE_LABELS);
         let label_cell_spacing = 2.0 * node.label_label_spacing;
+        let mut label_sizes: Vec<LSize> = node.labels.iter().map(|label| label.size).collect();
+        for port in &node.ports.ports {
+            label_sizes.extend(port.labels.iter().map(|label| label.size));
+        }
         let mut cells = Cells {
             cells: Vec::new(),
-            label_sizes: &node.labels,
+            label_sizes,
         };
         let node_container = cells.add(Kind::Strip {
             mode: Strip::Vertical,
@@ -965,6 +1138,10 @@ impl<'a> Context<'a> {
             inside_node_label_container,
             outside_containers,
             label_cells: Vec::new(),
+            port_contexts: Vec::new(),
+            side_ranges: Default::default(),
+            inside_port_label_cells: [0; 4],
+            label_cell_spacing,
         };
 
         for (index, label) in node.labels.iter().enumerate() {
@@ -1038,20 +1215,631 @@ impl<'a> Context<'a> {
         Some(cell)
     }
 
-    /// Source: `InsidePortLabelCellCreator.createInsidePortLabelCells`. A node without ports
-    /// gets four empty cells. Their paddings never count, because an atomic cell with an
-    /// empty content area has no minimum size.
+    /// Source: `PortContextCreator.createPortContexts` and `PortContext`'s constructor.
+    fn create_port_contexts(&mut self, ignore_inside_port_labels: bool) {
+        let ports = &self.node.ports;
+        let placement = ports.label_placement;
+        let im_port_labels =
+            !ignore_inside_port_labels || !placement.contains(PortLabelPlacement::INSIDE);
+        let next_to_port = placement.contains(PortLabelPlacement::NEXT_TO_PORT_IF_POSSIBLE);
+        let mut label_id = self.node.labels.len();
+        let mut contexts = Vec::with_capacity(ports.ports.len());
+        for (index, port) in ports.ports.iter().enumerate() {
+            let labels_next_to_port = if placement.contains(PortLabelPlacement::INSIDE) {
+                if ports.compound {
+                    next_to_port && !port.has_compound_connections
+                } else {
+                    true
+                }
+            } else if placement.contains(PortLabelPlacement::OUTSIDE) {
+                next_to_port && !port.has_edges
+            } else {
+                false
+            };
+            let label_cell = (im_port_labels && !placement.is_fixed()).then(|| {
+                let cell = self.cells.add(Kind::Label {
+                    horizontal_layout_mode: true,
+                    horizontal: HAlign::Center,
+                    vertical: VAlign::Center,
+                    gap: self.node.label_label_spacing,
+                    labels: Vec::new(),
+                    minimum_content: LSize::default(),
+                });
+                for label in 0..port.labels.len() {
+                    self.cells.add_label(cell, label_id + label);
+                }
+                cell
+            });
+            label_id += port.labels.len();
+            contexts.push(PortContext {
+                port: index,
+                position: port.position,
+                labels_next_to_port,
+                margin: zero_padding(),
+                label_cell,
+            });
+        }
+        // `TreeMultimap` with `comparePortSides` and `comparePortContexts`: north and east ports
+        // in list order, south and west ports in reverse list order.
+        contexts.sort_by(|a, b| {
+            let side_a = ports.ports[a.port].side;
+            let side_b = ports.ports[b.port].side;
+            side_ordinal(side_a)
+                .cmp(&side_ordinal(side_b))
+                .then_with(|| match side_a {
+                    PortSide::South | PortSide::West => b.port.cmp(&a.port),
+                    _ => a.port.cmp(&b.port),
+                })
+        });
+        let mut ranges: [std::ops::Range<usize>; 5] = Default::default();
+        let mut start = 0;
+        for (ordinal, range) in ranges.iter_mut().enumerate() {
+            let end = start
+                + contexts[start..]
+                    .iter()
+                    .take_while(|context| side_ordinal(ports.ports[context.port].side) == ordinal)
+                    .count();
+            *range = start..end;
+            start = end;
+        }
+        self.side_ranges = ranges;
+        self.port_contexts = contexts;
+    }
+
+    /// The indices into `port_contexts` of the ports on one side, in order:
+    /// `portContexts.get(side)`. The contexts are sorted by side, so each side is one range.
+    fn side_contexts(&self, side: PortSide) -> Vec<usize> {
+        self.side_ranges[side_ordinal(side)].clone().collect()
+    }
+
+    /// The port of a context. It borrows from the node, not from `self`, so the cells and the
+    /// contexts stay free to change.
+    fn port(&self, context: usize) -> &'a CellPort {
+        let node: &'a CellNode = self.node;
+        &node.ports.ports[self.port_contexts[context].port]
+    }
+
+    fn inside_cell(&self, side: PortSide) -> CellId {
+        self.inside_port_label_cells[side_slot(side)]
+    }
+
+    fn atomic_content(&mut self, cell: CellId) -> &mut LSize {
+        match &mut self.cells.cells[cell].kind {
+            Kind::Atomic { minimum_content }
+            | Kind::Label {
+                minimum_content, ..
+            } => minimum_content,
+            Kind::Strip { .. } | Kind::Grid { .. } => {
+                unreachable!("the inside port label cells are atomic")
+            }
+        }
+    }
+
+    fn content_of(&self, cell: CellId) -> LSize {
+        match &self.cells.cells[cell].kind {
+            Kind::Atomic { minimum_content }
+            | Kind::Label {
+                minimum_content, ..
+            } => *minimum_content,
+            Kind::Strip { .. } | Kind::Grid { .. } => LSize::default(),
+        }
+    }
+
+    /// Source: `InsidePortLabelCellCreator.createInsidePortLabelCells`.
     fn create_inside_port_label_cells(&mut self) {
-        for (container, area) in [
-            (self.node_container, 0),
-            (self.node_container, 2),
-            (self.node_container_middle_row, 0),
-            (self.node_container_middle_row, 2),
+        for (container, area, side) in [
+            (self.node_container, 0, PortSide::North),
+            (self.node_container, 2, PortSide::South),
+            (self.node_container_middle_row, 0, PortSide::West),
+            (self.node_container_middle_row, 2, PortSide::East),
         ] {
             let cell = self.cells.add(Kind::Atomic {
                 minimum_content: LSize::default(),
             });
             set_strip_cell(&mut self.cells, container, area, cell);
+            self.inside_port_label_cells[side_slot(side)] = cell;
+        }
+        let ports = &self.node.ports;
+        // `setupNorthOrSouthPortLabelCell`.
+        for side in [PortSide::North, PortSide::South] {
+            let cell = self.inside_cell(side);
+            let padding = &mut self.cells.cells[cell].padding;
+            if ports.label_port_vertical >= 0.0 {
+                if side == PortSide::North {
+                    padding.top = ports.label_port_vertical;
+                } else {
+                    padding.bottom = ports.label_port_vertical;
+                }
+            }
+            padding.left = ports.surrounding.left;
+            padding.right = ports.surrounding.right;
+        }
+        // `setupEastOrWestPortLabelCell`.
+        for side in [PortSide::East, PortSide::West] {
+            let cell = self.inside_cell(side);
+            if ports.label_placement.contains(PortLabelPlacement::INSIDE) {
+                // `calculateWidthDueToLabels`.
+                let mut width = self.content_of(cell).width;
+                for context in self.side_contexts(side) {
+                    if let Some(label_cell) = self.port_contexts[context].label_cell {
+                        width = f64::max(width, self.cells.minimum_width(label_cell));
+                    }
+                }
+                self.atomic_content(cell).width = width;
+                if width > 0.0 {
+                    let padding = &mut self.cells.cells[cell].padding;
+                    if side == PortSide::East {
+                        padding.right = ports.label_port_horizontal;
+                    } else {
+                        padding.left = ports.label_port_horizontal;
+                    }
+                }
+            }
+            // `setupTopAndBottomPadding`.
+            let padding = &mut self.cells.cells[cell].padding;
+            padding.top = ports.surrounding.top;
+            padding.bottom = ports.surrounding.bottom;
+        }
+    }
+
+    /// Source: `ElkUtil.getLabelsBounds`: the union of the port's labels, relative to the port,
+    /// or an empty rectangle.
+    fn labels_bounds(port: &CellPort) -> Rect {
+        let mut bounds: Option<Rect> = None;
+        for label in &port.labels {
+            let rect = Rect {
+                x: label.position.x,
+                y: label.position.y,
+                width: label.size.width,
+                height: label.size.height,
+            };
+            bounds = Some(match bounds {
+                None => rect,
+                Some(mut bounds) => {
+                    bounds.union(rect);
+                    bounds
+                }
+            });
+        }
+        bounds.unwrap_or_default()
+    }
+
+    /// Source: `ElkUtil.computeInsidePart(PortAdapter, double)`.
+    fn compute_inside_part(port: &CellPort, port_border_offset: f64) -> f64 {
+        let bounds = Self::labels_bounds(port);
+        match port.side {
+            PortSide::North => f64::max(
+                0.0,
+                bounds.height + bounds.y - (port.size.height + port_border_offset),
+            ),
+            PortSide::South => f64::max(0.0, -bounds.y - port_border_offset),
+            PortSide::East => f64::max(0.0, -bounds.x - port_border_offset),
+            PortSide::West => f64::max(
+                0.0,
+                bounds.width + bounds.x - (port.size.width + port_border_offset),
+            ),
+            PortSide::Undefined => 0.0,
+        }
+    }
+
+    /// Source: `NodeLabelAndSizeUtilities.setupNodePaddingForPortsWithOffset`.
+    fn setup_node_padding_for_ports_with_offset(&mut self) {
+        let symmetry = !self.node.sizing.options.contains(SizeOptions::ASYMMETRICAL);
+        let fixed = self.node.ports.label_placement.is_fixed();
+        for context in 0..self.port_contexts.len() {
+            let port = self.port(context);
+            let padding = &mut self.cells.cells[self.node_container].padding;
+            let mut port_border_offset = 0.0;
+            if let Some(offset) = port.border_offset {
+                port_border_offset = offset;
+                if offset < 0.0 {
+                    match port.side {
+                        PortSide::North => padding.top = f64::max(padding.top, -offset),
+                        PortSide::South => padding.bottom = f64::max(padding.bottom, -offset),
+                        PortSide::East => padding.right = f64::max(padding.right, -offset),
+                        PortSide::West => padding.left = f64::max(padding.left, -offset),
+                        PortSide::Undefined => {}
+                    }
+                }
+            }
+            if fixed {
+                let inside_part = Self::compute_inside_part(port, port_border_offset);
+                match port.side {
+                    PortSide::North => {
+                        let bigger = inside_part > padding.top;
+                        padding.top = f64::max(padding.top, inside_part);
+                        if symmetry && bigger {
+                            padding.top = f64::max(padding.top, padding.bottom);
+                            padding.bottom = padding.top + port_border_offset;
+                        }
+                    }
+                    PortSide::South => {
+                        let bigger = inside_part > padding.bottom;
+                        padding.bottom = f64::max(padding.bottom, inside_part);
+                        if symmetry && bigger {
+                            padding.bottom = f64::max(padding.bottom, padding.top);
+                            padding.top = padding.bottom + port_border_offset;
+                        }
+                    }
+                    PortSide::East => {
+                        let bigger = inside_part > padding.right;
+                        padding.right = f64::max(padding.right, inside_part);
+                        if symmetry && bigger {
+                            padding.right = f64::max(padding.left, padding.right);
+                            padding.left = padding.right + port_border_offset;
+                        }
+                    }
+                    PortSide::West => {
+                        let bigger = inside_part > padding.left;
+                        padding.left = f64::max(padding.left, inside_part);
+                        if symmetry && bigger {
+                            padding.left = f64::max(padding.left, padding.right);
+                            padding.right = padding.left + port_border_offset;
+                        }
+                    }
+                    PortSide::Undefined => {}
+                }
+            }
+        }
+    }
+
+    /// Source: `HorizontalPortPlacementSizeCalculator.calculateHorizontalPortPlacementSize` and
+    /// `VerticalPortPlacementSizeCalculator.calculateVerticalPortPlacementSize`.
+    fn calculate_port_placement_size(&mut self, horizontal: bool) {
+        let sides = if horizontal {
+            [PortSide::North, PortSide::South]
+        } else {
+            [PortSide::East, PortSide::West]
+        };
+        for side in sides {
+            match self.node.ports.constraints {
+                PortConstraints::FixedPos => self.size_required_by_fixed_pos_ports(side),
+                PortConstraints::FixedRatio => self.size_required_by_fixed_ratio_ports(side),
+                _ => self.size_required_by_free_ports(side),
+            }
+        }
+    }
+
+    /// Source: `calculate{Horizontal,Vertical}NodeSizeRequiredByFixedPosPorts`.
+    fn size_required_by_fixed_pos_ports(&mut self, side: PortSide) {
+        let horizontal = is_horizontal_side(side);
+        let mut far_border: f64 = 0.0;
+        for context in self.side_contexts(side) {
+            let position = self.port_contexts[context].position;
+            let size = self.port(context).size;
+            far_border = if horizontal {
+                f64::max(far_border, position.x + size.width)
+            } else {
+                f64::max(far_border, position.y + size.height)
+            };
+        }
+        let cell = self.inside_cell(side);
+        if horizontal {
+            self.cells.cells[cell].padding.left = 0.0;
+            self.atomic_content(cell).width = far_border;
+        } else {
+            self.cells.cells[cell].padding.top = 0.0;
+            self.atomic_content(cell).height = far_border;
+        }
+    }
+
+    /// Source: `calculate{Horizontal,Vertical}NodeSizeRequiredByFixedRatioPorts`.
+    fn size_required_by_fixed_ratio_ports(&mut self, side: PortSide) {
+        let horizontal = is_horizontal_side(side);
+        let cell = self.inside_cell(side);
+        let contexts = self.side_contexts(side);
+        if contexts.is_empty() {
+            let padding = &mut self.cells.cells[cell].padding;
+            if horizontal {
+                padding.left = 0.0;
+                padding.right = 0.0;
+            } else {
+                padding.top = 0.0;
+                padding.bottom = 0.0;
+            }
+            return;
+        }
+        let ports = &self.node.ports;
+        let port_labels_inside = ports.label_placement.contains(PortLabelPlacement::INSIDE);
+        let port_labels = self
+            .node
+            .sizing
+            .constraints
+            .contains(SizeConstraints::PORT_LABELS);
+        let surrounding = ports.surrounding;
+        let spacing = ports.port_port_spacing;
+        // The vertical calculator sets up the margins once, before the loop. The horizontal one
+        // does it again for every port, which gives the same margins each time, so here both do
+        // it once.
+        if port_labels {
+            self.setup_port_margins(side);
+        }
+        let (near_surrounding, far_surrounding) = if horizontal {
+            (surrounding.left, surrounding.right)
+        } else {
+            (surrounding.top, surrounding.bottom)
+        };
+        let near = |margin: &ElkPadding| if horizontal { margin.left } else { margin.top };
+        let far = |margin: &ElkPadding| {
+            if horizontal {
+                margin.right
+            } else {
+                margin.bottom
+            }
+        };
+        let mut min_size: f64 = 0.0;
+        let mut previous: Option<usize> = None;
+        let mut previous_ratio = 0.0;
+        let mut previous_extent = 0.0;
+        for &context in &contexts {
+            let port = self.port(context);
+            let current_ratio = port.ratio_or_position;
+            let current_extent = if horizontal {
+                port.size.width
+            } else {
+                port.size.height
+            };
+            let current_margin = self.port_contexts[context].margin;
+            match previous {
+                None => {
+                    if near_surrounding > 0.0 {
+                        min_size = f64::max(
+                            min_size,
+                            min_size_required_to_respect_spacing(
+                                near_surrounding + near(&current_margin),
+                                0.0,
+                                current_ratio,
+                            ),
+                        );
+                    }
+                }
+                Some(previous) => {
+                    let required = previous_extent
+                        + far(&self.port_contexts[previous].margin)
+                        + spacing
+                        + near(&current_margin);
+                    min_size = f64::max(
+                        min_size,
+                        min_size_required_to_respect_spacing(
+                            required,
+                            previous_ratio,
+                            current_ratio,
+                        ),
+                    );
+                }
+            }
+            previous = Some(context);
+            previous_ratio = current_ratio;
+            previous_extent = current_extent;
+        }
+        if far_surrounding > 0.0 {
+            let mut required = previous_extent + far_surrounding;
+            if port_labels_inside && let Some(previous) = previous {
+                required += far(&self.port_contexts[previous].margin);
+            }
+            min_size = f64::max(
+                min_size,
+                min_size_required_to_respect_spacing(required, previous_ratio, 1.0),
+            );
+        }
+        if horizontal {
+            self.cells.cells[cell].padding.left = 0.0;
+            self.atomic_content(cell).width = min_size;
+        } else {
+            self.cells.cells[cell].padding.top = 0.0;
+            self.atomic_content(cell).height = min_size;
+        }
+    }
+
+    /// Source: `calculate{Horizontal,Vertical}NodeSizeRequiredByFreePorts`.
+    fn size_required_by_free_ports(&mut self, side: PortSide) {
+        let horizontal = is_horizontal_side(side);
+        let cell = self.inside_cell(side);
+        let contexts = self.side_contexts(side);
+        let surrounding = self.node.ports.surrounding;
+        let padding = &mut self.cells.cells[cell].padding;
+        if contexts.is_empty() {
+            if horizontal {
+                padding.left = 0.0;
+                padding.right = 0.0;
+            } else {
+                padding.top = 0.0;
+                padding.bottom = 0.0;
+            }
+            return;
+        }
+        if horizontal {
+            padding.left = surrounding.left;
+            padding.right = surrounding.right;
+        } else {
+            padding.top = surrounding.top;
+            padding.bottom = surrounding.bottom;
+        }
+        if self
+            .node
+            .sizing
+            .constraints
+            .contains(SizeConstraints::PORT_LABELS)
+        {
+            self.setup_port_margins(side);
+        }
+        // `portWidthPlusPortPortSpacing` and `portHeightPlusPortPortSpacing`.
+        let mut extent = 0.0;
+        for (position, &context) in contexts.iter().enumerate() {
+            let margin = self.port_contexts[context].margin;
+            let size = self.port(context).size;
+            extent += if horizontal {
+                margin.left + size.width + margin.right
+            } else {
+                margin.top + size.height + margin.bottom
+            };
+            if position + 1 < contexts.len() {
+                extent += self.node.ports.port_port_spacing;
+            }
+        }
+        if self.node.ports.alignment == PortAlignment::Distributed {
+            extent += 2.0 * self.node.ports.port_port_spacing;
+        }
+        if horizontal {
+            self.atomic_content(cell).width = extent;
+        } else {
+            self.atomic_content(cell).height = extent;
+        }
+    }
+
+    /// Source: `{Horizontal,Vertical}PortPlacementSizeCalculator.setupPortMargins`.
+    fn setup_port_margins(&mut self, side: PortSide) {
+        let horizontal = is_horizontal_side(side);
+        let contexts = self.side_contexts(side);
+        let placement = self.node.ports.label_placement;
+        let outside = placement.contains(PortLabelPlacement::OUTSIDE);
+        let always_same_side = placement.contains(PortLabelPlacement::ALWAYS_SAME_SIDE);
+        let always_other_same_side = placement.contains(PortLabelPlacement::ALWAYS_OTHER_SAME_SIDE);
+        let space_efficient = placement.contains(PortLabelPlacement::SPACE_EFFICIENT);
+        let uniform = self
+            .node
+            .sizing
+            .options
+            .contains(SizeOptions::UNIFORM_PORT_SPACING);
+        let space_efficient_labels = !always_same_side
+            && !always_other_same_side
+            && (space_efficient || contexts.len() == 2);
+        if horizontal {
+            self.compute_horizontal_port_margins(&contexts);
+        } else {
+            self.compute_vertical_port_margins(&contexts);
+        }
+        let (first, last) = (contexts[0], contexts[contexts.len() - 1]);
+        let clear_ends = |this: &mut Self| {
+            if horizontal {
+                this.port_contexts[first].margin.left = 0.0;
+                this.port_contexts[last].margin.right = 0.0;
+            } else {
+                this.port_contexts[first].margin.top = 0.0;
+                this.port_contexts[last].margin.bottom = 0.0;
+            }
+        };
+        if outside {
+            clear_ends(self);
+            if space_efficient_labels && !self.port_contexts[first].labels_next_to_port {
+                if horizontal {
+                    self.port_contexts[first].margin.right = 0.0;
+                } else {
+                    self.port_contexts[first].margin.bottom = 0.0;
+                }
+            }
+        }
+        if uniform {
+            // `unifyPortMargins`.
+            let (mut max_near, mut max_far): (f64, f64) = (0.0, 0.0);
+            for &context in &contexts {
+                let margin = self.port_contexts[context].margin;
+                if horizontal {
+                    max_near = max_near.max(margin.left);
+                    max_far = max_far.max(margin.right);
+                } else {
+                    max_near = max_near.max(margin.top);
+                    max_far = max_far.max(margin.bottom);
+                }
+            }
+            for &context in &contexts {
+                let margin = &mut self.port_contexts[context].margin;
+                if horizontal {
+                    margin.left = max_near;
+                    margin.right = max_far;
+                } else {
+                    margin.top = max_near;
+                    margin.bottom = max_far;
+                }
+            }
+            if outside {
+                clear_ends(self);
+            }
+        }
+    }
+
+    /// Source: `HorizontalPortPlacementSizeCalculator.computeHorizontalPortMargins`.
+    fn compute_horizontal_port_margins(&mut self, contexts: &[usize]) {
+        let fixed = self.node.ports.label_placement.is_fixed();
+        for &context in contexts {
+            let label_width = self.port_contexts[context]
+                .label_cell
+                .map_or(0.0, |cell| self.cells.minimum_width(cell));
+            let port = self.port(context);
+            let next_to_port = self.port_contexts[context].labels_next_to_port;
+            let margin = &mut self.port_contexts[context].margin;
+            if label_width > 0.0 {
+                if next_to_port {
+                    if label_width > port.size.width {
+                        let overhang = (label_width - port.size.width) / 2.0;
+                        margin.left = overhang;
+                        margin.right = overhang;
+                    }
+                } else {
+                    margin.right = self.node.ports.label_port_horizontal + label_width;
+                }
+            } else if fixed {
+                let bounds = Self::labels_bounds(port);
+                if bounds.x < 0.0 {
+                    margin.left = -bounds.x;
+                }
+                if bounds.x + bounds.width > port.size.width {
+                    margin.right = bounds.x + bounds.width - port.size.width;
+                }
+            }
+        }
+    }
+
+    /// Source: `VerticalPortPlacementSizeCalculator.computeVerticalPortMargins`.
+    fn compute_vertical_port_margins(&mut self, contexts: &[usize]) {
+        let fixed = self.node.ports.label_placement.is_fixed();
+        let treat_as_group = self.node.ports.treat_as_group;
+        for &context in contexts {
+            let label_cell = self.port_contexts[context].label_cell;
+            let label_height = label_cell.map_or(0.0, |cell| self.cells.minimum_height(cell));
+            let port = self.port(context);
+            if label_height > 0.0 {
+                if self.port_contexts[context].labels_next_to_port {
+                    let port_height = port.size.height;
+                    if label_height > port_height {
+                        let labels = label_cell.map_or(&[][..], |cell| self.cell_labels(cell));
+                        let margin = if treat_as_group || labels.len() == 1 {
+                            let overhang = (label_height - port_height) / 2.0;
+                            (overhang, overhang)
+                        } else {
+                            let first_label_height = self.cells.label_sizes[labels[0]].height;
+                            let first_label_overhang = (first_label_height - port_height) / 2.0;
+                            (
+                                f64::max(0.0, first_label_overhang),
+                                label_height - first_label_overhang - port_height,
+                            )
+                        };
+                        let target = &mut self.port_contexts[context].margin;
+                        target.top = margin.0;
+                        target.bottom = margin.1;
+                    }
+                } else {
+                    self.port_contexts[context].margin.bottom =
+                        self.node.ports.label_port_vertical + label_height;
+                }
+            } else if fixed {
+                let bounds = Self::labels_bounds(port);
+                let margin = &mut self.port_contexts[context].margin;
+                if bounds.y < 0.0 {
+                    margin.top = -bounds.y;
+                }
+                if bounds.y + bounds.height > port.size.height {
+                    margin.bottom = bounds.y + bounds.height - port.size.height;
+                }
+            }
+        }
+    }
+
+    /// The label ids of a label cell.
+    fn cell_labels(&self, cell: CellId) -> &[usize] {
+        match &self.cells.cells[cell].kind {
+            Kind::Label { labels, .. } => labels,
+            _ => &[],
         }
     }
 
@@ -1072,12 +1860,31 @@ impl<'a> Context<'a> {
         }
     }
 
-    /// Source: `CellSystemConfigurator.configureCellSystemSizeContributions`, without the
-    /// `PORTS` branch: ports are refused before this runs.
+    /// Source: `CellSystemConfigurator.configureCellSystemSizeContributions`.
     fn configure_size_contributions(&mut self) {
         let sizing = self.node.sizing;
         if sizing.constraints.is_empty() {
             return;
+        }
+        if sizing.constraints.contains(SizeConstraints::PORTS) {
+            let [north, east, south, west] = self.inside_port_label_cells;
+            self.cells.cells[north].contributes_to_minimum_width = true;
+            self.cells.cells[south].contributes_to_minimum_width = true;
+            let free = !matches!(
+                self.node.ports.constraints,
+                PortConstraints::FixedRatio | PortConstraints::FixedPos
+            );
+            self.cells.cells[east].contributes_to_minimum_height = free;
+            self.cells.cells[west].contributes_to_minimum_height = free;
+            self.cells.cells[self.node_container_middle_row].contributes_to_minimum_height = free;
+            if sizing.constraints.contains(SizeConstraints::PORT_LABELS) {
+                self.cells.cells[north].contributes_to_minimum_height = true;
+                self.cells.cells[south].contributes_to_minimum_height = true;
+                self.cells.cells[east].contributes_to_minimum_width = true;
+                self.cells.cells[west].contributes_to_minimum_width = true;
+                self.cells.cells[self.node_container_middle_row].contributes_to_minimum_width =
+                    true;
+            }
         }
         if sizing.constraints.contains(SizeConstraints::NODE_LABELS) {
             let inside = self.inside_node_label_container;
@@ -1174,6 +1981,21 @@ impl<'a> Context<'a> {
             if let Some(minimum) = minimum_node_size(&sizing) {
                 height = f64::max(height, minimum.height);
             }
+            if sizing.constraints.contains(SizeConstraints::PORTS)
+                && matches!(
+                    self.node.ports.constraints,
+                    PortConstraints::FixedRatio | PortConstraints::FixedPos
+                )
+            {
+                height = f64::max(
+                    height,
+                    self.cells.minimum_height(self.inside_cell(PortSide::East)),
+                );
+                height = f64::max(
+                    height,
+                    self.cells.minimum_height(self.inside_cell(PortSide::West)),
+                );
+            }
             height
         };
         if self.node.fixed_graph_size {
@@ -1187,7 +2009,560 @@ impl<'a> Context<'a> {
         self.cells.layout_children_vertically(container);
     }
 
-    /// Source: `LabelPlacer.placeLabels`, without port labels.
+    /// Source: `CellSystemConfigurator.updateVerticalInsidePortLabelCellPadding`.
+    fn update_vertical_inside_port_label_cell_padding(&mut self) {
+        if matches!(
+            self.node.ports.constraints,
+            PortConstraints::FixedRatio | PortConstraints::FixedPos
+        ) {
+            return;
+        }
+        let container_padding = self.cells.cells[self.node_container].padding;
+        let top_border_offset = container_padding.top
+            + self.cells.minimum_height(self.inside_cell(PortSide::North))
+            + self.label_cell_spacing;
+        let bottom_border_offset = container_padding.bottom
+            + self.cells.minimum_height(self.inside_cell(PortSide::South))
+            + self.label_cell_spacing;
+        let east = self.inside_cell(PortSide::East);
+        let west = self.inside_cell(PortSide::West);
+        let east_padding = self.cells.cells[east].padding;
+        let west_padding = self.cells.cells[west].padding;
+        let mut top = f64::max(0.0, east_padding.top - top_border_offset);
+        top = f64::max(top, west_padding.top - top_border_offset);
+        let mut bottom = f64::max(0.0, east_padding.bottom - bottom_border_offset);
+        bottom = f64::max(bottom, west_padding.bottom - bottom_border_offset);
+        for cell in [east, west] {
+            self.cells.cells[cell].padding.top = top;
+            self.cells.cells[cell].padding.bottom = bottom;
+        }
+    }
+
+    /// Source: `NodeLabelAndSizeUtilities.offsetSouthernPortsByNodeSize`.
+    fn offset_southern_ports_by_node_size(&mut self) {
+        let height = self.node_size.height;
+        for context in self.side_contexts(PortSide::South) {
+            self.port_contexts[context].position.y += height;
+        }
+    }
+
+    /// Source: `PortPlacementCalculator.placeHorizontalPorts` and `placeVerticalPorts`.
+    fn place_ports(&mut self, horizontal: bool) {
+        let sides = if horizontal {
+            [PortSide::North, PortSide::South]
+        } else {
+            [PortSide::East, PortSide::West]
+        };
+        for side in sides {
+            match self.node.ports.constraints {
+                PortConstraints::FixedPos => {
+                    for context in self.side_contexts(side) {
+                        let port = self.port(context);
+                        if horizontal {
+                            self.port_contexts[context].position.y = horizontal_port_y(port);
+                        } else {
+                            self.port_contexts[context].position.x =
+                                vertical_port_x(port, self.node_size.width);
+                        }
+                    }
+                }
+                PortConstraints::FixedRatio => {
+                    for context in self.side_contexts(side) {
+                        let port = self.port(context);
+                        let position = &mut self.port_contexts[context].position;
+                        if horizontal {
+                            position.x = self.node_size.width * port.ratio_or_position;
+                            position.y = horizontal_port_y(port);
+                        } else {
+                            position.x = vertical_port_x(port, self.node_size.width);
+                            position.y = self.node_size.height * port.ratio_or_position;
+                        }
+                    }
+                }
+                _ => self.place_free_ports(side),
+            }
+        }
+    }
+
+    /// Source: `PortPlacementCalculator.placeHorizontalFreePorts` and `placeVerticalFreePorts`.
+    fn place_free_ports(&mut self, side: PortSide) {
+        let contexts = self.side_contexts(side);
+        if contexts.is_empty() {
+            return;
+        }
+        let horizontal = is_horizontal_side(side);
+        let cell = self.inside_cell(side);
+        let rect = self.cells.cells[cell].rect;
+        let padding = self.cells.cells[cell].padding;
+        let content = self.content_of(cell);
+        let mut alignment = self.node.ports.alignment;
+        let (available_space, mut calculated, mut current) = if horizontal {
+            (
+                rect.width - padding.left - padding.right,
+                content.width,
+                rect.x + padding.left,
+            )
+        } else {
+            (
+                rect.height - padding.top - padding.bottom,
+                content.height,
+                rect.y + padding.top,
+            )
+        };
+        let port_port_spacing = self.node.ports.port_port_spacing;
+        let mut space_between_ports = port_port_spacing;
+        let count = contexts.len() as f64;
+        // `modifiedPortPlacementSize`.
+        let modified = |alignment: PortAlignment, size: f64| {
+            if alignment == PortAlignment::Distributed {
+                size - 2.0 * port_port_spacing
+            } else {
+                size
+            }
+        };
+        if matches!(
+            alignment,
+            PortAlignment::Distributed | PortAlignment::Justified
+        ) && contexts.len() == 1
+        {
+            calculated = modified(alignment, calculated);
+            alignment = PortAlignment::Center;
+        }
+        if available_space < calculated
+            && !self
+                .node
+                .sizing
+                .options
+                .contains(SizeOptions::PORTS_OVERHANG)
+        {
+            // With one port and an alignment other than distributed, Java divides by zero. The
+            // spacing it gets is never used, because it only goes after the last port.
+            if alignment == PortAlignment::Distributed {
+                space_between_ports += (available_space - calculated) / (count + 1.0);
+                current += space_between_ports;
+            } else {
+                space_between_ports += (available_space - calculated) / (count - 1.0);
+            }
+        } else {
+            if available_space < calculated {
+                calculated = modified(alignment, calculated);
+                alignment = PortAlignment::Center;
+            }
+            match alignment {
+                PortAlignment::Begin => {}
+                PortAlignment::Center => current += (available_space - calculated) / 2.0,
+                PortAlignment::End => current += available_space - calculated,
+                PortAlignment::Distributed => {
+                    let additional = (available_space - calculated) / (count + 1.0);
+                    space_between_ports += f64::max(0.0, additional);
+                    current += space_between_ports;
+                }
+                PortAlignment::Justified => {
+                    let additional = (available_space - calculated) / (count - 1.0);
+                    space_between_ports += f64::max(0.0, additional);
+                }
+            }
+        }
+        let node_width = self.node_size.width;
+        for context in contexts {
+            let port = self.port(context);
+            let margin = self.port_contexts[context].margin;
+            let position = &mut self.port_contexts[context].position;
+            if horizontal {
+                position.x = current + margin.left;
+                position.y = horizontal_port_y(port);
+                current += margin.left + port.size.width + margin.right + space_between_ports;
+            } else {
+                position.x = vertical_port_x(port, node_width);
+                position.y = current + margin.top;
+                current += margin.top + port.size.height + margin.bottom + space_between_ports;
+            }
+        }
+    }
+
+    /// Source: `PortLabelPlacementCalculator.placeHorizontalPortLabels` and
+    /// `placeVerticalPortLabels`.
+    fn place_port_labels(&mut self, horizontal: bool) {
+        let sides = if horizontal {
+            [PortSide::North, PortSide::South]
+        } else {
+            [PortSide::East, PortSide::West]
+        };
+        for side in sides {
+            // `placePortLabels`.
+            let constrained = !self
+                .node
+                .sizing
+                .constraints
+                .contains(SizeConstraints::PORT_LABELS)
+                || self.node.ports.constraints == PortConstraints::FixedPos;
+            let placement = self.node.ports.label_placement;
+            if placement.contains(PortLabelPlacement::INSIDE) {
+                if constrained {
+                    self.constrained_inside_port_label_placement(side);
+                } else {
+                    self.simple_inside_port_label_placement(side);
+                }
+            } else if placement.contains(PortLabelPlacement::OUTSIDE) {
+                if constrained {
+                    self.constrained_outside_port_label_placement(side);
+                } else {
+                    self.simple_outside_port_label_placement(side);
+                }
+            }
+        }
+    }
+
+    /// The label cell of a port context, when it holds labels: `portLabelCell != null &&
+    /// portLabelCell.hasLabels()`.
+    fn filled_label_cell(&self, context: usize) -> Option<CellId> {
+        self.port_contexts[context]
+            .label_cell
+            .filter(|&cell| !self.cell_labels(cell).is_empty())
+    }
+
+    /// Sets the size of a port label cell to its minimum size, and its alignments.
+    fn size_label_cell(&mut self, cell: CellId, horizontal: HAlign, vertical: VAlign) -> Rect {
+        let width = self.cells.minimum_width(cell);
+        let height = self.cells.minimum_height(cell);
+        let data = &mut self.cells.cells[cell];
+        data.rect.width = width;
+        data.rect.height = height;
+        set_label_alignment(data, horizontal, vertical);
+        data.rect
+    }
+
+    /// The height of the label next to the port that `labelsNextToPort` centres: all labels, or
+    /// only the first.
+    fn centred_label_height(&self, cell: CellId) -> f64 {
+        if self.node.ports.treat_as_group {
+            self.cells.cells[cell].rect.height
+        } else {
+            self.cells.label_sizes[self.cell_labels(cell)[0]].height
+        }
+    }
+
+    /// Source: `PortLabelPlacementCalculator.simpleInsidePortLabelPlacement`.
+    fn simple_inside_port_label_placement(&mut self, side: PortSide) {
+        let mut inside_area_height: f64 = 0.0;
+        let label_border_offset = self.port_label_border_offset(side);
+        let spacing_horizontal = self.node.ports.label_port_horizontal;
+        let spacing_vertical = self.node.ports.label_port_vertical;
+        for context in self.side_contexts(side) {
+            let Some(cell) = self.filled_label_cell(context) else {
+                continue;
+            };
+            let port = self.port(context);
+            let next_to_port = self.port_contexts[context].labels_next_to_port;
+            let port_border_offset = port.border_offset.unwrap_or(0.0);
+            let (h, v) = match side {
+                PortSide::North | PortSide::South => (
+                    HAlign::Center,
+                    if side == PortSide::North {
+                        VAlign::Top
+                    } else {
+                        VAlign::Bottom
+                    },
+                ),
+                PortSide::East => (HAlign::Right, VAlign::Center),
+                _ => (HAlign::Left, VAlign::Center),
+            };
+            let mut rect = self.size_label_cell(cell, h, v);
+            match side {
+                PortSide::North | PortSide::South => {
+                    rect.x = if next_to_port {
+                        (port.size.width - rect.width) / 2.0
+                    } else {
+                        port.size.width + spacing_horizontal
+                    };
+                    rect.y = if side == PortSide::North {
+                        port.size.height + port_border_offset + label_border_offset
+                    } else {
+                        -port_border_offset - label_border_offset - rect.height
+                    };
+                }
+                _ => {
+                    rect.x = if side == PortSide::East {
+                        -port_border_offset - label_border_offset - rect.width
+                    } else {
+                        port.size.width + port_border_offset + label_border_offset
+                    };
+                    rect.y = if next_to_port {
+                        (port.size.height - self.centred_label_height(cell)) / 2.0
+                    } else {
+                        port.size.height + spacing_vertical
+                    };
+                }
+            }
+            self.cells.cells[cell].rect = rect;
+            if is_horizontal_side(side) {
+                inside_area_height = f64::max(inside_area_height, rect.height);
+            }
+        }
+        if inside_area_height > 0.0 {
+            let inside = self.inside_cell(side);
+            self.atomic_content(inside).height = inside_area_height;
+        }
+    }
+
+    /// Source: `PortLabelPlacementCalculator.portLabelBorderOffsetForPortSide`.
+    fn port_label_border_offset(&self, side: PortSide) -> f64 {
+        let padding = self.cells.cells[self.node_container].padding;
+        let ports = &self.node.ports;
+        match side {
+            PortSide::North => padding.top + ports.label_port_vertical,
+            PortSide::South => padding.bottom + ports.label_port_vertical,
+            PortSide::East => padding.right + ports.label_port_horizontal,
+            PortSide::West => padding.left + ports.label_port_horizontal,
+            PortSide::Undefined => 0.0,
+        }
+    }
+
+    /// Source: `PortLabelPlacementCalculator.constrainedInsidePortLabelPlacement`.
+    fn constrained_inside_port_label_placement(&mut self, side: PortSide) {
+        if !is_horizontal_side(side) {
+            self.simple_inside_port_label_placement(side);
+            return;
+        }
+        let north = side == PortSide::North;
+        let direction = if north {
+            OverlapRemovalDirection::Down
+        } else {
+            OverlapRemovalDirection::Up
+        };
+        let vertical = if north { VAlign::Top } else { VAlign::Bottom };
+        let inside = self.inside_cell(side);
+        let container_rect = self.cells.cells[inside].rect;
+        let container_padding = self.cells.cells[inside].padding;
+        let ports = &self.node.ports;
+        let spacing_vertical = ports.label_port_vertical;
+        // `ElkMath.maxd`.
+        let left_border = container_rect.x
+            + container_padding
+                .left
+                .max(ports.surrounding.left)
+                .max(self.node.label_node_spacing);
+        let right_border = container_rect.x + container_rect.width
+            - container_padding
+                .right
+                .max(ports.surrounding.right)
+                .max(self.node.label_node_spacing);
+        let mut rectangles = Vec::new();
+        let mut start = if north {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        };
+        let contexts = self.side_contexts(side);
+        for &context in &contexts {
+            let Some(cell) = self.filled_label_cell(context) else {
+                continue;
+            };
+            let port = self.port(context);
+            let position = self.port_contexts[context].position;
+            let mut rect = self.size_label_cell(cell, HAlign::Right, vertical);
+            center_port_label(&mut rect, position, port.size, left_border, right_border);
+            self.cells.cells[cell].rect = rect;
+            rectangles.push(cell);
+            start = if north {
+                f64::max(start, position.y + port.size.height)
+            } else {
+                f64::min(start, position.y)
+            };
+        }
+        start += if north {
+            spacing_vertical
+        } else {
+            -spacing_vertical
+        };
+        let strip_height = remove_overlaps(
+            &mut self.cells,
+            &rectangles,
+            direction,
+            spacing_vertical,
+            start,
+        );
+        if strip_height > 0.0 {
+            self.atomic_content(inside).height = strip_height;
+        }
+        self.make_label_cells_relative(&contexts);
+    }
+
+    /// The overlap removal works in node coordinates; label cells are relative to their port.
+    fn make_label_cells_relative(&mut self, contexts: &[usize]) {
+        for &context in contexts {
+            let Some(cell) = self.filled_label_cell(context) else {
+                continue;
+            };
+            let position = self.port_contexts[context].position;
+            let rect = &mut self.cells.cells[cell].rect;
+            rect.x -= position.x;
+            rect.y -= position.y;
+        }
+    }
+
+    /// Source: `PortLabelPlacementCalculator.simpleOutsidePortLabelPlacement`.
+    fn simple_outside_port_label_placement(&mut self, side: PortSide) {
+        let contexts = self.side_contexts(side);
+        let mut place_first_differently = self.is_first_outside_port_label_placed_differently(side);
+        let always_above = self
+            .node
+            .ports
+            .label_placement
+            .contains(PortLabelPlacement::ALWAYS_OTHER_SAME_SIDE);
+        let spacing_horizontal = self.node.ports.label_port_horizontal;
+        let spacing_vertical = self.node.ports.label_port_vertical;
+        for context in contexts {
+            let Some(cell) = self.filled_label_cell(context) else {
+                continue;
+            };
+            let port_size = self.port(context).size;
+            let next_to_port = self.port_contexts[context].labels_next_to_port;
+            let other_side = place_first_differently || always_above;
+            let (h, v) = match side {
+                PortSide::North | PortSide::South => (
+                    if next_to_port {
+                        HAlign::Center
+                    } else if other_side {
+                        HAlign::Right
+                    } else {
+                        HAlign::Left
+                    },
+                    if side == PortSide::North {
+                        VAlign::Bottom
+                    } else {
+                        VAlign::Top
+                    },
+                ),
+                _ => (
+                    if side == PortSide::East {
+                        HAlign::Left
+                    } else {
+                        HAlign::Right
+                    },
+                    if next_to_port {
+                        VAlign::Center
+                    } else if other_side {
+                        VAlign::Bottom
+                    } else {
+                        VAlign::Top
+                    },
+                ),
+            };
+            let mut rect = self.size_label_cell(cell, h, v);
+            match side {
+                PortSide::North | PortSide::South => {
+                    rect.x = if next_to_port {
+                        (port_size.width - rect.width) / 2.0
+                    } else if other_side {
+                        -rect.width - spacing_horizontal
+                    } else {
+                        port_size.width + spacing_horizontal
+                    };
+                    rect.y = if side == PortSide::North {
+                        -rect.height - spacing_vertical
+                    } else {
+                        port_size.height + spacing_vertical
+                    };
+                }
+                _ => {
+                    rect.y = if next_to_port {
+                        (port_size.height - self.centred_label_height(cell)) / 2.0
+                    } else if other_side {
+                        -rect.height - spacing_vertical
+                    } else {
+                        port_size.height + spacing_vertical
+                    };
+                    rect.x = if side == PortSide::East {
+                        port_size.width + spacing_horizontal
+                    } else {
+                        -rect.width - spacing_horizontal
+                    };
+                }
+            }
+            self.cells.cells[cell].rect = rect;
+            place_first_differently = false;
+        }
+    }
+
+    /// Source: `NodeLabelAndSizeUtilities.isFirstOutsidePortLabelPlacedDifferently`.
+    fn is_first_outside_port_label_placed_differently(&self, side: PortSide) -> bool {
+        let contexts = self.side_contexts(side);
+        if contexts.len() < 2 {
+            return false;
+        }
+        let placement = self.node.ports.label_placement;
+        !self.port_contexts[contexts[0]].labels_next_to_port
+            && !placement.contains(PortLabelPlacement::ALWAYS_SAME_SIDE)
+            && (contexts.len() == 2 || placement.contains(PortLabelPlacement::SPACE_EFFICIENT))
+    }
+
+    /// Source: `PortLabelPlacementCalculator.constrainedOutsidePortLabelPlacement`.
+    fn constrained_outside_port_label_placement(&mut self, side: PortSide) {
+        let contexts = self.side_contexts(side);
+        if contexts.len() <= 2 || !is_horizontal_side(side) {
+            self.simple_outside_port_label_placement(side);
+            return;
+        }
+        let north = side == PortSide::North;
+        let mut special_needs = self
+            .node
+            .ports
+            .label_placement
+            .contains(PortLabelPlacement::SPACE_EFFICIENT);
+        let direction = if north {
+            OverlapRemovalDirection::Up
+        } else {
+            OverlapRemovalDirection::Down
+        };
+        let vertical = if north { VAlign::Bottom } else { VAlign::Top };
+        let spacing_horizontal = self.node.ports.label_port_horizontal;
+        let spacing_vertical = self.node.ports.label_port_vertical;
+        let mut rectangles = Vec::new();
+        let mut start = if north {
+            f64::INFINITY
+        } else {
+            f64::NEG_INFINITY
+        };
+        for &context in &contexts {
+            let Some(cell) = self.filled_label_cell(context) else {
+                continue;
+            };
+            let port_size = self.port(context).size;
+            let position = self.port_contexts[context].position;
+            let mut rect = self.size_label_cell(cell, HAlign::Right, vertical);
+            if special_needs {
+                rect.x = position.x - rect.width - spacing_horizontal;
+                special_needs = false;
+            } else {
+                rect.x = position.x + port_size.width + spacing_horizontal;
+            }
+            self.cells.cells[cell].rect = rect;
+            rectangles.push(cell);
+            start = if north {
+                f64::min(start, position.y)
+            } else {
+                f64::max(start, position.y + port_size.height)
+            };
+        }
+        start += if north {
+            -spacing_vertical
+        } else {
+            spacing_vertical
+        };
+        // `withGap(portLabelSpacingVertical, portLabelSpacingHorizontal)`: the vertical gap the
+        // greedy strategy reads is the horizontal label spacing.
+        remove_overlaps(
+            &mut self.cells,
+            &rectangles,
+            direction,
+            spacing_horizontal,
+            start,
+        );
+        self.make_label_cells_relative(&contexts);
+    }
+
+    /// Source: `LabelPlacer.placeLabels`.
     fn place_labels(&mut self) -> Vec<Option<LPoint>> {
         if let Some(containers) = self.outside_containers {
             let overhang = self
@@ -1200,12 +2575,17 @@ impl<'a> Context<'a> {
             self.place_vertical_outer_container(containers[1], overhang, true);
             self.place_vertical_outer_container(containers[3], overhang, false);
         }
-        let mut positions = vec![None; self.node.labels.len()];
+        let mut positions = vec![None; self.cells.label_sizes.len()];
         // `nodeLabelCells` is an `EnumMap`, so its values come in location order.
         let mut label_cells = self.label_cells.clone();
         label_cells.sort_by_key(|(location, _)| location_order(*location));
         for (_, cell) in label_cells {
             self.cells.apply_label_layout(cell, &mut positions);
+        }
+        for context in &self.port_contexts {
+            if let Some(cell) = context.label_cell {
+                self.cells.apply_label_layout(cell, &mut positions);
+            }
         }
         positions
     }
@@ -1280,7 +2660,137 @@ impl<'a> Context<'a> {
     }
 }
 
-fn set_strip_cell(cells: &mut Cells<'_>, container: CellId, area: usize, cell: CellId) {
+/// Source: `PortPlacementCalculator.calculateHorizontalPortYCoordinate`.
+fn horizontal_port_y(port: &CellPort) -> f64 {
+    let offset = port.border_offset.unwrap_or(0.0);
+    if port.side == PortSide::North {
+        -port.size.height - offset
+    } else {
+        offset
+    }
+}
+
+/// Source: `PortPlacementCalculator.calculateVerticalPortXCoordinate`.
+fn vertical_port_x(port: &CellPort, node_width: f64) -> f64 {
+    let offset = port.border_offset.unwrap_or(0.0);
+    if port.side == PortSide::West {
+        -port.size.width - offset
+    } else {
+        node_width + offset
+    }
+}
+
+/// Source: `PortLabelPlacementCalculator.centerPortLabel`.
+fn center_port_label(rect: &mut Rect, position: LPoint, port_size: LSize, min_x: f64, max_x: f64) {
+    rect.x = position.x - (rect.width - port_size.width) / 2.0;
+    let actual_min_x = f64::min(min_x, position.x);
+    let actual_max_x = f64::max(max_x, position.x + port_size.width);
+    if rect.x < actual_min_x {
+        rect.x = actual_min_x;
+    } else if rect.x + rect.width > actual_max_x {
+        rect.x = actual_max_x - rect.width;
+    }
+}
+
+/// Source: `LabelCell.setHorizontalAlignment` and `setVerticalAlignment`.
+fn set_label_alignment(cell: &mut Cell, h: HAlign, v: VAlign) {
+    if let Kind::Label {
+        horizontal,
+        vertical,
+        ..
+    } = &mut cell.kind
+    {
+        *horizontal = h;
+        *vertical = v;
+    }
+}
+
+/// Source: `RectangleStripOverlapRemover.OverlapRemovalDirection`, the two directions the port
+/// labels use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OverlapRemovalDirection {
+    Up,
+    Down,
+}
+
+/// Moves the rectangles of the given cells apart along a strip, and gives the strip's size.
+///
+/// Source: `RectangleStripOverlapRemover.removeOverlaps` with its default strategy,
+/// `GreedyRectangleStripOverlapRemover`. For up and down, `importRectangle` hands back the
+/// rectangle itself, so the cells' own rectangles move.
+fn remove_overlaps(
+    cells: &mut Cells,
+    rectangles: &[CellId],
+    direction: OverlapRemovalDirection,
+    vertical_gap: f64,
+    start: f64,
+) -> f64 {
+    let rect = |cells: &Cells, node: usize| cells.cells[rectangles[node]].rect;
+    // `List.sort` is stable, in Java and in GWT.
+    let mut nodes: Vec<usize> = (0..rectangles.len()).collect();
+    nodes.sort_by(|&a, &b| rect(cells, a).x.total_cmp(&rect(cells, b).x));
+    // `computeOverlaps`. The scanline set is a `TreeSet` ordered by the right border: a
+    // rectangle whose right border equals one already in the set is not added.
+    let right = |cells: &Cells, node: usize| {
+        let r = rect(cells, node);
+        r.x + r.width
+    };
+    let mut overlapping: Vec<Vec<usize>> = vec![Vec::new(); rectangles.len()];
+    let mut intersecting: Vec<usize> = Vec::new();
+    for &current in &nodes {
+        let scanline = rect(cells, current).x;
+        while let Some(&first) = intersecting.first() {
+            if right(cells, first) < scanline {
+                intersecting.remove(0);
+            } else {
+                break;
+            }
+        }
+        for &other in &intersecting {
+            overlapping[other].push(current);
+            overlapping[current].push(other);
+        }
+        let key = right(cells, current);
+        match intersecting.binary_search_by(|&other| right(cells, other).total_cmp(&key)) {
+            Ok(_) => {}
+            Err(at) => intersecting.insert(at, current),
+        }
+    }
+    // `GreedyRectangleStripOverlapRemover.removeOverlaps`.
+    let mut placed = vec![false; rectangles.len()];
+    let mut strip_size: f64 = 0.0;
+    for &current in &nodes {
+        let mut y_pos = 0.0;
+        let mut others = std::mem::take(&mut overlapping[current]);
+        others.sort_by(|&a, &b| rect(cells, a).y.total_cmp(&rect(cells, b).y));
+        let height = rect(cells, current).height;
+        for &other in &others {
+            if placed[other] {
+                let other_rect = rect(cells, other);
+                if y_pos < other_rect.y + other_rect.height + vertical_gap
+                    && y_pos + height + vertical_gap > other_rect.y
+                {
+                    y_pos = other_rect.y + other_rect.height + vertical_gap;
+                }
+            }
+        }
+        overlapping[current] = others;
+        cells.cells[rectangles[current]].rect.y = y_pos;
+        placed[current] = true;
+        strip_size = f64::max(strip_size, y_pos + height);
+    }
+    // `exportRectangle`.
+    for &node in &nodes {
+        let r = &mut cells.cells[rectangles[node]].rect;
+        match direction {
+            OverlapRemovalDirection::Up => r.y = start - r.height - r.y,
+            OverlapRemovalDirection::Down => r.y += start,
+        }
+    }
+    strip_size
+}
+
+fn set_strip_cell(cells: &mut Cells, container: CellId, area: usize, cell: CellId) {
     if let Kind::Strip { cells: slots, .. } = &mut cells.cells[container].kind {
         slots[area] = Some(cell);
     }
@@ -1329,30 +2839,60 @@ fn minimum_node_size(sizing: &NodeSizing) -> Option<LSize> {
     sizing.effective_minimum()
 }
 
-/// Sizes a node and places its labels.
+/// Sizes a node and places its ports and labels.
 ///
-/// Source: `NodeLabelAndSizeCalculator.process(graph, node, applyStuff, false)`. With
-/// `apply` false, ELK stops once it knows the size, so no label moves.
-pub(crate) fn process(node: &CellNode, horizontal_layout_mode: bool, apply: bool) -> CellResult {
+/// Source: `NodeLabelAndSizeCalculator.process(graph, node, applyStuff, ignoreInsidePortLabels)`.
+/// With `apply` false, ELK stops once it knows the size, so no port or label moves.
+pub(crate) fn process(
+    node: &CellNode,
+    horizontal_layout_mode: bool,
+    apply: bool,
+    ignore_inside_port_labels: bool,
+) -> CellResult {
     let mut context = Context::new(node, false, horizontal_layout_mode);
+    context.create_port_contexts(ignore_inside_port_labels);
     context.create_inside_port_label_cells();
     context.setup_minimum_client_area_size();
+    context.setup_node_padding_for_ports_with_offset();
+    context.calculate_port_placement_size(true);
+    context.calculate_port_placement_size(false);
     context.configure_size_contributions();
     context.set_node_width();
+    context.place_ports(true);
+    context.place_port_labels(true);
+    context.update_vertical_inside_port_label_cell_padding();
     context.set_node_height();
     if !apply {
         return CellResult {
             size: context.node_size,
             label_positions: vec![None; node.labels.len()],
             padding: None,
+            port_positions: Vec::new(),
+            port_label_positions: Vec::new(),
         };
     }
-    let label_positions = context.place_labels();
+    context.offset_southern_ports_by_node_size();
+    context.place_ports(false);
+    context.place_port_labels(false);
+    let mut positions = context.place_labels();
     let padding = context.node_padding();
+    let mut port_positions: Vec<LPoint> = node.ports.ports.iter().map(|p| p.position).collect();
+    for port_context in &context.port_contexts {
+        port_positions[port_context.port] = port_context.position;
+    }
+    let mut port_label_positions = Vec::with_capacity(node.ports.ports.len());
+    let mut rest = positions.split_off(node.labels.len());
+    for port in &node.ports.ports {
+        let tail = rest.split_off(port.labels.len());
+        port_label_positions.push(rest);
+        rest = tail;
+    }
     CellResult {
         size: context.node_size,
-        label_positions,
+        label_positions: positions,
         padding,
+        port_positions,
+        port_label_positions,
     }
 }
 

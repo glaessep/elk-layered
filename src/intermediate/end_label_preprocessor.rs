@@ -182,7 +182,9 @@ pub(crate) fn gather_end_labels_for_node(graph: &mut LGraph, node: NodeId) -> No
         let Some(port_index) = graph.layerless_nodes[node].ports.id_at(position) else {
             continue;
         };
-        graph.layerless_nodes[node].ports[port_index].labels.clear();
+        graph.layerless_nodes[node].ports[port_index]
+            .end_labels
+            .clear();
         graph.layerless_nodes[node].ports[port_index].end_label_cell = None;
         let Some(gathered) = gather_end_labels(graph, node, port_index) else {
             continue;
@@ -208,7 +210,7 @@ pub(crate) fn copy_gathered_end_labels_into_ports(
             .iter()
             .map(|label| graph.edges[label.edge].labels[label.index].clone())
             .collect::<Vec<_>>();
-        graph.layerless_nodes[node].ports[port_index].labels = copies;
+        graph.layerless_nodes[node].ports[port_index].end_labels = copies;
     }
 }
 

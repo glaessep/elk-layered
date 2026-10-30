@@ -41,13 +41,22 @@
 // because #26 found its differences with FREE ports. elkjs crashes on some of these graphs;
 // `--drop-crashes` lists them in `dropped.txt`.
 //
+//   node random.mjs ../tests/elkjs/random-port-labels --port-labels && node record.mjs ../tests/elkjs/random-port-labels --drop-crashes
+//
+// With `--port-labels`, the generator is that of `--ports`, with its own seed and count, but a
+// port may sit on any of the four sides, and most ports have labels. A node with ports draws its
+// port label placement, `portLabels.treatAsGroup` and its size constraints, `PORTS` and
+// `PORT_LABELS` among them. Some nodes fix the ratio or the position of their ports, and some
+// graphs set `spacing.portsSurrounding`. Under the empty placement, the labels keep the positions they are
+// given. elkjs crashes on some of these graphs; `--drop-crashes` lists them in `dropped.txt`.
+//
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
 // a feature, and then write and record the whole corpus again.
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const USAGE =
-  "usage: node random.mjs <directory> [--group-ends | --ports | --group-ports | --cross-ports | --inline-labels | --one-sided]";
+  "usage: node random.mjs <directory> [--group-ends | --ports | --group-ports | --cross-ports | --inline-labels | --one-sided | --port-labels]";
 const dir = process.argv[2];
 // A mode typed first would be read as the directory, and the script deletes the files of that
 // directory. So a directory that starts with `-` is refused, and so is any extra argument.
@@ -58,7 +67,7 @@ if (!dir || dir.startsWith("-") || process.argv.length > 4) {
 const mode = process.argv[3] ?? "";
 // A mistyped mode must not fall through to the default mode: that mode would delete the files of
 // the directory it was given.
-const MODES = ["", "--group-ends", "--ports", "--group-ports", "--cross-ports", "--inline-labels", "--one-sided"];
+const MODES = ["", "--group-ends", "--ports", "--group-ports", "--cross-ports", "--inline-labels", "--one-sided", "--port-labels"];
 if (!MODES.includes(mode)) {
   console.error(`unknown mode "${mode}"; use one of: ${MODES.slice(1).join(" ")}`);
   process.exit(2);
@@ -68,9 +77,10 @@ const groupPorts = mode === "--group-ports";
 const crossPorts = mode === "--cross-ports";
 const inlineLabels = mode === "--inline-labels";
 const oneSided = mode === "--one-sided";
-const withPorts = mode === "--ports" || groupPorts || crossPorts || oneSided;
-const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200, "--inline-labels": 150, "--one-sided": 200 }[mode] ?? 200;
-const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed, "--inline-labels": 0xaeed, "--one-sided": 0xbeed }[mode] ?? 0x5eed;
+const portLabels = mode === "--port-labels";
+const withPorts = mode === "--ports" || groupPorts || crossPorts || oneSided || portLabels;
+const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200, "--inline-labels": 150, "--one-sided": 200, "--port-labels": 200 }[mode] ?? 200;
+const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed, "--inline-labels": 0xaeed, "--one-sided": 0xbeed, "--port-labels": 0xceed }[mode] ?? 0x5eed;
 
 // mulberry32: a small generator with a fixed seed. Its numbers only pick the graphs, so any
 // generator with a fixed seed would do.
@@ -103,6 +113,36 @@ function label(text) {
 
 const WORDS = ["req", "ack", "x", "speed", "0..*", "1", "pedal %", "brake request", "on"];
 
+// Draws the port label options of a node, and gives whether its port labels are fixed.
+function portLabelOptions(node) {
+  const options = (node.layoutOptions ??= {});
+  const placement = rand.pick([
+    null,
+    "OUTSIDE",
+    "INSIDE",
+    "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+    "[INSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+    "[OUTSIDE, ALWAYS_SAME_SIDE]",
+    "[OUTSIDE, ALWAYS_OTHER_SAME_SIDE]",
+    "[OUTSIDE, SPACE_EFFICIENT]",
+    "[]",
+  ]);
+  if (placement) options["elk.portLabels.placement"] = placement;
+  if (rand.chance(0.25)) options["elk.portLabels.treatAsGroup"] = "false";
+  const constraints = rand.pick([
+    null,
+    null,
+    "[PORTS]",
+    "[PORT_LABELS]",
+    "[PORTS, PORT_LABELS]",
+    "[PORTS, PORT_LABELS, NODE_LABELS, MINIMUM_SIZE]",
+  ]);
+  if (constraints) options["elk.nodeSize.constraints"] = constraints;
+  if (rand.chance(0.2)) options["elk.nodeSize.options"] = rand.pick(["[UNIFORM_PORT_SPACING]", "[PORTS_OVERHANG]"]);
+  if (Object.keys(options).length === 0) delete node.layoutOptions;
+  return placement === "[]";
+}
+
 // elkjs gives back every field of the input, an empty `edges` list too, and elk-layered writes no
 // empty list. So the generator writes none either: a list appears only with something in it.
 function graph() {
@@ -122,6 +162,9 @@ function graph() {
   if (rand.chance(0.2)) options["elk.spacing.nodeNode"] = String(rand.int(5, 40));
   if (rand.chance(0.2)) options["elk.layered.spacing.nodeNodeBetweenLayers"] = String(rand.int(10, 60));
   if (rand.chance(0.15)) options["elk.separateConnectedComponents"] = "false";
+  if (portLabels && rand.chance(0.4)) {
+    options["elk.spacing.portsSurrounding"] = `[top=${rand.int(0, 8)},left=${rand.int(0, 8)},bottom=${rand.int(0, 8)},right=${rand.int(0, 8)}]`;
+  }
 
   const root = { id: "root", layoutOptions: options, children: [] };
   const leaves = [];
@@ -187,7 +230,7 @@ function graph() {
     // root's children and for everything under INCLUDE_CHILDREN. A group under
     // SEPARATE_CHILDREN sets no direction, so the run of its children uses the default, RIGHT.
     const sidesOf = (node) => {
-      if (crossPorts) return ["NORTH", "EAST", "SOUTH", "WEST"];
+      if (crossPorts || portLabels) return ["NORTH", "EAST", "SOUTH", "WEST"];
       const own = parent.get(node.id) === root || hierarchy === "include" ? direction : null;
       return own === "DOWN" || own === "UP" ? ["NORTH", "SOUTH"] : ["WEST", "EAST"];
     };
@@ -198,11 +241,39 @@ function graph() {
       const constraint = oneSided
         ? rand.pick([null, "FREE", "FIXED_SIDE", "FIXED_ORDER"])
         : rand.pick([null, "FIXED_SIDE", "FIXED_SIDE", "FIXED_ORDER"]);
-      if (constraint) (node.layoutOptions ??= {})["elk.portConstraints"] = constraint;
+      // In this mode a node may also fix the ratio or the position of its ports, which then get
+      // a place on their side.
+      const placed = portLabels && rand.chance(0.3) ? rand.pick(["FIXED_RATIO", "FIXED_POS"]) : null;
+      const nodeConstraint = placed ?? constraint;
+      if (nodeConstraint) (node.layoutOptions ??= {})["elk.portConstraints"] = nodeConstraint;
+      // The draws happen only in this mode, so the other corpora keep their random numbers.
+      const fixedLabels = portLabels && portLabelOptions(node);
       node.ports = [];
       for (let i = 0, n = rand.int(1, 4); i < n; i++) {
         const port = { id: `p${p++}`, width: rand.int(4, 10), height: rand.int(4, 10) };
-        if (constraint && constraint !== "FREE") port.layoutOptions = { "elk.port.side": rand.pick(flowSides) };
+        if (nodeConstraint && nodeConstraint !== "FREE") port.layoutOptions = { "elk.port.side": rand.pick(flowSides) };
+        if (placed) {
+          const side = port.layoutOptions["elk.port.side"];
+          const along = (length, own) => rand.int(0, Math.max(0, Math.floor(length - own)));
+          if (side === "NORTH" || side === "SOUTH") {
+            port.x = along(node.width, port.width);
+            port.y = side === "NORTH" ? -port.height : node.height;
+          } else {
+            port.x = side === "WEST" ? -port.width : node.width;
+            port.y = along(node.height, port.height);
+          }
+        }
+        if (portLabels && rand.chance(0.75)) {
+          port.labels = [];
+          for (let l = 0, m = rand.int(1, 2); l < m; l++) {
+            const lab = label(rand.pick(WORDS));
+            if (fixedLabels) {
+              lab.x = rand.int(-20, 20);
+              lab.y = rand.int(-20, 20);
+            }
+            port.labels.push(lab);
+          }
+        }
         node.ports.push(port);
         parent.set(port.id, parent.get(node.id));
         ends.push(port.id);

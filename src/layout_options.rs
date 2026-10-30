@@ -25,7 +25,7 @@ use crate::options::{
     ExplicitSpacings, FixedAlignment, GreedySwitchType, HierarchyHandling, LayerConstraint,
     LayeredOptions, LayeringStrategy, LongEdgeOrderingStrategy, NodeFlexibility,
     NodeLabelPlacement, NodeLabelPlacementFlag, NodePlacementStrategy, NodeSizing,
-    OrderingStrategy, PortAlignment, PortConstraints, PortSortingStrategy,
+    OrderingStrategy, PortAlignment, PortConstraints, PortLabelPlacement, PortSortingStrategy,
     SelfLoopDistributionStrategy, SelfLoopOrderingStrategy, SizeConstraints, SizeOptions,
     SpacingMargin, WrappingStrategy,
 };
@@ -596,6 +596,8 @@ pub(crate) struct NodeSettings {
     pub(crate) self_loop_ordering: SelfLoopOrderingStrategy,
     /// The `algorithm` value, when set.
     pub(crate) algorithm: Option<String>,
+    /// Whether the node sets the deprecated `portLabels.nextToPortIfPossible`, to any value.
+    pub(crate) next_to_port_if_possible_set: bool,
 }
 
 /// What an edge's `layoutOptions` set.
@@ -657,13 +659,51 @@ pub(crate) fn node_settings(
         self_loop_distribution: SelfLoopDistributionStrategy::North,
         self_loop_ordering: SelfLoopOrderingStrategy::Stacked,
         algorithm: None,
+        next_to_port_if_possible_set: false,
     };
+    let mut size_options_entry = None;
     for (id, key, value) in resolve_all(options, ElementKind::Node)? {
         apply_node_option(&mut settings, id, value).map_err(|problem| OptionError {
             key: key.to_string(),
             value: value.to_string(),
             problem,
         })?;
+        if id == "org.eclipse.elk.nodeSize.options" {
+            size_options_entry = Some((key, value));
+        }
+    }
+    // `DeprecatedLayoutOptionReplacer`, which `RecursiveGraphLayoutEngine` runs before any
+    // layout. `getProperty` stores the default set when the node has none, so the value is
+    // added to `OUTSIDE`.
+    if settings.next_to_port_if_possible_set {
+        settings
+            .options
+            .port_label_placement
+            .insert(PortLabelPlacement::NEXT_TO_PORT_IF_POSSIBLE);
+    }
+    if settings
+        .node_size
+        .options
+        .contains(SizeOptions::SPACE_EFFICIENT_PORT_LABELS)
+    {
+        settings
+            .options
+            .port_label_placement
+            .insert(PortLabelPlacement::SPACE_EFFICIENT);
+        settings
+            .node_size
+            .options
+            .remove(SizeOptions::SPACE_EFFICIENT_PORT_LABELS);
+        // `NodeContext` throws for an invalid set, so elkjs fails such a layout.
+        if !settings.options.port_label_placement.is_valid()
+            && let Some((key, value)) = size_options_entry
+        {
+            return Err(OptionError {
+                key: key.to_string(),
+                value: value.to_string(),
+                problem: OptionProblem::InvalidValue,
+            });
+        }
     }
     settings.options.node_size = settings.node_size;
     Ok(settings)
@@ -780,8 +820,6 @@ pub(crate) fn label_settings(
 
 const NOT_PORTED: &str = "elk-layered does not support this option";
 const WRONG_TARGET: &str = "the option does not apply to this kind of element";
-const PORT_SIZING: &str = "sizing a node to its ports is not supported yet";
-const PORT_LABEL_PLACEMENT: &str = "port labels are not supported yet";
 const PORT_ALIGNMENT_BY_SIDE: &str = "port alignment by side is not supported yet";
 const PORT_ANCHOR: &str = "an explicit port anchor is not supported yet";
 const INTERACTIVE: &str = "interactive strategies need input positions, which are not read";
@@ -843,7 +881,9 @@ fn apply_node_option(s: &mut NodeSettings, id: &str, value: &str) -> Result<(), 
         }
         "org.eclipse.elk.aspectRatio" => o.aspect_ratio = parse_double(value)?,
         "org.eclipse.elk.portLabels.nextToPortIfPossible" => {
-            o.port_labels_placement_next_to_port_if_possible = parse_bool(value)?;
+            // `DeprecatedLayoutOptionReplacer` asks only whether the option is set, not its value.
+            parse_bool(value)?;
+            s.next_to_port_if_possible_set = true;
         }
         "org.eclipse.elk.portLabels.treatAsGroup" => {
             o.port_labels_treat_as_group = parse_bool(value)?;
@@ -879,11 +919,6 @@ fn apply_node_option(s: &mut NodeSettings, id: &str, value: &str) -> Result<(), 
                 SizeConstraints::FIXED,
                 |a, b| a | b,
             )?;
-            if constraints.contains(SizeConstraints::PORTS)
-                || constraints.contains(SizeConstraints::PORT_LABELS)
-            {
-                return Err(OptionProblem::Unsupported(PORT_SIZING));
-            }
             s.node_size.constraints = constraints;
         }
         "org.eclipse.elk.nodeSize.options" => {
@@ -1293,7 +1328,16 @@ fn apply_node_option(s: &mut NodeSettings, id: &str, value: &str) -> Result<(), 
             )?;
         }
         "org.eclipse.elk.portLabels.placement" => {
-            return Err(OptionProblem::Unsupported(PORT_LABEL_PLACEMENT));
+            o.port_label_placement = parse_flags(
+                value,
+                &PortLabelPlacement::NAMES,
+                PortLabelPlacement::FIXED,
+                |a, b| a | b,
+            )?;
+            // `NodeContext` throws for an invalid set, so elkjs fails such a layout.
+            if !o.port_label_placement.is_valid() {
+                return Err(OptionProblem::InvalidValue);
+            }
         }
         "org.eclipse.elk.portAlignment.north"
         | "org.eclipse.elk.portAlignment.south"

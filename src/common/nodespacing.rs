@@ -5,39 +5,17 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/NodeLabelAndSizeCalculator.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/NodeMarginCalculator.java
 
-use super::cells::{self, CellLabel, CellNode};
-use crate::graph::{LGraph, LMargin, LPadding, LPort, NodeId, PortId, PortSide};
-use crate::options::{PortAlignment, PortConstraints};
-
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-struct Rect {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-}
-
-impl Rect {
-    fn union(&mut self, other: Self) {
-        let min_x = self.x.min(other.x);
-        let min_y = self.y.min(other.y);
-        let max_x = (self.x + self.width).max(other.x + other.width);
-        let max_y = (self.y + self.height).max(other.y + other.height);
-        self.x = min_x;
-        self.y = min_y;
-        self.width = max_x - min_x;
-        self.height = max_y - min_y;
-    }
-}
+use super::cells::{self, CellLabel, CellNode, CellPort, CellPortLabel, CellPorts, Rect};
+use crate::graph::{LGraph, LMargin, LPadding, NodeId, PortId};
 
 /// Sizes each node and places its ports and labels.
 ///
-/// Source: `NodeLabelAndSizeCalculator.process(graph, node, true, false)`. ELK places the ports
-/// with the node size it has just computed, so the size comes first here too.
+/// Source: `NodeLabelAndSizeCalculator.process(graph, node, true, false)`, through
+/// `LGraphAdapters.adapt(graph, true, true, ...)`: edges at north and south port dummies count
+/// as edges of their ports.
 pub fn calculate_label_and_node_sizes(graph: &mut LGraph, nodes: impl IntoIterator<Item = NodeId>) {
     for node in nodes {
-        size_node_and_place_labels(graph, node);
-        place_ports(graph, node);
+        size_node_and_place_ports_and_labels(graph, node);
     }
 }
 
@@ -47,47 +25,85 @@ pub fn calculate_node_margins(graph: &mut LGraph, nodes: impl IntoIterator<Item 
     }
 }
 
-fn place_ports(graph: &mut LGraph, node: NodeId) {
-    match graph.layerless_nodes[node].port_constraints {
-        PortConstraints::FixedPos => {
-            place_fixed_pos_ports(graph, node, PortSide::North);
-            place_fixed_pos_ports(graph, node, PortSide::South);
-            offset_southern_ports_by_node_size(graph, node);
-            place_fixed_pos_ports(graph, node, PortSide::East);
-            place_fixed_pos_ports(graph, node, PortSide::West);
-        }
-        PortConstraints::FixedRatio => {
-            place_fixed_ratio_ports(graph, node, PortSide::North);
-            place_fixed_ratio_ports(graph, node, PortSide::South);
-            offset_southern_ports_by_node_size(graph, node);
-            place_fixed_ratio_ports(graph, node, PortSide::East);
-            place_fixed_ratio_ports(graph, node, PortSide::West);
-        }
-        _ => {
-            place_free_ports(graph, node, PortSide::North);
-            place_free_ports(graph, node, PortSide::South);
-            offset_southern_ports_by_node_size(graph, node);
-            place_free_ports(graph, node, PortSide::East);
-            place_free_ports(graph, node, PortSide::West);
+/// Source: `LPortAdapter.getIncomingEdges` and `getOutgoingEdges`, with transparent north and
+/// south edges, asked whether they are empty: the port's own edges, those of its north or south
+/// port dummy, and its self loops, which the self loop holder keeps apart.
+///
+/// `self_loop_ports` holds the ports of the node's self loops.
+fn port_has_edges(graph: &LGraph, node: NodeId, port: PortId, self_loop_ports: &[PortId]) -> bool {
+    let data = &graph.layerless_nodes[node].ports[port];
+    if !data.incoming_edges().is_empty() || !data.outgoing_edges().is_empty() {
+        return true;
+    }
+    // A port of a node with children has its dummy in the graph inside the node. Its labels
+    // are refused, and only labels read the edges, so that dummy is left out.
+    if let Some(dummy) = data.port_dummy
+        && dummy.graph_id == graph.id
+    {
+        let dummy = &graph.layerless_nodes[dummy.node];
+        if dummy
+            .ports
+            .iter()
+            .any(|p| !p.incoming_edges().is_empty() || !p.outgoing_edges().is_empty())
+        {
+            return true;
         }
     }
+    self_loop_ports.contains(&port)
 }
 
-/// Ports `NodeLabelAndSizeUtilities.offsetSouthernPortsByNodeSize`. ELK places the southern ports
-/// as if the node had no height, because the height is not known until the horizontal ports are
-/// placed. This moves them down to the southern border.
-fn offset_southern_ports_by_node_size(graph: &mut LGraph, node: NodeId) {
-    let height = graph.layerless_nodes[node].size.height;
-    for port in ports_on_side(graph, node, PortSide::South) {
-        graph.layerless_nodes[node].ports[port].position.y += height;
-    }
+/// The ports at which the self loops of `node` start or end, from its self loop holder.
+fn self_loop_ports(graph: &LGraph, node: NodeId) -> Vec<PortId> {
+    graph
+        .self_loop_holders
+        .iter()
+        .filter(|holder| holder.node == node)
+        .flat_map(|holder| &holder.hyper_loops)
+        .flat_map(|hyper_loop| &hyper_loop.edges)
+        .flat_map(|edge| [edge.source_port, edge.target_port])
+        .collect()
 }
 
-/// Runs ELK's cell system on one node: its size, when its size constraints are not fixed, and
-/// the positions of the labels it places.
-fn size_node_and_place_labels(graph: &mut LGraph, node: NodeId) {
+/// Runs ELK's cell system on one node: its size, when its size constraints are not fixed, the
+/// positions of its ports, and the positions of the labels it places.
+fn size_node_and_place_ports_and_labels(graph: &mut LGraph, node: NodeId) {
     let horizontal_layout_mode = !graph.options.direction.is_vertical();
     let data = &graph.layerless_nodes[node];
+    let self_loop_ports = self_loop_ports(graph, node);
+    let ports = CellPorts {
+        ports: data
+            .ports
+            .iter_with_ids()
+            .map(|(id, port)| CellPort {
+                side: port.side,
+                size: port.size,
+                position: port.position,
+                border_offset: port.border_offset,
+                ratio_or_position: port.ratio_or_position,
+                labels: port
+                    .labels
+                    .iter()
+                    .map(|label| CellPortLabel {
+                        size: label.size,
+                        position: label.position,
+                    })
+                    .collect(),
+                has_edges: port_has_edges(graph, node, id, &self_loop_ports),
+                has_compound_connections: port.inside_connections,
+            })
+            .collect(),
+        constraints: data.port_constraints,
+        label_placement: data.port_label_placement,
+        treat_as_group: data.port_labels_treat_as_group,
+        compound: data.nested_graph.is_some(),
+        port_port_spacing: graph.options.spacing.port_port,
+        label_port_horizontal: graph.options.spacing.label_port_horizontal,
+        label_port_vertical: graph.options.spacing.label_port_vertical,
+        surrounding: graph.options.spacing.ports_surrounding.into(),
+        alignment: graph
+            .port_alignment_of(node)
+            .unwrap_or(graph.options.port_alignment_default),
+    };
     let cell_node = CellNode {
         size: data.size,
         sizing: data.node_size,
@@ -104,13 +120,29 @@ fn size_node_and_place_labels(graph: &mut LGraph, node: NodeId) {
         label_node_spacing: graph.options.spacing.label_node,
         label_label_spacing: graph.options.spacing.label_label,
         fixed_graph_size: false,
+        ports,
     };
-    let result = cells::process(&cell_node, horizontal_layout_mode, true);
+    let result = cells::process(&cell_node, horizontal_layout_mode, true, false);
     let data = &mut graph.layerless_nodes[node];
     data.size = result.size;
     for (label, position) in data.labels.iter_mut().zip(result.label_positions) {
         if let Some(position) = position {
             label.position = position;
+        }
+    }
+    let port_ids: Vec<PortId> = data.ports.ids().collect();
+    for (id, (position, label_positions)) in port_ids.into_iter().zip(
+        result
+            .port_positions
+            .into_iter()
+            .zip(result.port_label_positions),
+    ) {
+        let port = &mut data.ports[id];
+        port.position = position;
+        for (label, position) in port.labels.iter_mut().zip(label_positions) {
+            if let Some(position) = position {
+                label.position = position;
+            }
         }
     }
     if let Some(padding) = result.padding {
@@ -121,209 +153,6 @@ fn size_node_and_place_labels(graph: &mut LGraph, node: NodeId) {
             left: padding.left,
         };
     }
-}
-
-fn place_fixed_pos_ports(graph: &mut LGraph, node: NodeId, side: PortSide) {
-    let size = graph.layerless_nodes[node].size;
-    let port_indices = ports_on_side(graph, node, side);
-    for port in port_indices {
-        match side {
-            PortSide::North | PortSide::South => {
-                graph.layerless_nodes[node].ports[port].position.y =
-                    horizontal_port_y(&graph.layerless_nodes[node].ports[port]);
-            }
-            PortSide::East | PortSide::West => {
-                graph.layerless_nodes[node].ports[port].position.x =
-                    vertical_port_x(&graph.layerless_nodes[node].ports[port], size.width);
-            }
-            PortSide::Undefined => {}
-        }
-    }
-}
-
-fn place_fixed_ratio_ports(graph: &mut LGraph, node: NodeId, side: PortSide) {
-    let size = graph.layerless_nodes[node].size;
-    let port_indices = ports_on_side(graph, node, side);
-    for port in port_indices {
-        let ratio = graph.layerless_nodes[node].ports[port].ratio_or_position;
-        match side {
-            PortSide::North | PortSide::South => {
-                graph.layerless_nodes[node].ports[port].position.x = size.width * ratio;
-                graph.layerless_nodes[node].ports[port].position.y =
-                    horizontal_port_y(&graph.layerless_nodes[node].ports[port]);
-            }
-            PortSide::East | PortSide::West => {
-                graph.layerless_nodes[node].ports[port].position.x =
-                    vertical_port_x(&graph.layerless_nodes[node].ports[port], size.width);
-                graph.layerless_nodes[node].ports[port].position.y = size.height * ratio;
-            }
-            PortSide::Undefined => {}
-        }
-    }
-}
-
-fn place_free_ports(graph: &mut LGraph, node: NodeId, side: PortSide) {
-    let port_indices = ports_on_side(graph, node, side);
-    if port_indices.is_empty() {
-        return;
-    }
-
-    let node_size = graph.layerless_nodes[node].size;
-    let alignment = graph
-        .port_alignment_of(node)
-        .unwrap_or(graph.options.port_alignment_default);
-    let spacing = graph.options.spacing.port_port;
-    let surrounding = graph.options.spacing.ports_surrounding;
-
-    match side {
-        PortSide::North | PortSide::South => {
-            let available = node_size.width - surrounding.left - surrounding.right;
-            let port_span = port_indices
-                .iter()
-                .map(|port| graph.layerless_nodes[node].ports[*port].size.width)
-                .sum::<f64>()
-                + spacing * port_indices.len().saturating_sub(1) as f64;
-            let (mut x, space_between_ports) = placement_start_and_spacing(
-                available,
-                port_span,
-                spacing,
-                port_indices.len(),
-                alignment,
-            );
-            x += surrounding.left;
-
-            for port in port_indices {
-                graph.layerless_nodes[node].ports[port].position.x = x;
-                graph.layerless_nodes[node].ports[port].position.y =
-                    horizontal_port_y(&graph.layerless_nodes[node].ports[port]);
-                x += graph.layerless_nodes[node].ports[port].size.width + space_between_ports;
-            }
-        }
-        PortSide::East | PortSide::West => {
-            // InsidePortLabelCellCreator reserves vertical label spacing even for
-            // empty north/south cells. CellSystemConfigurator deducts that space
-            // from the east/west surrounding margins before placing free ports.
-            let border_offset = graph.options.spacing.label_port_vertical.max(0.0)
-                + 2.0 * graph.options.spacing.label_label;
-            let top = (surrounding.top - border_offset).max(0.0);
-            let bottom = (surrounding.bottom - border_offset).max(0.0);
-            let available = node_size.height - top - bottom;
-            let port_span = port_indices
-                .iter()
-                .map(|port| graph.layerless_nodes[node].ports[*port].size.height)
-                .sum::<f64>()
-                + spacing * port_indices.len().saturating_sub(1) as f64;
-            let (mut y, space_between_ports) = placement_start_and_spacing(
-                available,
-                port_span,
-                spacing,
-                port_indices.len(),
-                alignment,
-            );
-            y += top;
-
-            for port in port_indices {
-                graph.layerless_nodes[node].ports[port].position.x =
-                    vertical_port_x(&graph.layerless_nodes[node].ports[port], node_size.width);
-                graph.layerless_nodes[node].ports[port].position.y = y;
-                y += graph.layerless_nodes[node].ports[port].size.height + space_between_ports;
-            }
-        }
-        PortSide::Undefined => {}
-    }
-}
-
-fn placement_start_and_spacing(
-    available_space: f64,
-    placement_span: f64,
-    port_spacing: f64,
-    port_count: usize,
-    alignment: PortAlignment,
-) -> (f64, f64) {
-    let alignment = if matches!(
-        alignment,
-        PortAlignment::Distributed | PortAlignment::Justified
-    ) && port_count == 1
-    {
-        PortAlignment::Center
-    } else {
-        alignment
-    };
-
-    // PortPlacementCalculator's default (no PORTS_OVERHANG) branch keeps the initial
-    // coordinate when the content cell is too small. In particular a single port on a
-    // negative-width cell stays at the leading surrounding margin, rather than recentering.
-    // Multiple ports may require negative spacing; clamping it changes the source geometry.
-    let calculated_span = if alignment == PortAlignment::Distributed {
-        placement_span + 2.0 * port_spacing
-    } else {
-        placement_span
-    };
-    if available_space < calculated_span {
-        if alignment == PortAlignment::Distributed {
-            let spacing =
-                port_spacing + (available_space - calculated_span) / (port_count + 1) as f64;
-            return (spacing, spacing);
-        }
-        let spacing = if port_count > 1 {
-            port_spacing + (available_space - calculated_span) / (port_count - 1) as f64
-        } else {
-            // The source divides by zero here, but the spacing is never used for one port.
-            port_spacing
-        };
-        return (0.0, spacing);
-    }
-
-    match alignment {
-        PortAlignment::Begin => (0.0, port_spacing),
-        PortAlignment::Center => ((available_space - placement_span) / 2.0, port_spacing),
-        PortAlignment::End => (available_space - placement_span, port_spacing),
-        PortAlignment::Distributed => {
-            let distributed_span = placement_span + 2.0 * port_spacing;
-            let additional = (available_space - distributed_span) / (port_count + 1) as f64;
-            let spacing = (port_spacing + additional).max(0.0);
-            (spacing, spacing)
-        }
-        PortAlignment::Justified => {
-            let spacing = if port_count > 1 {
-                (port_spacing + (available_space - placement_span) / (port_count - 1) as f64)
-                    .max(0.0)
-            } else {
-                port_spacing
-            };
-            (0.0, spacing)
-        }
-    }
-}
-
-fn horizontal_port_y(port: &LPort) -> f64 {
-    let offset = port.border_offset.unwrap_or(0.0);
-    match port.side {
-        PortSide::North => -port.size.height - offset,
-        PortSide::South => offset,
-        _ => port.position.y,
-    }
-}
-
-fn vertical_port_x(port: &LPort, node_width: f64) -> f64 {
-    let offset = port.border_offset.unwrap_or(0.0);
-    match port.side {
-        PortSide::West => -port.size.width - offset,
-        PortSide::East => node_width + offset,
-        _ => port.position.x,
-    }
-}
-
-fn ports_on_side(graph: &LGraph, node: NodeId, side: PortSide) -> Vec<PortId> {
-    let mut ports = graph.layerless_nodes[node]
-        .ports
-        .iter_with_ids()
-        .filter_map(|(port, port_data)| (port_data.side == side).then_some(port))
-        .collect::<Vec<_>>();
-    if matches!(side, PortSide::South | PortSide::West) {
-        ports.reverse();
-    }
-    ports
 }
 
 fn process_node_margin(graph: &mut LGraph, node: NodeId) {
