@@ -1,5 +1,5 @@
 use super::assembler::{
-    CrossingMinimizer, CycleBreaker, EdgeRouter, IntermediateProcessor, Layerer, NodePlacer,
+    CrossingMinimizer, CycleBreaker, EdgeRouter, IntermediateProcessor, Layerer, NodePlacer, Place,
     Strategies, assemble, assemble_graph,
 };
 use super::compound::{CompoundRun, check_strategies, execute_compound_graph_round};
@@ -2454,7 +2454,8 @@ fn a_graph_with_hypernodes_is_refused() {
 #[test]
 fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
     let cases = [
-        // Mutation: check the wrapping strategies before the layerer in `Strategies::select`.
+        // Mutation: give `WrappingStrategy::MultiEdge` the place
+        // `Place::Before(LayeredPhase::P1CycleBreaking)` in `wrapping_refusal`.
         (
             options_with(|o| {
                 o.layering_strategy = LayeringStrategy::BreadthFirstModelOrder;
@@ -2462,8 +2463,8 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
             }),
             UnportedProcessor::BreadthFirstModelOrderLayerer,
         ),
-        // Mutation: check the crossing minimizer before the multi-edge breaking points in
-        // `Strategies::select`.
+        // Mutation: give the interactive crossing minimizer the place
+        // `Place::Before(LayeredPhase::P2Layering)` in `CrossingMinimizer::select`.
         (
             options_with(|o| {
                 o.crossing_minimization_strategy = CrossingMinimizationStrategy::Interactive;
@@ -2471,7 +2472,8 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
             }),
             UnportedProcessor::BreakingPointInserter,
         ),
-        // Mutation: check the edge router before the node placer in `Strategies::select`.
+        // Mutation: give the polyline edge router the place
+        // `Place::Before(LayeredPhase::P4NodePlacement)` in `EdgeRouter::select`.
         (
             options_with(|o| {
                 o.node_placement_strategy = NodePlacementStrategy::Interactive;
@@ -2479,8 +2481,8 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
             }),
             UnportedProcessor::InteractiveNodePlacer,
         ),
-        // Mutation: check the single-edge wrapper before the crossing minimizer in
-        // `Strategies::select`.
+        // Mutation: give `WrappingStrategy::SingleEdge` the place
+        // `Place::Before(LayeredPhase::P3NodeOrdering)` in `wrapping_refusal`.
         (
             options_with(|o| {
                 o.crossing_minimization_strategy = CrossingMinimizationStrategy::Interactive;
@@ -2488,8 +2490,8 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
             }),
             UnportedProcessor::InteractiveCrossingMinimizer,
         ),
-        // Mutation: check the node placer before the single-edge wrapper in
-        // `Strategies::select`.
+        // Mutation: give `WrappingStrategy::SingleEdge` the place
+        // `Place::After(LayeredPhase::P4NodePlacement)` in `wrapping_refusal`.
         (
             options_with(|o| {
                 o.node_placement_strategy = NodePlacementStrategy::Interactive;
@@ -2510,13 +2512,129 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
         options_with(|o| o.edge_routing = EdgeRouting::Polyline),
     );
     graph.graph_properties.hypernodes = true;
-    // Mutation: check hypernodes before the edge router in `Strategies::select`.
+    // Mutation: give the hypernodes refusal the place `Place::Before(LayeredPhase::P5EdgeRouting)`
+    // in `hypernodes_refusal`.
     assert_eq!(
         try_graph_kinds(&graph),
         Err(PipelineError::UnsupportedProcessor {
             kind: UnportedProcessor::PolylineEdgeRouter,
         })
     );
+}
+
+// Mutation: give the refusal of `HypernodesProcessor` the place
+// `Place::Before(LayeredPhase::P1CycleBreaking)` in `hypernodes_refusal`. It then beats every
+// other refusal, and the pair that lists it second fails.
+#[test]
+fn of_two_refusals_the_one_earlier_in_the_schedule_wins() {
+    type Trigger = fn(&mut LayeredOptions, &mut GraphProperties);
+    // Each row: the option or property it sets, what a run is refused for, and how to set it.
+    // The rows stand in the order of the schedule in ELK's `GraphConfigurator` and the phases.
+    let schedule: [(&str, UnportedProcessor, Trigger); 10] = [
+        (
+            "layering",
+            UnportedProcessor::BreadthFirstModelOrderLayerer,
+            |o, _| o.layering_strategy = LayeringStrategy::BreadthFirstModelOrder,
+        ),
+        (
+            "layering",
+            UnportedProcessor::DepthFirstModelOrderLayerer,
+            |o, _| o.layering_strategy = LayeringStrategy::DepthFirstModelOrder,
+        ),
+        (
+            "wrapping",
+            UnportedProcessor::BreakingPointInserter,
+            |o, _| o.wrapping_strategy = WrappingStrategy::MultiEdge,
+        ),
+        (
+            "crossing",
+            UnportedProcessor::InteractiveCrossingMinimizer,
+            |o, _| o.crossing_minimization_strategy = CrossingMinimizationStrategy::Interactive,
+        ),
+        (
+            "wrapping",
+            UnportedProcessor::SingleEdgeGraphWrapper,
+            |o, _| o.wrapping_strategy = WrappingStrategy::SingleEdge,
+        ),
+        (
+            "placement",
+            UnportedProcessor::InteractiveNodePlacer,
+            |o, _| o.node_placement_strategy = NodePlacementStrategy::Interactive,
+        ),
+        (
+            "placement",
+            UnportedProcessor::LinearSegmentsNodePlacer,
+            |o, _| o.node_placement_strategy = NodePlacementStrategy::LinearSegments,
+        ),
+        ("routing", UnportedProcessor::PolylineEdgeRouter, |o, _| {
+            o.edge_routing = EdgeRouting::Polyline
+        }),
+        ("routing", UnportedProcessor::SplineEdgeRouter, |o, _| {
+            o.edge_routing = EdgeRouting::Splines
+        }),
+        (
+            "hypernodes",
+            UnportedProcessor::HypernodesProcessor,
+            |_, p| p.hypernodes = true,
+        ),
+    ];
+
+    let refused_for = |triggers: &[Trigger]| {
+        let mut options = LayeredOptions::default();
+        let mut properties = GraphProperties::default();
+        for trigger in triggers {
+            trigger(&mut options, &mut properties);
+        }
+        Strategies::select(&options, &properties).err()
+    };
+
+    let mut pairs = 0;
+    for (i, (first_field, first_kind, first)) in schedule.iter().enumerate() {
+        assert_eq!(
+            refused_for(&[*first]),
+            Some(PipelineError::UnsupportedProcessor { kind: *first_kind })
+        );
+        for (second_field, _, second) in &schedule[i + 1..] {
+            // Two values of one option cannot be set together.
+            if first_field == second_field {
+                continue;
+            }
+            pairs += 1;
+            // Both orders of setting give the same answer: the schedule decides, not the setting.
+            for triggers in [[*first, *second], [*second, *first]] {
+                assert_eq!(
+                    refused_for(&triggers),
+                    Some(PipelineError::UnsupportedProcessor { kind: *first_kind })
+                );
+            }
+        }
+    }
+    assert_eq!(pairs, 41);
+}
+
+// Mutation: count `Place::After` with `slot_before` instead of `slot_after` in
+// `Place::position`. A place after a phase then lands on the wrong side of the next slot.
+#[test]
+fn a_place_counts_the_way_the_schedule_slots_do() {
+    let phases = [
+        LayeredPhase::P1CycleBreaking,
+        LayeredPhase::P2Layering,
+        LayeredPhase::P3NodeOrdering,
+        LayeredPhase::P4NodePlacement,
+        LayeredPhase::P5EdgeRouting,
+    ];
+    for (i, phase) in phases.iter().enumerate() {
+        let (before, within, after) = (
+            Place::Before(*phase).position(),
+            Place::In(*phase).position(),
+            Place::After(*phase).position(),
+        );
+        assert!(before < within && within < after);
+        // The slot after one phase is the slot in front of the next.
+        if let Some(next) = phases.get(i + 1) {
+            assert_eq!(after, Place::Before(*next).position());
+        }
+    }
 }
 
 // Mutation: replace `assemble_graph(graph)?` in `graph_algorithm` by
