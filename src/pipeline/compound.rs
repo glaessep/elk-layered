@@ -32,6 +32,9 @@ pub struct GraphExecution {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct GraphAlgorithm {
+    /// Whether the graph is the root. Fixed at the start: nothing in the run reads
+    /// `execution.parent`, which a drop can leave stale.
+    pub(super) is_root: bool,
     pub(super) next_processor: usize,
     pub(super) processors: Vec<Processor>,
     pub(super) execution: GraphExecution,
@@ -92,6 +95,7 @@ pub(super) fn check_strategies(graphs: &GraphArena) -> PipelineResult<()> {
 
 fn graph_algorithm(graph: &LGraph) -> PipelineResult<GraphAlgorithm> {
     Ok(GraphAlgorithm {
+        is_root: graph.parent.is_none(),
         next_processor: 0,
         processors: assemble_graph(graph)?,
         execution: GraphExecution {
@@ -153,7 +157,7 @@ fn execute_compound_algorithm_until_pause(
     graphs: &mut GraphArena,
     algorithm: &mut GraphAlgorithm,
 ) -> PipelineResult<()> {
-    let is_root = algorithm.execution.parent.is_none();
+    let is_root = algorithm.is_root;
     while algorithm.next_processor < algorithm.processors.len() {
         let processor = algorithm.processors[algorithm.next_processor];
         algorithm.next_processor += 1;

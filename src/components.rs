@@ -449,6 +449,22 @@ fn drop_nodes_renumbered(
             index: owner.to_index(),
         });
     }
+    if split == ComponentSplit::Inactive
+        && let Some((owner, _)) = graph.nodes_with_ids().find(|(_, data)| {
+            data.nested_graph.is_some_and(|nested| {
+                graphs[nested]
+                    .parent
+                    .is_none_or(|parent| parent.graph != id)
+            })
+        })
+    {
+        // The check runs before anything changes, like the others, and names the id before the
+        // drop.
+        return Err(ComponentError::InvalidReference {
+            kind: "graph parent",
+            index: owner.to_index(),
+        });
+    }
     let keep_edge = graph
         .edges
         .iter()
@@ -506,21 +522,15 @@ fn drop_nodes_renumbered(
     }
     if split == ComponentSplit::Inactive {
         // The nodes are in their new places now, so each holder names the id it has now. A node
-        // before the first dropped one kept its id.
+        // before the first dropped one kept its id. Every holder was checked above.
         let holders = graphs[id]
             .nodes_with_ids()
             .skip(first.to_index())
             .filter_map(|(node, data)| data.nested_graph.map(|nested| (node, nested)))
             .collect::<Vec<_>>();
         for (node, nested) in holders {
-            match &mut graphs[nested].parent {
-                Some(parent) if parent.graph == id => parent.node = node,
-                _ => {
-                    return Err(ComponentError::InvalidReference {
-                        kind: "graph parent",
-                        index: node.to_index(),
-                    });
-                }
+            if let Some(parent) = &mut graphs[nested].parent {
+                parent.node = node;
             }
         }
     }

@@ -574,41 +574,45 @@ fn outside_a_split_a_node_that_holds_a_graph_after_a_dropped_node_moves_down() {
     assert_eq!(graphs[after].parent.unwrap().node, NodeId::new(3));
 }
 
-// Mutation: write the new id into `GraphParent.node` without checking `GraphParent.graph`. The
-// graph that names another graph as its parent then gets a node id of the wrong graph, silently.
+// Mutation: check `GraphParent.graph` only for holders after the first dropped node, or only
+// after the graphs are renumbered. A graph that names another graph as its parent then passes for
+// the holder at node 0, or the error leaves the graph half renumbered.
 #[test]
-fn a_graph_that_names_another_parent_is_an_error() {
-    let mut graphs = GraphArena::new(graph_with_a_node_to_drop());
-    let nested = graphs.nest(
-        GraphId::ROOT,
-        NodeId::new(4),
-        LGraph::new("inner", LayeredOptions::default()),
-    );
-    let other = graphs.nest(
-        GraphId::ROOT,
-        NodeId::new(0),
-        LGraph::new("other", LayeredOptions::default()),
-    );
-    graphs[nested].parent = Some(crate::graph::GraphParent {
-        graph: other,
-        node: NodeId::new(4),
-    });
+fn a_graph_that_names_another_parent_is_an_error_before_anything_changes() {
+    for holder in [0, 4] {
+        let mut graphs = GraphArena::new(graph_with_a_node_to_drop());
+        let nested = graphs.nest(
+            GraphId::ROOT,
+            NodeId::new(holder),
+            LGraph::new("inner", LayeredOptions::default()),
+        );
+        let other = graphs.nest(
+            GraphId::ROOT,
+            NodeId::new(1),
+            LGraph::new("other", LayeredOptions::default()),
+        );
+        graphs[nested].parent = Some(crate::graph::GraphParent {
+            graph: other,
+            node: NodeId::new(holder),
+        });
 
-    let error = drop_nodes(
-        &mut graphs,
-        GraphId::ROOT,
-        &[NodeId::new(2)],
-        ComponentSplit::Inactive,
-    )
-    .unwrap_err();
+        let error = drop_nodes(
+            &mut graphs,
+            GraphId::ROOT,
+            &[NodeId::new(2)],
+            ComponentSplit::Inactive,
+        )
+        .unwrap_err();
 
-    assert_eq!(
-        error,
-        ComponentError::DroppedReference {
-            kind: "graph parent",
-            index: 3
-        }
-    );
+        assert_eq!(
+            error,
+            ComponentError::DroppedReference {
+                kind: "graph parent",
+                index: holder
+            }
+        );
+        assert_eq!(graphs.root().layerless_nodes.len(), 5);
+    }
 }
 
 // Mutation: leave out the check that a dropped node holds no graph. The graph inside `r` then
