@@ -786,6 +786,7 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
         return;
     }
     let publications = order_segments_by_publication(graphs, scope, segments);
+    let first_put_order = first_put_order_of_labelled_edges(&publications.segments);
     let parent_port_flows = parent_port_net_flows(&publications.segments);
     let mut local_port_publications = publications.local_ports;
     let mut segments_by_parent: HashMap<Option<GraphId>, Vec<ScopedHierarchySegment>> =
@@ -878,12 +879,61 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
                     scoped.pending.segment,
                 );
             }
+            order_labels_of_merged_edges(graph, &state.merged_label_edges, &first_put_order);
         }
     }
     assert!(
         segments_by_parent.is_empty(),
         "scoped hierarchy segment owners were validated before graph mutation"
     );
+}
+
+/// Where each original edge that has labels first appears in the order the segments are
+/// introduced in, by the edge's id.
+///
+/// ELK moves the labels of the original edges in `moveLabelsAndRemoveOriginalEdges`, after all
+/// segments exist. It walks `crossHierarchyMap.keySet()`, a `HashMultimap`, which elkjs iterates
+/// in insertion order (see `crate::gwt::LinkedSet`). The first `put` of an original edge happens
+/// where its first segment is introduced, and the segments here are in that order already. An
+/// edge's first segment can lie in another graph than the one a label lands in: the edge from
+/// `g1`'s child to `g2`'s child is put when `g1`'s segment is made, before the segment in `g2`.
+fn first_put_order_of_labelled_edges(
+    segments: &[ScopedHierarchySegment],
+) -> HashMap<String, usize> {
+    let labelled = segments
+        .iter()
+        .filter(|scoped| !scoped.labels.is_empty())
+        .map(|scoped| scoped.edge.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut order = HashMap::new();
+    for (position, scoped) in segments.iter().enumerate() {
+        if labelled.contains(scoped.edge.id.as_str()) {
+            order.entry(scoped.edge.id.clone()).or_insert(position);
+        }
+    }
+    order
+}
+
+/// Puts the labels of an edge that several original edges merged into in the order ELK moved
+/// them in: by `first_put_order`, and a label keeps its place among the labels of its own
+/// original edge. The segments are introduced in the order of the ports, but the labels follow the
+/// order of the keys of `crossHierarchyMap`.
+fn order_labels_of_merged_edges(
+    graph: &mut LGraph,
+    merged_label_edges: &[EdgeId],
+    first_put_order: &HashMap<String, usize>,
+) {
+    for &edge in merged_label_edges {
+        // The sort is stable, so labels of one original edge keep their order.
+        graph.edges[edge].labels.sort_by_cached_key(|label| {
+            label
+                .original_label_edge
+                .as_ref()
+                .and_then(|id| first_put_order.get(id))
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
+    }
 }
 
 /// What the segments of one graph share while they are introduced.
@@ -894,6 +944,9 @@ struct SegmentState {
     /// The dummy of each port of the parent node that the caller named, by the port's key.
     /// `dummyNodeMap` keeps one dummy for a port, however many edges end at it.
     parent_dummies: HashMap<String, PortRef>,
+    /// The edges that took the labels of a second original edge, by merging into an exported
+    /// external port.
+    merged_label_edges: Vec<EdgeId>,
 }
 
 #[derive(Debug, Clone)]
@@ -1174,6 +1227,9 @@ fn introduce_hierarchical_edge_segment(
             external_port.original_edges.push(edge.id.clone());
             debug_assert_eq!(external_port.original_edges.last(), Some(&edge.id));
             apply_label_graph_properties(graph, &labels);
+            if !labels.is_empty() {
+                state.merged_label_edges.push(external_port.new_edge);
+            }
             graph.edges[external_port.new_edge].labels.extend(labels);
             return external_port.new_edge;
         }

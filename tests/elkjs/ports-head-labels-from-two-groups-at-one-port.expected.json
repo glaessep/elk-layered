@@ -1,0 +1,204 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "g1",
+      "children": [
+        {
+          "id": "n3",
+          "width": 44,
+          "height": 25.5,
+          "layoutOptions": {
+            "elk.portLabels.placement": "OUTSIDE"
+          },
+          "ports": [
+            {
+              "id": "p10",
+              "width": 5,
+              "height": 4,
+              "layoutOptions": {
+                "elk.port.side": "EAST"
+              },
+              "x": 44,
+              "y": 10.75
+            }
+          ],
+          "$H": 279,
+          "x": 12,
+          "y": 12
+        }
+      ],
+      "$H": 277,
+      "x": 38,
+      "y": 59.5,
+      "width": 73,
+      "height": 49.5
+    },
+    {
+      "id": "g2",
+      "children": [
+        {
+          "id": "n5",
+          "width": 0,
+          "height": 29,
+          "layoutOptions": {
+            "elk.nodeSize.constraints": "[PORTS, PORT_LABELS]"
+          },
+          "ports": [
+            {
+              "id": "p19",
+              "width": 6,
+              "height": 9,
+              "layoutOptions": {
+                "elk.port.side": "SOUTH"
+              },
+              "x": -6,
+              "y": 10
+            }
+          ],
+          "$H": 285,
+          "x": 52.5,
+          "y": 12
+        }
+      ],
+      "layoutOptions": {
+        "elk.nodeSize.constraints": "[NODE_LABELS]"
+      },
+      "$H": 283,
+      "x": 141,
+      "y": 12,
+      "width": 64.5,
+      "height": 69.5
+    },
+    {
+      "id": "n1",
+      "width": 0,
+      "height": 24,
+      "layoutOptions": {
+        "elk.nodeSize.constraints": "[PORTS, PORT_LABELS]"
+      },
+      "ports": [
+        {
+          "id": "p3",
+          "width": 6,
+          "height": 4,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          },
+          "x": 0,
+          "y": 10
+        }
+      ],
+      "$H": 288,
+      "x": 12,
+      "y": 26.5
+    }
+  ],
+  "edges": [
+    {
+      "id": "e28",
+      "sources": [
+        "p3"
+      ],
+      "targets": [
+        "p19"
+      ],
+      "labels": [
+        {
+          "text": "0..*",
+          "width": 26,
+          "height": 14,
+          "x": 64,
+          "y": 21.5
+        },
+        {
+          "text": "req",
+          "width": 19.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "HEAD"
+          },
+          "x": 166,
+          "y": 55.5
+        }
+      ],
+      "sections": [
+        {
+          "id": "e28_s0",
+          "startPoint": {
+            "x": 18,
+            "y": 38.5
+          },
+          "endPoint": {
+            "x": 187.5,
+            "y": 38.5
+          },
+          "incomingShape": "p3",
+          "outgoingShape": "p19"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e43",
+      "sources": [
+        "p10"
+      ],
+      "targets": [
+        "p19"
+      ],
+      "labels": [
+        {
+          "text": "speed",
+          "width": 32.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "HEAD"
+          },
+          "x": 153,
+          "y": 41.5
+        }
+      ],
+      "sections": [
+        {
+          "id": "e43_s0",
+          "startPoint": {
+            "x": 99,
+            "y": 84.25
+          },
+          "endPoint": {
+            "x": 187.5,
+            "y": 38.5
+          },
+          "bendPoints": [
+            {
+              "x": 126,
+              "y": 84.25
+            },
+            {
+              "x": 126,
+              "y": 38.5
+            }
+          ],
+          "incomingShape": "p10",
+          "outgoingShape": "p19"
+        }
+      ],
+      "junctionPoints": [
+        {
+          "x": 126,
+          "y": 38.5
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 217.5,
+  "height": 121
+}
