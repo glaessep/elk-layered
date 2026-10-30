@@ -1067,6 +1067,7 @@ fn transform_inside_self_loop(
             built_edge.priority_shortness = edge.priority_shortness;
             built_edge.priority_straightness = edge.priority_straightness;
             built_edge.thickness = ELK_DEFAULT_EDGE_THICKNESS;
+            built_edge.inside_self_loop = true;
             built_edge
         })
         .expect("inside self-loop dummies were created before adding edge");

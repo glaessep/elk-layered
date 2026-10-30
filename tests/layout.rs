@@ -2497,20 +2497,31 @@ fn an_inside_self_loop_in_a_graph_with_separate_children_is_unsupported() {
     assert!(matches!(error_of(&graph), Error::Unsupported { .. }));
 }
 
-// Mutation: drop the search among the edges of the parent in `run_layered`. The node laid out on
-// its own then lets its loop go through.
+// Mutation: drop the `SEPARATE_CHILDREN` test of the loop's node in `run_layered`. The node laid
+// out on its own then lets its loop go through.
 #[test]
 fn an_inside_self_loop_on_a_node_laid_out_on_its_own_is_unsupported() {
     let mut graph = inside_self_loop_graph();
     graph.children[0]
         .layout_options
         .insert("elk.hierarchyHandling".into(), "SEPARATE_CHILDREN".into());
-    assert!(matches!(
-        error_of(&graph),
-        Error::Unsupported { element, feature }
-            if element == "edge \"loop\""
-                && feature == "an inside self loop in a graph laid out on its own"
-    ));
+    for childless in [false, true] {
+        if childless {
+            graph.children[0].children.clear();
+            graph.children[0].edges.clear();
+            graph.children[0].width = 60.0;
+            graph.children[0].height = 40.0;
+        }
+        assert!(
+            matches!(
+                error_of(&graph),
+                Error::Unsupported { element, feature }
+                    if element == "edge \"loop\""
+                        && feature == "an inside self loop in a graph laid out on its own"
+            ),
+            "childless: {childless}"
+        );
+    }
 }
 
 // Mutation: drop the port check in `run_layered`. elkjs fails on this graph with a JavaScript

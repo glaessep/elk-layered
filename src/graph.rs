@@ -930,6 +930,13 @@ pub struct LayeredEdge {
     /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
     /// it.
     pub(crate) compound_segment: Option<CompoundEdgeSegment>,
+    /// Whether the importer made the edge from an inside self loop of the input. Its ends are
+    /// external port dummies that stand for no port of the input, so the export needs this mark to
+    /// tell it from an edge the compound steps made. ELK keeps the input edge in `ORIGIN`.
+    ///
+    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
+    /// it.
+    pub(crate) inside_self_loop: bool,
 }
 
 impl LayeredEdge {
@@ -955,6 +962,7 @@ impl LayeredEdge {
             thickness: 0.0,
             original_opposite_port: None,
             compound_segment: None,
+            inside_self_loop: false,
         }
     }
 

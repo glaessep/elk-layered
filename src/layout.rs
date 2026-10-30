@@ -426,7 +426,7 @@ impl<'a> Tree<'a> {
     /// `isConnectedToExternalNodes`. An edge into a child of the port's node, or out of one,
     /// votes that the port is an input port of the node and an output port, in that order.
     /// Every other edge votes the other way round. A self loop votes as an edge to the outside. An
-    /// inside self loop at a port never gets here: it is refused.
+    /// inside self loop at a port votes too, but `run_layered` refuses it later.
     fn count_port_facts(&mut self) {
         for index in 0..self.edges.len() {
             let (source, target) = (self.edges[index].source, self.edges[index].target);
@@ -618,8 +618,8 @@ impl<'a, 't> Work<'a, 't> {
         Ok(())
     }
 
-    /// Ports `RecursiveGraphLayoutEngine.layoutRecursively`, without top-down layout and inside
-    /// self-loops.
+    /// Ports `RecursiveGraphLayoutEngine.layoutRecursively`, without top-down layout. Its inside
+    /// self loop branch lives in the checks of `run_layered` and in `finish`.
     ///
     /// Java recurses once per nesting level. This keeps the same visiting order on a work list, so
     /// a deeply nested graph cannot overflow Rust's stack.
@@ -712,20 +712,6 @@ impl<'a, 't> Work<'a, 't> {
                     .to_string(),
             });
         }
-        // `ElkGraphImporter.importFlatGraph` looks for the inside self loops of the node whose
-        // children it lays out among the edges of the node's parent. It finds no end for them, as
-        // in the check of the edges below: the run has the children, not the node.
-        if !include
-            && let Some(parent) = scope_info.parent
-            && let Some(&edge) = tree.edges_by_container[parent].iter().find(|&&edge| {
-                tree.edges[edge].source == scope && self.is_inside_self_loop(&tree.edges[edge])
-            })
-        {
-            return Err(Error::Unsupported {
-                element: edge_element(&tree.edges[edge].edge.id),
-                feature: INSIDE_SELF_LOOP_ALONE.to_string(),
-            });
-        }
         let run_nodes = self.run_nodes(scope, include);
         let in_run: HashSet<usize> = run_nodes.iter().copied().collect();
         // The nodes whose insides belong to this run.
@@ -762,10 +748,16 @@ impl<'a, 't> Work<'a, 't> {
                     feature: "an inside self loop at a port".to_string(),
                 });
             }
-            // `ElkGraphImporter.importFlatGraph` skips an inside self loop here and looks for it
-            // in the run of its node. That run holds the node's children, not the node, so ELK
-            // cannot find the loop's end: `UnsupportedGraphException`.
-            if !include && inside_self_loop {
+            // `ElkGraphImporter.importFlatGraph` skips an inside self loop and looks for it in the
+            // run of its node. That run holds the node's children, not the node, so ELK cannot
+            // find the loop's end: `UnsupportedGraphException`. `layoutRecursively` also runs a
+            // node that sets `SEPARATE_CHILDREN` on its own when it has inside self loops, with or
+            // without children, so the loop fails in an `INCLUDE_CHILDREN` run too.
+            if inside_self_loop
+                && (!include
+                    || tree.nodes[edge.source].settings.hierarchy_handling
+                        == Some(HierarchyHandling::SeparateChildren))
+            {
                 return Err(Error::Unsupported {
                     element,
                     feature: INSIDE_SELF_LOOP_ALONE.to_string(),

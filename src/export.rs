@@ -519,22 +519,13 @@ fn is_original_edge(graph: &LGraph, index: EdgeId, input: &TransferInput<'_>) ->
                 list.contains(&index)
             })
     };
-    let source = &graph.layerless_nodes[edge.source().node];
-    let target = &graph.layerless_nodes[edge.target().node];
+    // The ends of an inside self loop are dummies that stand for no port of the input, so the
+    // importer marks the edge. Indexing is safe after `attached`: it saw both nodes.
     attached(edge.source(), true)
         && attached(edge.target(), false)
-        && ((is_input_end(source) && is_input_end(target))
-            || is_inside_self_loop(edge, source, target))
-}
-
-/// Whether the edge is an inside self loop: both ends are external port dummies of one node.
-///
-/// `ElkGraphImporter` makes these dummies for the loop, and they stand for no port of the input.
-fn is_inside_self_loop(edge: &crate::graph::LayeredEdge, source: &LNode, target: &LNode) -> bool {
-    source.external_port().is_some()
-        && target.external_port().is_some()
-        && !edge.source_node_id.is_empty()
-        && edge.source_node_id == edge.target_node_id
+        && (edge.inside_self_loop
+            || (is_input_end(&graph.layerless_nodes[edge.source().node])
+                && is_input_end(&graph.layerless_nodes[edge.target().node])))
 }
 
 /// Whether a node stands for something the input has: a node, or a port of the graph's own node.
