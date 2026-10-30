@@ -488,7 +488,7 @@ fn a_dropped_node_in_a_layer_is_an_error() {
 
     assert_eq!(
         error,
-        ComponentError::InvalidReference {
+        ComponentError::DroppedReference {
             kind: "layer node",
             index: 2
         }
@@ -510,7 +510,7 @@ fn a_node_that_holds_a_graph_after_a_dropped_node_is_an_error() {
 
     assert_eq!(
         error,
-        ComponentError::InvalidReference {
+        ComponentError::DroppedReference {
             kind: "graph owner after a dropped node",
             index: 4
         }
@@ -643,7 +643,7 @@ fn dropping_a_node_that_does_not_exist_is_an_error() {
 
     assert_eq!(
         error,
-        ComponentError::InvalidReference {
+        ComponentError::DroppedReference {
             kind: "dropped node",
             index: 9
         }
@@ -679,7 +679,7 @@ fn an_edge_that_names_a_missing_node_is_an_error_not_a_panic() {
 
     assert_eq!(
         error,
-        ComponentError::InvalidReference {
+        ComponentError::DroppedReference {
             kind: "port node",
             index: 9
         }
@@ -740,4 +740,23 @@ fn a_component_drops_a_node_between_split_and_combine() {
     let edge = &graphs.root().edges[EdgeId::new(0)];
     assert_eq!(node_name(graphs.root(), edge.source().node), "x");
     assert_eq!(node_name(graphs.root(), edge.target().node), "y");
+}
+
+// Mutation: in `drop_nodes`, filter the dropped nodes out of `hidden_nodes` before the
+// renumbering. A step that still holds a dropped node then loses it silently.
+#[test]
+fn a_reference_that_a_kept_list_holds_to_a_dropped_node_is_an_error() {
+    let mut graph = graph_with_a_node_to_drop();
+    graph.hidden_nodes.push(NodeId::new(2));
+    let mut graphs = GraphArena::new(graph);
+
+    let error = drop_nodes(&mut graphs, GraphId::ROOT, &[NodeId::new(2)]).unwrap_err();
+
+    assert_eq!(
+        error,
+        ComponentError::DroppedReference {
+            kind: "hidden node",
+            index: 2
+        }
+    );
 }

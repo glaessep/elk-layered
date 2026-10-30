@@ -1103,6 +1103,45 @@ fn the_end_labels_of_a_dropped_replacement_go_back_to_their_edge() {
     assert_eq!(labels, ["tail"]);
 }
 
+// Mutation: in `release_temporary_north_south_dummies`, release a replacement that still has
+// an edge. The drop then breaks that edge, and the routing fails.
+#[test]
+fn a_replacement_that_still_has_an_edge_stays() {
+    let mut graphs = graph_with_a_released_replacement();
+    let graph = graphs.root_mut();
+    let a = graph.node_named("a");
+    let r = graph.node_named("r");
+    let a_out = graph
+        .add_port(a, PortType::Output, PortSide::East, Default::default())
+        .unwrap();
+    graph
+        .add_edge(LayeredEdge::new(
+            "a-r".to_string(),
+            a_out,
+            PortRef {
+                node: r,
+                port: PortId::new(0),
+            },
+        ))
+        .unwrap();
+
+    execute_in_arena(
+        &mut graphs,
+        GraphId::ROOT,
+        false,
+        Processor::Intermediate(IntermediateProcessor::HierarchicalPortOrthogonalEdgeRouter),
+    )
+    .unwrap();
+
+    let graph = graphs.root();
+    let names = graph
+        .layerless_nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["a", "o", "r"]);
+}
+
 #[test]
 fn assembler_schedules_the_source_ported_processors_up_to_p3() {
     assert_eq!(

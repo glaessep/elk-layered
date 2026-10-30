@@ -2496,3 +2496,46 @@ fn push_output_node(graph: &mut LGraph, id: &str) -> NodeId {
         .unwrap();
     node
 }
+
+// Mutation: in `postprocess_end_labels`, leave out the branch for a node outside a layer. The
+// label then gets the place of the cell, which Java never gives it.
+#[test]
+fn end_label_postprocessor_hands_back_the_labels_of_a_node_outside_a_layer_unplaced() {
+    use crate::graph::LabelCellLayout;
+    use crate::intermediate::end_label_postprocessor::postprocess_end_labels;
+
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    let a = push_normal_node(&mut graph, "a");
+    let b = push_normal_node(&mut graph, "b");
+    let b_out = graph
+        .add_port(b, PortType::Output, PortSide::East, Default::default())
+        .unwrap();
+    let edge = add_test_edge(&mut graph, "b-a", b, b_out.port.index(), a, 0);
+    graph.set_node_layer(a, 0);
+    let mut label = LLabel::new("tail", 20.0, 10.0);
+    label.end_label_edge = Some(edge);
+    label.position = LPoint { x: 1.0, y: 2.0 };
+    let port = &mut graph.layerless_nodes[b].ports[b_out.port];
+    port.end_labels.push(label);
+    port.end_label_cell = Some(LabelCellLayout {
+        position: LPoint { x: 50.0, y: 60.0 },
+        size: LSize {
+            width: 20.0,
+            height: 10.0,
+        },
+        horizontal_layout: true,
+        horizontal_alignment: Default::default(),
+        vertical_alignment: Default::default(),
+    });
+
+    postprocess_end_labels(&mut graph);
+
+    let labels = &graph.edges[edge].labels;
+    assert_eq!(labels.len(), 1);
+    assert_eq!(labels[0].position, LPoint { x: 1.0, y: 2.0 });
+    assert!(
+        graph.layerless_nodes[b].ports[b_out.port]
+            .end_label_cell
+            .is_none()
+    );
+}

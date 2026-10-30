@@ -25,6 +25,13 @@ pub enum ComponentError {
     InvalidReference { kind: &'static str, index: usize },
     #[error("ELK component packing requires finite nonnegative geometry and spacing")]
     InvalidGeometry,
+    /// `drop_nodes` met a reference it cannot renumber. This is a bug in the processors, never
+    /// caller input.
+    #[error(
+        "dropping the temporary dummies after the hierarchical port routing left a {kind} \
+         reference {index} that names no node or edge"
+    )]
+    DroppedReference { kind: &'static str, index: usize },
 }
 
 pub(crate) struct Component {
@@ -379,6 +386,21 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
 /// graph inside it names it in `GraphParent.node`, and during a component split that field keeps
 /// the node's index in the whole graph, so this function cannot map it.
 pub(crate) fn drop_nodes(
+    graphs: &mut GraphArena,
+    id: GraphId,
+    dropped: &[NodeId],
+) -> Result<(), ComponentError> {
+    // The renumbering shares its helpers with the component split, which report
+    // `InvalidReference`. Here no component is involved, so the error says what really failed.
+    drop_nodes_renumbered(graphs, id, dropped).map_err(|error| match error {
+        ComponentError::InvalidReference { kind, index } => {
+            ComponentError::DroppedReference { kind, index }
+        }
+        other => other,
+    })
+}
+
+fn drop_nodes_renumbered(
     graphs: &mut GraphArena,
     id: GraphId,
     dropped: &[NodeId],
