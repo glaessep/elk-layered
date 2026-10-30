@@ -1740,3 +1740,110 @@ fn the_port_sides_are_kept_by_port_position_for_nodes_with_a_graph_only() {
     assert_eq!(sides[holder], vec![PortSide::North, PortSide::West]);
     assert!(sides[plain].is_empty());
 }
+
+/// A hierarchy edge from inside `group` to `other`, with one head label when `labelled`.
+fn hierarchy_edge_with_head_label(id: &str, labelled: bool) -> HierarchyEdge {
+    let mut label = LLabel::new(id, 12.0, 10.0);
+    label.placement = EdgeLabelPlacement::Head;
+    HierarchyEdge {
+        id: id.into(),
+        source_node_id: "A".into(),
+        target_node_id: "B".into(),
+        source_port_key: "A:source".into(),
+        target_port_key: "B:target".into(),
+        source_port_named: false,
+        target_port_named: false,
+        source_path: steps(&["group"]),
+        target_path: steps(&["other"]),
+        labels: if labelled { vec![label] } else { Vec::new() },
+        minlen: 1,
+        model_order: None,
+        priority_direction: 0,
+        priority_shortness: 0,
+        priority_straightness: 0,
+    }
+}
+
+// Mutation: in `first_put_order_of_labelled_edges`, leave out the early return for fewer than two
+// labelled edges. The map then holds the one labelled edge `a`. Insert the ids of the edges
+// without a label too (leave out the `labelled.contains` test): the map then holds `u`.
+#[test]
+fn the_first_put_order_is_built_only_for_two_labelled_edges() {
+    let segments_of = |ids: &[(&str, bool)]| {
+        ids.iter()
+            .flat_map(|(id, labelled)| {
+                materialize_hierarchy_edge_segments(&hierarchy_edge_with_head_label(id, *labelled))
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let one_labelled = segments_of(&[("u", false), ("a", true)]);
+    assert!(first_put_order_of_labelled_edges(&one_labelled).is_empty());
+
+    // `u` has no label, and its segments come first. `b` is before `a`: ids sort the other way.
+    let two_labelled = segments_of(&[("u", false), ("b", true), ("a", true)]);
+    let order = first_put_order_of_labelled_edges(&two_labelled);
+    let first_position = |id: &str| {
+        two_labelled
+            .iter()
+            .position(|scoped| scoped.edge.id == id)
+            .unwrap()
+    };
+    assert_eq!(order.len(), 2);
+    assert_eq!(order["b"], first_position("b"));
+    assert_eq!(order["a"], first_position("a"));
+    assert!(order["b"] < order["a"]);
+}
+
+// Mutation: in `order_labels_of_merged_edges`, give a label with no original edge the rank 0
+// instead of `usize::MAX`. It then comes first. Reverse the labels after the sort: `b` and `none`
+// then come first, and `a2` comes before `a1`.
+#[test]
+fn merged_labels_follow_the_first_put_order_and_a_label_without_an_edge_goes_last() {
+    let mut graph = LGraph::new("g", LayeredOptions::default());
+    for id in ["x", "y"] {
+        graph.layerless_nodes.push(LNode::new(id, 10.0, 10.0, None));
+    }
+    let out = graph
+        .add_port(
+            NodeId::new(0),
+            PortType::Output,
+            PortSide::East,
+            LPoint::default(),
+        )
+        .unwrap();
+    let inp = graph
+        .add_port(
+            NodeId::new(1),
+            PortType::Input,
+            PortSide::West,
+            LPoint::default(),
+        )
+        .unwrap();
+    let edge = graph
+        .add_edge(LayeredEdge::new("merged", out, inp))
+        .unwrap();
+    graph.edges[edge].labels = [
+        ("b", Some("b")),
+        ("none", None),
+        ("a1", Some("a")),
+        ("a2", Some("a")),
+    ]
+    .into_iter()
+    .map(|(text, original)| {
+        let mut label = LLabel::new(text, 10.0, 10.0);
+        label.original_label_edge = original.map(str::to_string);
+        label
+    })
+    .collect();
+    let order = HashMap::from([("a".to_string(), 0), ("b".to_string(), 1)]);
+
+    order_labels_of_merged_edges(&mut graph, &[edge], &order);
+
+    let texts = graph.edges[edge]
+        .labels
+        .iter()
+        .map(|label| label.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(texts, ["a1", "a2", "b", "none"]);
+}

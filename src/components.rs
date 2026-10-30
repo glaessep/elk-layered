@@ -54,12 +54,8 @@ pub(crate) struct Component {
 ///   under new, component-local indices.
 /// - The graphs inside the root's nodes are shared, so they cannot be copied per component.
 ///   `split` renumbers their references to the root in place (the origin of an external port
-///   dummy, the port dummies, the cross-hierarchy edges), so that they match the component that
-///   holds the node. [`combine`] renumbers them back.
-/// - `GraphParent.node` of those graphs is not renumbered. It keeps naming the node's index in
-///   the root, which the root still holds, and nothing reads it while components run: only
-///   compound preprocessing reads it, and that never runs after `split`. `combine` puts every
-///   original node back at its original index, so the value is right again afterwards.
+///   dummy, the port dummies, the cross-hierarchy edges, and `GraphParent.node`), so that they
+///   match the component that holds the node. [`combine`] renumbers them back.
 /// - After an error between `split` and the end of `combine`, the references of the nested graphs
 ///   are half renumbered, and `graphs` is not valid. The caller drops it. The one caller,
 ///   `execute_ported_processors`, hands the error up, and `layout` drops the graphs.
@@ -79,6 +75,23 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
     }
     if !graph.hierarchy_edges.is_empty() || !graph.cross_hierarchy_edges.is_empty() {
         return Err(ComponentError::HierarchyEdges.into());
+    }
+    // A graph inside a node names that node, as `drop_nodes` checks too. Mapping a stale name would
+    // point the graph at another node without an error.
+    for (node, data) in graph.nodes_with_ids() {
+        if let Some(nested) = data.nested_graph
+            && graphs[nested].parent
+                != Some(GraphParent {
+                    graph: graph.id,
+                    node,
+                })
+        {
+            return Err(ComponentError::InvalidReference {
+                kind: "graph parent",
+                index: node.index(),
+            }
+            .into());
+        }
     }
     let node_count = graph.layerless_nodes.len();
     let mut owners = IdVec::filled(node_count, usize::MAX);
@@ -373,15 +386,6 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     remap_graph_references(graph, graph.id, nodes, edges)
 }
 
-/// Whether the root graph of the run stands in for a component of a split.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ComponentSplit {
-    /// Between `split` and the end of `combine`.
-    Active,
-    /// Every other run: a flat run without components, and a compound run.
-    Inactive,
-}
-
 /// Takes the nodes `dropped` out of the graph `id`, together with every edge that ends at one of
 /// them. The other nodes and edges keep their order and close the gaps, and every reference to
 /// them moves along: in the graph, in the graphs inside its nodes, and in the graphs above it.
@@ -393,19 +397,16 @@ pub(crate) enum ComponentSplit {
 ///
 /// A dropped node must hold no graph.
 ///
-/// The graph inside a kept node names it in `GraphParent.node`. Outside a component split, this
-/// function renumbers that field with the node. During a split (`split` is `Active`), the field
-/// keeps the node's index in the whole graph on purpose, so this function cannot map it. A node
-/// that holds a graph must then come before every dropped node, so that it keeps its id.
+/// The graph inside a kept node names it in `GraphParent.node`. This function renumbers that
+/// field with the node, like every other reference.
 pub(crate) fn drop_nodes(
     graphs: &mut GraphArena,
     id: GraphId,
     dropped: &[NodeId],
-    split: ComponentSplit,
 ) -> Result<(), ComponentError> {
     // The renumbering shares its helpers with the component split, which report
     // `InvalidReference`. Here no component is involved, so the error says what really failed.
-    drop_nodes_renumbered(graphs, id, dropped, split).map_err(|error| match error {
+    drop_nodes_renumbered(graphs, id, dropped).map_err(|error| match error {
         ComponentError::InvalidReference { kind, index } => {
             ComponentError::DroppedReference { kind, index }
         }
@@ -417,11 +418,10 @@ fn drop_nodes_renumbered(
     graphs: &mut GraphArena,
     id: GraphId,
     dropped: &[NodeId],
-    split: ComponentSplit,
 ) -> Result<(), ComponentError> {
-    let Some(&first) = dropped.iter().min() else {
+    if dropped.is_empty() {
         return Ok(());
-    };
+    }
     let graph = &graphs[id];
     let mut keep_node = IdVec::<NodeId, bool>::filled(graph.layerless_nodes.len(), true);
     for &node in dropped {
@@ -439,25 +439,13 @@ fn drop_nodes_renumbered(
             });
         }
     }
-    if split == ComponentSplit::Active
-        && let Some((owner, _)) = graph
-            .nodes_with_ids()
-            .find(|(node, data)| data.nested_graph.is_some() && *node >= first)
-    {
-        return Err(ComponentError::InvalidReference {
-            kind: "graph owner after a dropped node",
-            index: owner.to_index(),
-        });
-    }
-    if split == ComponentSplit::Inactive
-        && let Some((owner, _)) = graph.nodes_with_ids().find(|(_, data)| {
-            data.nested_graph.is_some_and(|nested| {
-                graphs[nested]
-                    .parent
-                    .is_none_or(|parent| parent.graph != id)
-            })
+    if let Some((owner, _)) = graph.nodes_with_ids().find(|(node, data)| {
+        data.nested_graph.is_some_and(|nested| {
+            graphs[nested]
+                .parent
+                .is_none_or(|parent| parent.graph != id || parent.node != *node)
         })
-    {
+    }) {
         // The check runs before anything changes, like the others, and names the id before the
         // drop.
         return Err(ComponentError::InvalidReference {
@@ -520,20 +508,6 @@ fn drop_nodes_renumbered(
     for other in nested.into_iter().chain(above) {
         remap_graph_references(&mut graphs[other], id, &node_map, &edge_map)?;
     }
-    if split == ComponentSplit::Inactive {
-        // The nodes are in their new places now, so each holder names the id it has now. A node
-        // before the first dropped one kept its id. Every holder was checked above.
-        let holders = graphs[id]
-            .nodes_with_ids()
-            .skip(first.to_index())
-            .filter_map(|(node, data)| data.nested_graph.map(|nested| (node, nested)))
-            .collect::<Vec<_>>();
-        for (node, nested) in holders {
-            if let Some(parent) = &mut graphs[nested].parent {
-                parent.node = node;
-            }
-        }
-    }
     Ok(())
 }
 
@@ -554,8 +528,8 @@ fn renumber<I: VecId>(keep: &IdVec<I, bool>) -> (IdVec<I, Option<I>>, IdVec<I, I
 }
 
 /// Maps the references that the graphs inside the component's nodes hold to the component's
-/// graph: the origin of an external port dummy, and the cross-hierarchy edges that name an edge
-/// of it. `graph` is the component, and the graphs it holds are in `graphs`.
+/// graph: the origin of an external port dummy, the port dummies, the cross-hierarchy edges that
+/// name an edge of it, and the parent node of a graph. `graph` is the component, and the graphs it holds are in `graphs`.
 fn remap_nested_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     graphs: &mut GraphArena,
     graph: &LGraph,
@@ -585,6 +559,11 @@ fn remap_graph_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     nodes: &IdVec<NodeId, N>,
     edges: &IdVec<EdgeId, E>,
 ) -> Result<(), ComponentError> {
+    if let Some(parent) = &mut current.parent
+        && parent.graph == graph_id
+    {
+        parent.node = map_id(nodes, parent.node, "graph parent node")?;
+    }
     for node in &mut current.layerless_nodes {
         if let Some(origin) = node
             .external_port_mut()
@@ -755,11 +734,60 @@ pub(crate) fn combine(
     let mut cyclic = false;
     for mut component in components {
         let mut node_map = component.original_nodes;
-        let added_nodes = component.graph.layerless_nodes.len() - node_map.len();
+        // A component may add nodes, such as temporary dummies, but never drop one of its own: the
+        // maps below, and with them every reference of the nested graphs, would then point at the
+        // wrong whole-graph node. `drop_nodes` would let it, so this checks, for edges too. The
+        // importer refuses duplicate ids, so an original id names one node. The check misses a drop
+        // only if an added node reuses the id of the dropped one.
+        let added_nodes = component
+            .graph
+            .layerless_nodes
+            .len()
+            .checked_sub(node_map.len())
+            .ok_or(ComponentError::InvalidReference {
+                kind: "component node count",
+                index: node_map.len(),
+            })?;
+        for (local, &original) in node_map.iter_with_ids() {
+            let whole = graphs
+                .root()
+                .layerless_nodes
+                .get(original)
+                .map(|node| node.id.as_str());
+            if whole != Some(component.graph.layerless_nodes[local].id.as_str()) {
+                return Err(ComponentError::InvalidReference {
+                    kind: "component node",
+                    index: original.index(),
+                }
+                .into());
+            }
+        }
         node_map.extend((next_node..next_node + added_nodes).map(NodeId::new));
         next_node += added_nodes;
         let mut edge_map = component.original_edges;
-        let added_edges = component.graph.edges.len() - edge_map.len();
+        let added_edges = component
+            .graph
+            .edges
+            .len()
+            .checked_sub(edge_map.len())
+            .ok_or(ComponentError::InvalidReference {
+                kind: "component edge count",
+                index: edge_map.len(),
+            })?;
+        for (local, &original) in edge_map.iter_with_ids() {
+            let whole = graphs
+                .root()
+                .edges
+                .get(original)
+                .map(|edge| edge.id.as_str());
+            if whole != Some(component.graph.edges[local].id.as_str()) {
+                return Err(ComponentError::InvalidReference {
+                    kind: "component edge",
+                    index: original.index(),
+                }
+                .into());
+            }
+        }
         edge_map.extend((next_edge..next_edge + added_edges).map(EdgeId::new));
         next_edge += added_edges;
         component.graph.clear_layers();

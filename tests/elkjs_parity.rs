@@ -15,7 +15,7 @@ use serde_json::Value;
 
 /// Cases whose feature elk-layered does not have yet, each with the issue that adds it. A case
 /// leaves this list in the pull request that makes it pass.
-const NOT_YET: &[(&str, &str)] = &[("random-group-port-sizes/r013", "#62")];
+const NOT_YET: &[(&str, &str)] = &[];
 
 fn cases_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/elkjs")
@@ -479,6 +479,12 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 98. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), read the side
 //    of the first port for every port of the node (`.get(0)`): 33 cases, such as
 //    random-group-port-sizes/r009, r054 and r057.
+// 99. In `introduce_source_ported_scoped_edge_segments` (src/compound.rs), skip
+//    `order_labels_of_merged_edges`: 4 cases, ports-head-labels-from-two-groups-at-one-port,
+//    ports-tail-labels-to-two-groups-from-one-port,
+//    ports-head-labels-from-three-groups-at-one-port and random-group-port-sizes/r013.
+//    Rank the edges by their last segment instead of their first (insert without the
+//    `contains_key` check in `first_put_order_of_labelled_edges`): the three new cases.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
