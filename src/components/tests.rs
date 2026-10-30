@@ -840,11 +840,9 @@ fn a_component_drops_a_node_between_split_and_combine() {
     assert_eq!(node_name(graphs.root(), edge.target().node), "y");
 }
 
-// Mutation: leave out the `GraphParent.node` mapping in `remap_graph_references`. The graph inside
-// `holder` then still names node 2 of the whole graph right after the split. Leave out the nested
-// remap in `combine`: the graph keeps the local id 1 after `combine`.
-#[test]
-fn a_node_that_holds_a_graph_keeps_its_parent_link_through_split_drop_and_combine() {
+/// The nodes `alone`, `x` and `holder`, with the edge `x -> holder`, and a graph inside `holder`.
+/// `split` makes two components: `alone`, and `x` with `holder`.
+fn graphs_with_a_holder_in_a_component() -> (GraphArena, GraphId) {
     let mut graph = LGraph::new("g", LayeredOptions::default());
     for id in ["alone", "x", "holder"] {
         graph.layerless_nodes.push(LNode::new(id, 10.0, 10.0, None));
@@ -872,14 +870,40 @@ fn a_node_that_holds_a_graph_keeps_its_parent_link_through_split_drop_and_combin
         NodeId::new(2),
         LGraph::new("inside", LayeredOptions::default()),
     );
+    (graphs, inside)
+}
+
+// Mutation: in `drop_nodes`, leave out the `remap_graph_references` calls for the graphs inside
+// the nodes. The graph inside `holder` then still names node 1 after `x` is gone, and node 1 is
+// past the end of the component. Leave out the `GraphParent.node` mapping in
+// `remap_graph_references`: the graph names node 2 of the whole graph right after the split.
+#[test]
+fn a_holder_after_a_dropped_node_in_a_component_moves_down() {
+    let (mut graphs, inside) = graphs_with_a_holder_in_a_component();
     let parent = |graphs: &GraphArena| graphs[inside].parent.unwrap();
     assert_eq!(parent(&graphs).node, NodeId::new(2));
 
     let mut components = split(&mut graphs).unwrap().unwrap();
 
-    // `x` and `holder` are the second component: node 1 of the whole graph is node 0 there, and
-    // `holder` is node 1.
+    // `x` is node 0 of the second component, and `holder` is node 1.
     assert_eq!(parent(&graphs).node, NodeId::new(1));
+    std::mem::swap(&mut graphs[GraphId::ROOT], &mut components[1].graph);
+    let x = graphs.root().node_named("x");
+    // The routing detaches the edge of a node it replaces before the drop.
+    graphs.root_mut().detach_edge(EdgeId::new(0));
+    drop_nodes(&mut graphs, GraphId::ROOT, &[x]).unwrap();
+
+    assert_eq!(parent(&graphs).node, NodeId::new(0));
+    assert_eq!(node_name(graphs.root(), parent(&graphs).node), "holder");
+}
+
+// Mutation: leave the `GraphParent.node` mapping out of `remap_graph_references`, or the nested
+// remap out of `combine`. The graph inside `holder` then names node 2 or node 1 after `combine`.
+#[test]
+fn a_holder_gets_its_whole_graph_id_back_after_a_drop_in_its_component() {
+    let (mut graphs, inside) = graphs_with_a_holder_in_a_component();
+    let mut components = split(&mut graphs).unwrap().unwrap();
+    // A processor adds `r` after the original nodes, and drops it again.
     let component = &mut components[1];
     component
         .graph
@@ -889,13 +913,89 @@ fn a_node_that_holds_a_graph_keeps_its_parent_link_through_split_drop_and_combin
     let r = graphs.root().node_named("r");
     drop_nodes(&mut graphs, GraphId::ROOT, &[r]).unwrap();
     std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
-    assert_eq!(parent(&graphs).node, NodeId::new(1));
 
     combine(&mut graphs, components).unwrap();
 
-    assert_eq!(parent(&graphs).graph, GraphId::ROOT);
-    assert_eq!(parent(&graphs).node, NodeId::new(2));
-    assert_eq!(node_name(graphs.root(), parent(&graphs).node), "holder");
+    let parent = graphs[inside].parent.unwrap();
+    assert_eq!(parent.graph, GraphId::ROOT);
+    assert_eq!(parent.node, NodeId::new(2));
+    assert_eq!(node_name(graphs.root(), parent.node), "holder");
+}
+
+// Mutation: leave out the check of `GraphParent.node` in `split`. The graph inside `holder` then
+// names node 1, `x`, and `split` maps it to the local id of `x` without an error.
+#[test]
+fn a_graph_whose_parent_node_is_not_its_holder_is_an_error_in_split() {
+    let (mut graphs, inside) = graphs_with_a_holder_in_a_component();
+    graphs[inside].parent = Some(crate::graph::GraphParent {
+        graph: GraphId::ROOT,
+        node: NodeId::new(1),
+    });
+
+    let error = split(&mut graphs).err().unwrap();
+
+    assert!(matches!(
+        error,
+        crate::pipeline::PipelineError::Component(ComponentError::InvalidReference {
+            kind: "graph parent",
+            index: 2
+        })
+    ));
+    assert_eq!(graphs[inside].parent.unwrap().node, NodeId::new(1));
+}
+
+// Mutation: leave out the `checked_sub` for nodes in `combine`: the subtraction then overflows
+// and panics.
+#[test]
+fn a_component_that_lost_a_node_is_an_error_in_combine() {
+    let (mut graphs, _) = graphs_with_a_holder_in_a_component();
+    let mut components = split(&mut graphs).unwrap().unwrap();
+    std::mem::swap(&mut graphs[GraphId::ROOT], &mut components[1].graph);
+    // `holder` has no edge to `x` once `x` goes, so only `x` and its edge leave.
+    let x = graphs.root().node_named("x");
+    // The routing detaches the edge of a node it replaces before the drop.
+    graphs.root_mut().detach_edge(EdgeId::new(0));
+    drop_nodes(&mut graphs, GraphId::ROOT, &[x]).unwrap();
+    std::mem::swap(&mut graphs[GraphId::ROOT], &mut components[1].graph);
+
+    let error = combine(&mut graphs, components).unwrap_err();
+
+    assert!(matches!(
+        error,
+        crate::pipeline::PipelineError::Component(ComponentError::InvalidReference {
+            kind: "component node count",
+            index: 2
+        })
+    ));
+}
+
+// Mutation: leave out the comparison of the node ids in `combine`. `r` takes the place of `x`
+// in the count, and `holder` is then mapped to the whole-graph id of `x`.
+#[test]
+fn a_component_that_swapped_a_node_is_an_error_in_combine() {
+    let (mut graphs, _) = graphs_with_a_holder_in_a_component();
+    let mut components = split(&mut graphs).unwrap().unwrap();
+    let component = &mut components[1];
+    component
+        .graph
+        .layerless_nodes
+        .push(LNode::new("r", 1.0, 1.0, None));
+    std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
+    let x = graphs.root().node_named("x");
+    // The routing detaches the edge of a node it replaces before the drop.
+    graphs.root_mut().detach_edge(EdgeId::new(0));
+    drop_nodes(&mut graphs, GraphId::ROOT, &[x]).unwrap();
+    std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
+
+    let error = combine(&mut graphs, components).unwrap_err();
+
+    assert!(matches!(
+        error,
+        crate::pipeline::PipelineError::Component(ComponentError::InvalidReference {
+            kind: "component node",
+            index: 1
+        })
+    ));
 }
 
 // Mutation: in `drop_nodes`, filter the dropped nodes out of `hidden_nodes` before the

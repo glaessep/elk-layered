@@ -54,10 +54,8 @@ pub(crate) struct Component {
 ///   under new, component-local indices.
 /// - The graphs inside the root's nodes are shared, so they cannot be copied per component.
 ///   `split` renumbers their references to the root in place (the origin of an external port
-///   dummy, the port dummies, the cross-hierarchy edges, the parent node), so that they match the
-///   component that holds the node. [`combine`] renumbers them back.
-/// - `GraphParent.node` of those graphs is renumbered too, so that it names the node in the
-///   component that holds it. [`combine`] puts the whole-graph id back.
+///   dummy, the port dummies, the cross-hierarchy edges, and `GraphParent.node`), so that they
+///   match the component that holds the node. [`combine`] renumbers them back.
 /// - After an error between `split` and the end of `combine`, the references of the nested graphs
 ///   are half renumbered, and `graphs` is not valid. The caller drops it. The one caller,
 ///   `execute_ported_processors`, hands the error up, and `layout` drops the graphs.
@@ -77,6 +75,23 @@ pub(crate) fn split(graphs: &mut GraphArena) -> PipelineResult<Option<Vec<Compon
     }
     if !graph.hierarchy_edges.is_empty() || !graph.cross_hierarchy_edges.is_empty() {
         return Err(ComponentError::HierarchyEdges.into());
+    }
+    // A graph inside a node names that node, as `drop_nodes` checks too. Mapping a stale name would
+    // point the graph at another node without an error.
+    for (node, data) in graph.nodes_with_ids() {
+        if let Some(nested) = data.nested_graph
+            && graphs[nested].parent
+                != Some(GraphParent {
+                    graph: graph.id,
+                    node,
+                })
+        {
+            return Err(ComponentError::InvalidReference {
+                kind: "graph parent",
+                index: node.index(),
+            }
+            .into());
+        }
     }
     let node_count = graph.layerless_nodes.len();
     let mut owners = IdVec::filled(node_count, usize::MAX);
@@ -719,11 +734,44 @@ pub(crate) fn combine(
     let mut cyclic = false;
     for mut component in components {
         let mut node_map = component.original_nodes;
-        let added_nodes = component.graph.layerless_nodes.len() - node_map.len();
+        // A component may add nodes, such as temporary dummies, but never drop one of its own: the
+        // maps below, and with them every reference of the nested graphs, would then point at the
+        // wrong whole-graph node. `drop_nodes` would let it, so this checks.
+        let added_nodes = component
+            .graph
+            .layerless_nodes
+            .len()
+            .checked_sub(node_map.len())
+            .ok_or(ComponentError::InvalidReference {
+                kind: "component node count",
+                index: node_map.len(),
+            })?;
+        for (local, &original) in node_map.iter_with_ids() {
+            let whole = graphs
+                .root()
+                .layerless_nodes
+                .get(original)
+                .map(|node| node.id.as_str());
+            if whole != Some(component.graph.layerless_nodes[local].id.as_str()) {
+                return Err(ComponentError::InvalidReference {
+                    kind: "component node",
+                    index: original.index(),
+                }
+                .into());
+            }
+        }
         node_map.extend((next_node..next_node + added_nodes).map(NodeId::new));
         next_node += added_nodes;
         let mut edge_map = component.original_edges;
-        let added_edges = component.graph.edges.len() - edge_map.len();
+        let added_edges = component
+            .graph
+            .edges
+            .len()
+            .checked_sub(edge_map.len())
+            .ok_or(ComponentError::InvalidReference {
+                kind: "component edge count",
+                index: edge_map.len(),
+            })?;
         edge_map.extend((next_edge..next_edge + added_edges).map(EdgeId::new));
         next_edge += added_edges;
         component.graph.clear_layers();

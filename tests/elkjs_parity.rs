@@ -483,8 +483,8 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    `order_labels_of_merged_edges`: 4 cases, ports-head-labels-from-two-groups-at-one-port,
 //    ports-tail-labels-to-two-groups-from-one-port,
 //    ports-head-labels-from-three-groups-at-one-port and random-group-port-sizes/r013.
-//    Rank the edges by their last segment instead of their first (`insert` for `or_insert` in
-//    `first_put_order_of_labelled_edges`): the three new cases.
+//    Rank the edges by their last segment instead of their first (insert without the
+//    `contains_key` check in `first_put_order_of_labelled_edges`): the three new cases.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
