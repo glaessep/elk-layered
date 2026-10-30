@@ -58,13 +58,26 @@
 // INCLUDE_CHILDREN. elkjs crashes on some of these graphs; `--drop-crashes` lists them in
 // `dropped.txt`.
 //
+//   node random.mjs ../tests/elkjs/random-group-port-labels --group-port-labels && node record.mjs ../tests/elkjs/random-group-port-labels --drop-crashes
+//
+// With `--group-port-labels`, the generator is that of `--group-cross-ports`, with its own seed
+// and count, but most ports have labels, and a node or group draws its port label placement and
+// `portLabels.treatAsGroup` as in `--port-labels`. A group never sizes itself to its ports. So
+// groups get labelled ports under SEPARATE_CHILDREN and INCLUDE_CHILDREN.
+//
+//   node random.mjs ../tests/elkjs/random-group-port-sizes --group-port-sizes && node record.mjs ../tests/elkjs/random-group-port-sizes --drop-crashes
+//
+// With `--group-port-sizes`, the generator is that of `--group-port-labels`, with its own seed and
+// count, but a group may size itself to its ports: its `nodeSize.constraints` hold `PORTS`,
+// `PORT_LABELS` or both.
+//
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
 // a feature, and then write and record the whole corpus again.
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const USAGE =
-  "usage: node random.mjs <directory> [--group-ends | --ports | --group-ports | --cross-ports | --inline-labels | --one-sided | --port-labels | --group-cross-ports]";
+  "usage: node random.mjs <directory> [--group-ends | --ports | --group-ports | --cross-ports | --inline-labels | --one-sided | --port-labels | --group-cross-ports | --group-port-labels | --group-port-sizes]";
 const dir = process.argv[2];
 // A mode typed first would be read as the directory, and the script deletes the files of that
 // directory. So a directory that starts with `-` is refused, and so is any extra argument.
@@ -75,21 +88,24 @@ if (!dir || dir.startsWith("-") || process.argv.length > 4) {
 const mode = process.argv[3] ?? "";
 // A mistyped mode must not fall through to the default mode: that mode would delete the files of
 // the directory it was given.
-const MODES = ["", "--group-ends", "--ports", "--group-ports", "--cross-ports", "--inline-labels", "--one-sided", "--port-labels", "--group-cross-ports"];
+const MODES = ["", "--group-ends", "--ports", "--group-ports", "--cross-ports", "--inline-labels", "--one-sided", "--port-labels", "--group-cross-ports", "--group-port-labels", "--group-port-sizes"];
 if (!MODES.includes(mode)) {
   console.error(`unknown mode "${mode}"; use one of: ${MODES.slice(1).join(" ")}`);
   process.exit(2);
 }
 const groupEnds = mode === "--group-ends";
-const groupCrossPorts = mode === "--group-cross-ports";
+const groupPortLabels = mode === "--group-port-labels";
+const groupPortSizes = mode === "--group-port-sizes";
+const groupCrossPorts = mode === "--group-cross-ports" || groupPortLabels || groupPortSizes;
 const groupPorts = mode === "--group-ports" || groupCrossPorts;
 const crossPorts = mode === "--cross-ports";
 const inlineLabels = mode === "--inline-labels";
 const oneSided = mode === "--one-sided";
-const portLabels = mode === "--port-labels";
+// The modes whose ports have labels.
+const portLabels = mode === "--port-labels" || groupPortLabels || groupPortSizes;
 const withPorts = mode === "--ports" || groupPorts || crossPorts || oneSided || portLabels;
-const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200, "--inline-labels": 150, "--one-sided": 200, "--port-labels": 200, "--group-cross-ports": 200 }[mode] ?? 200;
-const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed, "--inline-labels": 0xaeed, "--one-sided": 0xbeed, "--port-labels": 0xceed, "--group-cross-ports": 0xdeed }[mode] ?? 0x5eed;
+const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200, "--inline-labels": 150, "--one-sided": 200, "--port-labels": 200, "--group-cross-ports": 200, "--group-port-labels": 200, "--group-port-sizes": 200 }[mode] ?? 200;
+const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed, "--inline-labels": 0xaeed, "--one-sided": 0xbeed, "--port-labels": 0xceed, "--group-cross-ports": 0xdeed, "--group-port-labels": 0xeeed, "--group-port-sizes": 0xfeed }[mode] ?? 0x5eed;
 
 // mulberry32: a small generator with a fixed seed. Its numbers only pick the graphs, so any
 // generator with a fixed seed would do.
@@ -138,7 +154,7 @@ function portLabelOptions(node) {
   ]);
   if (placement) options["elk.portLabels.placement"] = placement;
   if (rand.chance(0.25)) options["elk.portLabels.treatAsGroup"] = "false";
-  const constraints = rand.pick([
+  let constraints = rand.pick([
     null,
     null,
     "[PORTS]",
@@ -146,6 +162,9 @@ function portLabelOptions(node) {
     "[PORTS, PORT_LABELS]",
     "[PORTS, PORT_LABELS, NODE_LABELS, MINIMUM_SIZE]",
   ]);
+  // The draw above stays, so the node's other draws are the same in every mode. Only the group
+  // differs: it sizes itself to its ports in `--group-port-sizes` and never in `--group-port-labels`.
+  if (node.children && !groupPortSizes) constraints = null;
   if (constraints) options["elk.nodeSize.constraints"] = constraints;
   if (rand.chance(0.2)) options["elk.nodeSize.options"] = rand.pick(["[UNIFORM_PORT_SPACING]", "[PORTS_OVERHANG]"]);
   if (Object.keys(options).length === 0) delete node.layoutOptions;

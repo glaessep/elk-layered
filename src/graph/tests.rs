@@ -1163,3 +1163,66 @@ fn reordering_ports_changes_no_edge_and_no_other_reference() {
         .collect::<Vec<_>>();
     assert_eq!(listed, [PortSide::South, PortSide::East, PortSide::North]);
 }
+
+// --- `compute_inside_part`: ElkUtil.computeInsidePart. ---
+
+fn inside_part(side: PortSide, position: (f64, f64), offset: f64) -> f64 {
+    compute_inside_part(
+        LPoint {
+            x: position.0,
+            y: position.1,
+        },
+        LSize {
+            width: 30.0,
+            height: 14.0,
+        },
+        LSize {
+            width: 6.0,
+            height: 4.0,
+        },
+        offset,
+        side,
+    )
+}
+
+// Mutation: in the north arm, read the label width, or leave out the port height.
+#[test]
+fn the_inside_part_of_a_label_on_a_north_port_is_what_reaches_below_the_port() {
+    // 14 + 1 - (4 + 0) = 11.
+    assert_eq!(inside_part(PortSide::North, (0.0, 1.0), 0.0), 11.0);
+    // A label above the port's bottom edge has no inside part: 14 - 20 - 4 < 0.
+    assert_eq!(inside_part(PortSide::North, (0.0, -20.0), 0.0), 0.0);
+    // The border offset moves the node's border: 14 + 1 - (4 + 2) = 9.
+    assert_eq!(inside_part(PortSide::North, (0.0, 1.0), 2.0), 9.0);
+}
+
+// Mutation: in the south arm, add the label height, as the north arm does.
+#[test]
+fn the_inside_part_of_a_label_on_a_south_port_is_what_reaches_above_the_port() {
+    // -(-3) - 0 = 3.
+    assert_eq!(inside_part(PortSide::South, (0.0, -3.0), 0.0), 3.0);
+    assert_eq!(inside_part(PortSide::South, (0.0, 3.0), 0.0), 0.0);
+    assert_eq!(inside_part(PortSide::South, (0.0, -3.0), 1.5), 1.5);
+}
+
+// Mutation: in the east arm, read the y position.
+#[test]
+fn the_inside_part_of_a_label_on_an_east_port_is_what_reaches_left_of_the_port() {
+    assert_eq!(inside_part(PortSide::East, (-10.0, 0.0), 0.0), 10.0);
+    assert_eq!(inside_part(PortSide::East, (4.0, 0.0), 0.0), 0.0);
+    assert_eq!(inside_part(PortSide::East, (-10.0, 0.0), 4.0), 6.0);
+}
+
+// Mutation: in the west arm, read the label height, or leave out the port width.
+#[test]
+fn the_inside_part_of_a_label_on_a_west_port_is_what_reaches_right_of_the_port() {
+    // 30 + 1 - (6 + 0) = 25.
+    assert_eq!(inside_part(PortSide::West, (1.0, 0.0), 0.0), 25.0);
+    assert_eq!(inside_part(PortSide::West, (-40.0, 0.0), 0.0), 0.0);
+}
+
+// Mutation: let an undefined side count as north.
+#[test]
+fn a_port_without_a_side_has_no_inside_part() {
+    assert_eq!(inside_part(PortSide::Undefined, (-10.0, 1.0), 0.0), 0.0);
+}

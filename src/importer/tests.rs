@@ -1667,6 +1667,7 @@ fn input_port(id: &str, side: PortSide) -> ElkInputPort {
         net_flow: 0,
         child_edges: 0,
         connected_to_external_nodes: false,
+        inside_connections: false,
         labels: Vec::new(),
     }
 }
@@ -2155,4 +2156,224 @@ fn ports_get_a_model_order_when_the_graph_asks_for_one() {
         .map(|p| p.model_order)
         .collect();
     assert_eq!(orders, [None, None]);
+}
+
+// --- Labels of the ports of a graph's node: `transformExternalPort`. ---
+
+mod external_port_labels {
+    use super::*;
+    use crate::graph::{DummyLabelSpacings, LSize};
+    use crate::options::PortLabelPlacement;
+
+    fn label(text: &str, width: f64, height: f64) -> ElkInputLabel {
+        ElkInputLabel {
+            source_index: None,
+            text: text.to_string(),
+            width,
+            height,
+            placement: crate::graph::EdgeLabelPlacement::Center,
+            inline: false,
+            node_label_placement: None,
+            x: 0.0,
+            y: 0.0,
+        }
+    }
+
+    /// A port of 6 by 4 with the given labels. `child_edges` of 1 makes it external by itself.
+    fn port(
+        id: &str,
+        side: PortSide,
+        child_edges: usize,
+        labels: Vec<ElkInputLabel>,
+    ) -> ElkInputPort {
+        ElkInputPort {
+            child_edges,
+            labels,
+            ..input_port(id, side)
+        }
+    }
+
+    /// Imports a graph of one node, run with the given ports as the ports of its own node.
+    fn import(
+        ports: &[ElkInputPort],
+        placement: PortLabelPlacement,
+        spacings: DummyLabelSpacings,
+    ) -> GraphArena {
+        let mut input = graph(vec![node("A")], vec![]);
+        input.options.port_label_placement = placement;
+        input.options.port_constraints = PortConstraints::FixedSide;
+        let scope = ScopePorts {
+            ports,
+            node_size: LSize {
+                width: 80.0,
+                height: 40.0,
+            },
+            label_spacings: spacings,
+        };
+        import_scope(&input, &[], ElkPadding::uniform(0.0), scope)
+            .unwrap()
+            .graphs
+    }
+
+    fn defaults() -> DummyLabelSpacings {
+        DummyLabelSpacings::default()
+    }
+
+    fn dummy_labels(graph: &GraphArena, port: &str) -> Vec<(f64, f64)> {
+        let dummy = graph
+            .root()
+            .layerless_nodes
+            .iter()
+            .find(|node| node.id == format!("root:external:{port}"))
+            .expect("the port has a dummy");
+        dummy.ports[PortId::new(0)]
+            .labels
+            .iter()
+            .map(|label| (label.size.width, label.size.height))
+            .collect()
+    }
+
+    // Mutation: leave out the `inside_port_labels &&` branch of the external check, or let the
+    // OUTSIDE placement count as well.
+    #[test]
+    fn a_label_makes_a_port_external_only_under_inside_port_labels() {
+        let ports = [port("p", PortSide::East, 0, vec![label("req", 20.0, 10.0)])];
+        let inside = import(&ports, PortLabelPlacement::INSIDE, defaults());
+        assert!(inside.root().graph_properties.external_ports);
+        assert!(!inside.root().graph_properties.hyperedges);
+        let outside = import(&ports, PortLabelPlacement::OUTSIDE, defaults());
+        assert!(!outside.root().graph_properties.external_ports);
+        assert!(
+            outside
+                .layerless_nodes
+                .iter()
+                .all(|n| n.id != "root:external:p")
+        );
+    }
+
+    // Mutation: look for a label with text in the external check, which skips this port.
+    #[test]
+    fn a_label_without_text_still_makes_a_port_external_but_gets_no_dummy_label() {
+        let ports = [port("p", PortSide::East, 0, vec![label("", 20.0, 10.0)])];
+        let graph = import(&ports, PortLabelPlacement::INSIDE, defaults());
+        assert!(graph.root().graph_properties.external_ports);
+        assert_eq!(dummy_labels(&graph, "p"), vec![]);
+    }
+
+    // Mutation: make a port without labels external under INSIDE port labels.
+    #[test]
+    fn inside_port_labels_alone_make_no_port_external() {
+        let ports = [port("p", PortSide::East, 0, vec![])];
+        let graph = import(&ports, PortLabelPlacement::INSIDE, defaults());
+        assert!(!graph.root().graph_properties.external_ports);
+    }
+
+    // Mutation: keep the full size of the label under OUTSIDE port labels, or reduce the
+    // height of an east label.
+    #[test]
+    fn outside_labels_lose_the_size_along_the_axis_of_their_side() {
+        let ports = [
+            port("e", PortSide::East, 1, vec![label("req", 20.0, 10.0)]),
+            port("w", PortSide::West, 1, vec![label("req", 20.0, 10.0)]),
+            port("n", PortSide::North, 1, vec![label("req", 20.0, 10.0)]),
+            port("s", PortSide::South, 1, vec![label("req", 20.0, 10.0)]),
+        ];
+        let graph = import(&ports, PortLabelPlacement::OUTSIDE, defaults());
+        assert_eq!(dummy_labels(&graph, "e"), vec![(0.0, 10.0)]);
+        assert_eq!(dummy_labels(&graph, "w"), vec![(0.0, 10.0)]);
+        assert_eq!(dummy_labels(&graph, "n"), vec![(20.0, 0.0)]);
+        assert_eq!(dummy_labels(&graph, "s"), vec![(20.0, 0.0)]);
+    }
+
+    // Mutation: reduce the size of the labels under INSIDE port labels too.
+    #[test]
+    fn inside_labels_keep_their_size() {
+        let ports = [port("e", PortSide::East, 1, vec![label("req", 20.0, 10.0)])];
+        let graph = import(&ports, PortLabelPlacement::INSIDE, defaults());
+        assert_eq!(dummy_labels(&graph, "e"), vec![(20.0, 10.0)]);
+    }
+
+    // Mutation: keep the label size of a label with a position under fixed placement, or take
+    // the inside part with the border offset of the port.
+    #[test]
+    fn fixed_labels_keep_the_part_that_reaches_into_the_node() {
+        let mut east = label("req", 20.0, 10.0);
+        // The label starts 12 left of the port: 12 of it lie in the node.
+        east.x = -12.0;
+        let mut north = label("req", 20.0, 10.0);
+        // The label ends 7 below the top edge of the port's bottom (4): 10 + 1 - 4 = 7.
+        north.y = 1.0;
+        let ports = [
+            port("e", PortSide::East, 1, vec![east]),
+            port("n", PortSide::North, 1, vec![north]),
+        ];
+        let graph = import(&ports, PortLabelPlacement::FIXED, defaults());
+        assert_eq!(dummy_labels(&graph, "e"), vec![(12.0, 10.0)]);
+        assert_eq!(dummy_labels(&graph, "n"), vec![(20.0, 7.0)]);
+    }
+
+    // Mutation: give the dummy the label's size rather than reducing it under non-fixed OUTSIDE
+    // placement, which would read the position of a label that has none.
+    #[test]
+    fn non_fixed_outside_labels_ignore_their_position() {
+        let mut moved = label("req", 20.0, 10.0);
+        moved.x = -12.0;
+        let ports = [port("e", PortSide::East, 1, vec![moved])];
+        let graph = import(&ports, PortLabelPlacement::OUTSIDE, defaults());
+        assert_eq!(dummy_labels(&graph, "e"), vec![(0.0, 10.0)]);
+    }
+
+    // Mutation: copy the position of the label to the dummy's label only for fixed placement.
+    #[test]
+    fn a_dummy_label_keeps_the_position_of_its_label() {
+        let mut moved = label("req", 20.0, 10.0);
+        moved.x = 3.0;
+        moved.y = 5.0;
+        let ports = [port("e", PortSide::East, 1, vec![moved])];
+        let graph = import(&ports, PortLabelPlacement::INSIDE, defaults());
+        let dummy = graph
+            .root()
+            .layerless_nodes
+            .iter()
+            .find(|node| node.id == "root:external:e")
+            .unwrap();
+        let at = dummy.ports[PortId::new(0)].labels[0].position;
+        assert_eq!((at.x, at.y), (3.0, 5.0));
+    }
+
+    // Mutation: leave the label spacings of the dummy at their defaults.
+    #[test]
+    fn the_dummy_carries_the_label_spacings_of_the_parent() {
+        let ports = [port("e", PortSide::East, 1, vec![])];
+        let spacings = DummyLabelSpacings {
+            label_port_horizontal: 7.0,
+            label_port_vertical: 8.0,
+            label_label: 9.0,
+        };
+        let graph = import(&ports, PortLabelPlacement::OUTSIDE, spacings);
+        let dummy = graph
+            .root()
+            .layerless_nodes
+            .iter()
+            .find(|node| node.id == "root:external:e")
+            .unwrap();
+        assert_eq!(dummy.external_port().unwrap().label_spacings, spacings);
+    }
+
+    // Mutation: copy only the first label of the port.
+    #[test]
+    fn every_label_with_text_reaches_the_dummy_in_order() {
+        let ports = [port(
+            "e",
+            PortSide::East,
+            1,
+            vec![
+                label("a", 20.0, 10.0),
+                label("", 5.0, 5.0),
+                label("b", 30.0, 6.0),
+            ],
+        )];
+        let graph = import(&ports, PortLabelPlacement::INSIDE, defaults());
+        assert_eq!(dummy_labels(&graph, "e"), vec![(20.0, 10.0), (30.0, 6.0)]);
+    }
 }

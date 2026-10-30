@@ -22,7 +22,7 @@ use crate::components::ComponentError;
 use crate::compound::calc_port_side;
 use crate::error::Error;
 use crate::export::{self, LayoutResult, TransferInput};
-use crate::graph::{LPoint, LSize, PortSide, port_side_from_direction};
+use crate::graph::{DummyLabelSpacings, LPoint, LSize, PortSide, port_side_from_direction};
 use crate::importer::{
     self, ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, ElkInputPort, ParentSettings,
 };
@@ -30,7 +30,8 @@ use crate::layout_options::{
     self, EdgeSettings, LabelSettings, NodeSettings, OptionError, OptionProblem, PortSettings,
 };
 use crate::options::{
-    ElkDirection, HierarchyHandling, LayeredOptions, PortConstraints, SizeConstraints,
+    ElkDirection, HierarchyHandling, LayeredOptions, PortConstraints, PortLabelPlacement,
+    SizeConstraints,
 };
 use crate::phase::layering::LayeringError;
 use crate::pipeline::{self, PipelineError};
@@ -67,6 +68,8 @@ struct PortFacts {
     child_edges: usize,
     /// Ports `ElkGraphImporter.isConnectedToExternalNodes`.
     connected_to_external_nodes: bool,
+    /// Whether an edge at the port leads to or comes from a descendant of its node.
+    inside_connections: bool,
 }
 
 /// One node of the input, with what `layout` reads from it.
@@ -384,9 +387,6 @@ impl<'a> Tree<'a> {
             tree.edges_by_container[container].push(edge);
         }
         tree.count_port_facts();
-        // The graph inside a node with children reserves room for the labels of the node's ports:
-        // `ElkGraphImporter.transformExternalPort`, `CompoundGraphPreprocessor` and
-        // `LabelAndNodeSizeProcessor.placeExternalPortDummyLabels`. That part is not ported.
         for info in &tree.nodes {
             if info.children.is_empty() {
                 continue;
@@ -402,18 +402,6 @@ impl<'a> Tree<'a> {
                 return Err(Error::Unsupported {
                     element: node_element(&info.node.id),
                     feature: "sizing a node with children to its ports".to_string(),
-                });
-            }
-            // `ElkGraphImporter.transformPort` drops a label without text.
-            if let Some(port) = info
-                .node
-                .ports
-                .iter()
-                .find(|port| port.labels.iter().any(|label| !label.text.is_empty()))
-            {
-                return Err(Error::Unsupported {
-                    element: port_element(&port.id),
-                    feature: "a label on a port of a node with children".to_string(),
                 });
             }
         }
@@ -439,6 +427,7 @@ impl<'a> Tree<'a> {
                     facts.child_edges = (facts.child_edges + 1).min(2);
                 }
                 facts.connected_to_external_nodes |= outside;
+                facts.inside_connections |= !outside;
             }
             if let Some(port) = self.edges[index].target_port {
                 let from_child = self.nodes[source].parent == Some(target);
@@ -449,6 +438,7 @@ impl<'a> Tree<'a> {
                     facts.child_edges = (facts.child_edges + 1).min(2);
                 }
                 facts.connected_to_external_nodes |= outside;
+                facts.inside_connections |= !outside;
             }
         }
     }
@@ -712,6 +702,25 @@ impl<'a, 't> Work<'a, 't> {
                     .to_string(),
             });
         }
+        // The same lines read the parent for a port that holds a label and sits under `INSIDE`
+        // port labels: `checkExternalPorts` makes it external even without an edge.
+        if scope_info.parent.is_none()
+            && scope_info
+                .settings
+                .options
+                .port_label_placement
+                .contains(PortLabelPlacement::INSIDE)
+            && let Some(port) = scope_info
+                .node
+                .ports
+                .iter()
+                .find(|port| !port.labels.is_empty())
+        {
+            return Err(Error::Unsupported {
+                element: port_element(&port.id),
+                feature: "a labelled port of the root graph under inside port labels".to_string(),
+            });
+        }
         let run_nodes = self.run_nodes(scope, include);
         let in_run: HashSet<usize> = run_nodes.iter().copied().collect();
         // The nodes whose insides belong to this run.
@@ -903,6 +912,20 @@ impl<'a, 't> Work<'a, 't> {
             importer::ScopePorts {
                 ports: &scope_ports,
                 node_size: scope_size,
+                // `transformExternalPort` reads the label spacings from the parent of the node.
+                label_spacings: DummyLabelSpacings {
+                    label_port_horizontal: scope_input
+                        .parent_settings
+                        .options
+                        .spacing
+                        .label_port_horizontal,
+                    label_port_vertical: scope_input
+                        .parent_settings
+                        .options
+                        .spacing
+                        .label_port_vertical,
+                    label_label: scope_input.parent_settings.options.spacing.label_label,
+                },
             },
         )
         .map_err(|error| {
@@ -1049,6 +1072,7 @@ impl<'a, 't> Work<'a, 't> {
                 net_flow: facts.net_flow,
                 child_edges: facts.child_edges,
                 connected_to_external_nodes: facts.connected_to_external_nodes,
+                inside_connections: facts.inside_connections,
                 labels: port
                     .labels
                     .iter()

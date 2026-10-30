@@ -15,7 +15,7 @@ use serde_json::Value;
 
 /// Cases whose feature elk-layered does not have yet, each with the issue that adds it. A case
 /// leaves this list in the pull request that makes it pass.
-const NOT_YET: &[(&str, &str)] = &[];
+const NOT_YET: &[(&str, &str)] = &[("random-group-port-labels/r196", "#61")];
 
 fn cases_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/elkjs")
@@ -29,7 +29,8 @@ fn cases_dir() -> PathBuf {
 /// `tests/elkjs/random-inline-labels/`, whose centre labels are often inline,
 /// `tests/elkjs/random-one-sided/`, which use the one-sided greedy switch,
 /// `tests/elkjs/random-port-labels/`, whose ports have labels, and
-/// `tests/elkjs/random-group-cross-ports/`, whose groups have ports on all four sides.
+/// `tests/elkjs/random-group-cross-ports/`, whose groups have ports on all four sides,
+/// `tests/elkjs/random-group-port-labels/`, whose groups have labelled ports.
 fn cases() -> Vec<PathBuf> {
     let mut inputs = Vec::new();
     for dir in [
@@ -43,6 +44,7 @@ fn cases() -> Vec<PathBuf> {
         cases_dir().join("random-one-sided"),
         cases_dir().join("random-port-labels"),
         cases_dir().join("random-group-cross-ports"),
+        cases_dir().join("random-group-port-labels"),
     ] {
         let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|_| panic!("{} exists", dir.display()))
@@ -420,6 +422,28 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    greedy-switch-one-sided-port-order. Its node n1 has two free ports with edges to one port of
 //    the next layer, so the order of collection decides which entries merge.
 // 78. In the same function, walk the edges of each port in reverse: the same 1 case.
+// 79. In `import_external_ports` (src/importer.rs), leave the labels off the dummy of a port
+//    (`let _ = llabel;`): 24 cases, such as random-group-port-labels/r009, r011 and r013.
+// 80. In `reserve_room_for_port_labels` (src/compound.rs), keep the full size of a label under
+//    OUTSIDE port labels too (`if false`): 45 cases, such as random-group-port-labels/r005, r018
+//    and r022.
+// 81. In `place_external_port_dummy_labels` (src/intermediate/label_and_node_size_processor.rs),
+//    leave `- box_width` out of the x of an east label under INSIDE port labels: 12 cases, such
+//    as random-group-port-labels/r006, r015 and r033.
+// 82. In the same function, leave `- port_position.y` out of the y of an inside label below its
+//    port: 12 cases, such as random-group-port-labels/r006, r033 and r068.
+// 83. In `label_next_to_port`, put an inside label next to its port also when edges end there
+//    (`true`): 4 cases, such as random-group-port-labels/r097, r103 and r149.
+// 84. In the same function, ask an outside label for `connected_to_external_nodes` the wrong way
+//    round: 12 cases, such as random-group-port-labels/r033, r041 and r053.
+// 85. In `place_external_port_dummy_labels`, leave `port_position.y` out of the y of an outside
+//    east or west label below its port: 43 cases, such as random-group-port-labels/r005, r009
+//    and r011.
+// 86. In `transform_port` (src/importer.rs), leave `inside_connections` false: 4 cases, such as
+//    random-group-port-labels/r015, r103 and r120.
+// 87. In `size_node_and_place_ports_and_labels` (src/common/nodespacing.rs), read `nested_graph`
+//    for the compound flag instead of `compound_node`: 9 cases, such as
+//    random-group-port-labels/r015, r075 and r093.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

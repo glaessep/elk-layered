@@ -95,7 +95,7 @@ fn size_node_and_place_ports_and_labels(graph: &mut LGraph, node: NodeId) {
         constraints: data.port_constraints,
         label_placement: data.port_label_placement,
         treat_as_group: data.port_labels_treat_as_group,
-        compound: data.nested_graph.is_some(),
+        compound: data.compound_node,
         port_port_spacing: graph.options.spacing.port_port,
         label_port_horizontal: graph.options.spacing.label_port_horizontal,
         label_port_vertical: graph.options.spacing.label_port_vertical,

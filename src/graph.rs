@@ -336,6 +336,12 @@ pub struct LNode {
     /// Crate-visible: `GraphArena::nest` sets it, and the compound phases and the pipeline read it
     /// to reach the inner graph.
     pub(crate) nested_graph: Option<GraphId>,
+    /// `InternalProperties.COMPOUND_NODE`: the node has children in the input, or activates inside
+    /// self loops. Unlike `nested_graph`, it holds when a run lays out the node without its
+    /// children.
+    ///
+    /// Crate-visible: Plain data: the importer sets it, and the label and node size step reads it.
+    pub(crate) compound_node: bool,
     /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
     /// it.
     pub(crate) model_order: Option<usize>,
@@ -457,6 +463,58 @@ pub struct ExternalPortData {
     /// made. `GraphTransformer` turns the port but not this property, so in a vertical layout it
     /// keeps the coordinates from before the turn.
     pub anchor: LPoint,
+    /// The label spacings the dummy carries: `SPACING_LABEL_PORT_HORIZONTAL`,
+    /// `SPACING_LABEL_PORT_VERTICAL` and `SPACING_LABEL_LABEL`. `ElkGraphImporter` copies them from
+    /// the parent of the node. A dummy made by `CompoundGraphPreprocessor` keeps the defaults.
+    pub label_spacings: DummyLabelSpacings,
+}
+
+/// The label spacings of an external port dummy, which
+/// `LabelAndNodeSizeProcessor.placeExternalPortDummyLabels` and
+/// `HierarchicalPortOrthogonalEdgeRouter.restoreDummy` read.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DummyLabelSpacings {
+    /// `SPACING_LABEL_PORT_HORIZONTAL`.
+    pub label_port_horizontal: f64,
+    /// `SPACING_LABEL_PORT_VERTICAL`.
+    pub label_port_vertical: f64,
+    /// `SPACING_LABEL_LABEL`.
+    pub label_label: f64,
+}
+
+impl Default for DummyLabelSpacings {
+    /// The defaults of the three options, for a dummy that was given none.
+    fn default() -> Self {
+        Self {
+            label_port_horizontal: 1.0,
+            label_port_vertical: 1.0,
+            label_label: 0.0,
+        }
+    }
+}
+
+/// Ports `ElkUtil.computeInsidePart(KVector, KVector, KVector, double, PortSide)`: how far a port
+/// label reaches into the node behind its port. `label_position` is relative to the port.
+pub(crate) fn compute_inside_part(
+    label_position: LPoint,
+    label_size: LSize,
+    port_size: LSize,
+    port_border_offset: f64,
+    side: PortSide,
+) -> f64 {
+    match side {
+        PortSide::North => f64::max(
+            0.0,
+            label_size.height + label_position.y - (port_size.height + port_border_offset),
+        ),
+        PortSide::South => f64::max(0.0, -label_position.y - port_border_offset),
+        PortSide::East => f64::max(0.0, -label_position.x - port_border_offset),
+        PortSide::West => f64::max(
+            0.0,
+            label_size.width + label_position.x - (port_size.width + port_border_offset),
+        ),
+        PortSide::Undefined => 0.0,
+    }
 }
 
 impl Default for ExternalPortData {
@@ -473,6 +531,7 @@ impl Default for ExternalPortData {
             in_layer_constraint: InLayerConstraint::None,
             layer_constraint_explicit: false,
             anchor: LPoint::default(),
+            label_spacings: DummyLabelSpacings::default(),
         }
     }
 }
@@ -636,6 +695,7 @@ impl LNode {
             port_labels_treat_as_group: true,
             ports: NodePorts::default(),
             nested_graph: None,
+            compound_node: false,
             model_order,
             layer_index: None,
             layer_constraint: super::options::LayerConstraint::None,

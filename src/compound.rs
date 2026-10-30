@@ -10,10 +10,10 @@ use crate::graph::{
     CompoundEdgeSegment, CrossHierarchyEdge, EdgeId, EdgeLabelPlacement, ExternalPortData,
     GraphArena, GraphId, GraphNodeRef, GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep,
     IdVec, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, PortId, PortRef,
-    PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
+    PortSide, PortType, apply_port_index_to_dummy, compute_inside_part, create_external_port_dummy,
     port_side_from_direction,
 };
-use crate::options::{ElkDirection, PortConstraints};
+use crate::options::{ElkDirection, PortConstraints, PortLabelPlacement};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingCompoundSegment {
@@ -1506,61 +1506,121 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
             };
             if graph.layerless_nodes[node_index].ports[port_index]
                 .port_dummy
-                .is_some()
+                .is_none()
             {
-                continue;
-            }
+                let parent_port = PortRef {
+                    node: node_index,
+                    port: port_index,
+                };
+                let port = &graph.layerless_nodes[node_index].ports[port_index];
+                // `createExternalPortDummy(port, portConstraints, port.getSide(), ...)`: the node's
+                // constraints from before the dummies were linked, and the port's own side.
+                let (port_constraints, port_side) = (parent_constraints, port.side);
+                // ELK passes no position and no node size here: `new KVector()` and `null`. The node
+                // size only guards against a division by zero for fixed ratios, where ELK fails.
+                let dummy_node = nested_graph.push_node_with(|node| {
+                    let mut dummy = create_external_port_dummy(
+                        node,
+                        format!("external:{parent_node_id}"),
+                        format!("external:{parent_node_id}:0"),
+                        port.port_type,
+                        port_constraints,
+                        port_side,
+                        -net_flows
+                            .get(&(parent_node_id.clone(), port.id.clone(), port.named))
+                            .copied()
+                            .unwrap_or_else(|| port.net_flow()),
+                        LPoint::default(),
+                        port.size,
+                        parent_size,
+                        port.border_offset.unwrap_or(0.0),
+                        nested_direction,
+                        ExternalPortData {
+                            parent_port_key: Some(port.id.clone()),
+                            parent_port_type: Some(port.port_type),
+                            ..ExternalPortData::default()
+                        },
+                    );
+                    apply_port_index_to_dummy(&mut dummy, port_constraints, port.port_index);
+                    dummy
+                });
+                let dummy_side = nested_graph.layerless_nodes[dummy_node].external_port_side();
+                let dummy_border_offset = port.border_offset;
 
-            let parent_port = PortRef {
-                node: node_index,
-                port: port_index,
-            };
-            let port = &graph.layerless_nodes[node_index].ports[port_index];
-            // `createExternalPortDummy(port, portConstraints, port.getSide(), ...)`: the node's
-            // constraints from before the dummies were linked, and the port's own side.
-            let (port_constraints, port_side) = (parent_constraints, port.side);
-            // ELK passes no position and no node size here: `new KVector()` and `null`. The node
-            // size only guards against a division by zero for fixed ratios, where ELK fails.
-            let dummy_node = nested_graph.push_node_with(|node| {
-                let mut dummy = create_external_port_dummy(
-                    node,
-                    format!("external:{parent_node_id}"),
-                    format!("external:{parent_node_id}:0"),
-                    port.port_type,
-                    port_constraints,
-                    port_side,
-                    -net_flows
-                        .get(&(parent_node_id.clone(), port.id.clone(), port.named))
-                        .copied()
-                        .unwrap_or_else(|| port.net_flow()),
-                    LPoint::default(),
-                    port.size,
-                    parent_size,
-                    port.border_offset.unwrap_or(0.0),
-                    nested_direction,
-                    ExternalPortData {
-                        parent_port_key: Some(port.id.clone()),
-                        parent_port_type: Some(port.port_type),
-                        ..ExternalPortData::default()
-                    },
+                link_external_port_dummy(
+                    graph,
+                    parent_port,
+                    dummy_side,
+                    nested_graph_id,
+                    dummy_node,
+                    dummy_border_offset,
                 );
-                apply_port_index_to_dummy(&mut dummy, port_constraints, port.port_index);
-                dummy
-            });
-            let dummy_side = nested_graph.layerless_nodes[dummy_node].external_port_side();
-            let dummy_border_offset = port.border_offset;
-
-            link_external_port_dummy(
+                set_external_dummy_origin(nested_graph, dummy_node, graph_id, parent_port);
+            }
+            reserve_room_for_port_labels(
                 graph,
-                parent_port,
-                dummy_side,
-                nested_graph_id,
-                dummy_node,
-                dummy_border_offset,
+                node_index,
+                port_index,
+                nested_graph,
+                parent_constraints,
             );
-            set_external_dummy_origin(nested_graph, dummy_node, graph_id, parent_port);
         }
     }
+}
+
+/// Gives the dummy of a port, in the graph inside the port's node, a label for each label of the
+/// port, so the graph leaves room for them.
+///
+/// Ports the label loop of `CompoundGraphPreprocessor.transformHierarchyEdges`. A port that is
+/// placed outside needs room only inside the node: the label keeps its size along the side's axis
+/// only if its placement is fixed and the label reaches into the node.
+fn reserve_room_for_port_labels(
+    graph: &LGraph,
+    node: NodeId,
+    port: PortId,
+    nested_graph: &mut LGraph,
+    parent_constraints: PortConstraints,
+) {
+    let node_data = &graph.layerless_nodes[node];
+    let port_data = &node_data.ports[port];
+    let Some(dummy) = port_data.port_dummy else {
+        return;
+    };
+    let inside_port_labels = node_data
+        .port_label_placement
+        .contains(PortLabelPlacement::INSIDE);
+    let placement_fixed = node_data.port_label_placement.is_fixed();
+    let mut labels = Vec::with_capacity(port_data.labels.len());
+    for label in &port_data.labels {
+        let mut dummy_label = LLabel::new("", label.size.width, label.size.height);
+        // At this point the side of the port may not be known if the port constraints are free.
+        // Then the port ends up on the east or west side (ELK issue 596).
+        if !inside_port_labels {
+            let inside_part = if placement_fixed {
+                // Border offset 0: only the part of the label inside the node "after" the port.
+                compute_inside_part(
+                    label.position,
+                    label.size,
+                    port_data.size,
+                    0.0,
+                    port_data.side,
+                )
+            } else {
+                0.0
+            };
+            if parent_constraints == PortConstraints::Free
+                || matches!(port_data.side, PortSide::East | PortSide::West)
+            {
+                dummy_label.size.width = inside_part;
+            } else {
+                dummy_label.size.height = inside_part;
+            }
+        }
+        labels.push(dummy_label);
+    }
+    nested_graph.layerless_nodes[dummy.node].ports[PortId::new(0)]
+        .labels
+        .extend(labels);
 }
 
 #[derive(Debug, Clone)]
