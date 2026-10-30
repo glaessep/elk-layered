@@ -11,8 +11,8 @@
 mod group;
 
 use crate::graph::{
-    EdgeId, GraphArena, GraphId, IdVec, LGraph, LLabel, LPoint, LSize, NodeId, NodeTables, PortRef,
-    VecId,
+    EdgeId, GraphArena, GraphId, GraphParent, IdVec, LGraph, LLabel, LPoint, LSize, NodeId,
+    NodeTables, PortRef, VecId,
 };
 use crate::options::{HierarchyHandling, PortConstraints};
 use crate::pipeline::PipelineResult;
@@ -364,6 +364,109 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
         }
     }
     remap_graph_references(graph, graph.id, nodes, edges)
+}
+
+/// Takes the nodes `dropped` out of the graph `id`, together with every edge that ends at one of
+/// them. The other nodes and edges keep their order and close the gaps, and every reference to
+/// them moves along: in the graph, in the graphs inside its nodes, and in the graphs above it.
+///
+/// Used for the temporary replacements of north and south external port dummies. ELK makes them
+/// with `new LNode(graph)`, which never adds a node to `getLayerlessNodes()`, so they are gone
+/// once they leave their layer. A dropped node must be in no layer, and no node that stays may
+/// name it: such a reference is an error.
+///
+/// A node that holds a graph must come before every dropped node, so that it keeps its id. The
+/// graph inside it names it in `GraphParent.node`, and during a component split that field keeps
+/// the node's index in the whole graph, so this function cannot map it.
+pub(crate) fn drop_nodes(
+    graphs: &mut GraphArena,
+    id: GraphId,
+    dropped: &[NodeId],
+) -> Result<(), ComponentError> {
+    let Some(&first) = dropped.iter().min() else {
+        return Ok(());
+    };
+    let graph = &graphs[id];
+    let mut keep_node = IdVec::<NodeId, bool>::filled(graph.layerless_nodes.len(), true);
+    for &node in dropped {
+        *keep_node
+            .get_mut(node)
+            .ok_or(ComponentError::InvalidReference {
+                kind: "dropped node",
+                index: node.to_index(),
+            })? = false;
+    }
+    if let Some((owner, _)) = graph
+        .nodes_with_ids()
+        .find(|(node, data)| data.nested_graph.is_some() && *node >= first)
+    {
+        return Err(ComponentError::InvalidReference {
+            kind: "graph owner after a dropped node",
+            index: owner.to_index(),
+        });
+    }
+    let keep_edge = graph
+        .edges
+        .iter()
+        .map(|edge| keep_node[edge.source().node] && keep_node[edge.target().node])
+        .collect::<IdVec<EdgeId, bool>>();
+    let (node_map, kept_nodes) = renumber(&keep_node);
+    let (edge_map, _) = renumber(&keep_edge);
+
+    let graph = &mut graphs[id];
+    // A long edge dummy of an inverted port can name a port of a dropped node as its end. Java
+    // keeps that reference to a node that is gone, and no step after the routing reads it, so
+    // the end is cleared here instead of renumbered.
+    for node in graph.layerless_nodes.iter_mut() {
+        if let Some(ends) = node.long_edge_ends_mut() {
+            for end in [&mut ends.source, &mut ends.target] {
+                if end.is_some_and(|port| !keep_node[port.node]) {
+                    *end = None;
+                }
+            }
+        }
+    }
+    graph.tables = graph.tables.subset(&kept_nodes);
+    let nodes = std::mem::take(&mut graph.layerless_nodes);
+    graph.layerless_nodes = nodes
+        .into_iter()
+        .zip(keep_node.iter())
+        .filter_map(|(node, &keep)| keep.then_some(node))
+        .collect();
+    let edges = std::mem::take(&mut graph.edges);
+    graph.edges = edges
+        .into_iter()
+        .zip(keep_edge.iter())
+        .filter_map(|(edge, &keep)| keep.then_some(edge))
+        .collect();
+    remap_references(graph, &node_map, &edge_map)?;
+
+    let nested = graphs[id]
+        .layerless_nodes
+        .iter()
+        .filter_map(|node| node.nested_graph)
+        .flat_map(|nested| graphs.preorder(nested))
+        .collect::<Vec<_>>();
+    let mut above = Vec::new();
+    let mut parent = graphs[id].parent;
+    while let Some(GraphParent { graph, .. }) = parent {
+        above.push(graph);
+        parent = graphs[graph].parent;
+    }
+    for other in nested.into_iter().chain(above) {
+        remap_graph_references(&mut graphs[other], id, &node_map, &edge_map)?;
+    }
+    Ok(())
+}
+
+/// For a list of keep flags, the new id of each kept entry, and the old id of each new one.
+fn renumber<I: VecId>(keep: &IdVec<I, bool>) -> (IdVec<I, Option<I>>, IdVec<I, I>) {
+    let mut kept = IdVec::new();
+    let map = keep
+        .iter_with_ids()
+        .map(|(old, &keep)| keep.then(|| kept.push(old)))
+        .collect();
+    (map, kept)
 }
 
 /// Maps the references that the graphs inside the component's nodes hold to the component's

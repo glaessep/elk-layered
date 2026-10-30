@@ -3,13 +3,13 @@ use super::assembler::{
     Strategies, assemble, assemble_graph,
 };
 use super::compound::{CompoundRun, check_strategies, execute_compound_graph_round};
-use super::execute::{execute_processor, resize_layered_node};
+use super::execute::{execute_in_arena, execute_processor, resize_layered_node};
 use super::*;
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::graph::EdgeId;
 use crate::graph::PortId;
 use crate::graph::{GraphParent, GraphProperties, LPoint, NodeId, OtherGraphs};
-use crate::graph::{LNode, LNodeKind, PortSide, PortType};
+use crate::graph::{LLabel, LNode, LNodeKind, LayeredEdge, PortRef, PortSide, PortType};
 use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputLabel, ElkInputNode, import_graph};
 use crate::intermediate::hierarchical_node_resizing_processor::{
     resize_graph_no_really_i_mean_it, resize_graph_to_minimum,
@@ -1013,6 +1013,94 @@ fn hierarchical_port_orthogonal_router_runs_for_north_south_external_ports() {
     .unwrap();
 
     assert_eq!(graph.layerless_nodes[port].position.y, 0.0);
+}
+
+/// A graph after the hierarchical port routing took replacement `r` of dummy `o` out of its
+/// layer: `a` and `o` in layer 0, joined by edge `e`, and `r` in no layer. The port of `r`
+/// still holds an end label of `e`.
+fn graph_with_a_released_replacement() -> GraphArena {
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    let a = graph.next_node_id();
+    graph
+        .layerless_nodes
+        .push(LNode::new("a", 10.0, 10.0, None));
+    let a_out = graph
+        .add_port(a, PortType::Output, PortSide::East, Default::default())
+        .unwrap();
+    let o = push_test_external_dummy(&mut graph, "o", PortSide::North);
+    let edge = graph
+        .add_edge(LayeredEdge::new(
+            "e".to_string(),
+            a_out,
+            PortRef {
+                node: o,
+                port: PortId::new(0),
+            },
+        ))
+        .unwrap();
+    let r = push_test_external_dummy(&mut graph, "r", PortSide::North);
+    graph.layerless_nodes[r]
+        .external_port_mut()
+        .unwrap()
+        .replaced_dummy = Some(o);
+    graph.layerless_nodes[r].ports[PortId::new(0)]
+        .end_labels
+        .push(LLabel {
+            end_label_edge: Some(edge),
+            ..LLabel::new("tail", 20.0, 10.0)
+        });
+    graph.set_node_layer(a, 0);
+    graph.set_node_layer(o, 0);
+    GraphArena::new(graph)
+}
+
+// Mutation: in `execute_in_arena`, leave out the drop after the hierarchical port routing. The
+// replacement then stays in the node list.
+#[test]
+fn no_replacement_dummy_is_left_after_the_hierarchical_port_routing() {
+    let mut graphs = graph_with_a_released_replacement();
+
+    execute_in_arena(
+        &mut graphs,
+        GraphId::ROOT,
+        false,
+        Processor::Intermediate(IntermediateProcessor::HierarchicalPortOrthogonalEdgeRouter),
+    )
+    .unwrap();
+
+    let graph = graphs.root();
+    assert!(graph.layerless_nodes.iter().all(|node| {
+        node.external_port()
+            .is_none_or(|external| external.replaced_dummy.is_none())
+    }));
+    let names = graph
+        .layerless_nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["a", "o"]);
+}
+
+// Mutation: in `release_temporary_north_south_dummies`, leave out the hand-back of the end
+// labels. The label then goes with the replacement.
+#[test]
+fn the_end_labels_of_a_dropped_replacement_go_back_to_their_edge() {
+    let mut graphs = graph_with_a_released_replacement();
+
+    execute_in_arena(
+        &mut graphs,
+        GraphId::ROOT,
+        false,
+        Processor::Intermediate(IntermediateProcessor::HierarchicalPortOrthogonalEdgeRouter),
+    )
+    .unwrap();
+
+    let labels = graphs.root().edges[EdgeId::new(0)]
+        .labels
+        .iter()
+        .map(|label| label.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(labels, ["tail"]);
 }
 
 #[test]

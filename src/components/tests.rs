@@ -388,3 +388,224 @@ fn the_side_tables_of_nodes_follow_them_through_split_and_combine() {
     assert!(root.is_layer_constraint_explicit(NodeId::new(3)));
     assert!(!root.is_layer_constraint_explicit(NodeId::new(0)));
 }
+
+/// A graph for `drop_nodes`: `holder`, `a`, `r`, `b`, `c` as nodes 0 to 4, where `r` is the one
+/// to drop. Edge 0 runs from `a` to `b`, edge 1 from `r` to `b` and is detached, edge 2 from `b`
+/// to `c`. `a` and `b` sit in layers, and `b` has a row in a side table.
+fn graph_with_a_node_to_drop() -> LGraph {
+    let mut graph = LGraph::new("g", LayeredOptions::default());
+    for id in ["holder", "a", "r", "b", "c"] {
+        graph.layerless_nodes.push(LNode::new(id, 10.0, 10.0, None));
+    }
+    let port = |graph: &mut LGraph, node: usize, port_type: PortType, side: PortSide| {
+        graph
+            .add_port(NodeId::new(node), port_type, side, LPoint::default())
+            .unwrap()
+    };
+    let a_out = port(&mut graph, 1, PortType::Output, PortSide::East);
+    let r_out = port(&mut graph, 2, PortType::Output, PortSide::East);
+    let b_in = port(&mut graph, 3, PortType::Input, PortSide::West);
+    let b_out = port(&mut graph, 3, PortType::Output, PortSide::East);
+    let c_in = port(&mut graph, 4, PortType::Input, PortSide::West);
+    graph.add_edge(edge_between("e0", a_out, b_in)).unwrap();
+    graph.add_edge(edge_between("e1", r_out, b_in)).unwrap();
+    graph.add_edge(edge_between("e2", b_out, c_in)).unwrap();
+    // The routing detaches the edge of a replacement before the drop.
+    graph.detach_edge(EdgeId::new(1));
+    graph.set_node_layer(NodeId::new(1), 0);
+    graph.set_node_layer(NodeId::new(3), 1);
+    *graph.tables.port_alignment.row_mut(NodeId::new(3)) = crate::options::PortAlignment::End;
+    graph
+}
+
+fn node_name(graph: &LGraph, node: NodeId) -> &str {
+    &graph.layerless_nodes[node].id
+}
+
+// Mutation: leave out the `remap_references` call in `drop_nodes`. Edge `e2` then still names
+// node 3, which is `c` now, and the layer of `b` names a node that is gone.
+#[test]
+fn dropping_a_node_moves_the_nodes_and_edges_after_it_down() {
+    let mut graphs = GraphArena::new(graph_with_a_node_to_drop());
+
+    drop_nodes(&mut graphs, GraphId::ROOT, &[NodeId::new(2)]).unwrap();
+
+    let graph = graphs.root();
+    let names = graph
+        .layerless_nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["holder", "a", "b", "c"]);
+    let edges = graph
+        .edges
+        .iter()
+        .map(|edge| {
+            (
+                edge.id.as_str(),
+                node_name(graph, edge.source().node),
+                node_name(graph, edge.target().node),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(edges, [("e0", "a", "b"), ("e2", "b", "c")]);
+    let b = graph.node_named("b");
+    assert_eq!(
+        graph.layerless_nodes[b].ports[PortId::new(0)].incoming_edges(),
+        [EdgeId::new(0)]
+    );
+    assert_eq!(
+        graph.layerless_nodes[b].ports[PortId::new(1)].outgoing_edges(),
+        [EdgeId::new(1)]
+    );
+    assert_eq!(graph.layers()[1].nodes(), [b]);
+    assert_eq!(
+        graph.port_alignment_of(b),
+        Some(crate::options::PortAlignment::End)
+    );
+}
+
+// Mutation: in `drop_nodes`, keep every edge. Edge `e1` then names the dropped node, and the
+// drop fails.
+#[test]
+fn an_edge_that_ends_at_a_dropped_node_goes_with_it() {
+    let mut graphs = GraphArena::new(graph_with_a_node_to_drop());
+
+    drop_nodes(&mut graphs, GraphId::ROOT, &[NodeId::new(2)]).unwrap();
+
+    assert!(graphs.root().edges.iter().all(|edge| edge.id != "e1"));
+}
+
+// Mutation: in `drop_nodes`, take each dropped node out of its layer before the drop. The node
+// then goes silently, though a step still holds it in a layer.
+#[test]
+fn a_dropped_node_in_a_layer_is_an_error() {
+    let mut graph = graph_with_a_node_to_drop();
+    graph.set_node_layer(NodeId::new(2), 0);
+    let mut graphs = GraphArena::new(graph);
+
+    let error = drop_nodes(&mut graphs, GraphId::ROOT, &[NodeId::new(2)]).unwrap_err();
+
+    assert_eq!(
+        error,
+        ComponentError::InvalidReference {
+            kind: "layer node",
+            index: 2
+        }
+    );
+}
+
+// Mutation: leave out the check for a node that holds a graph. Node `c` then moves from 4 to 3,
+// and the graph inside it still names 4 as its parent node.
+#[test]
+fn a_node_that_holds_a_graph_after_a_dropped_node_is_an_error() {
+    let mut graphs = GraphArena::new(graph_with_a_node_to_drop());
+    graphs.nest(
+        GraphId::ROOT,
+        NodeId::new(4),
+        LGraph::new("inner", LayeredOptions::default()),
+    );
+
+    let error = drop_nodes(&mut graphs, GraphId::ROOT, &[NodeId::new(2)]).unwrap_err();
+
+    assert_eq!(
+        error,
+        ComponentError::InvalidReference {
+            kind: "graph owner after a dropped node",
+            index: 4
+        }
+    );
+}
+
+// Mutation: in `drop_nodes`, leave out the graphs inside the nodes. The dummy in the inner graph
+// then names node 4 as its origin, which no longer exists.
+#[test]
+fn a_graph_inside_a_node_sees_the_new_ids() {
+    use crate::graph::GraphPortRef;
+
+    let mut graphs = GraphArena::new(graph_with_a_node_to_drop());
+    let mut inner = LGraph::new("inner", LayeredOptions::default());
+    let mut dummy = LNode::new("dummy", 0.0, 0.0, None);
+    dummy.set_kind(crate::graph::LNodeKind::ExternalPort);
+    dummy.external_port_mut().unwrap().origin_port = Some(GraphPortRef {
+        graph_id: GraphId::ROOT,
+        port: PortRef {
+            node: NodeId::new(4),
+            port: PortId::new(0),
+        },
+    });
+    inner.layerless_nodes.push(dummy);
+    let inner = graphs.nest(GraphId::ROOT, NodeId::new(0), inner);
+
+    drop_nodes(&mut graphs, GraphId::ROOT, &[NodeId::new(2)]).unwrap();
+
+    let origin = graphs[inner].layerless_nodes[NodeId::new(0)]
+        .external_port()
+        .unwrap()
+        .origin_port
+        .unwrap();
+    assert_eq!(node_name(graphs.root(), origin.port.node), "c");
+}
+
+// Mutation: in `drop_nodes`, leave out the graphs above. The port of the outer node then names
+// node 4 of the inner graph as its dummy, which no longer exists.
+#[test]
+fn the_graph_above_sees_the_new_ids() {
+    let mut outer = LGraph::new("outer", LayeredOptions::default());
+    outer
+        .layerless_nodes
+        .push(LNode::new("group", 10.0, 10.0, None));
+    let group_port = outer
+        .add_port(
+            NodeId::new(0),
+            PortType::Input,
+            PortSide::West,
+            LPoint::default(),
+        )
+        .unwrap();
+    let mut graphs = GraphArena::new(outer);
+    let inner = graphs.nest(GraphId::ROOT, NodeId::new(0), graph_with_a_node_to_drop());
+    graphs.root_mut().layerless_nodes[NodeId::new(0)].ports[group_port.port].port_dummy =
+        Some(GraphNodeRef {
+            graph_id: inner,
+            node: NodeId::new(4),
+        });
+
+    drop_nodes(&mut graphs, inner, &[NodeId::new(2)]).unwrap();
+
+    let dummy = graphs.root().layerless_nodes[NodeId::new(0)].ports[group_port.port]
+        .port_dummy
+        .unwrap();
+    assert_eq!(node_name(&graphs[inner], dummy.node), "c");
+}
+
+// Mutation: in `drop_nodes`, renumber the ends of a long edge dummy instead of clearing an end
+// at a dropped node. The drop then fails on the end at `r`.
+#[test]
+fn a_long_edge_end_at_a_dropped_node_is_cleared() {
+    let mut graph = graph_with_a_node_to_drop();
+    let c = NodeId::new(4);
+    graph.layerless_nodes[c].set_kind(crate::graph::LNodeKind::LongEdge);
+    let ends = graph.layerless_nodes[c].long_edge_ends_mut().unwrap();
+    ends.source = Some(PortRef {
+        node: NodeId::new(2),
+        port: PortId::new(0),
+    });
+    ends.target = Some(PortRef {
+        node: NodeId::new(3),
+        port: PortId::new(1),
+    });
+    let mut graphs = GraphArena::new(graph);
+
+    drop_nodes(&mut graphs, GraphId::ROOT, &[NodeId::new(2)]).unwrap();
+
+    let graph = graphs.root();
+    let ends = graph.layerless_nodes[graph.node_named("c")]
+        .long_edge_ends()
+        .unwrap();
+    assert_eq!(ends.source, None);
+    assert_eq!(
+        ends.target.map(|port| node_name(graph, port.node)),
+        Some("b")
+    );
+}

@@ -236,12 +236,6 @@ fn transfer_external_port_dummy_layout_to_parent_node(
         let Some(external) = nested_graph.layerless_nodes[dummy_index].external_port() else {
             continue;
         };
-        // Java: the temporary replacement dummies of `HierarchicalPortConstraintProcessor` copy
-        // ORIGIN but are never in `getLayerlessNodes()`, so this loop never sees them. Here they
-        // sit in the node list, and would overwrite the port of the dummy they replace.
-        if external.replaced_dummy.is_some() {
-            continue;
-        }
         let Some(origin_port) = external.origin_port else {
             continue;
         };
