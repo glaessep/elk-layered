@@ -139,7 +139,7 @@ fn edge_element(id: &str) -> String {
 
 /// Whether an edge is a self loop that `insideSelfLoops.yo` of the edge and `insideSelfLoops.activate`
 /// of its node route inside the node. This is the one place that decides; the importer reads the
-/// answer from `ElkInputEdge::inside_self_loops_yo`.
+/// answer from `ElkInputEdge::inside_self_loop`.
 ///
 /// Ports the `isInsideSelfLoop` tests in `ElkGraphImporter.importFlatGraph` and
 /// `importHierarchicalGraph`.
@@ -1145,7 +1145,7 @@ impl<'a, 't> Work<'a, 't> {
                 .collect(),
             minlen: 1,
             // The importer reads this alone; `is_inside_self_loop` has already looked at the node.
-            inside_self_loops_yo: info.inside_self_loop,
+            inside_self_loop: info.inside_self_loop,
             model_order: None,
             priority_direction: info.settings.priority_direction,
             priority_shortness: info.settings.priority_shortness,

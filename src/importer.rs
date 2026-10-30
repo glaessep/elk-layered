@@ -150,7 +150,7 @@ pub struct ElkInputEdge {
     /// Whether the edge is an inside self loop. The caller has already combined the edge's
     /// `insideSelfLoops.yo` with the `insideSelfLoops.activate` of its node, so the importer
     /// reads this alone.
-    pub inside_self_loops_yo: bool,
+    pub inside_self_loop: bool,
     /// Explicit input-model position within the edge's owning hierarchy scope.
     ///
     /// When absent, standalone imports retain the historical filtered-input ordinal.
@@ -2090,16 +2090,16 @@ fn node_needs_nested_graph(
 /// Ports the `isInsideSelfLoop` tests in `ElkGraphImporter.importFlatGraph`,
 /// `importHierarchicalGraph` and `hasInsideSelfLoops`. Java reads `isSelfloop()`, the node's
 /// `INSIDE_SELF_LOOPS_ACTIVATE` and the edge's `INSIDE_SELF_LOOPS_YO` here. The caller has already
-/// read all three (`is_inside_self_loop` in `layout.rs`) and sets `inside_self_loops_yo` to the
+/// read all three (`is_inside_self_loop` in `layout.rs`) and sets `inside_self_loop` to the
 /// answer, so the importer reads that field alone.
 fn is_inside_self_loop(edge: &ElkInputEdge) -> bool {
     // A caller bug, not caller input: only `layout.rs` sets the field.
     debug_assert!(
-        !edge.inside_self_loops_yo || edge.source == edge.target,
+        !edge.inside_self_loop || edge.source == edge.target,
         "inside self loop \"{}\" joins two nodes",
         edge.id
     );
-    edge.inside_self_loops_yo
+    edge.inside_self_loop
 }
 
 /// Source: `LGraphUtil.getDirection`, which `ElkGraphImporter.createLGraph` uses for a graph
