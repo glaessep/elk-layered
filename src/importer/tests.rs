@@ -155,8 +155,8 @@ fn import_records_the_options_the_processors_read() {
         root.tables.placement_options.get(b).unwrap().flexibility,
         crate::options::NodeFlexibility::None
     );
-    assert!(root.is_layer_constraint_explicit(a));
-    assert!(!root.is_layer_constraint_explicit(b));
+    assert!(root.layerless_nodes[a].is_layer_constraint_explicit());
+    assert!(!root.layerless_nodes[b].is_layer_constraint_explicit());
 }
 
 #[test]

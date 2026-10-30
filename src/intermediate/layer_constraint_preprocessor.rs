@@ -62,7 +62,7 @@ pub fn preprocess_layer_constraints(graph: &mut LGraph) -> IntermediateResult<()
 
 fn is_relevant_layer_constraint_node(graph: &LGraph, node: NodeId) -> bool {
     matches!(
-        graph.layerless_nodes[node].layer_constraint,
+        graph.layerless_nodes[node].layer_constraint(),
         LayerConstraint::FirstSeparate | LayerConstraint::LastSeparate
     )
 }
@@ -111,12 +111,12 @@ fn update_opposite_node_layer_constraints(
     opposite_node: NodeId,
     hidden_connections: &mut IdVec<NodeId, HiddenNodeConnections>,
 ) {
-    if graph.is_layer_constraint_explicit(opposite_node) {
+    if graph.layerless_nodes[opposite_node].is_layer_constraint_explicit() {
         return;
     }
 
     hidden_connections[opposite_node] = hidden_connections[opposite_node]
-        .combine(graph.layerless_nodes[hidden_node].layer_constraint);
+        .combine(graph.layerless_nodes[hidden_node].layer_constraint());
 
     if !graph.node_connected_edges(opposite_node).is_empty() {
         return;
@@ -124,19 +124,17 @@ fn update_opposite_node_layer_constraints(
 
     match hidden_connections[opposite_node] {
         HiddenNodeConnections::FirstSeparate => {
-            graph.layerless_nodes[opposite_node].layer_constraint = LayerConstraint::First;
-            graph.mark_layer_constraint_explicit(opposite_node);
+            graph.layerless_nodes[opposite_node].set_layer_constraint(LayerConstraint::First);
         }
         HiddenNodeConnections::LastSeparate => {
-            graph.layerless_nodes[opposite_node].layer_constraint = LayerConstraint::Last;
-            graph.mark_layer_constraint_explicit(opposite_node);
+            graph.layerless_nodes[opposite_node].set_layer_constraint(LayerConstraint::Last);
         }
         HiddenNodeConnections::None | HiddenNodeConnections::Both => {}
     }
 }
 
 fn ensure_no_unacceptable_separate_edges(graph: &LGraph, node: NodeId) -> IntermediateResult<()> {
-    match graph.layerless_nodes[node].layer_constraint {
+    match graph.layerless_nodes[node].layer_constraint() {
         LayerConstraint::FirstSeparate => {
             for edge in graph.node_incoming_edges(node) {
                 if !is_acceptable_separate_incident_edge(graph, edge) {

@@ -262,7 +262,8 @@ fn the_side_tables_of_nodes_follow_them_through_split_and_combine() {
         .placement_options
         .row_mut(NodeId::new(3))
         .flexibility = crate::options::NodeFlexibility::PortPosition;
-    graph.mark_layer_constraint_explicit(NodeId::new(3));
+    graph.layerless_nodes[NodeId::new(3)]
+        .set_layer_constraint(crate::options::LayerConstraint::None);
     let mut graphs = GraphArena::new(graph);
 
     let components = split(&mut graphs).unwrap().unwrap();
@@ -294,12 +295,8 @@ fn the_side_tables_of_nodes_follow_them_through_split_and_combine() {
             .flexibility,
         crate::options::NodeFlexibility::PortPosition
     );
-    assert!(second.is_layer_constraint_explicit(NodeId::new(1)));
-    assert!(
-        !components[0]
-            .graph
-            .is_layer_constraint_explicit(NodeId::new(1))
-    );
+    assert!(second.layerless_nodes[NodeId::new(1)].is_layer_constraint_explicit());
+    assert!(!components[0].graph.layerless_nodes[NodeId::new(1)].is_layer_constraint_explicit());
     assert_eq!(
         components[0].graph.in_layer_layout_unit(NodeId::new(1)),
         None
@@ -330,9 +327,8 @@ fn the_side_tables_of_nodes_follow_them_through_split_and_combine() {
         .placement_options
         .row_mut(NodeId::new(0))
         .flexibility = crate::options::NodeFlexibility::PortPosition;
-    components[1]
-        .graph
-        .mark_layer_constraint_explicit(NodeId::new(0));
+    components[1].graph.layerless_nodes[NodeId::new(0)]
+        .set_layer_constraint(crate::options::LayerConstraint::None);
 
     combine(&mut graphs, components).unwrap();
 
@@ -384,9 +380,9 @@ fn the_side_tables_of_nodes_follow_them_through_split_and_combine() {
             .flexibility,
         crate::options::NodeFlexibility::PortPosition
     );
-    assert!(root.is_layer_constraint_explicit(NodeId::new(2)));
-    assert!(root.is_layer_constraint_explicit(NodeId::new(3)));
-    assert!(!root.is_layer_constraint_explicit(NodeId::new(0)));
+    assert!(root.layerless_nodes[NodeId::new(2)].is_layer_constraint_explicit());
+    assert!(root.layerless_nodes[NodeId::new(3)].is_layer_constraint_explicit());
+    assert!(!root.layerless_nodes[NodeId::new(0)].is_layer_constraint_explicit());
 }
 
 /// A graph for `drop_nodes`: `holder`, `a`, `r`, `b`, `c` as nodes 0 to 4, where `r` is the one

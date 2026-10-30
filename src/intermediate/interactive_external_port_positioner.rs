@@ -21,7 +21,7 @@ pub fn position_interactive_external_ports(graph: &mut LGraph) {
             continue;
         }
 
-        if graph.layerless_nodes[node_index].layer_constraint == LayerConstraint::FirstSeparate {
+        if graph.layerless_nodes[node_index].layer_constraint() == LayerConstraint::FirstSeparate {
             graph.layerless_nodes[node_index].position.x =
                 bounds.min_x - INTERACTIVE_EXTERNAL_PORT_SPACING;
             if let Some(y) = first_connected_other_node_center_y(graph, node_index, true) {
@@ -30,7 +30,7 @@ pub fn position_interactive_external_ports(graph: &mut LGraph) {
             continue;
         }
 
-        if graph.layerless_nodes[node_index].layer_constraint == LayerConstraint::LastSeparate {
+        if graph.layerless_nodes[node_index].layer_constraint() == LayerConstraint::LastSeparate {
             graph.layerless_nodes[node_index].position.x =
                 bounds.max_x + INTERACTIVE_EXTERNAL_PORT_SPACING;
             if let Some(y) = first_connected_other_node_center_y(graph, node_index, false) {

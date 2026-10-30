@@ -1401,7 +1401,7 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
         graph.graph_properties.non_free_ports = true;
     }
     if let Some(layer_constraint) = node.layer_constraint {
-        lnode.layer_constraint = layer_constraint;
+        lnode.set_layer_constraint(layer_constraint);
     }
     // `ElkGraphImporter.transformNode` skips labels without text.
     for label in node.labels.iter().filter(|label| !label.text.is_empty()) {
@@ -1414,9 +1414,6 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     lnode.compound_node = node.compound_node;
     let node_size = lnode.size;
     let node_index = graph.push_node_with(|_| lnode);
-    if node.layer_constraint.is_some() {
-        graph.mark_layer_constraint_explicit(node_index);
-    }
     if let Some(alignment) = node.port_alignment {
         *graph.tables.port_alignment.row_mut(node_index) = alignment;
     }

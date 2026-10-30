@@ -660,24 +660,27 @@ fn a_node_that_is_no_external_port_dummy_has_no_side_and_no_in_layer_constraint(
     }
 }
 
-// Mutation: in `external_port_and_layer_constraint_mut`, answer `Some` for a long edge
-// dummy too, or hand out the constraint of another node.
+// Mutation: in `set_layer_constraint`, store the value without making it present, or in
+// `is_layer_constraint_explicit`, answer `true` only for a value other than `NONE`.
 #[test]
-fn the_external_port_data_and_the_layer_constraint_change_together() {
-    let mut external = dummy_of(LNodeKind::ExternalPort);
-    external.layer_constraint = LayerConstraint::FirstSeparate;
+fn a_write_through_set_layer_constraint_counts_as_explicit_even_for_none() {
+    let node = dummy_of(LNodeKind::Normal);
+    assert!(!node.is_layer_constraint_explicit());
+    assert_eq!(node.layer_constraint(), LayerConstraint::None);
 
-    let (data, constraint) = external.external_port_and_layer_constraint_mut().unwrap();
-    data.side = PortSide::East;
-    *constraint = LayerConstraint::LastSeparate;
+    for layer_constraint in [
+        LayerConstraint::First,
+        LayerConstraint::FirstSeparate,
+        LayerConstraint::Last,
+        LayerConstraint::LastSeparate,
+        LayerConstraint::None,
+    ] {
+        let mut node = dummy_of(LNodeKind::Normal);
+        node.set_layer_constraint(layer_constraint);
 
-    assert_eq!(external.external_port_side(), PortSide::East);
-    assert_eq!(external.layer_constraint, LayerConstraint::LastSeparate);
-    assert!(
-        dummy_of(LNodeKind::LongEdge)
-            .external_port_and_layer_constraint_mut()
-            .is_none()
-    );
+        assert!(node.is_layer_constraint_explicit(), "{layer_constraint:?}");
+        assert_eq!(node.layer_constraint(), layer_constraint);
+    }
 }
 
 // Mutation: in `segment_of`, leave out the copy of one field of the old edge, or keep its
@@ -712,8 +715,8 @@ fn segment_of_keeps_the_fields_of_the_old_edge_but_not_its_geometry() {
     assert_eq!(segment, expected);
 }
 
-// Mutation: in `create_external_port_dummy`, mark the layer constraint of every dummy
-// explicit, or of none. In `is_layer_constraint_explicit`, read only the table.
+// Mutation: in `create_external_port_dummy`, set the layer constraint of every dummy, or of
+// none.
 #[test]
 fn a_west_or_east_external_port_dummy_has_an_explicit_layer_constraint() {
     let mut graph = graph_with_nodes(0);
@@ -730,7 +733,7 @@ fn a_west_or_east_external_port_dummy_has_an_explicit_layer_constraint() {
 
     for (dummy, explicit, side) in nodes {
         assert_eq!(
-            graph.is_layer_constraint_explicit(dummy),
+            graph.layerless_nodes[dummy].is_layer_constraint_explicit(),
             explicit,
             "{side:?}"
         );
@@ -903,7 +906,7 @@ fn external_port_dummy_keeps_fixed_side_and_order_metadata() {
         ExternalPortData::default(),
     );
 
-    assert_eq!(dummy.layer_constraint, LayerConstraint::FirstSeparate);
+    assert_eq!(dummy.layer_constraint(), LayerConstraint::FirstSeparate);
     assert_eq!(dummy.size.width, 3.0);
     assert_eq!(dummy.size.height, 6.0);
     assert_eq!(dummy.ports[PortId::new(0)].side, PortSide::East);
