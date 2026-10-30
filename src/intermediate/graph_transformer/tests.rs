@@ -667,6 +667,60 @@ fn transpose_preserves_external_port_layer_constraint_through_in_layer_constrain
     );
 }
 
+// Mutation: leave `layer_constraint_explicit` unset where the transpose turns a top or bottom
+// in-layer constraint into a separate layer constraint.
+#[test]
+fn transpose_marks_a_separate_layer_constraint_of_an_external_port_explicit() {
+    for (in_layer, layer_constraint) in [
+        (InLayerConstraint::Top, LayerConstraint::FirstSeparate),
+        (InLayerConstraint::Bottom, LayerConstraint::LastSeparate),
+    ] {
+        let mut graph = graph(ElkDirection::Down);
+        let mut node = LNode::new("external", 0.0, 0.0, None);
+        node.set_kind(crate::graph::LNodeKind::ExternalPort);
+        node.external_port_mut().unwrap().side = PortSide::North;
+        node.external_port_mut().unwrap().in_layer_constraint = in_layer;
+        let node = graph.add_node_for_test(node);
+        assert!(!graph.is_layer_constraint_explicit(node));
+
+        transform_graph_direction(&mut graph, GraphTransformMode::ToInternalLeftToRight);
+
+        assert_eq!(
+            graph.layerless_nodes[node].layer_constraint,
+            layer_constraint
+        );
+        assert!(graph.is_layer_constraint_explicit(node), "{in_layer:?}");
+    }
+}
+
+// Mutation: mark the layer constraint explicit where the transpose turns a separate layer
+// constraint into an in-layer constraint.
+#[test]
+fn transpose_leaves_the_explicit_flag_alone_when_it_clears_a_layer_constraint() {
+    for layer_constraint in [
+        LayerConstraint::FirstSeparate,
+        LayerConstraint::LastSeparate,
+    ] {
+        let mut graph = graph(ElkDirection::Down);
+        let mut node = LNode::new("external", 0.0, 0.0, None);
+        node.set_kind(crate::graph::LNodeKind::ExternalPort);
+        node.layer_constraint = layer_constraint;
+        node.external_port_mut().unwrap().side = PortSide::East;
+        let node = graph.add_node_for_test(node);
+
+        transform_graph_direction(&mut graph, GraphTransformMode::ToInputDirection);
+
+        assert_eq!(
+            graph.layerless_nodes[node].layer_constraint,
+            LayerConstraint::None
+        );
+        assert!(
+            !graph.is_layer_constraint_explicit(node),
+            "{layer_constraint:?}"
+        );
+    }
+}
+
 #[test]
 fn edge_bend_points_and_labels_are_transformed() {
     let mut graph = graph(ElkDirection::Down);

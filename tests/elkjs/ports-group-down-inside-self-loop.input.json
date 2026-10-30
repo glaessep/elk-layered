@@ -1,0 +1,53 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "DOWN",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "g",
+      "layoutOptions": {
+        "elk.insideSelfLoops.activate": "true"
+      },
+      "children": [
+        {
+          "id": "a",
+          "width": 50,
+          "height": 24
+        },
+        {
+          "id": "b",
+          "width": 50,
+          "height": 24
+        }
+      ],
+      "edges": [
+        {
+          "id": "ab",
+          "sources": [
+            "a"
+          ],
+          "targets": [
+            "b"
+          ]
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "loop",
+      "sources": [
+        "g"
+      ],
+      "targets": [
+        "g"
+      ],
+      "layoutOptions": {
+        "elk.insideSelfLoops.yo": "true"
+      }
+    }
+  ]
+}

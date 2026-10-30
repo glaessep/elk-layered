@@ -353,9 +353,12 @@ fn transpose_layer_constraint_for_external_port(
     } else if external.in_layer_constraint == InLayerConstraint::Top {
         *layer_constraint = LayerConstraint::FirstSeparate;
         external.in_layer_constraint = InLayerConstraint::None;
+        // ELK sets the constraint with `setProperty`, so it counts as explicit from here on.
+        external.layer_constraint_explicit = true;
     } else if external.in_layer_constraint == InLayerConstraint::Bottom {
         *layer_constraint = LayerConstraint::LastSeparate;
         external.in_layer_constraint = InLayerConstraint::None;
+        external.layer_constraint_explicit = true;
     }
 }
 
