@@ -5,7 +5,6 @@ use super::assembler::{
     Processor,
 };
 use super::{PipelineError, PipelineResult};
-use crate::components::ComponentSplit;
 use crate::graph::{GraphArena, GraphId, LGraph, LNode, LSize, OtherGraphs, PortSide};
 use crate::intermediate::graph_transformer::{GraphTransformMode, transform_graph_direction};
 use crate::intermediate::hierarchical_port_orthogonal_edge_router::release_temporary_north_south_dummies;
@@ -40,7 +39,7 @@ use crate::selfloop::{
 };
 
 /// Runs `processor` on the graph `id` of `graphs`. The layer sweep also orders the graphs inside
-/// its nodes when `include_children` is set. `split` says whether `id` stands in for a component.
+/// its nodes when `include_children` is set.
 ///
 /// The layer sweep needs the arena, because it is the one port of `LayerSweepCrossingMinimizer`
 /// that also serves `INCLUDE_CHILDREN`. Every other processor runs through `execute_processor`.
@@ -50,7 +49,6 @@ pub(super) fn execute_in_arena(
     graphs: &mut GraphArena,
     id: GraphId,
     include_children: bool,
-    split: ComponentSplit,
     processor: Processor,
 ) -> PipelineResult<()> {
     if let Some(sweep) = processor.hierarchy_aware_sweep() {
@@ -66,7 +64,7 @@ pub(super) fn execute_in_arena(
         // they leave their layer. Here they must leave the node list too, so no later step meets
         // them.
         let released = release_temporary_north_south_dummies(&mut graphs[id]);
-        crate::components::drop_nodes(graphs, id, &released, split)?;
+        crate::components::drop_nodes(graphs, id, &released)?;
     }
     Ok(())
 }

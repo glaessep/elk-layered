@@ -5,7 +5,6 @@ use super::assembler::{
 use super::compound::{CompoundRun, check_strategies, execute_compound_graph_round};
 use super::execute::{execute_in_arena, execute_processor, resize_layered_node};
 use super::*;
-use crate::components::ComponentSplit;
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::graph::EdgeId;
 use crate::graph::PortId;
@@ -245,13 +244,7 @@ fn a_compound_execution_names_the_node_that_holds_its_graph_after_a_drop() {
         LGraph::new("inner", LayeredOptions::default()),
     );
     let run = compound_run(&graphs);
-    crate::components::drop_nodes(
-        &mut graphs,
-        GraphId::ROOT,
-        &[NodeId::new(0)],
-        ComponentSplit::Inactive,
-    )
-    .unwrap();
+    crate::components::drop_nodes(&mut graphs, GraphId::ROOT, &[NodeId::new(0)]).unwrap();
 
     let executions = run.into_executions(&graphs);
 
@@ -1111,7 +1104,6 @@ fn no_replacement_dummy_is_left_after_the_hierarchical_port_routing() {
         &mut graphs,
         GraphId::ROOT,
         false,
-        ComponentSplit::Inactive,
         Processor::Intermediate(IntermediateProcessor::HierarchicalPortOrthogonalEdgeRouter),
     )
     .unwrap();
@@ -1139,7 +1131,6 @@ fn the_end_labels_of_a_dropped_replacement_go_back_to_their_edge() {
         &mut graphs,
         GraphId::ROOT,
         false,
-        ComponentSplit::Inactive,
         Processor::Intermediate(IntermediateProcessor::HierarchicalPortOrthogonalEdgeRouter),
     )
     .unwrap();
@@ -1178,7 +1169,6 @@ fn a_replacement_that_still_has_an_edge_stays() {
         &mut graphs,
         GraphId::ROOT,
         false,
-        ComponentSplit::Inactive,
         Processor::Intermediate(IntermediateProcessor::HierarchicalPortOrthogonalEdgeRouter),
     )
     .unwrap();
