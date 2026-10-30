@@ -145,12 +145,8 @@ fn horizontal_alignment_ratio(graph: &LGraph, node: NodeId) -> f64 {
 /// `EXT_PORT_SIDE` is west or east. The side of the dummy's own port does not count: the
 /// replacement of a north or south dummy lists a west port first.
 fn is_external_west_or_east_port(graph: &LGraph, node: NodeId) -> bool {
-    graph.layerless_nodes[node]
-        .external_port()
-        .is_some_and(|external| {
-            matches!(
-                external.side,
-                crate::graph::PortSide::West | crate::graph::PortSide::East
-            )
-        })
+    matches!(
+        graph.layerless_nodes[node].external_port_side(),
+        crate::graph::PortSide::West | crate::graph::PortSide::East
+    )
 }

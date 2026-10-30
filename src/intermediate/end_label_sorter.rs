@@ -2,7 +2,7 @@
 //!
 //! Source: https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/EndLabelSorter.java
 
-use crate::graph::{EdgeId, IdVec, LGraph, NodeId};
+use crate::graph::{EdgeId, IdVec, LGraph, LNodeKind, NodeId};
 
 /// Ports `EndLabelSorter.process`, `initialize` and the label group comparator at commit
 /// `62d5909`.
@@ -19,6 +19,13 @@ pub fn sort_end_labels(graph: &mut LGraph) {
         .collect::<IdVec<EdgeId, _>>();
 
     for node in graph.node_ids() {
+        // `EndLabelSorter.process` walks the layers and keeps only normal nodes, so the end
+        // labels at an external port dummy keep the order they were gathered in.
+        if graph.layerless_nodes[node].kind() != LNodeKind::Normal
+            || graph.layerless_nodes[node].layer_index().is_none()
+        {
+            continue;
+        }
         graph.layerless_nodes[node]
             .ports
             .for_each_listed_mut(|port| {

@@ -24,6 +24,17 @@ pub fn postprocess_end_labels(graph: &mut LGraph) {
             let Some(cell) = graph.layerless_nodes[node].ports[port_index].end_label_cell else {
                 continue;
             };
+            // Java walks the layers, so a node that left its layer keeps its end labels where
+            // they are: the temporary replacements of north and south external port dummies,
+            // which `HierarchicalPortOrthogonalEdgeRouter` removes before this step. This crate
+            // still holds their labels at the port, so it hands them back unplaced.
+            if graph.layerless_nodes[node].layer_index().is_none() {
+                let labels =
+                    std::mem::take(&mut graph.layerless_nodes[node].ports[port_index].end_labels);
+                return_labels_to_edges(graph, node, port_index, labels);
+                graph.layerless_nodes[node].ports[port_index].end_label_cell = None;
+                continue;
+            }
             apply_end_label_cell_layout(graph, node, port_index, node_position, cell);
             graph.layerless_nodes[node].ports[port_index].end_label_cell = None;
         }
@@ -58,6 +69,16 @@ fn apply_end_label_cell_layout(
         }
     }
 
+    return_labels_to_edges(graph, node, port_index, labels);
+}
+
+/// Puts end labels back on the edges they belong to.
+fn return_labels_to_edges(
+    graph: &mut LGraph,
+    node: NodeId,
+    port_index: PortId,
+    labels: Vec<crate::graph::LLabel>,
+) {
     for label in labels {
         let target_edge = label.end_label_edge.or_else(|| {
             let port = &graph.layerless_nodes[node].ports[port_index];

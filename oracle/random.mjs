@@ -50,13 +50,21 @@
 // graphs set `spacing.portsSurrounding`. Under the empty placement, the labels keep the positions they are
 // given. elkjs crashes on some of these graphs; `--drop-crashes` lists them in `dropped.txt`.
 //
+//   node random.mjs ../tests/elkjs/random-group-cross-ports --group-cross-ports && node record.mjs ../tests/elkjs/random-group-cross-ports --drop-crashes
+//
+// With `--group-cross-ports`, the generator is that of `--group-ports`, with its own seed and
+// count, but a port may sit on any of the four sides, and some nodes and groups fix the ratio or
+// the position of their ports. So groups get ports across the flow under SEPARATE_CHILDREN and
+// INCLUDE_CHILDREN. elkjs crashes on some of these graphs; `--drop-crashes` lists them in
+// `dropped.txt`.
+//
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
 // a feature, and then write and record the whole corpus again.
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const USAGE =
-  "usage: node random.mjs <directory> [--group-ends | --ports | --group-ports | --cross-ports | --inline-labels | --one-sided | --port-labels]";
+  "usage: node random.mjs <directory> [--group-ends | --ports | --group-ports | --cross-ports | --inline-labels | --one-sided | --port-labels | --group-cross-ports]";
 const dir = process.argv[2];
 // A mode typed first would be read as the directory, and the script deletes the files of that
 // directory. So a directory that starts with `-` is refused, and so is any extra argument.
@@ -67,20 +75,21 @@ if (!dir || dir.startsWith("-") || process.argv.length > 4) {
 const mode = process.argv[3] ?? "";
 // A mistyped mode must not fall through to the default mode: that mode would delete the files of
 // the directory it was given.
-const MODES = ["", "--group-ends", "--ports", "--group-ports", "--cross-ports", "--inline-labels", "--one-sided", "--port-labels"];
+const MODES = ["", "--group-ends", "--ports", "--group-ports", "--cross-ports", "--inline-labels", "--one-sided", "--port-labels", "--group-cross-ports"];
 if (!MODES.includes(mode)) {
   console.error(`unknown mode "${mode}"; use one of: ${MODES.slice(1).join(" ")}`);
   process.exit(2);
 }
 const groupEnds = mode === "--group-ends";
-const groupPorts = mode === "--group-ports";
+const groupCrossPorts = mode === "--group-cross-ports";
+const groupPorts = mode === "--group-ports" || groupCrossPorts;
 const crossPorts = mode === "--cross-ports";
 const inlineLabels = mode === "--inline-labels";
 const oneSided = mode === "--one-sided";
 const portLabels = mode === "--port-labels";
 const withPorts = mode === "--ports" || groupPorts || crossPorts || oneSided || portLabels;
-const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200, "--inline-labels": 150, "--one-sided": 200, "--port-labels": 200 }[mode] ?? 200;
-const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed, "--inline-labels": 0xaeed, "--one-sided": 0xbeed, "--port-labels": 0xceed }[mode] ?? 0x5eed;
+const COUNT = { "--group-ends": 120, "--ports": 150, "--group-ports": 150, "--cross-ports": 200, "--inline-labels": 150, "--one-sided": 200, "--port-labels": 200, "--group-cross-ports": 200 }[mode] ?? 200;
+const SEED = { "--group-ends": 0x6eed, "--ports": 0x7eed, "--group-ports": 0x8eed, "--cross-ports": 0x9eed, "--inline-labels": 0xaeed, "--one-sided": 0xbeed, "--port-labels": 0xceed, "--group-cross-ports": 0xdeed }[mode] ?? 0x5eed;
 
 // mulberry32: a small generator with a fixed seed. Its numbers only pick the graphs, so any
 // generator with a fixed seed would do.
@@ -230,7 +239,7 @@ function graph() {
     // root's children and for everything under INCLUDE_CHILDREN. A group under
     // SEPARATE_CHILDREN sets no direction, so the run of its children uses the default, RIGHT.
     const sidesOf = (node) => {
-      if (crossPorts || portLabels) return ["NORTH", "EAST", "SOUTH", "WEST"];
+      if (crossPorts || portLabels || groupCrossPorts) return ["NORTH", "EAST", "SOUTH", "WEST"];
       const own = parent.get(node.id) === root || hierarchy === "include" ? direction : null;
       return own === "DOWN" || own === "UP" ? ["NORTH", "SOUTH"] : ["WEST", "EAST"];
     };
@@ -243,7 +252,12 @@ function graph() {
         : rand.pick([null, "FIXED_SIDE", "FIXED_SIDE", "FIXED_ORDER"]);
       // In this mode a node may also fix the ratio or the position of its ports, which then get
       // a place on their side.
-      const placed = portLabels && rand.chance(0.3) ? rand.pick(["FIXED_RATIO", "FIXED_POS"]) : null;
+      const placed = (portLabels || groupCrossPorts) && rand.chance(0.3) ? rand.pick(["FIXED_RATIO", "FIXED_POS"]) : null;
+      // A group has no size of its own; the ports it places need one to sit on.
+      if (placed && node.width === undefined) {
+        node.width = size(60, 160);
+        node.height = size(40, 120);
+      }
       const nodeConstraint = placed ?? constraint;
       if (nodeConstraint) (node.layoutOptions ??= {})["elk.portConstraints"] = nodeConstraint;
       // The draws happen only in this mode, so the other corpora keep their random numbers.
