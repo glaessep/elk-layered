@@ -89,6 +89,7 @@ fn node(id: &str) -> ElkInputNode {
         node_flexibility: crate::options::NodeFlexibility::None,
         ports_surrounding: None,
         nested_options: None,
+        compound_node: false,
         labels: Vec::new(),
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
@@ -1717,4 +1718,25 @@ mod port_label_room {
                 .is_empty()
         );
     }
+}
+
+// Mutation: read the first port for every port, or list the ports of a node without a graph.
+#[test]
+fn the_port_sides_are_kept_by_port_position_for_nodes_with_a_graph_only() {
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    let holder = graph.push_node_with(|_| LNode::new("holder", 10.0, 10.0, None));
+    let plain = graph.push_node_with(|_| LNode::new("plain", 10.0, 10.0, None));
+    graph.layerless_nodes[holder].nested_graph = Some(GraphId::new(1));
+    for (node, side) in [
+        (holder, PortSide::North),
+        (holder, PortSide::West),
+        (plain, PortSide::East),
+    ] {
+        graph
+            .add_port(node, PortType::Output, side, LPoint::default())
+            .unwrap();
+    }
+    let sides = port_sides_of(&graph);
+    assert_eq!(sides[holder], vec![PortSide::North, PortSide::West]);
+    assert!(sides[plain].is_empty());
 }

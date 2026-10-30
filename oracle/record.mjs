@@ -82,7 +82,9 @@ if (one) {
     (node.children ?? []).some(hasNaN);
   if (hasNaN(laid)) {
     console.error(`${one}: elkjs laid it out with a NaN coordinate`);
-    process.exit(NOT_A_NUMBER);
+    // Only the parent loop below reads exit code 4. Someone who records one case by hand gets
+    // the warning and a success: the case may have its NaN on purpose.
+    process.exit(process.env.RECORD_PARENT ? NOT_A_NUMBER : 0);
   }
 } else {
   const inputs = readdirSync(dir)
@@ -96,7 +98,10 @@ if (one) {
   const dropped = [];
   for (const name of inputs) {
     try {
-      execFileSync(process.execPath, [self, dir, name], { stdio: ["ignore", "inherit", "pipe"] });
+      execFileSync(process.execPath, [self, dir, name], {
+        stdio: ["ignore", "inherit", "pipe"],
+        env: { ...process.env, RECORD_PARENT: "1" },
+      });
     } catch (error) {
       const stderr = String(error.stderr ?? "").trim();
       if (error.status === NOT_A_NUMBER && !dropCrashes) {

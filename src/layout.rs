@@ -983,6 +983,9 @@ impl<'a, 't> Work<'a, 't> {
                     .unwrap_or(ElkDirection::Undefined),
             },
         );
+        // `ElkGraphImporter.transformNode`: children, or inside self loops.
+        let compound =
+            !info.children.is_empty() || info.settings.options.inside_self_loops_activate;
         ElkInputNode {
             id: info.node.id.clone(),
             width: current.width,
@@ -1002,9 +1005,8 @@ impl<'a, 't> Work<'a, 't> {
             node_flexibility: info.settings.node_flexibility,
             ports_surrounding: None,
             ports: self.input_ports(node),
-            nested_options: (!info.children.is_empty()
-                || info.settings.options.inside_self_loops_activate)
-                .then(|| Box::new(info.settings.options.clone())),
+            nested_options: compound.then(|| Box::new(info.settings.options.clone())),
+            compound_node: compound,
             labels: current
                 .labels
                 .iter()

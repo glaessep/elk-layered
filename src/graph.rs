@@ -482,19 +482,10 @@ pub struct DummyLabelSpacings {
     pub label_label: f64,
 }
 
-impl DummyLabelSpacings {
-    /// The defaults of the three options. A test holds them to those of [`SpacingOptions`].
-    pub(crate) const DEFAULT: Self = Self {
-        label_port_horizontal: 1.0,
-        label_port_vertical: 1.0,
-        label_label: 0.0,
-    };
-}
-
 impl Default for DummyLabelSpacings {
     /// The defaults of the three options, for a dummy that was given none.
     fn default() -> Self {
-        Self::DEFAULT
+        Self::from(&SpacingOptions::default())
     }
 }
 

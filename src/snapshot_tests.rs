@@ -39,6 +39,7 @@ pub(crate) fn node(id: &str, width: f64, height: f64, parent: Option<&str>) -> E
         node_flexibility: NodeFlexibility::default(),
         ports_surrounding: None,
         nested_options: None,
+        compound_node: false,
         labels: Vec::new(),
         node_size: Default::default(),
         self_loop_distribution: Default::default(),

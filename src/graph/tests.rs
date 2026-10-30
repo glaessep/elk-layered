@@ -1229,16 +1229,6 @@ fn a_port_without_a_side_has_no_inside_part() {
 
 // --- Label spacings of an external port dummy. ---
 
-// Mutation: write a default into `DummyLabelSpacings::DEFAULT` that differs from the option's.
-#[test]
-fn the_default_label_spacings_of_a_dummy_are_those_of_the_options() {
-    assert_eq!(
-        DummyLabelSpacings::DEFAULT,
-        DummyLabelSpacings::from(&SpacingOptions::default())
-    );
-    assert_eq!(DummyLabelSpacings::default(), DummyLabelSpacings::DEFAULT);
-}
-
 // Mutation: read `label_node` for the horizontal spacing, or swap the two port spacings.
 #[test]
 fn the_label_spacings_of_a_dummy_come_from_the_three_options() {

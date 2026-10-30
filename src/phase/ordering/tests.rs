@@ -152,6 +152,7 @@ fn node(id: &str) -> ElkInputNode {
         node_flexibility: crate::options::NodeFlexibility::None,
         ports_surrounding: None,
         nested_options: None,
+        compound_node: false,
         labels: Vec::new(),
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
@@ -196,6 +197,7 @@ fn nested_node(id: &str, parent: Option<&str>) -> ElkInputNode {
         node_flexibility: crate::options::NodeFlexibility::None,
         ports_surrounding: None,
         nested_options: None,
+        compound_node: false,
         labels: Vec::new(),
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
@@ -223,6 +225,7 @@ fn nested_group(id: &str, parent: Option<&str>) -> ElkInputNode {
         ),
         node_flexibility: crate::options::NodeFlexibility::None,
         ports_surrounding: None,
+        compound_node: true,
         nested_options: Some(Box::new(crate::options::LayeredOptions {
             spacing: crate::options::SpacingOptions::layered_base_value(30.0),
             ..Default::default()

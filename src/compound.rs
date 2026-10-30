@@ -413,7 +413,7 @@ fn preprocess_source_ported_compound_graph_observed(
     // `setSidesOfPortsToSidesOfDummyNodes` fixes them, so keep them.
     let mut original_constraints = vec![IdVec::new(); graphs.len()];
     // The label loop of `transformHierarchyEdges` reads the port sides the importer gave, too.
-    let mut original_sides = vec![HashMap::new(); graphs.len()];
+    let mut original_sides = vec![IdVec::new(); graphs.len()];
     for &graph in &order {
         original_constraints[graph.index()] = port_constraints_of(&graphs[graph]);
         original_sides[graph.index()] = port_sides_of(&graphs[graph]);
@@ -475,16 +475,19 @@ fn original_net_flows(graphs: &GraphArena) -> HashMap<OriginalNetFlowKey, isize>
     flows
 }
 
-/// The side of each port of the graph's nodes that hold a graph.
-fn port_sides_of(graph: &LGraph) -> HashMap<(NodeId, PortId), PortSide> {
-    // Only the ports of a node with a graph inside are ever looked up.
+/// The side of each port of the nodes that hold a graph, in the order of the node's ports. The
+/// other nodes get an empty list: no label loop looks them up. A port the preprocessor adds later
+/// lies past the end of its list.
+fn port_sides_of(graph: &LGraph) -> IdVec<NodeId, Vec<PortSide>> {
     graph
-        .nodes_with_ids()
-        .filter(|(_, node)| node.nested_graph.is_some())
-        .flat_map(|(node_id, node)| {
-            node.ports
-                .iter_with_ids()
-                .map(move |(port_id, port)| ((node_id, port_id), port.side))
+        .layerless_nodes
+        .iter()
+        .map(|node| {
+            if node.nested_graph.is_some() {
+                node.ports.iter().map(|port| port.side).collect()
+            } else {
+                Vec::new()
+            }
         })
         .collect()
 }
@@ -1485,7 +1488,7 @@ fn ensure_nested_external_dummies_for_parent_ports(
     graphs: &mut GraphArena,
     order: &[GraphId],
     original_constraints: &[IdVec<NodeId, PortConstraints>],
-    original_sides: &[HashMap<(NodeId, PortId), PortSide>],
+    original_sides: &[IdVec<NodeId, Vec<PortSide>>],
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
     for &graph in order.iter().rev() {
@@ -1503,7 +1506,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
     graphs: &mut GraphArena,
     graph_id: GraphId,
     original_constraints: &IdVec<NodeId, PortConstraints>,
-    original_sides: &HashMap<(NodeId, PortId), PortSide>,
+    original_sides: &IdVec<NodeId, Vec<PortSide>>,
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
     for (node_index, &parent_constraints) in original_constraints.iter_with_ids() {
@@ -1579,8 +1582,8 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
                 set_external_dummy_origin(nested_graph, dummy_node, graph_id, parent_port);
             }
             // A port the importer did not make has no label, so its side does not matter.
-            let side = original_sides
-                .get(&(node_index, port_index))
+            let side = original_sides[node_index]
+                .get(position)
                 .copied()
                 .unwrap_or(PortSide::Undefined);
             reserve_room_for_port_labels(

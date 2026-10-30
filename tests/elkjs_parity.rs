@@ -476,6 +476,9 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 97. In the function that makes the dummy of an edge across a level (src/compound.rs), give the
 //    dummy label spacings of 7, 5 and 3 instead of the defaults: 7 cases, such as
 //    ports-group-label-spacings-of-the-parent-include and ports-group-label-inside-child-edge-include.
+// 98. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), read the side
+//    of the first port for every port of the node (`.get(0)`): 33 cases, such as
+//    random-group-port-sizes/r009, r054 and r057.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

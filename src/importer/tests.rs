@@ -21,6 +21,7 @@ fn node(id: &str) -> ElkInputNode {
         node_flexibility: crate::options::NodeFlexibility::None,
         ports_surrounding: None,
         nested_options: None,
+        compound_node: false,
         labels: Vec::new(),
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
@@ -334,7 +335,7 @@ fn separate_children_self_loop_graph_does_not_materialize_regular_children() {
 #[test]
 fn the_edge_containers_are_built_only_when_asked_for() {
     let input = graph(vec![node("a"), node("b")], vec![edge("e", "a", "b")]);
-    let scope = || (ElkPadding::uniform(0.0), ScopePorts::NONE);
+    let scope = || (ElkPadding::uniform(0.0), ScopePorts::none());
 
     let (padding, ports) = scope();
     let without = import_scope_with(&input, &[], padding, ports, false).unwrap();
@@ -363,7 +364,7 @@ fn an_edge_maps_to_the_graph_of_its_container_even_when_the_scope_has_that_name(
     input.id = "group".to_string();
     input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
 
-    let imported = import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::NONE).unwrap();
+    let imported = import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::none()).unwrap();
 
     let group_graph = imported.graphs.root().layerless_nodes[NodeId::new(0)]
         .nested_graph
@@ -382,7 +383,7 @@ fn an_edge_whose_container_holds_no_graph_is_refused() {
     // Flat hierarchy handling: no node gets a graph.
     let input = graph(vec![node("a"), node("b")], vec![contained]);
 
-    let error = import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::NONE)
+    let error = import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::none())
         .err()
         .expect("an error");
 
@@ -2424,5 +2425,42 @@ mod cell_ports {
         moved.y = 20.0;
         let ports = cell_ports_of(vec![moved]);
         assert_eq!(ports[0].ratio_or_position, 0.0);
+    }
+}
+
+// --- The compound flag and the labels of a port. ---
+
+mod compound_flag_and_port_labels {
+    use super::*;
+
+    // Mutation: derive the flag from `nested_options` again. A leaf that carries options is no
+    // compound node, and a compound node without options is one.
+    #[test]
+    fn the_compound_flag_follows_the_field_not_the_options() {
+        let mut leaf_with_options = node("leaf");
+        leaf_with_options.nested_options = Some(Box::default());
+        let mut compound_without_options = node("compound");
+        compound_without_options.compound_node = true;
+        let imported = import_graph(&graph(
+            vec![leaf_with_options, compound_without_options],
+            vec![],
+        ))
+        .unwrap();
+        assert!(!layered_node(&imported, "leaf").compound_node);
+        assert!(layered_node(&imported, "compound").compound_node);
+    }
+
+    // Mutation: keep the labels without text in `port_labels_to_lgraph`, or drop the position.
+    #[test]
+    fn a_port_keeps_its_labels_with_text_and_the_position_they_have() {
+        let mut port = input_port("p", PortSide::East);
+        let mut at = ElkInputLabel::center("a", 10.0, 5.0);
+        at.x = 3.0;
+        at.y = -4.0;
+        port.labels = vec![ElkInputLabel::center("", 1.0, 1.0), at];
+        let labels: Vec<_> = port_labels_to_lgraph(&port).collect();
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].text, "a");
+        assert_eq!((labels[0].position.x, labels[0].position.y), (3.0, -4.0));
     }
 }

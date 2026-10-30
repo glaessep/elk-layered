@@ -55,6 +55,9 @@ pub struct ElkInputNode {
     pub ports: Vec<ElkInputPort>,
     /// Resolved options for the graph inside this node. Absent values use ELK defaults.
     pub nested_options: Option<Box<LayeredOptions>>,
+    /// `InternalProperties.COMPOUND_NODE`: the node has children, or activates inside self
+    /// loops. It holds also when a run lays the node out without its children.
+    pub compound_node: bool,
     /// The node's labels, in input order. ELK drops a label with empty text from the layered
     /// graph but keeps it for the node size and label padding computations.
     pub labels: Vec<ElkInputLabel>,
@@ -287,7 +290,7 @@ pub fn import_graph_with_segments(
         input,
         segments,
         ElkPadding::uniform(0.0),
-        ScopePorts::NONE,
+        ScopePorts::none(),
         false,
     )
     .map(|imported| imported.graphs)
@@ -318,14 +321,16 @@ pub(crate) struct ScopePorts<'a> {
 impl ScopePorts<'_> {
     /// A graph whose node has no ports.
     #[cfg(test)]
-    pub(crate) const NONE: ScopePorts<'static> = ScopePorts {
-        ports: &[],
-        node_size: LSize {
-            width: 0.0,
-            height: 0.0,
-        },
-        label_spacings: DummyLabelSpacings::DEFAULT,
-    };
+    pub(crate) fn none() -> ScopePorts<'static> {
+        ScopePorts {
+            ports: &[],
+            node_size: LSize {
+                width: 0.0,
+                height: 0.0,
+            },
+            label_spacings: DummyLabelSpacings::default(),
+        }
+    }
 }
 
 /// Imports a graph whose root has inside node labels. `root_label_padding` is the padding
@@ -479,12 +484,7 @@ fn import_external_ports(
             // places them outside, the graph still needs room, so the ports do not clash outside;
             // but inside it needs none on the axis along the port's side. So the label keeps only
             // the part that lies inside the node: `insidePart`, which only fixed labels have.
-            for label in port.labels.iter().filter(|label| !label.text.is_empty()) {
-                let mut llabel = label_to_lgraph(label);
-                llabel.position = LPoint {
-                    x: label.x,
-                    y: label.y,
-                };
+            for mut llabel in port_labels_to_lgraph(port) {
                 if !inside_port_labels && port.side != PortSide::Undefined {
                     llabel.size = outside_dummy_label_size(
                         llabel.position,
@@ -1411,8 +1411,7 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     lnode.node_size = node.node_size;
     lnode.port_label_placement = node.port_label_placement;
     lnode.port_labels_treat_as_group = node.port_labels_treat_as_group;
-    // `nested_options` is set exactly when the node has children or activates inside self loops.
-    lnode.compound_node = node.nested_options.is_some();
+    lnode.compound_node = node.compound_node;
     let node_size = lnode.size;
     let node_index = graph.push_node_with(|_| lnode);
     if node.layer_constraint.is_some() {
@@ -1475,16 +1474,7 @@ fn transform_port(
     // An inside self loop at a port is refused, so only an edge to or from a descendant counts.
     lport.inside_connections = port.inside_connections;
     initialize_port(&mut lport, constraints, node_size, graph.options.direction);
-    for label in port.labels.iter().filter(|label| !label.text.is_empty()) {
-        // `transformLabel` keeps the given position. Only a port label reads it: one whose
-        // placement is fixed keeps it, and its bounds set the margins of its port.
-        let mut llabel = label_to_lgraph(label);
-        llabel.position = LPoint {
-            x: label.x,
-            y: label.y,
-        };
-        lport.labels.push(llabel);
-    }
+    lport.labels.extend(port_labels_to_lgraph(port));
 
     if is_across_flow(graph.options.direction, lport.side) {
         graph.graph_properties.north_south_ports = true;
@@ -2043,6 +2033,25 @@ fn ensure_port_at_node(
     });
     let port = graph.layerless_nodes[node].ports.push(implicit_port);
     Some(PortRef { node, port })
+}
+
+/// The labels of a port that ELK keeps: those with text, each with the position it was given.
+///
+/// Ports the label loops of `ElkGraphImporter.transformPort` and `transformExternalPort`, with
+/// `transformLabel`. Only a port label reads the position: one whose placement is fixed keeps it,
+/// and its bounds set the margins of its port.
+fn port_labels_to_lgraph(port: &ElkInputPort) -> impl Iterator<Item = LLabel> + '_ {
+    port.labels
+        .iter()
+        .filter(|label| !label.text.is_empty())
+        .map(|label| {
+            let mut llabel = label_to_lgraph(label);
+            llabel.position = LPoint {
+                x: label.x,
+                y: label.y,
+            };
+            llabel
+        })
 }
 
 fn label_to_lgraph(label: &ElkInputLabel) -> LLabel {
