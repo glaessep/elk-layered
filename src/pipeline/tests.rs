@@ -1,6 +1,6 @@
 use super::assembler::{
     CrossingMinimizer, CycleBreaker, EdgeRouter, IntermediateProcessor, Layerer, NodePlacer, Place,
-    Strategies, assemble, assemble_graph,
+    Strategies, assemble, assemble_graph, hypernodes_refusal,
 };
 use super::compound::{CompoundRun, check_strategies, execute_compound_graph_round};
 use super::execute::{execute_processor, resize_layered_node};
@@ -537,8 +537,8 @@ fn flowchart_test_defaults_insert_direction_model_order_and_hierarchy_processors
     );
 }
 
-// Mutation: refuse a graph with `wrapping_multi_edge_improve_cuts` set, instead of a graph with a
-// wrapping strategy, in `Strategies::select`.
+// Mutation: in `Strategies::select`, refuse a graph with `wrapping_multi_edge_improve_cuts` set,
+// instead of calling `wrapping_refusal(options.wrapping_strategy)`.
 #[test]
 fn mermaid_wrapping_flags_do_not_enable_wrapping_processors_without_strategy() {
     let options = LayeredOptions::flowchart_test_defaults(ElkDirection::Down);
@@ -2512,14 +2512,29 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
         options_with(|o| o.edge_routing = EdgeRouting::Polyline),
     );
     graph.graph_properties.hypernodes = true;
-    // Mutation: give the hypernodes refusal the place `Place::Before(LayeredPhase::P5EdgeRouting)`
-    // in `hypernodes_refusal`.
+    // Mutation: in `hypernodes_refusal`, ignore the edge router and give the refusal the place
+    // `Place::Before(LayeredPhase::P5EdgeRouting)`.
     assert_eq!(
         try_graph_kinds(&graph),
         Err(PipelineError::UnsupportedProcessor {
             kind: UnportedProcessor::PolylineEdgeRouter,
         })
     );
+}
+
+// Mutation: in `hypernodes_refusal`, drop the `EdgeRouting::Orthogonal` check. A graph with
+// hypernodes is then refused under a router that never asks for `HYPERNODE_PROCESSOR`.
+#[test]
+fn hypernodes_are_refused_only_for_the_router_that_asks_for_their_processor() {
+    let with = GraphProperties {
+        hypernodes: true,
+        ..Default::default()
+    };
+    assert!(hypernodes_refusal(&with, EdgeRouting::Orthogonal).is_some());
+    assert!(hypernodes_refusal(&with, EdgeRouting::Polyline).is_none());
+    assert!(hypernodes_refusal(&with, EdgeRouting::Splines).is_none());
+    let without = GraphProperties::default();
+    assert!(hypernodes_refusal(&without, EdgeRouting::Orthogonal).is_none());
 }
 
 // The table guards three things, one mutation each:

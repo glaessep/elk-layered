@@ -82,7 +82,7 @@ impl Place {
 /// An option or graph property that needs a processor this crate has not ported, and the place in
 /// the schedule where a run would reach that processor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Refusal {
+pub(super) struct Refusal {
     place: Place,
     processor: UnportedProcessor,
 }
@@ -320,9 +320,12 @@ fn wrapping_refusal(strategy: WrappingStrategy) -> Option<Refusal> {
 ///
 /// Java: `OrthogonalEdgeRouter.getLayoutProcessorConfiguration` adds `HYPERNODE_PROCESSOR` after
 /// phase five when the graph has the `HYPERNODES` property. The router adds it, not the
-/// configurator.
-fn hypernodes_refusal(properties: &GraphProperties) -> Option<Refusal> {
-    properties.hypernodes.then(|| {
+/// configurator, so no other router asks for it.
+pub(super) fn hypernodes_refusal(
+    properties: &GraphProperties,
+    edge_routing: EdgeRouting,
+) -> Option<Refusal> {
+    (properties.hypernodes && edge_routing == EdgeRouting::Orthogonal).then(|| {
         Refusal::new(
             Place::After(LayeredPhase::P5EdgeRouting),
             UnportedProcessor::HypernodesProcessor,
@@ -392,9 +395,10 @@ impl Strategies {
     /// need a processor this crate has not ported.
     ///
     /// The refusal a run would reach first is the one it reports. Each refusal carries its
-    /// [`Place`] in the schedule, so the order comes from there. Two refusals in one slot keep
-    /// the order in which they are gathered below, so gather them in the order ELK's `EnumSet`
-    /// runs them.
+    /// [`Place`] in the schedule, so the order comes from there. Two refusals at one place keep
+    /// the order in which they are gathered below. No two share a place today. If a new one
+    /// does, gather it in the order ELK's `EnumSet` runs them, and add the pair to
+    /// `of_two_refusals_the_one_earlier_in_the_schedule_wins`.
     pub(crate) fn select(
         options: &LayeredOptions,
         properties: &GraphProperties,
@@ -411,7 +415,7 @@ impl Strategies {
             crossing_minimizer.err(),
             node_placer.err(),
             edge_router.err(),
-            hypernodes_refusal(properties),
+            hypernodes_refusal(properties, options.edge_routing),
         ];
         if let Some(first) = refusals
             .into_iter()
