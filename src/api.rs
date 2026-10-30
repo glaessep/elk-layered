@@ -98,9 +98,9 @@ pub struct ElkNode {
 
 /// A port on a node.
 ///
-/// Layout writes the port's `x` and `y`, relative to its node. A port on a north or south
-/// side across the layout flow, a port with a label, and an edge between a port of the root
-/// and a node inside it are refused for now.
+/// Layout writes the port's `x` and `y`, relative to its node, and places its labels unless
+/// the port label placement of its node is fixed. A label on a port of a node with children,
+/// and an edge between a port of the root and a node inside it, are refused for now.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]

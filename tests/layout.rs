@@ -2322,7 +2322,7 @@ fn a_replacement_dummy_leaves_the_port_of_its_group_alone() {
     );
 }
 
-// Mutation: in `first_port_anchor_x`, read the turned position of the dummy's port instead of
+// Mutation: in `external_port_anchor`, read the turned position of the dummy's port instead of
 // the anchor from before the turn. The group then loses the 20 for the routing at its north
 // dummy, and its port moves by half its height.
 #[test]
