@@ -9,6 +9,7 @@ use super::{
     PipelineError, PipelineResult, actual_graph_size, check_external_port_sides,
     validate_node_size_minima,
 };
+use crate::components::ComponentSplit;
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::configurator::{check_random_seeds, configure_graph_properties};
 use crate::graph::{
@@ -31,6 +32,9 @@ pub struct GraphExecution {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct GraphAlgorithm {
+    /// Whether the graph is the root. Fixed at the start: nothing in the run reads
+    /// `execution.parent`, which a drop can leave stale.
+    pub(super) is_root: bool,
     pub(super) next_processor: usize,
     pub(super) processors: Vec<Processor>,
     pub(super) execution: GraphExecution,
@@ -60,14 +64,19 @@ impl CompoundRun {
         Ok(Self { algorithms })
     }
 
-    fn into_executions(self) -> Vec<GraphExecution> {
+    pub(super) fn into_executions(self, graphs: &GraphArena) -> Vec<GraphExecution> {
         // ELK's `collectAllGraphsBottomUp` returns the reverse of discovery order. This is not
         // interchangeable with ordinary DFS postorder: sibling subtrees are interleaved in a
         // public, error-observable order.
         self.algorithms
             .into_iter()
             .rev()
-            .map(|algorithm| algorithm.execution)
+            .map(|mut algorithm| {
+                // The copy from the start of the run is stale when a drop moved the node that
+                // holds the graph.
+                algorithm.execution.parent = graphs[algorithm.execution.graph].parent;
+                algorithm.execution
+            })
             .collect()
     }
 }
@@ -86,6 +95,7 @@ pub(super) fn check_strategies(graphs: &GraphArena) -> PipelineResult<()> {
 
 fn graph_algorithm(graph: &LGraph) -> PipelineResult<GraphAlgorithm> {
     Ok(GraphAlgorithm {
+        is_root: graph.parent.is_none(),
         next_processor: 0,
         processors: assemble_graph(graph)?,
         execution: GraphExecution {
@@ -128,7 +138,7 @@ pub fn execute_ported_compound_processors(
         execute_compound_graph_round(graphs, &mut run.algorithms)?;
     }
 
-    Ok(run.into_executions())
+    Ok(run.into_executions(graphs))
 }
 
 /// One round: every nested graph, deepest first, runs until it reaches a hierarchy-aware
@@ -147,7 +157,7 @@ fn execute_compound_algorithm_until_pause(
     graphs: &mut GraphArena,
     algorithm: &mut GraphAlgorithm,
 ) -> PipelineResult<()> {
-    let is_root = algorithm.execution.parent.is_none();
+    let is_root = algorithm.is_root;
     while algorithm.next_processor < algorithm.processors.len() {
         let processor = algorithm.processors[algorithm.next_processor];
         algorithm.next_processor += 1;
@@ -157,9 +167,15 @@ fn execute_compound_algorithm_until_pause(
             break;
         }
 
-        execute_in_arena(graphs, algorithm.execution.graph, true, processor)?;
+        execute_in_arena(
+            graphs,
+            algorithm.execution.graph,
+            true,
+            ComponentSplit::Inactive,
+            processor,
+        )?;
         if processor == Processor::Intermediate(IntermediateProcessor::HierarchicalNodeResizer)
-            && let Some(parent) = algorithm.execution.parent
+            && let Some(parent) = graphs[algorithm.execution.graph].parent
         {
             let size = actual_graph_size(&graphs[algorithm.execution.graph]);
             let (nested, parent_graph) = graphs.pair_mut(algorithm.execution.graph, parent.graph);

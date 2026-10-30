@@ -6,6 +6,7 @@
 use super::assembler::{Processor, Strategies, assemble_graph};
 use super::execute::execute_in_arena;
 use super::{PipelineResult, check_external_port_sides, validate_node_size_minima};
+use crate::components::ComponentSplit;
 use crate::configurator::{check_random_seeds, configure_graph_properties};
 use crate::intermediate::hierarchical_node_resizing_processor::resize_graph_to_minimum;
 
@@ -36,7 +37,13 @@ pub(crate) fn execute_ported_processors(graphs: &mut GraphArena) -> PipelineResu
             component.graph.random = random;
             std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
             let result = processors.iter().try_for_each(|&processor| {
-                execute_in_arena(graphs, GraphId::ROOT, false, processor)
+                execute_in_arena(
+                    graphs,
+                    GraphId::ROOT,
+                    false,
+                    ComponentSplit::Active,
+                    processor,
+                )
             });
             std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
             result?;
@@ -47,7 +54,13 @@ pub(crate) fn execute_ported_processors(graphs: &mut GraphArena) -> PipelineResu
         executed.extend(processors);
     } else {
         for processor in processors {
-            execute_in_arena(graphs, GraphId::ROOT, false, processor)?;
+            execute_in_arena(
+                graphs,
+                GraphId::ROOT,
+                false,
+                ComponentSplit::Inactive,
+                processor,
+            )?;
             executed.push(processor);
         }
     }
@@ -90,7 +103,13 @@ fn run_processors_until_processor(
     let mut executed = Vec::new();
     prepare_single_graph_processors(graphs).and_then(|processors| {
         for processor in processors {
-            execute_in_arena(graphs, GraphId::ROOT, false, processor)?;
+            execute_in_arena(
+                graphs,
+                GraphId::ROOT,
+                false,
+                ComponentSplit::Inactive,
+                processor,
+            )?;
             executed.push(processor);
             if is_last(processor) {
                 break;
