@@ -297,6 +297,11 @@ impl EdgeRouter {
 }
 
 /// The refusal of a wrapping strategy. Wrapping adds processors in front of a phase, not a phase.
+///
+/// Java: `GraphConfigurator.getPhaseIndependentLayoutProcessorConfiguration`, the switch on
+/// `WRAPPING_STRATEGY`. `SINGLE_EDGE` adds `SINGLE_EDGE_GRAPH_WRAPPER` before phase four.
+/// `MULTI_EDGE` adds `BREAKING_POINT_INSERTER` before phase three, and two more processors that
+/// this crate does not need to name, because the first one already refuses.
 fn wrapping_refusal(strategy: WrappingStrategy) -> Option<Refusal> {
     match strategy {
         WrappingStrategy::Off => None,
@@ -312,6 +317,10 @@ fn wrapping_refusal(strategy: WrappingStrategy) -> Option<Refusal> {
 }
 
 /// The refusal of a graph with hypernodes.
+///
+/// Java: `OrthogonalEdgeRouter.getLayoutProcessorConfiguration` adds `HYPERNODE_PROCESSOR` after
+/// phase five when the graph has the `HYPERNODES` property. The router adds it, not the
+/// configurator.
 fn hypernodes_refusal(properties: &GraphProperties) -> Option<Refusal> {
     properties.hypernodes.then(|| {
         Refusal::new(
@@ -411,6 +420,8 @@ impl Strategies {
         {
             return Err(refused(first));
         }
+        // Every `Err` below is in `refusals`, so the `?` never returns here. It stays as the
+        // form that cannot panic if that ever changes.
         Ok(Self {
             cycle_breaker,
             layerer: layerer.map_err(refused)?,

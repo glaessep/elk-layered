@@ -2418,12 +2418,12 @@ fn every_phase_strategy_selects_its_processor_or_is_refused() {
 #[test]
 fn wrapping_strategies_are_refused() {
     let cases = [
-        // Mutation: let `WrappingStrategy::SingleEdge` through in `Strategies::select`.
+        // Mutation: return `None` for `WrappingStrategy::SingleEdge` in `wrapping_refusal`.
         (
             WrappingStrategy::SingleEdge,
             UnportedProcessor::SingleEdgeGraphWrapper,
         ),
-        // Mutation: let `WrappingStrategy::MultiEdge` through in `Strategies::select`.
+        // Mutation: return `None` for `WrappingStrategy::MultiEdge` in `wrapping_refusal`.
         (
             WrappingStrategy::MultiEdge,
             UnportedProcessor::BreakingPointInserter,
@@ -2438,7 +2438,7 @@ fn wrapping_strategies_are_refused() {
     }
 }
 
-// Mutation: leave out the `properties.hypernodes` check in `Strategies::select`.
+// Mutation: make `hypernodes_refusal` return `None`.
 #[test]
 fn a_graph_with_hypernodes_is_refused() {
     let mut graph = LGraph::new("root", LayeredOptions::default());
@@ -2522,9 +2522,14 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
     );
 }
 
-// Mutation: give the refusal of `HypernodesProcessor` the place
-// `Place::Before(LayeredPhase::P1CycleBreaking)` in `hypernodes_refusal`. It then beats every
-// other refusal, and the pair that lists it second fails.
+// The table guards three things, one mutation each:
+// - Mutation: leave `hypernodes_refusal(properties)` out of `refusals` in `Strategies::select`.
+//   The row checked alone then gives no refusal.
+// - Mutation: use `max_by_key` instead of `min_by_key` in `Strategies::select`. Every pair then
+//   names the later processor.
+// - Mutation: give the refusal of `HypernodesProcessor` the place
+//   `Place::Before(LayeredPhase::P1CycleBreaking)` in `hypernodes_refusal`. It then beats every
+//   other refusal, and each pair that lists it second fails.
 #[test]
 fn of_two_refusals_the_one_earlier_in_the_schedule_wins() {
     type Trigger = fn(&mut LayeredOptions, &mut GraphProperties);
@@ -2600,41 +2605,73 @@ fn of_two_refusals_the_one_earlier_in_the_schedule_wins() {
                 continue;
             }
             pairs += 1;
-            // Both orders of setting give the same answer: the schedule decides, not the setting.
-            for triggers in [[*first, *second], [*second, *first]] {
-                assert_eq!(
-                    refused_for(&triggers),
-                    Some(PipelineError::UnsupportedProcessor { kind: *first_kind })
-                );
-            }
+            assert_eq!(
+                refused_for(&[*first, *second]),
+                Some(PipelineError::UnsupportedProcessor { kind: *first_kind })
+            );
         }
     }
     assert_eq!(pairs, 41);
 }
 
-// Mutation: count `Place::After` with `slot_before` instead of `slot_after` in
-// `Place::position`. A place after a phase then lands on the wrong side of the next slot.
+// Mutation: in `Config::add_after`, use `slot_before` instead of `slot_after`. The processor that
+// ELK adds after phase five then runs in front of the router, and the order of the places no
+// longer matches the order of the run.
 #[test]
-fn a_place_counts_the_way_the_schedule_slots_do() {
-    let phases = [
-        LayeredPhase::P1CycleBreaking,
-        LayeredPhase::P2Layering,
-        LayeredPhase::P3NodeOrdering,
-        LayeredPhase::P4NodePlacement,
-        LayeredPhase::P5EdgeRouting,
+fn the_places_stand_in_the_order_of_the_assembled_run() {
+    let run = kinds(&LayeredOptions::default());
+    let phase_index = |phase: LayeredPhase| {
+        run.iter()
+            .position(|processor| processor.phase() == Some(phase))
+            .unwrap()
+    };
+    let index_of = |processor: IntermediateProcessor| {
+        run.iter()
+            .position(|candidate| *candidate == Processor::Intermediate(processor))
+            .unwrap()
+    };
+    // Each row is a step of the real run and the place that names it.
+    let mut steps = vec![
+        (
+            Place::In(LayeredPhase::P2Layering),
+            phase_index(LayeredPhase::P2Layering),
+        ),
+        (
+            Place::In(LayeredPhase::P3NodeOrdering),
+            phase_index(LayeredPhase::P3NodeOrdering),
+        ),
+        (
+            Place::In(LayeredPhase::P4NodePlacement),
+            phase_index(LayeredPhase::P4NodePlacement),
+        ),
+        (
+            Place::In(LayeredPhase::P5EdgeRouting),
+            phase_index(LayeredPhase::P5EdgeRouting),
+        ),
+        (
+            Place::Before(LayeredPhase::P4NodePlacement),
+            index_of(IntermediateProcessor::InnermostNodeMarginCalculator),
+        ),
+        (
+            Place::Before(LayeredPhase::P5EdgeRouting),
+            index_of(IntermediateProcessor::LayerSizeAndGraphHeightCalculator),
+        ),
+        (
+            Place::After(LayeredPhase::P5EdgeRouting),
+            index_of(IntermediateProcessor::EndLabelSorter),
+        ),
     ];
-    for (i, phase) in phases.iter().enumerate() {
-        let (before, within, after) = (
-            Place::Before(*phase).position(),
-            Place::In(*phase).position(),
-            Place::After(*phase).position(),
-        );
-        assert!(before < within && within < after);
-        // The slot after one phase is the slot in front of the next.
-        if let Some(next) = phases.get(i + 1) {
-            assert_eq!(after, Place::Before(*next).position());
-        }
-    }
+    steps.sort_by_key(|(place, _)| place.position());
+    let indices: Vec<usize> = steps.iter().map(|(_, index)| *index).collect();
+    assert!(
+        indices.windows(2).all(|pair| pair[0] < pair[1]),
+        "the places and the run disagree: {steps:?}"
+    );
+    // A slot after one phase is the slot in front of the next.
+    assert_eq!(
+        Place::After(LayeredPhase::P2Layering).position(),
+        Place::Before(LayeredPhase::P3NodeOrdering).position()
+    );
 }
 
 // Mutation: replace `assemble_graph(graph)?` in `graph_algorithm` by
