@@ -1840,3 +1840,426 @@ fn ports_with_and_without_an_index_sort_as_elkjs_sorts_them() {
         ]
     );
 }
+
+// --- Port labels. elkjs 0.9.3 returns the numbers of each test. ---
+
+fn labelled_port(id: &str, side: &str, labels: &[&str]) -> ElkPort {
+    let mut p = port(id, 6.0, 4.0, side);
+    p.labels = labels.iter().map(|text| label(text, 20.0, 8.0)).collect();
+    p
+}
+
+/// A node with FIXED_SIDE ports and its own options.
+fn port_node(width: f64, height: f64, ports: Vec<ElkPort>, opts: &[(&str, &str)]) -> ElkNode {
+    let mut n = with_ports(node("n", width, height), "FIXED_SIDE", ports);
+    n.layout_options.extend(options(opts));
+    n
+}
+
+/// The position of each label of each port of `node`, relative to its port.
+fn port_label_positions(graph: &ElkNode, node: &str) -> Vec<Vec<(f64, f64)>> {
+    find(graph, node)
+        .ports
+        .iter()
+        .map(|p| p.labels.iter().map(|l| (l.x, l.y)).collect())
+        .collect()
+}
+
+fn three_ports(side: &str) -> Vec<ElkPort> {
+    vec![
+        labelled_port("p0", side, &["aa"]),
+        labelled_port("p1", side, &["bb"]),
+        labelled_port("p2", side, &["cc"]),
+    ]
+}
+
+fn two_east_ports() -> Vec<ElkPort> {
+    vec![
+        labelled_port("p0", "EAST", &["aa"]),
+        labelled_port("p1", "EAST", &["bb"]),
+    ]
+}
+
+// Mutation: in `remove_overlaps`, never move a rectangle past one already placed. The middle
+// label then stays at the height of the others and overlaps them.
+#[test]
+fn outside_labels_of_north_ports_move_apart_when_they_overlap() {
+    let graph = root(
+        vec![port_node(
+            60.0,
+            20.0,
+            three_ports("NORTH"),
+            &[("elk.portLabels.placement", "OUTSIDE")],
+        )],
+        vec![],
+    );
+    let laid = layout(&graph).unwrap();
+    assert_eq!(
+        port_label_positions(&laid, "n"),
+        [[(7.0, -9.0)], [(7.0, -18.0)], [(7.0, -9.0)]]
+    );
+}
+
+// Mutation: in `constrained_inside_port_label_placement`, skip `center_port_label`. Each label
+// then starts at the left border of the node.
+#[test]
+fn inside_labels_of_north_ports_sit_centred_below_their_ports() {
+    let graph = root(
+        vec![port_node(
+            60.0,
+            20.0,
+            three_ports("NORTH"),
+            &[("elk.portLabels.placement", "INSIDE")],
+        )],
+        vec![],
+    );
+    let laid = layout(&graph).unwrap();
+    assert_eq!(
+        port_label_positions(&laid, "n"),
+        [[(-5.5, 5.0)], [(-7.0, 14.0)], [(-8.5, 5.0)]]
+    );
+}
+
+// Mutation: in `is_first_outside_port_label_placed_differently`, ignore `ALWAYS_SAME_SIDE`.
+#[test]
+fn always_same_side_puts_the_first_label_where_the_others_go() {
+    let same = root(
+        vec![port_node(
+            20.0,
+            40.0,
+            two_east_ports(),
+            &[("elk.portLabels.placement", "[OUTSIDE, ALWAYS_SAME_SIDE]")],
+        )],
+        vec![],
+    );
+    let default = root(
+        vec![port_node(
+            20.0,
+            40.0,
+            two_east_ports(),
+            &[("elk.portLabels.placement", "OUTSIDE")],
+        )],
+        vec![],
+    );
+    assert_eq!(
+        port_label_positions(&layout(&same).unwrap(), "n"),
+        [[(7.0, 5.0)], [(7.0, 5.0)]]
+    );
+    assert_eq!(
+        port_label_positions(&layout(&default).unwrap(), "n"),
+        [[(7.0, -9.0)], [(7.0, 5.0)]]
+    );
+}
+
+// Mutation: in `simple_outside_port_label_placement`, ignore `ALWAYS_OTHER_SAME_SIDE`.
+#[test]
+fn always_other_same_side_puts_a_label_above_its_east_port() {
+    let graph = root(
+        vec![port_node(
+            20.0,
+            40.0,
+            vec![labelled_port("p0", "EAST", &["aa"])],
+            &[(
+                "elk.portLabels.placement",
+                "[OUTSIDE, ALWAYS_OTHER_SAME_SIDE]",
+            )],
+        )],
+        vec![],
+    );
+    assert_eq!(
+        port_label_positions(&layout(&graph).unwrap(), "n"),
+        [[(7.0, -9.0)]]
+    );
+}
+
+// Mutation: in `is_first_outside_port_label_placed_differently`, ignore `SPACE_EFFICIENT`.
+#[test]
+fn space_efficient_puts_the_first_of_three_labels_on_the_other_side() {
+    let place = |placement: &str| {
+        let graph = root(
+            vec![port_node(
+                20.0,
+                60.0,
+                three_ports("EAST"),
+                &[("elk.portLabels.placement", placement)],
+            )],
+            vec![],
+        );
+        port_label_positions(&layout(&graph).unwrap(), "n")
+    };
+    assert_eq!(
+        place("[OUTSIDE, SPACE_EFFICIENT]"),
+        [[(7.0, -9.0)], [(7.0, 5.0)], [(7.0, 5.0)]]
+    );
+    assert_eq!(place("OUTSIDE"), [[(7.0, 5.0)], [(7.0, 5.0)], [(7.0, 5.0)]]);
+}
+
+// Mutation: in `create_port_contexts`, ignore whether the port has edges for an outside label.
+#[test]
+fn next_to_port_if_possible_centres_the_label_of_a_port_without_edges() {
+    let graph = root(
+        vec![
+            port_node(
+                20.0,
+                40.0,
+                two_east_ports(),
+                &[(
+                    "elk.portLabels.placement",
+                    "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+                )],
+            ),
+            node("m", 10.0, 10.0),
+        ],
+        vec![edge("e", "p1", "m")],
+    );
+    assert_eq!(
+        port_label_positions(&layout(&graph).unwrap(), "n"),
+        [[(7.0, -2.0)], [(7.0, 5.0)]]
+    );
+}
+
+// Mutation: in `centred_label_height`, always centre the whole group of labels.
+#[test]
+fn without_treat_as_group_only_the_first_label_is_centred_next_to_the_port() {
+    let place = |treat_as_group: &str| {
+        let graph = root(
+            vec![port_node(
+                20.0,
+                40.0,
+                vec![labelled_port("p0", "EAST", &["aa", "bb"])],
+                &[
+                    (
+                        "elk.portLabels.placement",
+                        "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+                    ),
+                    ("elk.portLabels.treatAsGroup", treat_as_group),
+                ],
+            )],
+            vec![],
+        );
+        port_label_positions(&layout(&graph).unwrap(), "n")
+    };
+    assert_eq!(place("true"), [[(7.0, -6.0), (7.0, 2.0)]]);
+    assert_eq!(place("false"), [[(7.0, -2.0), (7.0, 6.0)]]);
+}
+
+// Mutation: in `compute_vertical_port_margins`, skip the branch for fixed labels. The ports then
+// move up by the 9 their labels reach above them.
+#[test]
+fn fixed_port_labels_keep_their_place_and_push_the_ports_apart() {
+    let fixed_port = |id: &str| {
+        let mut p = labelled_port(id, "EAST", &["aa"]);
+        p.labels[0].x = -15.0;
+        p.labels[0].y = -9.0;
+        p
+    };
+    let graph = root(
+        vec![port_node(
+            20.0,
+            40.0,
+            vec![fixed_port("p0"), fixed_port("p1")],
+            &[
+                ("elk.portLabels.placement", "[]"),
+                (
+                    "elk.nodeSize.constraints",
+                    "[PORTS, PORT_LABELS, NODE_LABELS]",
+                ),
+            ],
+        )],
+        vec![],
+    );
+    let laid = layout(&graph).unwrap();
+    assert_eq!(
+        port_label_positions(&laid, "n"),
+        [[(-15.0, -9.0)], [(-15.0, -9.0)]]
+    );
+    assert_eq!(port_at(&laid, "n", "p0"), (0.0, 19.0));
+    assert_eq!(port_at(&laid, "n", "p1"), (0.0, 42.0));
+    assert_eq!(size(&laid, "n"), (0.0, 56.0));
+}
+
+// Mutation: in `node_settings`, add `NEXT_TO_PORT_IF_POSSIBLE` only when
+// `portLabels.nextToPortIfPossible` is true.
+#[test]
+fn the_deprecated_next_to_port_option_counts_when_it_is_set_at_all() {
+    // `DeprecatedLayoutOptionReplacer` asks only whether the option is set, so false turns it on.
+    let graph = root(
+        vec![port_node(
+            20.0,
+            40.0,
+            two_east_ports(),
+            &[("elk.portLabels.nextToPortIfPossible", "false")],
+        )],
+        vec![],
+    );
+    assert_eq!(
+        port_label_positions(&layout(&graph).unwrap(), "n"),
+        [[(7.0, -2.0)], [(7.0, -2.0)]]
+    );
+}
+
+// Mutation: in `node_settings`, drop the move of `SPACE_EFFICIENT_PORT_LABELS` into the port
+// label placement.
+#[test]
+fn the_deprecated_space_efficient_size_option_becomes_a_port_label_placement() {
+    let graph = root(
+        vec![port_node(
+            20.0,
+            60.0,
+            three_ports("EAST"),
+            &[("elk.nodeSize.options", "[SPACE_EFFICIENT_PORT_LABELS]")],
+        )],
+        vec![],
+    );
+    assert_eq!(
+        port_label_positions(&layout(&graph).unwrap(), "n"),
+        [[(7.0, -9.0)], [(7.0, 5.0)], [(7.0, 5.0)]]
+    );
+}
+
+// Mutation: drop the `is_valid` check after the deprecated options in `node_settings`. elkjs
+// fails both graphs with "Invalid port label placement".
+#[test]
+fn an_invalid_port_label_placement_is_an_error() {
+    let cases: [&[(&str, &str)]; 2] = [
+        &[("elk.portLabels.placement", "[INSIDE, OUTSIDE]")],
+        &[
+            ("elk.portLabels.placement", "[OUTSIDE, ALWAYS_SAME_SIDE]"),
+            ("elk.nodeSize.options", "[SPACE_EFFICIENT_PORT_LABELS]"),
+        ],
+    ];
+    for opts in cases {
+        let graph = root(
+            vec![port_node(20.0, 60.0, three_ports("EAST"), opts)],
+            vec![],
+        );
+        assert!(
+            matches!(error_of(&graph), Error::InvalidOptionValue { .. }),
+            "{opts:?}"
+        );
+    }
+}
+
+// Mutation: in `configure_size_contributions`, drop the `PORTS` branch. The node then keeps its
+// height of 10.
+#[test]
+fn a_node_sized_to_its_ports_grows_to_hold_them() {
+    let graph = root(
+        vec![port_node(
+            10.0,
+            10.0,
+            three_ports("EAST"),
+            &[("elk.nodeSize.constraints", "[PORTS]")],
+        )],
+        vec![],
+    );
+    let laid = layout(&graph).unwrap();
+    assert_eq!(size(&laid, "n"), (0.0, 52.0));
+    assert_eq!(port_at(&laid, "n", "p2"), (0.0, 38.0));
+}
+
+// Mutation: in `configure_size_contributions`, drop the `PORT_LABELS` branch inside `PORTS`.
+// The node then stays as narrow as its ports need.
+#[test]
+fn a_node_sized_to_its_port_labels_grows_to_hold_inside_labels() {
+    let graph = root(
+        vec![port_node(
+            10.0,
+            10.0,
+            three_ports("EAST"),
+            &[
+                ("elk.nodeSize.constraints", "[PORTS, PORT_LABELS]"),
+                ("elk.portLabels.placement", "INSIDE"),
+            ],
+        )],
+        vec![],
+    );
+    let laid = layout(&graph).unwrap();
+    assert_eq!(size(&laid, "n"), (42.0, 64.0));
+    assert_eq!(
+        port_label_positions(&laid, "n"),
+        [[(-21.0, -2.0)], [(-21.0, -2.0)], [(-21.0, -2.0)]]
+    );
+}
+
+// Mutation: in `port_has_edges`, skip the north or south port dummy. The north port then seems
+// to have no edge, and its label goes next to it.
+#[test]
+fn an_edge_moved_to_a_north_port_dummy_still_counts_for_its_port() {
+    let place = |edges: Vec<ElkEdge>| {
+        let graph = root(
+            vec![
+                port_node(
+                    40.0,
+                    20.0,
+                    vec![labelled_port("p0", "NORTH", &["aa"])],
+                    &[(
+                        "elk.portLabels.placement",
+                        "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+                    )],
+                ),
+                node("m", 10.0, 10.0),
+            ],
+            edges,
+        );
+        port_label_positions(&layout(&graph).unwrap(), "n")
+    };
+    assert_eq!(place(vec![edge("e", "p0", "m")]), [[(7.0, -9.0)]]);
+    assert_eq!(place(vec![]), [[(-7.0, -9.0)]]);
+}
+
+// Mutation: in `port_has_edges`, skip the self loop holder. The port of the loop then seems to
+// have no edge, and its label goes next to it.
+#[test]
+fn a_self_loop_counts_as_an_edge_of_its_ports() {
+    let graph = root(
+        vec![port_node(
+            20.0,
+            40.0,
+            vec![
+                labelled_port("p0", "EAST", &["aa"]),
+                port("p1", 6.0, 4.0, "EAST"),
+            ],
+            &[(
+                "elk.portLabels.placement",
+                "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+            )],
+        )],
+        vec![edge("e", "p0", "p1")],
+    );
+    assert_eq!(
+        port_label_positions(&layout(&graph).unwrap(), "n"),
+        [vec![(7.0, -9.0)], vec![]]
+    );
+}
+
+// Mutation: in `remove_overlaps`, add a rectangle to the scanline set even when its right
+// border equals one already there. The label of p2 then moves above the label of p1.
+#[test]
+fn two_labels_with_one_right_border_hide_the_second_from_the_overlap_removal() {
+    // Java's scanline is a `TreeSet` ordered by the right border, so it keeps only one of the
+    // labels of p0 and p1. The label of p2 then never sees that of p1, and both end up at -18.
+    let placed = |id: &str, x: f64, width: f64| {
+        let mut p = port(id, 6.0, 4.0, "NORTH");
+        p.x = x;
+        p.y = -4.0;
+        p.labels = vec![label(id, width, 8.0)];
+        p
+    };
+    let mut n = with_ports(
+        node("n", 80.0, 20.0),
+        "FIXED_POS",
+        vec![
+            placed("p0", 0.0, 40.0),
+            placed("p1", 10.0, 30.0),
+            placed("p2", 30.0, 20.0),
+        ],
+    );
+    n.layout_options
+        .insert("elk.portLabels.placement".into(), "OUTSIDE".into());
+    let laid = layout(&root(vec![n], vec![])).unwrap();
+    assert_eq!(
+        port_label_positions(&laid, "n"),
+        [[(7.0, -9.0)], [(7.0, -18.0)], [(7.0, -18.0)]]
+    );
+}
