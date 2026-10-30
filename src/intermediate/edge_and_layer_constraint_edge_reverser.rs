@@ -16,7 +16,7 @@ pub fn reverse_edges_for_edge_and_layer_constraints(graph: &mut LGraph) {
     let mut remaining_nodes = Vec::new();
 
     for node in graph.node_ids() {
-        let layer_constraint = graph.layerless_nodes[node].layer_constraint;
+        let layer_constraint = graph.layerless_nodes[node].layer_constraint();
         if let Some(target_port_type) = target_port_type_for_layer_constraint(layer_constraint) {
             reverse_node_edges(graph, node, layer_constraint, target_port_type);
         } else {
@@ -26,7 +26,7 @@ pub fn reverse_edges_for_edge_and_layer_constraints(graph: &mut LGraph) {
 
     for node in remaining_nodes {
         if should_reverse_all_fixed_side_edges(graph, node) {
-            let layer_constraint = graph.layerless_nodes[node].layer_constraint;
+            let layer_constraint = graph.layerless_nodes[node].layer_constraint();
             reverse_node_edges(graph, node, layer_constraint, EdgeReversalPortType::All);
         }
     }
@@ -62,7 +62,7 @@ fn should_reverse_all_fixed_side_edges(graph: &LGraph, node: NodeId) -> bool {
 
         for edge in port.outgoing_edges() {
             let target_layer_constraint =
-                graph.layerless_nodes[graph.edges[*edge].target().node].layer_constraint;
+                graph.layerless_nodes[graph.edges[*edge].target().node].layer_constraint();
             if matches!(
                 target_layer_constraint,
                 LayerConstraint::Last | LayerConstraint::LastSeparate
@@ -72,7 +72,7 @@ fn should_reverse_all_fixed_side_edges(graph: &LGraph, node: NodeId) -> bool {
         }
         for edge in port.incoming_edges() {
             let source_layer_constraint =
-                graph.layerless_nodes[graph.edges[*edge].source().node].layer_constraint;
+                graph.layerless_nodes[graph.edges[*edge].source().node].layer_constraint();
             if matches!(
                 source_layer_constraint,
                 LayerConstraint::First | LayerConstraint::FirstSeparate
@@ -144,7 +144,7 @@ fn can_reverse_outgoing_edge(
         return false;
     }
 
-    graph.layerless_nodes[target_node].layer_constraint != LayerConstraint::LastSeparate
+    graph.layerless_nodes[target_node].layer_constraint() != LayerConstraint::LastSeparate
 }
 
 fn can_reverse_incoming_edge(
@@ -166,5 +166,5 @@ fn can_reverse_incoming_edge(
         return false;
     }
 
-    graph.layerless_nodes[source_node].layer_constraint != LayerConstraint::FirstSeparate
+    graph.layerless_nodes[source_node].layer_constraint() != LayerConstraint::FirstSeparate
 }

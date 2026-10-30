@@ -31,7 +31,7 @@ fn move_first_and_last_nodes(graph: &mut LGraph) -> IntermediateResult<()> {
         .collect::<Vec<_>>();
 
     for node in layered_nodes {
-        match graph.layerless_nodes[node].layer_constraint {
+        match graph.layerless_nodes[node].layer_constraint() {
             LayerConstraint::First => {
                 ensure_no_incoming_except_label_dummies(graph, node)?;
                 graph.set_node_layer(node, first_layer);
@@ -92,7 +92,7 @@ pub(crate) fn restore_hidden_layer_constraint_nodes(graph: &mut LGraph) {
     let mut last_separate_nodes = Vec::new();
 
     for node in hidden_nodes {
-        match graph.layerless_nodes[node].layer_constraint {
+        match graph.layerless_nodes[node].layer_constraint() {
             LayerConstraint::FirstSeparate => first_separate_nodes.push(node),
             LayerConstraint::LastSeparate => last_separate_nodes.push(node),
             _ => {}

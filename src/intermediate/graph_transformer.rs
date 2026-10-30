@@ -5,8 +5,7 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/options/DirectionCongruency.java
 
 use crate::graph::{
-    ExternalPortData, InLayerConstraint, LGraph, LLabel, LNode, LPadding, LPoint, LPort, LSize,
-    PortSide,
+    InLayerConstraint, LGraph, LLabel, LNode, LPadding, LPoint, LPort, LSize, PortSide,
 };
 use crate::options::{Alignment, DirectionCongruency, ElkDirection, ElkPadding, LayerConstraint};
 
@@ -101,9 +100,11 @@ fn mirror_node_x(node: &mut LNode, offset: f64) {
     for port in node.ports.slots_mut() {
         mirror_port_x(port, node.size.width);
     }
-    if let Some((external, layer_constraint)) = node.external_port_and_layer_constraint_mut() {
-        *layer_constraint = mirror_layer_constraint_x(*layer_constraint);
+    if let Some(external) = node.external_port_mut() {
         external.side = mirror_port_side_x(external.side);
+        // `mirrorLayerConstraintX` writes only a value other than `NONE`, so an unset constraint
+        // stays unset. An explicit `NONE` is written back as `NONE`.
+        node.map_layer_constraint(mirror_layer_constraint_x);
     }
     for label in &mut node.labels {
         label.node_label_placement = label.node_label_placement.map(|p| p.mirror_x());
@@ -210,10 +211,7 @@ fn transpose_node(node: &mut LNode) {
     for port in node.ports.slots_mut() {
         transpose_port(port);
     }
-    if let Some((external, layer_constraint)) = node.external_port_and_layer_constraint_mut() {
-        transpose_layer_constraint_for_external_port(external, layer_constraint);
-        external.side = transpose_port_side(external.side);
-    }
+    transpose_external_port(node);
     for label in &mut node.labels {
         label.node_label_placement = label.node_label_placement.map(|p| p.transpose());
         transpose_label(label);
@@ -340,16 +338,19 @@ fn mirror_layer_constraint_x(layer_constraint: LayerConstraint) -> LayerConstrai
     }
 }
 
-/// Ports `GraphTransformer.transposeLayerConstraint`.
+/// Ports the external port part of `GraphTransformer.transpose`: `transposeExternalPortSide`,
+/// then `transposeLayerConstraint`. Both run under one check for an external port dummy.
 ///
-/// Every branch that sets a value sets it with `setProperty` in ELK, so the layer constraint
-/// counts as explicit afterwards, even when the branch sets `NONE`. A dummy that no branch
-/// matches keeps what it had.
-fn transpose_layer_constraint_for_external_port(
-    external: &mut ExternalPortData,
-    layer_constraint: &mut LayerConstraint,
-) {
-    let transposed = match (*layer_constraint, external.in_layer_constraint) {
+/// Every branch of the layer constraint step that sets a value sets it with `setProperty` in ELK,
+/// so the layer constraint counts as explicit afterwards, even when the branch sets `NONE`. A
+/// dummy that no branch matches keeps what it had.
+fn transpose_external_port(node: &mut LNode) {
+    let layer_constraint = node.layer_constraint();
+    let Some(external) = node.external_port_mut() else {
+        return;
+    };
+    external.side = transpose_port_side(external.side);
+    let transposed = match (layer_constraint, external.in_layer_constraint) {
         (LayerConstraint::FirstSeparate, _) => {
             Some((LayerConstraint::None, InLayerConstraint::Top))
         }
@@ -365,9 +366,8 @@ fn transpose_layer_constraint_for_external_port(
         (_, InLayerConstraint::None) => None,
     };
     if let Some((new_layer_constraint, new_in_layer_constraint)) = transposed {
-        *layer_constraint = new_layer_constraint;
         external.in_layer_constraint = new_in_layer_constraint;
-        external.layer_constraint_explicit = true;
+        node.set_layer_constraint(new_layer_constraint);
     }
 }
 

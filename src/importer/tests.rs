@@ -117,8 +117,8 @@ fn import_records_the_self_loop_options_of_each_node() {
     );
 }
 
-// Mutation: in `transform_node`, write the port alignment, the placement options or the
-// explicit layer constraint of every node to the row of node 0.
+// Mutation: in `transform_node`, write the port alignment or the placement options of every node
+// to the row of node 0, or skip `set_layer_constraint`, or call it for every node.
 #[test]
 fn import_records_the_options_the_processors_read() {
     let mut first = node("A");
@@ -155,8 +155,8 @@ fn import_records_the_options_the_processors_read() {
         root.tables.placement_options.get(b).unwrap().flexibility,
         crate::options::NodeFlexibility::None
     );
-    assert!(root.is_layer_constraint_explicit(a));
-    assert!(!root.is_layer_constraint_explicit(b));
+    assert!(root.layerless_nodes[a].is_layer_constraint_explicit());
+    assert!(!root.layerless_nodes[b].is_layer_constraint_explicit());
 }
 
 #[test]

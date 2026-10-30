@@ -168,7 +168,7 @@ fn model_order_cycle_breaker_respects_first_layer_constraint() {
     let a = graph.node_named("A");
     let b = graph.node_named("B");
     graph.layerless_nodes[a].model_order = Some(1);
-    graph.layerless_nodes[a].layer_constraint = crate::options::LayerConstraint::First;
+    graph.layerless_nodes[a].set_layer_constraint(crate::options::LayerConstraint::First);
     graph.layerless_nodes[b].model_order = Some(0);
 
     break_cycles_model_order(&mut graph);
@@ -205,7 +205,7 @@ fn model_order_cycle_breaker_consumes_separate_counters_in_edge_order() {
             .iter_mut()
             .find(|node| node.id == id)
             .unwrap();
-        node.layer_constraint = constraint;
+        node.set_layer_constraint(constraint);
         node.model_order = model_order;
     }
 

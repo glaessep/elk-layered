@@ -1211,7 +1211,7 @@ fn layer_constraint_preprocessor_hides_separate_nodes_before_layering() {
     assert!(graph.hidden_mask()[hidden]);
     assert_eq!(graph.hidden_nodes, vec![hidden]);
     assert_eq!(
-        graph.layerless_nodes[a].layer_constraint,
+        graph.layerless_nodes[a].layer_constraint(),
         LayerConstraint::None
     );
     assert!(
@@ -1231,7 +1231,7 @@ fn layer_constraint_preprocessor_constrains_isolated_opposite_node() {
 
     let a = graph.node_named("A");
     assert_eq!(
-        graph.layerless_nodes[a].layer_constraint,
+        graph.layerless_nodes[a].layer_constraint(),
         LayerConstraint::First
     );
 }
@@ -1247,15 +1247,15 @@ fn layer_constraint_preprocessor_keeps_explicit_opposite_constraint() {
     preprocess_layer_constraints(&mut graph).unwrap();
 
     let a = graph.node_named("A");
-    assert!(graph.is_layer_constraint_explicit(a));
+    assert!(graph.layerless_nodes[a].is_layer_constraint_explicit());
     assert_eq!(
-        graph.layerless_nodes[a].layer_constraint,
+        graph.layerless_nodes[a].layer_constraint(),
         LayerConstraint::None
     );
 }
 
-// Mutation: in `transpose_layer_constraint_for_external_port`, do not mark the layer constraint
-// explicit.
+// Mutation: in `transpose_external_port`, skip the write where the transpose turns a top or
+// bottom in-layer constraint into a separate layer constraint.
 #[test]
 fn layer_constraint_preprocessor_keeps_a_transposed_external_port_dummy_in_its_separate_layer() {
     let mut graph = LGraph::new("root", LayeredOptions::default());
@@ -1279,7 +1279,7 @@ fn layer_constraint_preprocessor_keeps_a_transposed_external_port_dummy_in_its_s
     preprocess_layer_constraints(&mut graph).unwrap();
 
     assert_eq!(
-        graph.layerless_nodes[south].layer_constraint,
+        graph.layerless_nodes[south].layer_constraint(),
         LayerConstraint::LastSeparate
     );
     assert_eq!(graph.hidden_nodes, vec![north, south]);
@@ -1300,7 +1300,7 @@ fn layer_constraint_preprocessor_keeps_node_connected_to_both_separate_sides_unc
 
     let a = graph.node_named("A");
     assert_eq!(
-        graph.layerless_nodes[a].layer_constraint,
+        graph.layerless_nodes[a].layer_constraint(),
         LayerConstraint::None
     );
 }
@@ -1660,8 +1660,78 @@ fn hierarchical_port_constraint_processor_reuses_north_south_replacements_per_vi
     assert_eq!(graph.edges[outgoing_to_north].target().port, PortId::new(0));
 }
 
+/// Runs the hierarchical port constraint processor on a graph with one north dummy whose layer
+/// constraint is `layer_constraint` (`None` leaves it unset), and returns the replacement dummy.
+fn replacement_of_north_dummy(layer_constraint: Option<LayerConstraint>) -> (LGraph, NodeId) {
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    graph.options.port_constraints = PortConstraints::FixedSide;
+    let north = push_external_dummy(&mut graph, "north", PortSide::North, 0.42);
+    let target = push_normal_node(&mut graph, "target");
+    graph.layerless_nodes[north]
+        .external_port_mut()
+        .unwrap()
+        .in_layer_constraint = InLayerConstraint::Top;
+    if let Some(layer_constraint) = layer_constraint {
+        graph.layerless_nodes[north].set_layer_constraint(layer_constraint);
+    }
+    graph
+        .tables
+        .in_layer
+        .row_mut(north)
+        .successor_constraints
+        .push(target);
+    graph.set_node_layer(north, 0);
+    graph.set_node_layer(target, 0);
+    add_test_edge(&mut graph, "north-target", north, 0, target, 0);
+
+    process_hierarchical_port_constraints(&mut graph);
+
+    let replacement = graph
+        .nodes_with_ids()
+        .find_map(|(index, node)| {
+            (node
+                .external_port()
+                .and_then(|external| external.replaced_dummy)
+                == Some(north))
+            .then_some(index)
+        })
+        .unwrap();
+    (graph, replacement)
+}
+
+// Mutation: in `copy_layer_constraint_from`, make an unset layer constraint explicit with `NONE`.
+#[test]
+fn a_replacement_dummy_of_an_unset_original_has_no_explicit_layer_constraint() {
+    let (graph, replacement) = replacement_of_north_dummy(None);
+
+    assert!(!graph.layerless_nodes[replacement].is_layer_constraint_explicit());
+    assert_eq!(
+        graph.layerless_nodes[replacement].layer_constraint(),
+        LayerConstraint::None
+    );
+}
+
+// Mutation: in `copy_layer_constraint_from`, write `NONE` in place of the value of `other`.
+#[test]
+fn a_replacement_dummy_copies_the_layer_constraint_value_of_its_original() {
+    for layer_constraint in [
+        LayerConstraint::First,
+        LayerConstraint::FirstSeparate,
+        LayerConstraint::Last,
+        LayerConstraint::LastSeparate,
+    ] {
+        let (graph, replacement) = replacement_of_north_dummy(Some(layer_constraint));
+
+        assert!(graph.layerless_nodes[replacement].is_layer_constraint_explicit());
+        assert_eq!(
+            graph.layerless_nodes[replacement].layer_constraint(),
+            layer_constraint
+        );
+    }
+}
+
 // Mutation: in `create_hierarchical_port_replacement_dummy`, leave out the copy of the
-// successor constraints to the replacement dummy, or of the explicit layer constraint.
+// successor constraints to the replacement dummy, or skip `copy_layer_constraint_from`.
 #[test]
 fn hierarchical_port_constraint_processor_copies_replacement_dummy_metadata() {
     let mut graph = LGraph::new("root", LayeredOptions::default());
@@ -1691,7 +1761,7 @@ fn hierarchical_port_constraint_processor_copies_replacement_dummy_metadata() {
         .row_mut(north)
         .successor_constraints
         .push(target);
-    graph.mark_layer_constraint_explicit(north);
+    graph.layerless_nodes[north].set_layer_constraint(LayerConstraint::None);
 
     graph.set_node_layer(north, 0);
     graph.set_node_layer(target, 0);
@@ -1711,7 +1781,7 @@ fn hierarchical_port_constraint_processor_copies_replacement_dummy_metadata() {
         .unwrap();
     let node = &graph.layerless_nodes[replacement];
     assert_eq!(graph.in_layer_successor_constraints(replacement), [target]);
-    assert!(graph.is_layer_constraint_explicit(replacement));
+    assert!(graph.layerless_nodes[replacement].is_layer_constraint_explicit());
     assert_eq!(node.external_port().unwrap().ratio_or_position, 0.42);
     assert_eq!(node.external_port().unwrap().origin_port, Some(origin));
     assert_eq!(node.model_order, Some(17));

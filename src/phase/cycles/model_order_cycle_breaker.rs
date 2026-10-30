@@ -58,7 +58,7 @@ impl ModelOrderContext {
         offset: i64,
     ) -> i64 {
         let node = &graph.layerless_nodes[node_index];
-        let mut model_order = match node.layer_constraint {
+        let mut model_order = match node.layer_constraint() {
             LayerConstraint::FirstSeparate => {
                 let order = -2 * offset + self.first_separate_model_order;
                 self.first_separate_model_order += 1;

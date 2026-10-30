@@ -111,9 +111,6 @@ pub(crate) struct NodeTables {
     pub(crate) port_alignment: NodeTable<PortAlignment>,
     /// The options only the node placement reads, of the nodes the importer read them for.
     pub(crate) placement_options: NodeTable<PlacementOptions>,
-    /// A node has a row when its layer constraint was set by the caller or by a hierarchical
-    /// port dummy, not derived. Only the layer constraint preprocessing reads it.
-    pub(crate) layer_constraint_explicit: NodeTable<()>,
 }
 
 impl NodeTables {
@@ -124,7 +121,6 @@ impl NodeTables {
             self_loop_options: self.self_loop_options.subset(nodes),
             port_alignment: self.port_alignment.subset(nodes),
             placement_options: self.placement_options.subset(nodes),
-            layer_constraint_explicit: self.layer_constraint_explicit.subset(nodes),
         }
     }
 
@@ -157,8 +153,6 @@ impl NodeTables {
         self.port_alignment.absorb(node_map, other.port_alignment);
         self.placement_options
             .absorb(node_map, other.placement_options);
-        self.layer_constraint_explicit
-            .absorb(node_map, other.layer_constraint_explicit);
     }
 }
 
@@ -347,9 +341,10 @@ pub struct LNode {
     pub(crate) model_order: Option<usize>,
     /// The layer the node sits in. Private: `LGraph` sets it together with the layer's list.
     layer_index: Option<usize>,
-    /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
-    /// it.
-    pub(crate) layer_constraint: super::options::LayerConstraint,
+    /// ELK's `LAYERING_LAYER_CONSTRAINT` property: `Some` once something sets it, even to `NONE`,
+    /// as `hasProperty` answers in ELK. Private so that the methods of `LNode` are the only way
+    /// to write it, and no write can set a value without making it explicit.
+    layer_constraint: Option<super::options::LayerConstraint>,
     /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
     /// it.
     pub(crate) node_alignment: Alignment,
@@ -455,10 +450,6 @@ pub struct ExternalPortData {
     pub origin_port: Option<GraphPortRef>,
     /// `InternalProperties.IN_LAYER_CONSTRAINT`.
     pub in_layer_constraint: InLayerConstraint,
-    /// Whether ELK sets the layer constraint of the dummy on purpose, as it does for a west or
-    /// east dummy, and for a north or south dummy once the graph is transposed. Such a constraint
-    /// counts as explicit.
-    pub layer_constraint_explicit: bool,
     /// `LayeredOptions.PORT_ANCHOR` of the dummy: where its port's anchor sat when the dummy was
     /// made. `GraphTransformer` turns the port but not this property, so in a vertical layout it
     /// keeps the coordinates from before the turn.
@@ -570,7 +561,6 @@ impl Default for ExternalPortData {
             parent_port_type: None,
             origin_port: None,
             in_layer_constraint: InLayerConstraint::None,
-            layer_constraint_explicit: false,
             anchor: LPoint::default(),
             label_spacings: DummyLabelSpacings::default(),
         }
@@ -656,18 +646,6 @@ impl LNode {
             })
     }
 
-    /// The data of an external port dummy together with the layer constraint of the node, both
-    /// for change, or `None` for any other node. A layer constraint and an external port's side
-    /// change together in the graph transformations.
-    pub fn external_port_and_layer_constraint_mut(
-        &mut self,
-    ) -> Option<(&mut ExternalPortData, &mut super::options::LayerConstraint)> {
-        match &mut self.dummy {
-            Some(DummyData::ExternalPort(data)) => Some((data, &mut self.layer_constraint)),
-            _ => None,
-        }
-    }
-
     /// The ports at the ends of the long edge that a long edge dummy or a label dummy belongs
     /// to, or `None` for any other node.
     pub fn long_edge_ends(&self) -> Option<LongEdgeEnds> {
@@ -721,6 +699,42 @@ impl LNode {
         }
     }
 
+    /// The layer constraint of the node: `NONE` while nothing has set it.
+    pub(crate) fn layer_constraint(&self) -> super::options::LayerConstraint {
+        self.layer_constraint.unwrap_or_default()
+    }
+
+    /// Whether the caller, a hierarchical port dummy, or a graph step set the layer constraint
+    /// on purpose, even to `NONE`. ELK's `hasProperty(LAYERING_LAYER_CONSTRAINT)`. The layer
+    /// constraint preprocessing leaves such a node alone.
+    pub(crate) fn is_layer_constraint_explicit(&self) -> bool {
+        self.layer_constraint.is_some()
+    }
+
+    /// Sets the layer constraint. Every write goes through here and counts as explicit, as ELK's
+    /// `setProperty` makes the property present.
+    pub(crate) fn set_layer_constraint(
+        &mut self,
+        layer_constraint: super::options::LayerConstraint,
+    ) {
+        self.layer_constraint = Some(layer_constraint);
+    }
+
+    /// Maps the layer constraint if it is set, and leaves an unset one unset. For a step that ELK
+    /// writes back only where it changes a value.
+    pub(crate) fn map_layer_constraint(
+        &mut self,
+        map: impl FnOnce(super::options::LayerConstraint) -> super::options::LayerConstraint,
+    ) {
+        self.layer_constraint = self.layer_constraint.map(map);
+    }
+
+    /// Copies the layer constraint of `other` as it is: a set one stays set, an unset one stays
+    /// unset.
+    pub(crate) fn copy_layer_constraint_from(&mut self, other: &LNode) {
+        self.layer_constraint = other.layer_constraint;
+    }
+
     pub fn new(id: impl Into<String>, width: f64, height: f64, model_order: Option<usize>) -> Self {
         Self {
             id: id.into(),
@@ -739,7 +753,7 @@ impl LNode {
             compound_node: false,
             model_order,
             layer_index: None,
-            layer_constraint: super::options::LayerConstraint::None,
+            layer_constraint: None,
             node_alignment: Alignment::Automatic,
             port_constraints: PortConstraints::Undefined,
         }
@@ -1550,20 +1564,6 @@ impl LGraph {
         self.tables.port_alignment.get(node).copied()
     }
 
-    /// Whether the caller, a hierarchical port dummy, or the graph transform (which transposes a
-    /// north or south dummy) set the layer constraint of `node`.
-    pub(crate) fn is_layer_constraint_explicit(&self, node: NodeId) -> bool {
-        self.tables.layer_constraint_explicit.get(node).is_some()
-            || self.layerless_nodes[node]
-                .external_port()
-                .is_some_and(|external| external.layer_constraint_explicit)
-    }
-
-    /// Records that the layer constraint of `node` is explicit.
-    pub(crate) fn mark_layer_constraint_explicit(&mut self, node: NodeId) {
-        self.tables.layer_constraint_explicit.row_mut(node);
-    }
-
     /// Which nodes the layer constraint preprocessing has hidden from the layering. A node is
     /// hidden while it is in [`Self::hidden_nodes`].
     pub fn hidden_mask(&self) -> IdVec<NodeId, bool> {
@@ -2230,7 +2230,6 @@ pub fn create_external_port_dummy(
         size: port_size,
         ratio_or_position: 0.0,
         in_layer_constraint: InLayerConstraint::None,
-        layer_constraint_explicit: false,
         ..data
     };
     dummy.port_constraints = PortConstraints::FixedPos;
@@ -2253,16 +2252,14 @@ pub fn create_external_port_dummy(
 
     match external_side {
         PortSide::West => {
-            dummy.layer_constraint = LayerConstraint::FirstSeparate;
-            external.layer_constraint_explicit = true;
+            dummy.set_layer_constraint(LayerConstraint::FirstSeparate);
             dummy.size.height = port_size.height;
             if border_offset < 0.0 {
                 dummy.size.width = -border_offset;
             }
         }
         PortSide::East => {
-            dummy.layer_constraint = LayerConstraint::LastSeparate;
-            external.layer_constraint_explicit = true;
+            dummy.set_layer_constraint(LayerConstraint::LastSeparate);
             dummy.size.height = port_size.height;
             if border_offset < 0.0 {
                 dummy.size.width = -border_offset;

@@ -228,7 +228,6 @@ pub(crate) fn create_hierarchical_port_replacement_dummy(
         .external_port()
         .expect("only an external port dummy gets a replacement")
         .clone();
-    let layer_constraint_explicit = graph.is_layer_constraint_explicit(original_dummy);
     let node_index = graph.push_node_with(|id| {
         let mut replacement = LNode::new(
             format!("{}:replacement:{}", original.id, id.index()),
@@ -243,7 +242,6 @@ pub(crate) fn create_hierarchical_port_replacement_dummy(
             replaced_dummy: Some(original_dummy),
             origin_port: original_external.origin_port,
             in_layer_constraint: original_external.in_layer_constraint,
-            layer_constraint_explicit,
             anchor: original_external.anchor,
             ..ExternalPortData::default()
         }));
@@ -251,7 +249,7 @@ pub(crate) fn create_hierarchical_port_replacement_dummy(
         replacement.padding = original.padding;
         replacement.node_label_placement = original.node_label_placement;
         replacement.model_order = original.model_order;
-        replacement.layer_constraint = original.layer_constraint;
+        replacement.copy_layer_constraint_from(&original);
         replacement.port_constraints = PortConstraints::FixedPos;
         replacement.node_alignment = Alignment::Center;
         replacement
