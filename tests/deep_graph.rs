@@ -124,6 +124,8 @@ fn staircase() -> ElkNode {
 // - In `place_nodes_brandes_koepf`, reverse the nodes of every odd layer. The order of `n{i}` and
 //   `m{i}` then changes from layer to layer.
 // - Drop the edges `n{i} -> m{i+1}` from `staircase()`. The `n{i}` then leave their layers.
+// - In `apply_layout`, set every `y` to zero. `n{i}` and `m{i}` then share one `y`, and no order
+//   is left to check.
 #[test]
 fn a_staircase_of_blocks_is_placed_on_a_small_stack() {
     let laid_out = lay_out_on_small_stack(staircase()).unwrap();
@@ -132,15 +134,17 @@ fn a_staircase_of_blocks_is_placed_on_a_small_stack() {
         .iter()
         .map(|node| (node.id.as_str(), (node.x, node.y)))
         .collect();
-    let at = |id: String| at[id.as_str()];
+    let at = |id: &str| at[id];
 
-    // The right direction puts a layer at one x. `n{i}` shares the layer of `m{i}` and lies before
-    // `m{i+1}`, so the block `n{i}, m{i+1}` spans two layers.
-    let n_above_m = at("n0".into()).1 < at("m0".into()).1;
+    // With `elk.direction` RIGHT, a layer sits at one x. `n{i}` shares the layer of `m{i}` and
+    // lies before `m{i+1}`, so the block `n{i}, m{i+1}` spans two layers.
+    let n_above_m = at("n0").1 < at("m0").1;
     for i in 0..STEPS - 1 {
-        assert_eq!(at(format!("n{i}")).0, at(format!("m{i}")).0);
-        assert!(at(format!("n{i}")).0 < at(format!("m{}", i + 1)).0);
-        assert_eq!(at(format!("n{i}")).1 < at(format!("m{i}")).1, n_above_m);
+        let (n, m, next_m) = (format!("n{i}"), format!("m{i}"), format!("m{}", i + 1));
+        assert_eq!(at(&n).0, at(&m).0);
+        assert!(at(&n).0 < at(&next_m).0);
+        assert_ne!(at(&n).1, at(&m).1);
+        assert_eq!(at(&n).1 < at(&m).1, n_above_m);
     }
 }
 
