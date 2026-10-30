@@ -144,7 +144,7 @@ fn execute_intermediate(
         }
         P::SelfLoopPortRestorer => restore_self_loop_ports(graph, others),
         P::InLayerConstraintProcessor => process_in_layer_constraints(graph),
-        P::LabelAndNodeSizeProcessor => calculate_label_and_node_sizes(graph),
+        P::LabelAndNodeSizeProcessor => calculate_label_and_node_sizes(graph, others),
         P::InnermostNodeMarginCalculator => calculate_innermost_node_margins(graph),
         P::SelfLoopRouter => route_self_loops(graph),
         P::LabelDummySwitcher => switch_label_dummies(graph),

@@ -1,0 +1,81 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered"
+  },
+  "children": [
+    {
+      "id": "g",
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.nodeSize.constraints": "[PORTS, PORT_LABELS]",
+        "elk.portLabels.placement": "OUTSIDE"
+      },
+      "ports": [
+        {
+          "id": "pa",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "labels": [
+            {
+              "text": "l",
+              "width": 12,
+              "height": 14
+            }
+          ]
+        },
+        {
+          "id": "pb",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "labels": [
+            {
+              "text": "l",
+              "width": 12,
+              "height": 14
+            }
+          ]
+        },
+        {
+          "id": "pc",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "labels": [
+            {
+              "text": "l",
+              "width": 12,
+              "height": 14
+            }
+          ]
+        }
+      ],
+      "children": [
+        {
+          "id": "c",
+          "width": 10,
+          "height": 10
+        }
+      ],
+      "edges": [
+        {
+          "id": "e",
+          "sources": [
+            "pb"
+          ],
+          "targets": [
+            "c"
+          ]
+        }
+      ]
+    }
+  ]
+}

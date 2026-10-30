@@ -15,7 +15,7 @@ use serde_json::Value;
 
 /// Cases whose feature elk-layered does not have yet, each with the issue that adds it. A case
 /// leaves this list in the pull request that makes it pass.
-const NOT_YET: &[(&str, &str)] = &[("random-group-port-labels/r196", "#61")];
+const NOT_YET: &[(&str, &str)] = &[("random-group-port-sizes/r013", "#62")];
 
 fn cases_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/elkjs")
@@ -30,7 +30,8 @@ fn cases_dir() -> PathBuf {
 /// `tests/elkjs/random-one-sided/`, which use the one-sided greedy switch,
 /// `tests/elkjs/random-port-labels/`, whose ports have labels, and
 /// `tests/elkjs/random-group-cross-ports/`, whose groups have ports on all four sides,
-/// `tests/elkjs/random-group-port-labels/`, whose groups have labelled ports.
+/// `tests/elkjs/random-group-port-labels/`, whose groups have labelled ports, and
+/// `tests/elkjs/random-group-port-sizes/`, whose groups may size themselves to their ports.
 fn cases() -> Vec<PathBuf> {
     let mut inputs = Vec::new();
     for dir in [
@@ -45,6 +46,7 @@ fn cases() -> Vec<PathBuf> {
         cases_dir().join("random-port-labels"),
         cases_dir().join("random-group-cross-ports"),
         cases_dir().join("random-group-port-labels"),
+        cases_dir().join("random-group-port-sizes"),
     ] {
         let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|_| panic!("{} exists", dir.display()))
@@ -444,6 +446,30 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 // 87. In `size_node_and_place_ports_and_labels` (src/common/nodespacing.rs), read `nested_graph`
 //    for the compound flag instead of `compound_node`: 9 cases, such as
 //    random-group-port-labels/r015, r075 and r093.
+// 88. In `border_to_content_area_y` (src/intermediate/hierarchical_port_position_processor.rs),
+//    subtract `padding.top + offset.y` in one step instead of the two one after the other
+//    (`position.y -= ..`): 2 cases, random-group-port-sizes/r193 and random-group-port-labels/r196.
+//    The same change in `border_to_content_area_x` of the router fails no case; a unit test in
+//    src/intermediate/tests.rs holds it.
+// 89. In `restore_north_south_dummy` (src/intermediate/hierarchical_port_orthogonal_edge_router.rs),
+//    skip the labels and the margins of the restored dummy (`if false`): 9 cases, such as
+//    random-group-port-sizes/r020, r036 and r054.
+// 90. In `cell_ports` (src/importer.rs), give the cells no ports (`.filter(|_| false)`): 4 cases,
+//    ports-group-sized-to-port-labels-next-to-free-ports and its include twin,
+//    random-group-port-sizes/r188 and random-group-port-labels/r071.
+// 91. In `apply_parent_node_layout` (src/layout.rs), set the size constraints to fixed also for a
+//    group that had `PORT_LABELS`: 3 cases, ports-group-sized-to-port-labels-next-to-free-ports,
+//    random-group-port-sizes/r011 and r124.
+// 92. In `port_has_edges` (src/common/nodespacing.rs), ignore the dummy of the port
+//    (`.filter(|_| false)`): 107 cases, such as ports-group-sized-to-port-labels-next-to-ports-include,
+//    ports-group-sized-to-port-labels-only-include and random-group-port-sizes/r001.
+// 93. In `reserve_room_for_port_labels` (src/compound.rs), read the current side of the port
+//    instead of the side the importer gave it: 1 case, random-group-port-sizes/r152.
+// 94. In `place_restored_dummy_labels`, leave `- port.position.x` out of the x of an outside label:
+//    9 cases, such as random-group-port-sizes/r020, r036 and r054.
+// 95. In `cell_ports` (src/importer.rs), leave `has_edges` or `has_compound_connections` false:
+//    no case fails. The group's graph holds a dummy with the same labels, and its size agrees with
+//    the cells in every case the corpus has. Unit tests in src/importer/tests.rs hold both.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

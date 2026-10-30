@@ -412,8 +412,11 @@ fn preprocess_source_ported_compound_graph_observed(
     // `transformHierarchyEdges` reads the port constraints of each compound node before
     // `setSidesOfPortsToSidesOfDummyNodes` fixes them, so keep them.
     let mut original_constraints = vec![IdVec::new(); graphs.len()];
+    // The label loop of `transformHierarchyEdges` reads the port sides the importer gave, too.
+    let mut original_sides = vec![HashMap::new(); graphs.len()];
     for &graph in &order {
         original_constraints[graph.index()] = port_constraints_of(&graphs[graph]);
+        original_sides[graph.index()] = port_sides_of(&graphs[graph]);
     }
     let mut endpoint_plans = (0..graphs.len()).map(|_| None).collect::<Vec<_>>();
     for &graph in &order {
@@ -427,6 +430,7 @@ fn preprocess_source_ported_compound_graph_observed(
         graphs,
         &order,
         &original_constraints,
+        &original_sides,
         &original_net_flows,
     );
 }
@@ -469,6 +473,18 @@ fn original_net_flows(graphs: &GraphArena) -> HashMap<OriginalNetFlowKey, isize>
         }
     }
     flows
+}
+
+/// The side of each port of the graph's nodes.
+fn port_sides_of(graph: &LGraph) -> HashMap<(NodeId, PortId), PortSide> {
+    graph
+        .nodes_with_ids()
+        .flat_map(|(node_id, node)| {
+            node.ports
+                .iter_with_ids()
+                .map(move |(port_id, port)| ((node_id, port_id), port.side))
+        })
+        .collect()
 }
 
 fn port_constraints_of(graph: &LGraph) -> IdVec<NodeId, PortConstraints> {
@@ -1467,6 +1483,7 @@ fn ensure_nested_external_dummies_for_parent_ports(
     graphs: &mut GraphArena,
     order: &[GraphId],
     original_constraints: &[IdVec<NodeId, PortConstraints>],
+    original_sides: &[HashMap<(NodeId, PortId), PortSide>],
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
     for &graph in order.iter().rev() {
@@ -1474,6 +1491,7 @@ fn ensure_nested_external_dummies_for_parent_ports(
             graphs,
             graph,
             &original_constraints[graph.index()],
+            &original_sides[graph.index()],
             net_flows,
         );
     }
@@ -1483,6 +1501,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
     graphs: &mut GraphArena,
     graph_id: GraphId,
     original_constraints: &IdVec<NodeId, PortConstraints>,
+    original_sides: &HashMap<(NodeId, PortId), PortSide>,
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
     for (node_index, &parent_constraints) in original_constraints.iter_with_ids() {
@@ -1557,19 +1576,26 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
                 );
                 set_external_dummy_origin(nested_graph, dummy_node, graph_id, parent_port);
             }
+            // A port the importer did not make has no label, so its side does not matter.
+            let side = original_sides
+                .get(&(node_index, port_index))
+                .copied()
+                .unwrap_or(PortSide::Undefined);
             reserve_room_for_port_labels(
                 graph,
                 node_index,
                 port_index,
                 nested_graph,
                 parent_constraints,
+                side,
             );
         }
     }
 }
 
 /// Gives the dummy of a port, in the graph inside the port's node, a label for each label of the
-/// port, so the graph leaves room for them.
+/// port, so the graph leaves room for them. `side` is the side the importer gave the port: the
+/// dummies have changed the sides of the ports by now, and ELK still reads the old ones.
 ///
 /// Ports the label loop of `CompoundGraphPreprocessor.transformHierarchyEdges`. A port that is
 /// placed outside needs room only inside the node: the label keeps its size along the side's axis
@@ -1580,6 +1606,7 @@ fn reserve_room_for_port_labels(
     port: PortId,
     nested_graph: &mut LGraph,
     parent_constraints: PortConstraints,
+    side: PortSide,
 ) {
     let node_data = &graph.layerless_nodes[node];
     let port_data = &node_data.ports[port];
@@ -1598,18 +1625,12 @@ fn reserve_room_for_port_labels(
         if !inside_port_labels {
             let inside_part = if placement_fixed {
                 // Border offset 0: only the part of the label inside the node "after" the port.
-                compute_inside_part(
-                    label.position,
-                    label.size,
-                    port_data.size,
-                    0.0,
-                    port_data.side,
-                )
+                compute_inside_part(label.position, label.size, port_data.size, 0.0, side)
             } else {
                 0.0
             };
             if parent_constraints == PortConstraints::Free
-                || matches!(port_data.side, PortSide::East | PortSide::West)
+                || matches!(side, PortSide::East | PortSide::West)
             {
                 dummy_label.size.width = inside_part;
             } else {

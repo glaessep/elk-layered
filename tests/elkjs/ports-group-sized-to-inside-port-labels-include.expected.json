@@ -1,0 +1,123 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "g",
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.nodeSize.constraints": "[PORTS, PORT_LABELS]",
+        "elk.portLabels.placement": "[INSIDE, NEXT_TO_PORT_IF_POSSIBLE]"
+      },
+      "ports": [
+        {
+          "id": "pa",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "labels": [
+            {
+              "text": "l",
+              "width": 12,
+              "height": 14,
+              "x": 7,
+              "y": 11
+            }
+          ],
+          "x": -6,
+          "y": 49
+        },
+        {
+          "id": "pb",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "labels": [
+            {
+              "text": "l",
+              "width": 12,
+              "height": 14,
+              "x": 7,
+              "y": 11
+            }
+          ],
+          "x": -6,
+          "y": 12
+        },
+        {
+          "id": "pc",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "labels": [
+            {
+              "text": "l",
+              "width": 12,
+              "height": 14,
+              "x": 7,
+              "y": 11
+            }
+          ],
+          "x": -6,
+          "y": 73
+        }
+      ],
+      "children": [
+        {
+          "id": "c",
+          "width": 10,
+          "height": 10,
+          "$H": 287,
+          "x": 25,
+          "y": 12
+        }
+      ],
+      "edges": [
+        {
+          "id": "e",
+          "sources": [
+            "pb"
+          ],
+          "targets": [
+            "c"
+          ],
+          "sections": [
+            {
+              "id": "e_s0",
+              "startPoint": {
+                "x": -6,
+                "y": 17
+              },
+              "endPoint": {
+                "x": 25,
+                "y": 17
+              },
+              "incomingShape": "pb",
+              "outgoingShape": "c"
+            }
+          ],
+          "container": "g"
+        }
+      ],
+      "$H": 277,
+      "x": 18,
+      "y": 12,
+      "width": 47,
+      "height": 97
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 77,
+  "height": 122
+}

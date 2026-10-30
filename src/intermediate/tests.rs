@@ -859,7 +859,10 @@ fn end_label_preprocessor_moves_head_labels_to_port_cell_and_expands_margin() {
 
     layer_network_simplex(&mut graph).unwrap();
     crate::intermediate::process_port_sides(&mut graph, crate::graph::OtherGraphs::none());
-    crate::intermediate::calculate_label_and_node_sizes(&mut graph);
+    crate::intermediate::calculate_label_and_node_sizes(
+        &mut graph,
+        crate::graph::OtherGraphs::none(),
+    );
     crate::intermediate::calculate_innermost_node_margins(&mut graph);
     select_label_sides(&mut graph);
     let target = graph.edges[EdgeId::new(0)].target().node;
@@ -1812,6 +1815,28 @@ fn hierarchical_port_position_processor_sets_fixed_ratio_east_west_y_coordinates
     assert_eq!(graph.layerless_nodes[north].position.y, 0.0);
 }
 
+// Mutation: in `border_to_content_area_y`, subtract `padding.top + offset.y` in one step. Java
+// subtracts them one after the other, and the two roundings differ here: elkjs 0.9.3 gives the
+// port of the group in case random-group-port-sizes/r193 the value that follows from this order.
+#[test]
+fn hierarchical_port_position_processor_subtracts_padding_and_offset_one_after_the_other() {
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    graph.options.port_constraints = PortConstraints::FixedRatio;
+    graph.size.height = 70.5;
+    graph.padding.top = 12.0;
+    graph.padding.bottom = 12.0;
+    graph.offset.y = 25.833333333333332;
+
+    let west = push_external_dummy(&mut graph, "west", PortSide::West, 0.11180124223602485);
+    set_anchor(&mut graph, west, LPoint { x: 0.0, y: 4.0 });
+    graph.set_node_layer(west, 0);
+
+    process_hierarchical_port_positions(&mut graph);
+
+    // 94.5 * ratio - 4 = 6.565217391304348. Then minus 12, then minus the offset.
+    assert_eq!(graph.layerless_nodes[west].position.y, -31.268115942028984);
+}
+
 // Mutation: in `external_port_anchor`, read the position of the dummy's first port instead of
 // its anchor.
 #[test]
@@ -2133,6 +2158,102 @@ fn restoring_a_dummy_without_ports_fails_loudly() {
     process_hierarchical_port_orthogonal_edges(&mut graph);
 }
 
+/// A graph with a replaced north dummy of width 4, two labels on the dummy's port (20 by 10 and
+/// 6 by 8) and the given port label placement. The graph sizes itself to its port labels when
+/// `port_labels` says so.
+fn replaced_dummy_with_labels(
+    placement: crate::options::PortLabelPlacement,
+    port_labels: bool,
+) -> (LGraph, NodeId) {
+    let (mut graph, north) = graph_with_a_replaced_north_dummy();
+    graph.options.port_label_placement = placement;
+    if port_labels {
+        graph.options.node_size.constraints = crate::options::SizeConstraints::PORT_LABELS;
+    }
+    let external = graph.layerless_nodes[north].external_port_mut().unwrap();
+    external.label_spacings = crate::graph::DummyLabelSpacings {
+        label_port_horizontal: 5.0,
+        label_port_vertical: 3.0,
+        label_label: 2.0,
+    };
+    for (width, height) in [(20.0, 10.0), (6.0, 8.0)] {
+        graph.layerless_nodes[north].ports[PortId::new(0)]
+            .labels
+            .push(LLabel::new("l", width, height));
+    }
+    (graph, north)
+}
+
+fn label_positions(graph: &LGraph, dummy: NodeId) -> Vec<(f64, f64)> {
+    graph.layerless_nodes[dummy].ports[PortId::new(0)]
+        .labels
+        .iter()
+        .map(|label| (label.position.x, label.position.y))
+        .collect()
+}
+
+// Mutation: in `place_restored_dummy_labels`, leave `- port.position.x` out of the centre, or
+// `- label.size.width / 2.0` out of the x of a label, or the label spacing out of the step.
+#[test]
+fn a_restored_dummy_centres_inside_labels_below_its_port() {
+    let (mut graph, north) =
+        replaced_dummy_with_labels(crate::options::PortLabelPlacement::INSIDE, true);
+    graph.layerless_nodes[north].ports[PortId::new(0)].position = LPoint { x: 1.0, y: 0.0 };
+
+    restore_north_south_dummies(&mut graph);
+
+    // The centre is 4 / 2 - 1 = 1 beside the port; the labels are 20 and 6 wide, and 3 below
+    // the port. The second follows after 10 + 2.
+    assert_eq!(
+        label_positions(&graph, north),
+        vec![(-9.0, 3.0), (-2.0, 15.0)]
+    );
+}
+
+// Mutation: in `place_restored_dummy_labels`, leave `- port.position.x` out of the x, or swap
+// the arms for INSIDE and OUTSIDE.
+#[test]
+fn a_restored_dummy_puts_outside_labels_beside_its_port() {
+    let (mut graph, north) =
+        replaced_dummy_with_labels(crate::options::PortLabelPlacement::OUTSIDE, true);
+    graph.layerless_nodes[north].ports[PortId::new(0)].position = LPoint { x: 1.0, y: 0.0 };
+
+    restore_north_south_dummies(&mut graph);
+
+    // 5 + 4 - 1 = 8 for both labels. The y coordinates stay.
+    assert_eq!(label_positions(&graph, north), vec![(8.0, 0.0), (8.0, 0.0)]);
+}
+
+// Mutation: in `restore_north_south_dummy`, leave out the call of `calculate_node_margins`.
+#[test]
+fn a_restored_dummy_gets_the_margins_of_its_labels() {
+    let (mut graph, north) =
+        replaced_dummy_with_labels(crate::options::PortLabelPlacement::INSIDE, true);
+
+    restore_north_south_dummies(&mut graph);
+
+    // The labels lie at x = -8 to 12 and x = -1 to 5, and at y = 3 to 13 and 15 to 23, below a
+    // dummy of 4 by 0.
+    let margin = graph.layerless_nodes[north].margin;
+    assert_eq!(
+        (margin.top, margin.right, margin.bottom, margin.left),
+        (0.0, 8.0, 23.0, 8.0)
+    );
+}
+
+// Mutation: place the labels and set the margins also when the graph does not size itself to its
+// port labels. Then the labels and the margins would change here.
+#[test]
+fn a_restored_dummy_keeps_its_labels_unless_the_graph_sizes_itself_to_port_labels() {
+    let (mut graph, north) =
+        replaced_dummy_with_labels(crate::options::PortLabelPlacement::INSIDE, false);
+
+    restore_north_south_dummies(&mut graph);
+
+    assert_eq!(label_positions(&graph, north), vec![(0.0, 0.0), (0.0, 0.0)]);
+    assert_eq!(graph.layerless_nodes[north].margin, Default::default());
+}
+
 // Mutation: return without a word from `remove_temporary_north_south_dummy` when the replaced
 // dummy lists no port. The connect step runs first, with the port, because it makes the edge
 // the removal looks for.
@@ -2168,6 +2289,27 @@ fn hierarchical_port_orthogonal_router_places_fixed_ratio_north_south_dummies() 
 
     assert_eq!(graph.layerless_nodes[north].position.x, 19.0);
     assert_eq!(graph.layerless_nodes[south].position.x, 53.0);
+}
+
+// Mutation: in `border_to_content_area_x`, subtract `padding.left + offset.x` in one step. Java
+// subtracts them one after the other. See the same test for the y coordinate.
+#[test]
+fn hierarchical_port_orthogonal_router_subtracts_padding_and_offset_one_after_the_other() {
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    graph.options.port_constraints = PortConstraints::FixedRatio;
+    graph.size.width = 70.5;
+    graph.padding.left = 12.0;
+    graph.padding.right = 12.0;
+    graph.offset.x = 25.833333333333332;
+
+    let north = push_external_dummy(&mut graph, "north", PortSide::North, 0.11180124223602485);
+    set_anchor(&mut graph, north, LPoint { x: 4.0, y: 0.0 });
+    graph.replaced_external_port_dummies = vec![north];
+    graph.set_layer_nodes(graph.layers().len(), vec![]);
+
+    process_hierarchical_port_orthogonal_edges(&mut graph);
+
+    assert_eq!(graph.layerless_nodes[north].position.x, -31.268115942028984);
 }
 
 #[test]

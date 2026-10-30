@@ -111,6 +111,9 @@ pub struct ElkInputPort {
     /// Whether an edge at the port leads to or comes from a descendant of the port's node.
     /// Ports the `connectionsToDescendants` of `ElkGraphImporter.transformPort`.
     pub inside_connections: bool,
+    /// Whether any edge of the graph starts or ends at the port. The cells read it from
+    /// `ElkGraphAdapters.ElkPortAdapter` to place port labels next to the port.
+    pub has_edges: bool,
     /// The port's labels, in input order. ELK drops a label with empty text.
     pub labels: Vec<ElkInputLabel>,
 }
@@ -1322,9 +1325,8 @@ pub(crate) fn cell_node(node: &ElkInputNode) -> CellNode {
 /// The ports of a node of the input graph, as `ElkGraphAdapters.ElkPortAdapter` shows them to
 /// the cells.
 ///
-/// A node with children may not size itself to its ports, and their labels with text are
-/// refused, so the ports reach the minimum size only through `setupNodePaddingForPortsWithOffset`:
-/// a negative border offset, or the inside part of fixed labels.
+/// `ratio_or_position` stays 0, as on an `ElkPort`: only `LGraphUtil.initializePort` sets that
+/// property, on the layered port.
 fn cell_ports(node: &ElkInputNode) -> CellPorts {
     let parent = &node.parent_settings.options;
     CellPorts {
@@ -1361,8 +1363,8 @@ fn cell_ports(node: &ElkInputNode) -> CellPorts {
                         },
                     })
                     .collect(),
-                has_edges: false,
-                has_compound_connections: false,
+                has_edges: port.has_edges,
+                has_compound_connections: port.inside_connections,
             })
             .collect(),
         constraints: match node.port_constraints {

@@ -56,6 +56,10 @@ pub(crate) fn external_port_anchor(graph: &LGraph, node: NodeId) -> LPoint {
         .map_or(LPoint::default(), |external| external.anchor)
 }
 
+/// Ports `LNode.borderToContentAreaCoordinates(false, true)`. Java subtracts the padding and then
+/// the offset, one after the other: `pos.y - padding.top - offset.y`. Adding them first can round
+/// differently.
 pub(crate) fn border_to_content_area_y(graph: &mut LGraph, node: NodeId) {
-    graph.layerless_nodes[node].position.y -= graph.padding.top + graph.offset.y;
+    let position = &mut graph.layerless_nodes[node].position;
+    position.y = position.y - graph.padding.top - graph.offset.y;
 }

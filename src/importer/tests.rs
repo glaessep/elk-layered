@@ -1668,6 +1668,7 @@ fn input_port(id: &str, side: PortSide) -> ElkInputPort {
         child_edges: 0,
         connected_to_external_nodes: false,
         inside_connections: false,
+        has_edges: false,
         labels: Vec::new(),
     }
 }
@@ -2375,5 +2376,53 @@ mod external_port_labels {
         )];
         let graph = import(&ports, PortLabelPlacement::INSIDE, defaults());
         assert_eq!(dummy_labels(&graph, "e"), vec![(20.0, 10.0), (30.0, 6.0)]);
+    }
+}
+
+// --- What the cells read from the ports of a node with children. ---
+
+mod cell_ports {
+    use super::*;
+    use crate::options::PortLabelPlacement;
+
+    fn cell_ports_of(ports: Vec<ElkInputPort>) -> Vec<crate::common::cells::CellPort> {
+        let mut group = node("g");
+        group.nested_options = Some(Box::default());
+        group.port_constraints = Some(PortConstraints::FixedSide);
+        group.port_label_placement = PortLabelPlacement::OUTSIDE;
+        group.ports = ports;
+        cell_node(&group).ports.ports
+    }
+
+    // Mutation: leave `has_edges` false in `cell_ports`. ELK asks the port adapter, which shows
+    // every edge of the port: a label may go next to a port only when no edge ends there.
+    #[test]
+    fn a_cell_port_has_edges_when_any_edge_ends_there() {
+        let mut with_edge = input_port("a", PortSide::West);
+        with_edge.has_edges = true;
+        let ports = cell_ports_of(vec![with_edge, input_port("b", PortSide::West)]);
+        assert!(ports[0].has_edges);
+        assert!(!ports[1].has_edges);
+    }
+
+    // Mutation: leave `has_compound_connections` false in `cell_ports`. Inside labels of a node
+    // with children go next to a port only when no edge to a descendant ends there.
+    #[test]
+    fn a_cell_port_has_compound_connections_when_a_descendant_reaches_it() {
+        let mut reached = input_port("a", PortSide::West);
+        reached.inside_connections = true;
+        let ports = cell_ports_of(vec![reached, input_port("b", PortSide::West)]);
+        assert!(ports[0].has_compound_connections);
+        assert!(!ports[1].has_compound_connections);
+    }
+
+    // Mutation: give the port a ratio from its position. An `ElkPort` has none: only the layered
+    // port gets one in `initializePort`, so the minimum size does not depend on ratios.
+    #[test]
+    fn a_cell_port_has_the_ratio_zero() {
+        let mut moved = input_port("a", PortSide::West);
+        moved.y = 20.0;
+        let ports = cell_ports_of(vec![moved]);
+        assert_eq!(ports[0].ratio_or_position, 0.0);
     }
 }

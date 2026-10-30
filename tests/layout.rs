@@ -906,23 +906,100 @@ fn a_labelled_port_of_the_root_under_inside_port_labels_is_refused() {
     assert!(layout(&graph).is_ok());
 }
 
-// Mutation: drop the check for the port size constraints of a node with children in
-// `Tree::new`.
-#[test]
-fn a_group_that_sizes_itself_to_its_ports_is_unsupported() {
-    for constraints in ["[PORTS]", "[PORT_LABELS]"] {
-        let mut g = group("g", vec![node("c", 20.0, 20.0)]);
-        g.layout_options = options(&[("elk.nodeSize.constraints", constraints)]);
-        assert!(
-            matches!(
-                error_of(&root(vec![g], vec![])),
-                Error::Unsupported { element, feature }
-                    if element == "node \"g\""
-                        && feature == "sizing a node with children to its ports"
-            ),
-            "{constraints}"
-        );
+/// A group `g` with the child `c` of 10 by 10 and three west ports of 6 by 10, `pa`, `pb` and `pc`.
+/// With `labels`, each port has a label of 12 by 14. With `with_edge`, `pb` connects to `c`.
+fn sized_group(constraints: &str, placement: &str, with_edge: bool, labels: bool) -> ElkNode {
+    let ports = ["pa", "pb", "pc"]
+        .map(|id| {
+            let mut p = port(id, 6.0, 10.0, "WEST");
+            if labels {
+                p.labels = vec![label("l", 12.0, 14.0)];
+            }
+            p
+        })
+        .to_vec();
+    let mut g = with_ports(group("g", vec![node("c", 10.0, 10.0)]), "FIXED_SIDE", ports);
+    g.layout_options = options(&[
+        ("elk.portConstraints", "FIXED_SIDE"),
+        ("elk.nodeSize.constraints", constraints),
+        ("elk.portLabels.placement", placement),
+    ]);
+    if with_edge {
+        g.edges = vec![edge("e", "pb", "c")];
     }
+    g
+}
+
+/// The size of `g` laid out on its own and under `INCLUDE_CHILDREN`.
+fn sizes_of_sized_group(g: ElkNode) -> [(f64, f64); 2] {
+    let separate = layout(&root(vec![g.clone()], vec![])).unwrap();
+    let included = layout(&include_children(root(vec![g], vec![]))).unwrap();
+    [size(&separate, "g"), size(&included, "g")]
+}
+
+// Mutation: put back the check for the port size constraints of a node with children in
+// `Tree::new`, or give the cells no ports in `cell_ports`: the group would not hold its ports.
+#[test]
+fn a_group_sized_to_its_ports_grows_to_hold_them() {
+    // elkjs 0.9.3 returns these numbers. Three ports of 10 and the spacing between them, and the
+    // child with its edge when the group is laid out on its own.
+    let g = sized_group("[PORTS]", "OUTSIDE", true, false);
+    assert_eq!(sizes_of_sized_group(g), [(34.0, 94.0), (34.0, 74.0)]);
+    let laid = layout(&root(
+        vec![sized_group("[PORTS]", "OUTSIDE", true, false)],
+        vec![],
+    ))
+    .unwrap();
+    assert_eq!(port_at(&laid, "g", "pa"), (-6.0, 12.0));
+    assert_eq!(port_at(&laid, "g", "pc"), (-6.0, 72.0));
+}
+
+// Mutation: leave the labels out of the size in `cell_ports`, or ignore `PORT_LABELS` in the
+// group's constraints: the group would be as high as without labels.
+#[test]
+fn a_group_sized_to_its_port_labels_grows_to_hold_them() {
+    let g = sized_group("[PORTS, PORT_LABELS]", "OUTSIDE", true, true);
+    assert_eq!(sizes_of_sized_group(g), [(34.0, 139.0), (34.0, 119.0)]);
+    let g = sized_group(
+        "[PORT_LABELS]",
+        "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+        true,
+        true,
+    );
+    assert_eq!(sizes_of_sized_group(g), [(34.0, 106.0), (34.0, 119.0)]);
+}
+
+// Mutation: let `has_edges` of a port stay false in `cell_ports`. The port `pb` has an edge, so
+// its label may not go next to it: the group is 106 high against 78 without the edge.
+#[test]
+fn labels_go_next_to_a_group_port_only_when_no_edge_ends_there() {
+    let with_edge = sized_group(
+        "[PORTS, PORT_LABELS]",
+        "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+        true,
+        true,
+    );
+    assert_eq!(sizes_of_sized_group(with_edge)[0], (34.0, 106.0));
+    let without = sized_group(
+        "[PORTS, PORT_LABELS]",
+        "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+        false,
+        true,
+    );
+    assert_eq!(sizes_of_sized_group(without), [(34.0, 78.0), (34.0, 78.0)]);
+}
+
+// Mutation: let `has_compound_connections` of a port stay false in `cell_ports`. A child reaches
+// `pb`, so its inside label goes below it: 117 high against 97 when laid out in one run.
+#[test]
+fn inside_labels_of_a_sized_group_go_below_a_port_that_a_child_reaches() {
+    let g = sized_group(
+        "[PORTS, PORT_LABELS]",
+        "[INSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+        true,
+        true,
+    );
+    assert_eq!(sizes_of_sized_group(g), [(47.0, 117.0), (47.0, 97.0)]);
 }
 
 // Mutation: in `hierarchy_edge_end` of src/importer.rs, ignore the named port and make a port of
