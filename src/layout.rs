@@ -792,7 +792,6 @@ impl<'a, 't> Work<'a, 't> {
         }
 
         // The options of the scope, and what ELK reads from its parent.
-        let scope_input = self.input_node(scope, scope);
         let mut options = scope_info.settings.options.clone();
         options.hierarchy_handling = self.handling[scope];
         // The graph has the port constraints of its node: `LGraph.copyProperties`.
@@ -802,6 +801,10 @@ impl<'a, 't> Work<'a, 't> {
             .unwrap_or(PortConstraints::Undefined);
         options.port_constraints = scope_constraints;
         let run_direction = importer::resolve_direction(options.direction, options.aspect_ratio);
+        // `importGraph` gives the ports of the scope a side first, so the minimum size below
+        // sees them on their sides.
+        self.define_port_sides(scope, run_direction, scope_constraints);
+        let scope_input = self.input_node(scope, scope);
         let scope_cell = importer::cell_node(&scope_input);
         if scope_info.parent.is_some() && !self.sizing[scope].constraints.is_empty() {
             // `ElkGraphImporter.calculateMinimumGraphSize`, for a node laid out on its own.
@@ -815,9 +818,8 @@ impl<'a, 't> Work<'a, 't> {
         }
         let root_label_padding = crate::common::cells::inside_node_label_padding(&scope_cell);
 
-        // `importGraph` gives the ports of the scope a side. `importHierarchicalGraph` does the
-        // same for each node with a graph of its own whose size the importer works out.
-        self.define_port_sides(scope, run_direction, scope_constraints);
+        // `importHierarchicalGraph` gives a side to the ports of each node with a graph of its
+        // own whose size the importer works out.
         for &node in &run_nodes {
             if include
                 && self.handling[node] == HierarchyHandling::IncludeChildren

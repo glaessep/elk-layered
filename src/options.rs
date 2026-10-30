@@ -958,6 +958,18 @@ pub struct SpacingMargin {
     pub left: f64,
 }
 
+impl From<SpacingMargin> for ElkPadding {
+    /// ELK's `ElkMargin` and `ElkPadding` are both a `Spacing`; the cells read one as the other.
+    fn from(margin: SpacingMargin) -> Self {
+        Self {
+            top: margin.top,
+            right: margin.right,
+            bottom: margin.bottom,
+            left: margin.left,
+        }
+    }
+}
+
 impl Default for SpacingOptions {
     fn default() -> Self {
         Self {

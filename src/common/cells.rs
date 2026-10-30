@@ -129,19 +129,21 @@ pub(crate) struct CellPorts {
     pub(crate) alignment: PortAlignment,
 }
 
+#[cfg(test)]
 impl Default for CellPorts {
     /// No ports, with ELK's defaults for the rest.
     fn default() -> Self {
+        let spacing = crate::options::SpacingOptions::default();
         Self {
             ports: Vec::new(),
             constraints: PortConstraints::Free,
             label_placement: PortLabelPlacement::OUTSIDE,
             treat_as_group: true,
             compound: false,
-            port_port_spacing: 10.0,
-            label_port_horizontal: 1.0,
-            label_port_vertical: 1.0,
-            surrounding: ElkPadding::uniform(0.0),
+            port_port_spacing: spacing.port_port,
+            label_port_horizontal: spacing.label_port_horizontal,
+            label_port_vertical: spacing.label_port_vertical,
+            surrounding: spacing.ports_surrounding.into(),
             alignment: PortAlignment::Distributed,
         }
     }
@@ -1012,6 +1014,8 @@ struct Context<'a> {
     label_cells: Vec<(NodeLabelLocation, CellId)>,
     /// `NodeContext.portContexts`: sorted by side, then as `comparePortContexts` orders them.
     port_contexts: Vec<PortContext>,
+    /// The range of `port_contexts` that holds the ports of each side, by `side_ordinal`.
+    side_ranges: [std::ops::Range<usize>; 5],
     /// `NodeContext.insidePortLabelCells`, by `side_slot`.
     inside_port_label_cells: [CellId; 4],
     /// `NodeContext.labelCellSpacing`.
@@ -1135,6 +1139,7 @@ impl<'a> Context<'a> {
             outside_containers,
             label_cells: Vec::new(),
             port_contexts: Vec::new(),
+            side_ranges: Default::default(),
             inside_port_label_cells: [0; 4],
             label_cell_spacing,
         };
@@ -1266,15 +1271,25 @@ impl<'a> Context<'a> {
                     _ => a.port.cmp(&b.port),
                 })
         });
+        let mut ranges: [std::ops::Range<usize>; 5] = Default::default();
+        let mut start = 0;
+        for (ordinal, range) in ranges.iter_mut().enumerate() {
+            let end = start
+                + contexts[start..]
+                    .iter()
+                    .take_while(|context| side_ordinal(ports.ports[context.port].side) == ordinal)
+                    .count();
+            *range = start..end;
+            start = end;
+        }
+        self.side_ranges = ranges;
         self.port_contexts = contexts;
     }
 
     /// The indices into `port_contexts` of the ports on one side, in order:
-    /// `portContexts.get(side)`.
+    /// `portContexts.get(side)`. The contexts are sorted by side, so each side is one range.
     fn side_contexts(&self, side: PortSide) -> Vec<usize> {
-        (0..self.port_contexts.len())
-            .filter(|&context| self.port(context).side == side)
-            .collect()
+        self.side_ranges[side_ordinal(side)].clone().collect()
     }
 
     /// The port of a context. It borrows from the node, not from `self`, so the cells and the

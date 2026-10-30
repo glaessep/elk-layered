@@ -2117,8 +2117,11 @@ fn the_deprecated_space_efficient_size_option_becomes_a_port_label_placement() {
     );
 }
 
-// Mutation: drop the `is_valid` check after the deprecated options in `node_settings`. elkjs
-// fails all four graphs with "Invalid port label placement", the root ones too.
+// Mutation: drop the `is_valid` check in the `portLabels.placement` arm of `apply_node_option`.
+// The first case, on the node and on the root, is then laid out.
+// Mutation: drop the `is_valid` check after the deprecated options in `node_settings`. The
+// second case, on the node and on the root, is then laid out. elkjs fails all four graphs with
+// "Invalid port label placement".
 #[test]
 fn an_invalid_port_label_placement_is_an_error() {
     let cases: [&[(&str, &str)]; 2] = [
@@ -2290,4 +2293,51 @@ fn a_negative_border_offset_on_a_group_port_widens_the_group() {
     g.ports = vec![p];
     let laid = layout(&root(vec![g], vec![])).unwrap();
     assert_eq!(size(&laid, "g").0, 95.0);
+}
+
+// Mutation: in `run_layered` of src/layout.rs, build the cells of the scope before
+// `define_port_sides`. The port then still sits on the north side the caller gave, and the
+// group grows in height instead of width.
+#[test]
+fn a_group_laid_out_on_its_own_sizes_itself_with_the_sides_its_ports_end_up_on() {
+    // elkjs 0.9.3 returns these numbers. Free constraints move the north port to the west.
+    let mut p = port("p", 6.0, 6.0, "NORTH");
+    p.layout_options
+        .insert("elk.port.borderOffset".into(), "-5".into());
+    let mut g = group("g", vec![node("c", 20.0, 20.0)]);
+    g.labels = vec![label("Group", 40.0, 14.0)];
+    g.layout_options = options(&[
+        ("elk.nodeSize.constraints", "[NODE_LABELS]"),
+        ("elk.nodeLabels.placement", "[H_LEFT, V_TOP, INSIDE]"),
+    ]);
+    g.ports = vec![p];
+    let laid = layout(&root(vec![g], vec![])).unwrap();
+    assert_eq!(size(&laid, "g"), (95.0, 63.0));
+    assert_eq!(port_at(&laid, "g", "p"), (-1.0, 28.5));
+}
+
+// Mutation: in `gather_end_labels_for_node`, clear `labels` instead of `end_labels`. The port
+// then loses its own label.
+#[test]
+fn a_port_keeps_its_own_label_beside_the_end_label_of_its_edge() {
+    // elkjs 0.9.3 returns these numbers. c and d form a second component.
+    let mut p = port("p", 6.0, 6.0, "EAST");
+    p.labels = vec![label("P", 10.0, 10.0)];
+    let mut e = edge("e", "p", "b");
+    let mut tail = label("tail", 20.0, 10.0);
+    tail.layout_options = options(&[("elk.edgeLabels.placement", "TAIL")]);
+    e.labels = vec![tail];
+    let graph = root(
+        vec![
+            with_ports(node("a", 30.0, 30.0), "FIXED_SIDE", vec![p]),
+            node("b", 30.0, 30.0),
+            node("c", 30.0, 30.0),
+            node("d", 30.0, 30.0),
+        ],
+        vec![e, edge("f", "c", "d")],
+    );
+    let laid = layout(&graph).unwrap();
+    assert_eq!(port_label_positions(&laid, "a"), [[(7.0, 7.0)]]);
+    let tail = &find_edge(&laid, "e").labels[0];
+    assert_eq!((tail.x, tail.y), (61.0, 80.0));
 }

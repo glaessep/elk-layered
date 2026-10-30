@@ -1402,12 +1402,7 @@ fn cell_ports(node: &ElkInputNode) -> CellPorts {
         port_port_spacing: parent.spacing.port_port,
         label_port_horizontal: parent.spacing.label_port_horizontal,
         label_port_vertical: parent.spacing.label_port_vertical,
-        surrounding: ElkPadding {
-            top: parent.spacing.ports_surrounding.top,
-            right: parent.spacing.ports_surrounding.right,
-            bottom: parent.spacing.ports_surrounding.bottom,
-            left: parent.spacing.ports_surrounding.left,
-        },
+        surrounding: parent.spacing.ports_surrounding.into(),
         alignment: node.port_alignment.unwrap_or(parent.port_alignment_default),
     }
 }

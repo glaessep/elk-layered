@@ -7,7 +7,6 @@
 
 use super::cells::{self, CellLabel, CellNode, CellPort, CellPortLabel, CellPorts, Rect};
 use crate::graph::{LGraph, LMargin, LPadding, NodeId, PortId};
-use crate::options::ElkPadding;
 
 /// Sizes each node and places its ports and labels.
 ///
@@ -29,7 +28,9 @@ pub fn calculate_node_margins(graph: &mut LGraph, nodes: impl IntoIterator<Item 
 /// Source: `LPortAdapter.getIncomingEdges` and `getOutgoingEdges`, with transparent north and
 /// south edges, asked whether they are empty: the port's own edges, those of its north or south
 /// port dummy, and its self loops, which the self loop holder keeps apart.
-fn port_has_edges(graph: &LGraph, node: NodeId, port: PortId) -> bool {
+///
+/// `self_loop_ports` holds the ports of the node's self loops.
+fn port_has_edges(graph: &LGraph, node: NodeId, port: PortId, self_loop_ports: &[PortId]) -> bool {
     let data = &graph.layerless_nodes[node].ports[port];
     if !data.incoming_edges().is_empty() || !data.outgoing_edges().is_empty() {
         return true;
@@ -48,13 +49,19 @@ fn port_has_edges(graph: &LGraph, node: NodeId, port: PortId) -> bool {
             return true;
         }
     }
+    self_loop_ports.contains(&port)
+}
+
+/// The ports at which the self loops of `node` start or end, from its self loop holder.
+fn self_loop_ports(graph: &LGraph, node: NodeId) -> Vec<PortId> {
     graph
         .self_loop_holders
         .iter()
         .filter(|holder| holder.node == node)
         .flat_map(|holder| &holder.hyper_loops)
         .flat_map(|hyper_loop| &hyper_loop.edges)
-        .any(|edge| edge.source_port == port || edge.target_port == port)
+        .flat_map(|edge| [edge.source_port, edge.target_port])
+        .collect()
 }
 
 /// Runs ELK's cell system on one node: its size, when its size constraints are not fixed, the
@@ -62,7 +69,7 @@ fn port_has_edges(graph: &LGraph, node: NodeId, port: PortId) -> bool {
 fn size_node_and_place_ports_and_labels(graph: &mut LGraph, node: NodeId) {
     let horizontal_layout_mode = !graph.options.direction.is_vertical();
     let data = &graph.layerless_nodes[node];
-    let surrounding = graph.options.spacing.ports_surrounding;
+    let self_loop_ports = self_loop_ports(graph, node);
     let ports = CellPorts {
         ports: data
             .ports
@@ -81,7 +88,7 @@ fn size_node_and_place_ports_and_labels(graph: &mut LGraph, node: NodeId) {
                         position: label.position,
                     })
                     .collect(),
-                has_edges: port_has_edges(graph, node, id),
+                has_edges: port_has_edges(graph, node, id, &self_loop_ports),
                 has_compound_connections: port.inside_connections,
             })
             .collect(),
@@ -92,12 +99,7 @@ fn size_node_and_place_ports_and_labels(graph: &mut LGraph, node: NodeId) {
         port_port_spacing: graph.options.spacing.port_port,
         label_port_horizontal: graph.options.spacing.label_port_horizontal,
         label_port_vertical: graph.options.spacing.label_port_vertical,
-        surrounding: ElkPadding {
-            top: surrounding.top,
-            right: surrounding.right,
-            bottom: surrounding.bottom,
-            left: surrounding.left,
-        },
+        surrounding: graph.options.spacing.ports_surrounding.into(),
         alignment: graph
             .port_alignment_of(node)
             .unwrap_or(graph.options.port_alignment_default),

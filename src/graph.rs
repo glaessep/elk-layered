@@ -754,8 +754,8 @@ pub struct LPort {
     /// `EndLabelPostprocessor`. Java leaves them on their edges and keeps a label cell; this
     /// crate holds them here, apart from the port's own labels.
     ///
-    /// Crate-visible: the two end label steps and the end label sorter move them, and a
-    /// component split and combine remap their edges.
+    /// Crate-visible: the two end label steps and the end label sorter move them. The list is
+    /// empty again before the components are combined, so the combine leaves it alone.
     pub(crate) end_labels: Vec<LLabel>,
     /// The edges that enter the port. Private: it must match each edge's `target`, so
     /// `LGraph` changes it together with the edge.
