@@ -17,7 +17,7 @@ mod flat;
 #[cfg(test)]
 mod tests;
 
-use crate::graph::{GraphArena, GraphId, LGraph, LSize, PortSide, is_across_flow};
+use crate::graph::{GraphArena, GraphId, LGraph, LSize, PortSide};
 use crate::intermediate::IntermediateError;
 use crate::phase::layering::LayeringError;
 use crate::random::RandomSeedError;
@@ -72,14 +72,10 @@ pub enum PipelineError {
 /// The result of a step of a layered run.
 pub type PipelineResult<T> = Result<T, PipelineError>;
 
-/// Refuses a graph with an external port dummy that ELK cannot place, or that elk-layered
-/// cannot place yet.
+/// Refuses a graph with an external port dummy that ELK cannot place.
 ///
-/// A dummy on a north or south side of a horizontal layout, or on an east or west side of a
-/// vertical one, needs the steps for ports across the flow. Issue #24 adds them. Without them the
-/// routing of the edges at such a dummy does not match elkjs. A dummy without a side comes from a
-/// port without one on a node whose port sides are fixed, and a node of size zero has nothing to
-/// take the side from: ELK fails on it.
+/// A dummy without a side comes from a port without one on a node whose port sides are fixed,
+/// and a node of size zero has nothing to take the side from: ELK fails on it.
 pub(super) fn check_external_port_sides(graphs: &GraphArena) -> PipelineResult<()> {
     let mut pending = vec![GraphId::ROOT];
     while let Some(id) = pending.pop() {
@@ -91,11 +87,6 @@ pub(super) fn check_external_port_sides(graphs: &GraphArena) -> PipelineResult<(
             if external.side == PortSide::Undefined {
                 return Err(PipelineError::UnsupportedCompoundGraph {
                     reason: "a port of a node with children that has no side, on a node with fixed port sides",
-                });
-            }
-            if is_across_flow(graph.options.direction, external.side) {
-                return Err(PipelineError::UnsupportedCompoundGraph {
-                    reason: "ports of a node with children on a side across the layout direction, which wait for issue #24",
                 });
             }
         }

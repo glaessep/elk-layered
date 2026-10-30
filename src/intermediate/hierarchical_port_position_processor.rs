@@ -47,10 +47,8 @@ pub(crate) fn actual_graph_height(graph: &LGraph) -> f64 {
 
 pub(crate) fn first_port_anchor_y(graph: &LGraph, node: NodeId) -> f64 {
     graph.layerless_nodes[node]
-        .ports
-        .first()
-        .map(|port| port.position.y)
-        .unwrap_or(0.0)
+        .external_port()
+        .map_or(0.0, |external| external.anchor.y)
 }
 
 pub(crate) fn border_to_content_area_y(graph: &mut LGraph, node: NodeId) {

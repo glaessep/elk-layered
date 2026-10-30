@@ -452,6 +452,10 @@ pub struct ExternalPortData {
     /// Whether ELK sets the layer constraint of the dummy on purpose, as it does for a west or
     /// east dummy. Such a constraint counts as explicit.
     pub layer_constraint_explicit: bool,
+    /// `LayeredOptions.PORT_ANCHOR` of the dummy: where its port's anchor sat when the dummy was
+    /// made. `GraphTransformer` turns the port but not this property, so in a vertical layout it
+    /// keeps the coordinates from before the turn.
+    pub anchor: LPoint,
 }
 
 impl Default for ExternalPortData {
@@ -467,6 +471,7 @@ impl Default for ExternalPortData {
             origin_port: None,
             in_layer_constraint: InLayerConstraint::None,
             layer_constraint_explicit: false,
+            anchor: LPoint::default(),
         }
     }
 }
@@ -2171,6 +2176,7 @@ pub fn create_external_port_dummy(
         }
     }
 
+    external.anchor = position;
     let mut port = LPort::new(port_id, node, port_type);
     port.side = dummy_port_side;
     port.position = position;

@@ -237,10 +237,8 @@ fn calculate_north_south_dummy_position(graph: &mut LGraph, dummy: NodeId) {
 
 fn first_port_anchor_x(graph: &LGraph, node: NodeId) -> f64 {
     graph.layerless_nodes[node]
-        .ports
-        .first()
-        .map(|port| port.position.x)
-        .unwrap_or(0.0)
+        .external_port()
+        .map_or(0.0, |external| external.anchor.x)
 }
 
 fn border_to_content_area_x(graph: &mut LGraph, node: NodeId) {

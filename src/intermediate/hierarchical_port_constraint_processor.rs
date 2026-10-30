@@ -244,6 +244,7 @@ pub(crate) fn create_hierarchical_port_replacement_dummy(
             origin_port: original_external.origin_port,
             in_layer_constraint: original_external.in_layer_constraint,
             layer_constraint_explicit,
+            anchor: original_external.anchor,
             ..ExternalPortData::default()
         }));
         replacement.margin = original.margin;

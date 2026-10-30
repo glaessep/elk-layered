@@ -2,7 +2,7 @@
 //!
 //! Source: https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/p5edges/OrthogonalEdgeRouter.java
 
-use crate::graph::{LGraph, LNodeKind, NodeId};
+use crate::graph::{LGraph, NodeId};
 use crate::options::Alignment;
 use crate::phase::routing::orthogonal;
 
@@ -142,17 +142,12 @@ fn horizontal_alignment_ratio(graph: &LGraph, node: NodeId) -> f64 {
 }
 
 fn is_external_west_or_east_port(graph: &LGraph, node: NodeId) -> bool {
-    if graph.layerless_nodes[node].kind() != LNodeKind::ExternalPort {
-        return false;
-    }
     graph.layerless_nodes[node]
-        .ports
-        .first()
-        .map(|port| {
+        .external_port()
+        .is_some_and(|external| {
             matches!(
-                port.side,
+                external.side,
                 crate::graph::PortSide::West | crate::graph::PortSide::East
             )
         })
-        .unwrap_or(false)
 }

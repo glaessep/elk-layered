@@ -1764,9 +1764,24 @@ fn hierarchical_port_position_processor_sets_fixed_ratio_east_west_y_coordinates
     let east = push_external_dummy(&mut graph, "east", PortSide::East, 0.5);
     let north = push_external_dummy(&mut graph, "north", PortSide::North, 0.75);
     graph.layerless_nodes[west].ports[PortId::new(0)].position.y = 3.0;
+    graph.layerless_nodes[west]
+        .external_port_mut()
+        .unwrap()
+        .anchor
+        .y = 3.0;
     graph.layerless_nodes[east].ports[PortId::new(0)].position.y = 4.0;
+    graph.layerless_nodes[east]
+        .external_port_mut()
+        .unwrap()
+        .anchor
+        .y = 4.0;
     graph.layerless_nodes[north].ports[PortId::new(0)]
         .position
+        .y = 5.0;
+    graph.layerless_nodes[north]
+        .external_port_mut()
+        .unwrap()
+        .anchor
         .y = 5.0;
 
     graph.set_node_layer(west, 0);
@@ -1781,13 +1796,18 @@ fn hierarchical_port_position_processor_sets_fixed_ratio_east_west_y_coordinates
 }
 
 #[test]
-fn hierarchical_port_position_processor_uses_port_position_for_east_west_dummies() {
+fn hierarchical_port_position_processor_uses_port_anchor_for_east_west_dummies() {
     let mut graph = LGraph::new("root", LayeredOptions::default());
     graph.options.port_constraints = PortConstraints::FixedRatio;
     graph.size.height = 100.0;
 
     let west = push_external_dummy(&mut graph, "west", PortSide::West, 0.25);
     graph.layerless_nodes[west].ports[PortId::new(0)].position.y = 7.0;
+    graph.layerless_nodes[west]
+        .external_port_mut()
+        .unwrap()
+        .anchor
+        .y = 7.0;
     graph.set_node_layer(west, 0);
 
     process_hierarchical_port_positions(&mut graph);
@@ -1808,10 +1828,25 @@ fn hierarchical_port_position_processor_sets_fixed_pos_only_on_border_layers() {
     graph.layerless_nodes[first].ports[PortId::new(0)]
         .position
         .y = 1.0;
+    graph.layerless_nodes[first]
+        .external_port_mut()
+        .unwrap()
+        .anchor
+        .y = 1.0;
     graph.layerless_nodes[middle].ports[PortId::new(0)]
         .position
         .y = 2.0;
+    graph.layerless_nodes[middle]
+        .external_port_mut()
+        .unwrap()
+        .anchor
+        .y = 2.0;
     graph.layerless_nodes[last].ports[PortId::new(0)].position.y = 3.0;
+    graph.layerless_nodes[last]
+        .external_port_mut()
+        .unwrap()
+        .anchor
+        .y = 3.0;
 
     graph.set_node_layer(first, 0);
     graph.set_node_layer(middle, 1);
@@ -1851,7 +1886,17 @@ fn hierarchical_port_orthogonal_router_tail_fixes_east_west_coordinates_and_slan
         .size
         .height = 8.0;
     graph.layerless_nodes[west].ports[PortId::new(0)].position.y = 2.0;
+    graph.layerless_nodes[west]
+        .external_port_mut()
+        .unwrap()
+        .anchor
+        .y = 2.0;
     graph.layerless_nodes[east].ports[PortId::new(0)].position.y = 5.0;
+    graph.layerless_nodes[east]
+        .external_port_mut()
+        .unwrap()
+        .anchor
+        .y = 5.0;
 
     graph.set_node_layer(west, 0);
     graph.set_node_layer(middle, 1);
@@ -1903,6 +1948,10 @@ fn hierarchical_port_orthogonal_router_restores_and_removes_north_dummy_replacem
     let north = push_external_dummy(&mut graph, "north", PortSide::North, 0.0);
     graph.layerless_nodes[north].size.width = 4.0;
     graph.layerless_nodes[north].ports[PortId::new(0)].position = LPoint { x: 2.0, y: 0.0 };
+    graph.layerless_nodes[north]
+        .external_port_mut()
+        .unwrap()
+        .anchor = LPoint { x: 2.0, y: 0.0 };
     let source = push_normal_node(&mut graph, "A");
     graph.layerless_nodes[source].position = LPoint { x: 50.0, y: 30.0 };
     let source_port = graph
@@ -2122,8 +2171,18 @@ fn hierarchical_port_orthogonal_router_places_fixed_ratio_north_south_dummies() 
     graph.layerless_nodes[north].ports[PortId::new(0)]
         .position
         .x = 2.0;
+    graph.layerless_nodes[north]
+        .external_port_mut()
+        .unwrap()
+        .anchor
+        .x = 2.0;
     graph.layerless_nodes[south].ports[PortId::new(0)]
         .position
+        .x = 3.0;
+    graph.layerless_nodes[south]
+        .external_port_mut()
+        .unwrap()
+        .anchor
         .x = 3.0;
     graph.replaced_external_port_dummies = vec![north, south];
     graph.set_layer_nodes(graph.layers().len(), vec![]);
@@ -2145,6 +2204,10 @@ fn hierarchical_port_orthogonal_router_routes_fixed_pos_north_edges_above_graph(
     let north = push_external_dummy(&mut graph, "north", PortSide::North, 5.0);
     graph.layerless_nodes[north].size.width = 4.0;
     graph.layerless_nodes[north].ports[PortId::new(0)].position = LPoint { x: 2.0, y: 0.0 };
+    graph.layerless_nodes[north]
+        .external_port_mut()
+        .unwrap()
+        .anchor = LPoint { x: 2.0, y: 0.0 };
     let source = push_normal_node(&mut graph, "A");
     let source_port = graph
         .add_port(
