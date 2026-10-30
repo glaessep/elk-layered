@@ -590,6 +590,79 @@ const NODE_LABEL_LOCATIONS: [(NodeLabelLocation, &[NodeLabelPlacement]); 21] = {
     ]
 };
 
+/// ELK's `EnumSet<PortLabelPlacement>`: where a node's port labels go. The empty set is ELK's
+/// `fixed()`: the labels keep the positions the caller gave them.
+///
+/// Source: `org.eclipse.elk.core.options.PortLabelPlacement`. ELK's default is `OUTSIDE` alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PortLabelPlacement(u8);
+
+impl Default for PortLabelPlacement {
+    fn default() -> Self {
+        Self::OUTSIDE
+    }
+}
+
+impl PortLabelPlacement {
+    /// The empty set: `fixed()`.
+    pub const FIXED: Self = Self(0);
+    /// `OUTSIDE`.
+    pub const OUTSIDE: Self = Self(1);
+    /// `INSIDE`.
+    pub const INSIDE: Self = Self(1 << 1);
+    /// `NEXT_TO_PORT_IF_POSSIBLE`.
+    pub const NEXT_TO_PORT_IF_POSSIBLE: Self = Self(1 << 2);
+    /// `ALWAYS_SAME_SIDE`.
+    pub const ALWAYS_SAME_SIDE: Self = Self(1 << 3);
+    /// `ALWAYS_OTHER_SAME_SIDE`.
+    pub const ALWAYS_OTHER_SAME_SIDE: Self = Self(1 << 4);
+    /// `SPACE_EFFICIENT`.
+    pub const SPACE_EFFICIENT: Self = Self(1 << 5);
+
+    pub(crate) const NAMES: [(&'static str, Self); 6] = [
+        ("OUTSIDE", Self::OUTSIDE),
+        ("INSIDE", Self::INSIDE),
+        ("NEXT_TO_PORT_IF_POSSIBLE", Self::NEXT_TO_PORT_IF_POSSIBLE),
+        ("ALWAYS_SAME_SIDE", Self::ALWAYS_SAME_SIDE),
+        ("ALWAYS_OTHER_SAME_SIDE", Self::ALWAYS_OTHER_SAME_SIDE),
+        ("SPACE_EFFICIENT", Self::SPACE_EFFICIENT),
+    ];
+
+    /// Whether every value of `other` is in the set.
+    pub fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub(crate) fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
+    /// Source: `PortLabelPlacement.isFixed`: neither inside nor outside.
+    pub fn is_fixed(self) -> bool {
+        !self.contains(Self::INSIDE) && !self.contains(Self::OUTSIDE)
+    }
+
+    /// Source: `PortLabelPlacement.isValid`: at most one of `INSIDE` and `OUTSIDE`, and at most
+    /// one of the three side choices.
+    pub fn is_valid(self) -> bool {
+        let count = |values: &[Self]| values.iter().filter(|v| self.contains(**v)).count();
+        count(&[Self::INSIDE, Self::OUTSIDE]) <= 1
+            && count(&[
+                Self::ALWAYS_SAME_SIDE,
+                Self::ALWAYS_OTHER_SAME_SIDE,
+                Self::SPACE_EFFICIENT,
+            ]) <= 1
+    }
+}
+
+impl std::ops::BitOr for PortLabelPlacement {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+
 /// ELK's `EnumSet<SizeConstraint>`: what a node's size must make room for. The empty set is
 /// ELK's `fixed()`.
 ///
@@ -703,6 +776,10 @@ impl SizeOptions {
     pub(crate) fn insert(&mut self, other: Self) {
         self.0 |= other.0;
     }
+
+    pub(crate) fn remove(&mut self, other: Self) {
+        self.0 &= !other.0;
+    }
 }
 
 /// The three node size options ELK keeps on a node and on the graph inside it.
@@ -768,7 +845,7 @@ pub struct LayeredOptions {
     pub hierarchy_handling: HierarchyHandling,
     pub separate_connected_components: bool,
     pub aspect_ratio: f64,
-    pub port_labels_placement_next_to_port_if_possible: bool,
+    pub port_label_placement: PortLabelPlacement,
     pub port_labels_treat_as_group: bool,
     pub inside_self_loops_activate: bool,
     pub edge_routing: EdgeRouting,
@@ -1055,7 +1132,7 @@ impl Default for LayeredOptions {
             hierarchy_handling: HierarchyHandling::SeparateChildren,
             separate_connected_components: true,
             aspect_ratio: f64::from(1.6_f32),
-            port_labels_placement_next_to_port_if_possible: false,
+            port_label_placement: PortLabelPlacement::OUTSIDE,
             port_labels_treat_as_group: true,
             inside_self_loops_activate: false,
             edge_routing: EdgeRouting::Orthogonal,
@@ -1132,7 +1209,8 @@ impl LayeredOptions {
         Self {
             direction,
             hierarchy_handling: HierarchyHandling::IncludeChildren,
-            port_labels_placement_next_to_port_if_possible: true,
+            port_label_placement: PortLabelPlacement::OUTSIDE
+                | PortLabelPlacement::NEXT_TO_PORT_IF_POSSIBLE,
             port_labels_treat_as_group: true,
             inside_self_loops_activate: false,
             node_placement_strategy: NodePlacementStrategy::BrandesKoepf,

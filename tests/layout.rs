@@ -808,30 +808,58 @@ fn a_root_port_without_edges_is_laid_out_and_placed_by_its_side() {
     assert_eq!(east_x, 64.0);
 }
 
-// Mutation: refuse a label without text, which ELK drops, or accept one with text.
+// Mutation: in `transform_port` of src/importer.rs, keep a port label without text, which ELK
+// drops.
 #[test]
-fn a_port_label_with_text_is_unsupported_but_one_without_is_dropped() {
+fn a_port_label_with_text_is_placed_but_one_without_is_dropped() {
+    // elkjs 0.9.3 returns these numbers: the label goes outside, below the east port, 1 away
+    // from it each way, and the label without text stays where it was given.
     let mut p = port("p", 6.0, 4.0, "EAST");
-    p.labels = vec![label("", 10.0, 10.0)];
-    let graph = root(
-        vec![with_ports(
-            node("a", 40.0, 30.0),
-            "FIXED_SIDE",
-            vec![p.clone()],
-        )],
-        vec![],
-    );
-    assert!(layout(&graph).is_ok());
-    p.labels = vec![label("P", 10.0, 10.0)];
+    p.labels = vec![label("", 10.0, 10.0), label("P", 10.0, 10.0)];
     let graph = root(
         vec![with_ports(node("a", 40.0, 30.0), "FIXED_SIDE", vec![p])],
         vec![],
     );
+    let laid = layout(&graph).unwrap();
+    let labels = &find(&laid, "a").ports[0].labels;
+    assert_eq!((labels[0].x, labels[0].y), (0.0, 0.0));
+    assert_eq!((labels[1].x, labels[1].y), (7.0, 5.0));
+}
+
+// Mutation: drop the check for labels on the ports of a node with children in `Tree::new`.
+#[test]
+fn a_port_label_with_text_on_a_group_is_unsupported_but_one_without_is_dropped() {
+    let mut p = port("p", 6.0, 4.0, "EAST");
+    p.labels = vec![label("", 10.0, 10.0)];
+    let mut g = group("g", vec![node("c", 20.0, 20.0)]);
+    g.ports = vec![p.clone()];
+    assert!(layout(&root(vec![g.clone()], vec![])).is_ok());
+    p.labels = vec![label("P", 10.0, 10.0)];
+    g.ports = vec![p];
     assert!(matches!(
-        error_of(&graph),
+        error_of(&root(vec![g], vec![])),
         Error::Unsupported { element, feature }
-            if element == "port \"p\"" && feature == "port labels"
+            if element == "port \"p\"" && feature == "a label on a port of a node with children"
     ));
+}
+
+// Mutation: drop the check for the port size constraints of a node with children in
+// `Tree::new`.
+#[test]
+fn a_group_that_sizes_itself_to_its_ports_is_unsupported() {
+    for constraints in ["[PORTS]", "[PORT_LABELS]"] {
+        let mut g = group("g", vec![node("c", 20.0, 20.0)]);
+        g.layout_options = options(&[("elk.nodeSize.constraints", constraints)]);
+        assert!(
+            matches!(
+                error_of(&root(vec![g], vec![])),
+                Error::Unsupported { element, feature }
+                    if element == "node \"g\""
+                        && feature == "sizing a node with children to its ports"
+            ),
+            "{constraints}"
+        );
+    }
 }
 
 // Mutation: in `hierarchy_edge_end` of src/importer.rs, ignore the named port and make a port of
@@ -1475,11 +1503,10 @@ fn an_unknown_option_is_an_error() {
 // Mutation: let `apply_node_option` accept unknown ids silently.
 #[test]
 fn an_unsupported_option_is_an_error() {
-    let cases: [(&str, &str); 6] = [
+    let cases: [(&str, &str); 5] = [
         ("elk.noLayout", "true"),
         ("elk.layered.mergeEdges", "true"),
         ("elk.layered.cycleBreaking.strategy", "INTERACTIVE"),
-        ("elk.nodeSize.constraints", "[PORTS]"),
         ("elk.edgeRouting", "UNDEFINED"),
         // A label option on a node.
         ("elk.edgeLabels.placement", "HEAD"),

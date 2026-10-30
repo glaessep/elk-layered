@@ -32,16 +32,17 @@ fn node(
         label_node_spacing: 5.0,
         label_label_spacing: 0.0,
         fixed_graph_size: false,
+        ports: CellPorts::default(),
     }
 }
 
 fn sized(node: &CellNode) -> (f64, f64) {
-    let size = process(node, true, false).size;
+    let size = process(node, true, false, false).size;
     (size.width, size.height)
 }
 
 fn positions(node: &CellNode, horizontal: bool) -> Vec<(f64, f64)> {
-    process(node, horizontal, true)
+    process(node, horizontal, true, false)
         .label_positions
         .into_iter()
         .map(|p| p.map_or((f64::NAN, f64::NAN), |p| (p.x, p.y)))
@@ -138,7 +139,7 @@ fn labels_stack_across_the_layout_direction() {
         vec![label(10.0, 30.0, None), label(12.0, 20.0, None)],
     );
     vertical.label_label_spacing = 3.0;
-    let size = process(&vertical, false, false).size;
+    let size = process(&vertical, false, false, false).size;
     assert_eq!((size.width, size.height), (66.0, 76.0));
 }
 

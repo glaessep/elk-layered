@@ -33,6 +33,8 @@ fn node(id: &str) -> ElkInputNode {
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
         self_loop_ordering: Default::default(),
+        port_label_placement: Default::default(),
+        port_labels_treat_as_group: true,
     }
 }
 
@@ -273,6 +275,8 @@ fn reverse_edge_swaps_endpoint_adjacency_labels_and_bendpoints() {
         placement: EdgeLabelPlacement::Head,
         inline: false,
         node_label_placement: None,
+        x: 0.0,
+        y: 0.0,
     }];
     let mut graph = graph(vec![node("A"), node("B")], vec![ab]);
     graph.edges[EdgeId::new(0)].bend_points =

@@ -1,6 +1,7 @@
 use super::*;
+use crate::graph::PortSide;
 use crate::graph::{EdgeLabelPlacement, LLabel, LNode, LPoint, LSize, PortType};
-use crate::options::{ElkDirection, LayeredOptions, NodeLabelPlacement};
+use crate::options::{ElkDirection, LayeredOptions, NodeLabelPlacement, PortConstraints};
 
 fn node_label(width: f64, height: f64) -> LLabel {
     LLabel {

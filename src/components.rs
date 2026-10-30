@@ -334,6 +334,7 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
                 map_port(origin, nodes)?;
             }
             map_labels(&mut port.labels, edges)?;
+            map_labels(&mut port.end_labels, edges)?;
         }
     }
     for edge in &mut graph.edges {

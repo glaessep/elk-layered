@@ -156,6 +156,8 @@ fn node(id: &str) -> ElkInputNode {
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
         self_loop_ordering: Default::default(),
+        port_label_placement: Default::default(),
+        port_labels_treat_as_group: true,
     }
 }
 
@@ -198,6 +200,8 @@ fn nested_node(id: &str, parent: Option<&str>) -> ElkInputNode {
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
         self_loop_ordering: Default::default(),
+        port_label_placement: Default::default(),
+        port_labels_treat_as_group: true,
     }
 }
 
@@ -227,6 +231,8 @@ fn nested_group(id: &str, parent: Option<&str>) -> ElkInputNode {
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
         self_loop_ordering: Default::default(),
+        port_label_placement: Default::default(),
+        port_labels_treat_as_group: true,
     }
 }
 

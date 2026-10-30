@@ -59,6 +59,8 @@ fn node(id: &str) -> ElkInputNode {
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
         self_loop_ordering: Default::default(),
+        port_label_placement: Default::default(),
+        port_labels_treat_as_group: true,
     }
 }
 
@@ -795,14 +797,14 @@ fn end_label_gather_preserves_large_mixed_label_order_and_identity() {
     remove_gathered_end_labels(&mut graph, gathered.labels.into_iter().flatten().collect());
     let port = &graph.layerless_nodes[target.node].ports[target.port];
     assert_eq!(
-        port.labels
+        port.end_labels
             .iter()
             .map(|label| label.source_index.unwrap())
             .collect::<Vec<_>>(),
         (0..4096).filter(|index| index % 3 != 0).collect::<Vec<_>>()
     );
     assert!(
-        port.labels
+        port.end_labels
             .iter()
             .all(|label| label.end_label_edge == Some(EdgeId::new(0)))
     );
@@ -832,14 +834,14 @@ fn gathering_end_labels_copies_nothing_until_the_node_asks() {
     assert_eq!(gathered.labels[target.port.index()].len(), 1);
     assert!(
         graph.layerless_nodes[target.node].ports[target.port]
-            .labels
+            .end_labels
             .is_empty()
     );
     assert_eq!(graph.edges[EdgeId::new(0)].labels.len(), 1);
     copy_gathered_end_labels_into_ports(&mut graph, target.node, &gathered);
     assert_eq!(
         graph.layerless_nodes[target.node].ports[target.port]
-            .labels
+            .end_labels
             .len(),
         1
     );
@@ -867,9 +869,9 @@ fn end_label_preprocessor_moves_head_labels_to_port_cell_and_expands_margin() {
 
     assert!(graph.edges[EdgeId::new(0)].labels.is_empty());
     let port = &graph.layerless_nodes[target].ports[target_port];
-    assert_eq!(port.labels.len(), 1);
-    assert_eq!(port.labels[0].text, "head");
-    assert_eq!(port.labels[0].end_label_edge, Some(EdgeId::new(0)));
+    assert_eq!(port.end_labels.len(), 1);
+    assert_eq!(port.end_labels[0].text, "head");
+    assert_eq!(port.end_labels[0].end_label_edge, Some(EdgeId::new(0)));
     assert!(port.end_label_cell.is_some());
     assert!(graph.layerless_nodes[target].margin.left > old_left_margin);
 }

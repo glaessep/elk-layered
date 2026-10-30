@@ -22,10 +22,10 @@ pub fn sort_end_labels(graph: &mut LGraph) {
         graph.layerless_nodes[node]
             .ports
             .for_each_listed_mut(|port| {
-                if port.labels.len() < 2 {
+                if port.end_labels.len() < 2 {
                     return;
                 }
-                port.labels.sort_by(|a, b| {
+                port.end_labels.sort_by(|a, b| {
                     let a_key = a
                         .end_label_edge
                         .and_then(|edge| edge_sort_keys.get(edge).copied())

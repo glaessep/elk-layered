@@ -80,6 +80,8 @@ struct NodeInfo<'a> {
     labels: Vec<LabelSettings>,
     /// The options of each port of `node`, in order.
     ports: Vec<PortSettings>,
+    /// The options of the labels of each port of `node`, in order.
+    port_labels: Vec<Vec<LabelSettings>>,
     /// What the edges say about each port of `node`, in order.
     port_facts: Vec<PortFacts>,
 }
@@ -184,8 +186,8 @@ fn label_settings(labels: &[ElkLabel], owner: &str) -> Result<Vec<LabelSettings>
         .collect()
 }
 
-/// No ELK counterpart: checks and reads one port, and refuses what elk-layered cannot place yet.
-fn port_settings(port: &ElkPort) -> Result<PortSettings, Error> {
+/// No ELK counterpart: checks and reads one port and its labels.
+fn port_settings(port: &ElkPort) -> Result<(PortSettings, Vec<LabelSettings>), Error> {
     let element = port_element(&port.id);
     check_number(&element, "x", port.x, false)?;
     check_number(&element, "y", port.y, false)?;
@@ -193,15 +195,8 @@ fn port_settings(port: &ElkPort) -> Result<PortSettings, Error> {
     check_number(&element, "height", port.height, true)?;
     let settings = layout_options::port_settings(&port.layout_options)
         .map_err(|error| option_error(element.clone(), error))?;
-    label_settings(&port.labels, &element)?;
-    // `ElkGraphImporter.transformPort` drops a label without text.
-    if port.labels.iter().any(|label| !label.text.is_empty()) {
-        return Err(Error::Unsupported {
-            element,
-            feature: "port labels".to_string(),
-        });
-    }
-    Ok(settings)
+    let labels = label_settings(&port.labels, &element)?;
+    Ok((settings, labels))
 }
 
 /// The `feature` of the refusal for an edge end that ELK's importer cannot find, such as an edge
@@ -249,6 +244,7 @@ impl<'a> Tree<'a> {
             let labels = label_settings(&node.labels, &element)?;
             let node_index = nodes.len();
             let mut ports = Vec::with_capacity(node.ports.len());
+            let mut port_labels = Vec::with_capacity(node.ports.len());
             for (port_position, port) in node.ports.iter().enumerate() {
                 if port_by_id
                     .insert(port.id.as_str(), (node_index, port_position))
@@ -258,7 +254,9 @@ impl<'a> Tree<'a> {
                         id: port.id.clone(),
                     });
                 }
-                ports.push(port_settings(port)?);
+                let (settings, labels) = port_settings(port)?;
+                ports.push(settings);
+                port_labels.push(labels);
             }
             let index = node_index;
             if let Some(parent) = parent {
@@ -273,6 +271,7 @@ impl<'a> Tree<'a> {
                 labels,
                 port_facts: vec![PortFacts::default(); ports.len()],
                 ports,
+                port_labels,
             });
             for (child_index, child) in node.children.iter().enumerate().rev() {
                 let mut child_path = path.clone();
@@ -380,6 +379,39 @@ impl<'a> Tree<'a> {
             tree.edges_by_container[container].push(edge);
         }
         tree.count_port_facts();
+        // The graph inside a node with children reserves room for the labels of the node's ports:
+        // `ElkGraphImporter.transformExternalPort`, `CompoundGraphPreprocessor` and
+        // `LabelAndNodeSizeProcessor.placeExternalPortDummyLabels`. That part is not ported.
+        for info in &tree.nodes {
+            if info.children.is_empty() {
+                continue;
+            }
+            // `ElkGraphImporter.calculateMinimumGraphSize` runs the cells over the node's ports
+            // as well. That is not ported, so a node with children may not size itself to them.
+            // It skips the root.
+            let constraints = info.settings.node_size.constraints;
+            if info.parent.is_some()
+                && (constraints.contains(SizeConstraints::PORTS)
+                    || constraints.contains(SizeConstraints::PORT_LABELS))
+            {
+                return Err(Error::Unsupported {
+                    element: node_element(&info.node.id),
+                    feature: "sizing a node with children to its ports".to_string(),
+                });
+            }
+            // `ElkGraphImporter.transformPort` drops a label without text.
+            if let Some(port) = info
+                .node
+                .ports
+                .iter()
+                .find(|port| port.labels.iter().any(|label| !label.text.is_empty()))
+            {
+                return Err(Error::Unsupported {
+                    element: port_element(&port.id),
+                    feature: "a label on a port of a node with children".to_string(),
+                });
+            }
+        }
         Ok(tree)
     }
 
@@ -962,6 +994,8 @@ impl<'a, 't> Work<'a, 't> {
             self_loop_distribution: info.settings.self_loop_distribution,
             self_loop_ordering: info.settings.self_loop_ordering,
             parent_settings,
+            port_label_placement: info.settings.options.port_label_placement,
+            port_labels_treat_as_group: info.settings.options.port_labels_treat_as_group,
         }
     }
 
@@ -975,7 +1009,8 @@ impl<'a, 't> Work<'a, 't> {
             .iter()
             .zip(&self.port_state[node])
             .zip(&info.port_facts)
-            .map(|((port, settings), facts)| ElkInputPort {
+            .zip(&info.port_labels)
+            .map(|(((port, settings), facts), label_settings)| ElkInputPort {
                 id: port.id.clone(),
                 x: port.x,
                 y: port.y,
@@ -988,6 +1023,13 @@ impl<'a, 't> Work<'a, 't> {
                 net_flow: facts.net_flow,
                 child_edges: facts.child_edges,
                 connected_to_external_nodes: facts.connected_to_external_nodes,
+                labels: port
+                    .labels
+                    .iter()
+                    .zip(label_settings)
+                    .enumerate()
+                    .map(|(index, (label, settings))| input_label(index, label, settings))
+                    .collect(),
             })
             .collect()
     }
@@ -1089,6 +1131,18 @@ impl<'a, 't> Work<'a, 't> {
             }
             for &(label, position, size) in &node.labels {
                 if let Some(label) = out.labels.get_mut(label) {
+                    label.x = position.x;
+                    label.y = position.y;
+                    label.width = size.width;
+                    label.height = size.height;
+                }
+            }
+            for &(port, label, position, size) in &node.port_labels {
+                if let Some(label) = out
+                    .ports
+                    .get_mut(port)
+                    .and_then(|port| port.labels.get_mut(label))
+                {
                     label.x = position.x;
                     label.y = position.y;
                     label.width = size.width;
@@ -1295,6 +1349,8 @@ fn input_label(index: usize, label: &ElkLabel, settings: &LabelSettings) -> ElkI
         placement: settings.placement,
         inline: settings.inline,
         node_label_placement: settings.node_label_placement,
+        x: label.x,
+        y: label.y,
     }
 }
 

@@ -93,6 +93,8 @@ fn node(id: &str) -> ElkInputNode {
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
         self_loop_ordering: Default::default(),
+        port_label_placement: Default::default(),
+        port_labels_treat_as_group: true,
     }
 }
 
@@ -304,6 +306,7 @@ fn a_made_up_port_keeps_its_net_flow_apart_from_a_named_port_of_the_same_id() {
         child_edges: 0,
         connected_to_external_nodes: false,
         allow_non_flow_ports_to_switch_sides: false,
+        labels: Vec::new(),
     };
     let mut group = node("G");
     group.ports = vec![port("G:1"), port("G:2")];

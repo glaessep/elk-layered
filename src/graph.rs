@@ -8,7 +8,7 @@
 
 use super::options::{
     Alignment, ElkDirection, LayerConstraint, LayeredOptions, NodeLabelPlacement, NodeSizing,
-    PortAlignment, PortConstraints,
+    PortAlignment, PortConstraints, PortLabelPlacement,
 };
 use crate::random::JavaRandom;
 
@@ -319,6 +319,15 @@ pub struct LNode {
     /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
     /// it.
     pub(crate) node_size: NodeSizing,
+    /// The node's own `portLabels.placement`, with the deprecated options folded in.
+    ///
+    /// Crate-visible: Plain data: the importer sets it, and the label and node size step and the
+    /// export read it.
+    pub(crate) port_label_placement: PortLabelPlacement,
+    /// The node's own `portLabels.treatAsGroup`.
+    ///
+    /// Crate-visible: Plain data: the importer sets it, and the label and node size step reads it.
+    pub(crate) port_labels_treat_as_group: bool,
     /// Crate-visible: `NodePorts` keeps the port order and the port ids in step; the node reaches
     /// it directly.
     pub(crate) ports: NodePorts,
@@ -617,6 +626,8 @@ impl LNode {
             labels: Vec::new(),
             node_label_placement: NodeLabelPlacement::FIXED,
             node_size: NodeSizing::default(),
+            port_label_placement: PortLabelPlacement::OUTSIDE,
+            port_labels_treat_as_group: true,
             ports: NodePorts::default(),
             nested_graph: None,
             model_order,
@@ -739,6 +750,13 @@ pub struct LPort {
     /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
     /// it.
     pub(crate) end_label_cell: Option<LabelCellLayout>,
+    /// The end labels of the edges at the port, from `EndLabelPreprocessor` to
+    /// `EndLabelPostprocessor`. Java leaves them on their edges and keeps a label cell; this
+    /// crate holds them here, apart from the port's own labels.
+    ///
+    /// Crate-visible: the two end label steps and the end label sorter move them, and a
+    /// component split and combine remap their edges.
+    pub(crate) end_labels: Vec<LLabel>,
     /// The edges that enter the port. Private: it must match each edge's `target`, so
     /// `LGraph` changes it together with the edge.
     incoming_edges: Vec<EdgeId>,
@@ -774,6 +792,7 @@ impl LPort {
             inside_connections: false,
             collector_type: None,
             end_label_cell: None,
+            end_labels: Vec::new(),
             incoming_edges: Vec::new(),
             outgoing_edges: Vec::new(),
         }
