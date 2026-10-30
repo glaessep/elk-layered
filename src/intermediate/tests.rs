@@ -1254,8 +1254,8 @@ fn layer_constraint_preprocessor_keeps_explicit_opposite_constraint() {
     );
 }
 
-// Mutation: in `transpose_layer_constraint_for_external_port`, do not mark the layer constraint
-// explicit.
+// Mutation: in `transpose_external_port`, skip the write where the transpose turns a top or
+// bottom in-layer constraint into a separate layer constraint.
 #[test]
 fn layer_constraint_preprocessor_keeps_a_transposed_external_port_dummy_in_its_separate_layer() {
     let mut graph = LGraph::new("root", LayeredOptions::default());
@@ -1699,8 +1699,7 @@ fn replacement_of_north_dummy(layer_constraint: Option<LayerConstraint>) -> (LGr
     (graph, replacement)
 }
 
-// Mutation: in `create_hierarchical_port_replacement_dummy`, call `set_layer_constraint` whether
-// or not the original dummy is explicit.
+// Mutation: in `copy_layer_constraint_from`, make an unset layer constraint explicit with `NONE`.
 #[test]
 fn a_replacement_dummy_of_an_unset_original_has_no_explicit_layer_constraint() {
     let (graph, replacement) = replacement_of_north_dummy(None);
@@ -1712,8 +1711,7 @@ fn a_replacement_dummy_of_an_unset_original_has_no_explicit_layer_constraint() {
     );
 }
 
-// Mutation: in `create_hierarchical_port_replacement_dummy`, write `LayerConstraint::None` in
-// place of the value of the original dummy.
+// Mutation: in `copy_layer_constraint_from`, write `NONE` in place of the value of `other`.
 #[test]
 fn a_replacement_dummy_copies_the_layer_constraint_value_of_its_original() {
     for layer_constraint in [
@@ -1733,7 +1731,7 @@ fn a_replacement_dummy_copies_the_layer_constraint_value_of_its_original() {
 }
 
 // Mutation: in `create_hierarchical_port_replacement_dummy`, leave out the copy of the
-// successor constraints to the replacement dummy, or of the explicit layer constraint.
+// successor constraints to the replacement dummy, or skip `copy_layer_constraint_from`.
 #[test]
 fn hierarchical_port_constraint_processor_copies_replacement_dummy_metadata() {
     let mut graph = LGraph::new("root", LayeredOptions::default());

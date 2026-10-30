@@ -249,9 +249,7 @@ pub(crate) fn create_hierarchical_port_replacement_dummy(
         replacement.padding = original.padding;
         replacement.node_label_placement = original.node_label_placement;
         replacement.model_order = original.model_order;
-        if original.is_layer_constraint_explicit() {
-            replacement.set_layer_constraint(original.layer_constraint());
-        }
+        replacement.copy_layer_constraint_from(&original);
         replacement.port_constraints = PortConstraints::FixedPos;
         replacement.node_alignment = Alignment::Center;
         replacement

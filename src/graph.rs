@@ -342,8 +342,8 @@ pub struct LNode {
     /// The layer the node sits in. Private: `LGraph` sets it together with the layer's list.
     layer_index: Option<usize>,
     /// ELK's `LAYERING_LAYER_CONSTRAINT` property: `Some` once something sets it, even to `NONE`,
-    /// as `hasProperty` answers in ELK. Private so that [`Self::set_layer_constraint`] is the one
-    /// way to write it, and no write can forget to mark it explicit.
+    /// as `hasProperty` answers in ELK. Private so that the methods of `LNode` are the only way
+    /// to write it, and no write can set a value without making it explicit.
     layer_constraint: Option<super::options::LayerConstraint>,
     /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
     /// it.
@@ -718,6 +718,21 @@ impl LNode {
         layer_constraint: super::options::LayerConstraint,
     ) {
         self.layer_constraint = Some(layer_constraint);
+    }
+
+    /// Maps the layer constraint if it is set, and leaves an unset one unset. For a step that ELK
+    /// writes back only where it changes a value.
+    pub(crate) fn map_layer_constraint(
+        &mut self,
+        map: impl FnOnce(super::options::LayerConstraint) -> super::options::LayerConstraint,
+    ) {
+        self.layer_constraint = self.layer_constraint.map(map);
+    }
+
+    /// Copies the layer constraint of `other` as it is: a set one stays set, an unset one stays
+    /// unset.
+    pub(crate) fn copy_layer_constraint_from(&mut self, other: &LNode) {
+        self.layer_constraint = other.layer_constraint;
     }
 
     pub fn new(id: impl Into<String>, width: f64, height: f64, model_order: Option<usize>) -> Self {

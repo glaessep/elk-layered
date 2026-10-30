@@ -117,8 +117,8 @@ fn import_records_the_self_loop_options_of_each_node() {
     );
 }
 
-// Mutation: in `transform_node`, write the port alignment, the placement options or the
-// explicit layer constraint of every node to the row of node 0.
+// Mutation: in `transform_node`, write the port alignment or the placement options of every node
+// to the row of node 0, or skip `set_layer_constraint`, or call it for every node.
 #[test]
 fn import_records_the_options_the_processors_read() {
     let mut first = node("A");

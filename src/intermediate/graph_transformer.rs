@@ -104,9 +104,7 @@ fn mirror_node_x(node: &mut LNode, offset: f64) {
         external.side = mirror_port_side_x(external.side);
         // `mirrorLayerConstraintX` writes only a value other than `NONE`, so an unset constraint
         // stays unset. An explicit `NONE` is written back as `NONE`.
-        if node.is_layer_constraint_explicit() {
-            node.set_layer_constraint(mirror_layer_constraint_x(node.layer_constraint()));
-        }
+        node.map_layer_constraint(mirror_layer_constraint_x);
     }
     for label in &mut node.labels {
         label.node_label_placement = label.node_label_placement.map(|p| p.mirror_x());
@@ -213,10 +211,7 @@ fn transpose_node(node: &mut LNode) {
     for port in node.ports.slots_mut() {
         transpose_port(port);
     }
-    transpose_layer_constraint_for_external_port(node);
-    if let Some(external) = node.external_port_mut() {
-        external.side = transpose_port_side(external.side);
-    }
+    transpose_external_port(node);
     for label in &mut node.labels {
         label.node_label_placement = label.node_label_placement.map(|p| p.transpose());
         transpose_label(label);
@@ -343,16 +338,18 @@ fn mirror_layer_constraint_x(layer_constraint: LayerConstraint) -> LayerConstrai
     }
 }
 
-/// Ports `GraphTransformer.transposeLayerConstraint`.
+/// Ports the external port part of `GraphTransformer.transpose`: `transposeExternalPortSide`,
+/// then `transposeLayerConstraint`. Both run under one check for an external port dummy.
 ///
-/// Every branch that sets a value sets it with `setProperty` in ELK, so the layer constraint
-/// counts as explicit afterwards, even when the branch sets `NONE`. A dummy that no branch
-/// matches keeps what it had.
-fn transpose_layer_constraint_for_external_port(node: &mut LNode) {
+/// Every branch of the layer constraint step that sets a value sets it with `setProperty` in ELK,
+/// so the layer constraint counts as explicit afterwards, even when the branch sets `NONE`. A
+/// dummy that no branch matches keeps what it had.
+fn transpose_external_port(node: &mut LNode) {
     let layer_constraint = node.layer_constraint();
     let Some(external) = node.external_port_mut() else {
         return;
     };
+    external.side = transpose_port_side(external.side);
     let transposed = match (layer_constraint, external.in_layer_constraint) {
         (LayerConstraint::FirstSeparate, _) => {
             Some((LayerConstraint::None, InLayerConstraint::Top))

@@ -618,6 +618,7 @@ fn rotation_down_to_input_direction_rotates_counter_clockwise() {
     );
 }
 
+// Mutation: in `mirror_node_x`, skip the call of `map_layer_constraint`.
 #[test]
 fn left_transform_mirrors_external_port_layer_constraint() {
     let mut graph = graph(ElkDirection::Left);
@@ -640,8 +641,7 @@ fn left_transform_mirrors_external_port_layer_constraint() {
     );
 }
 
-// Mutation: in `mirror_node_x`, write the mirrored layer constraint of an external port dummy
-// whether or not it is set.
+// Mutation: in `map_layer_constraint`, make an unset layer constraint explicit with `NONE`.
 #[test]
 fn left_transform_keeps_an_unset_external_port_layer_constraint_unset() {
     let mut graph = graph(ElkDirection::Left);
@@ -661,6 +661,8 @@ fn left_transform_keeps_an_unset_external_port_layer_constraint_unset() {
     );
 }
 
+// Mutation: in `transpose_external_port`, leave out the write of the new layer constraint or of
+// the new in-layer constraint, or the turn of the side.
 #[test]
 fn transpose_preserves_external_port_layer_constraint_through_in_layer_constraint() {
     let mut graph = graph(ElkDirection::Down);
@@ -708,7 +710,7 @@ fn transpose_preserves_external_port_layer_constraint_through_in_layer_constrain
     );
 }
 
-// Mutation: in `transpose_layer_constraint_for_external_port`, skip the write where the transpose
+// Mutation: in `transpose_external_port`, skip the write where the transpose
 // turns a top or bottom in-layer constraint into a separate layer constraint.
 #[test]
 fn transpose_marks_a_separate_layer_constraint_of_an_external_port_explicit() {
@@ -733,7 +735,7 @@ fn transpose_marks_a_separate_layer_constraint_of_an_external_port_explicit() {
     }
 }
 
-// Mutation: in `transpose_layer_constraint_for_external_port`, skip the write where the transpose
+// Mutation: in `transpose_external_port`, skip the write where the transpose
 // turns a separate layer constraint into an in-layer constraint. The dummy then keeps its separate
 // constraint.
 #[test]
@@ -760,7 +762,7 @@ fn transpose_clears_a_separate_layer_constraint_of_an_external_port() {
     }
 }
 
-// Mutation: in `transpose_layer_constraint_for_external_port`, call `set_layer_constraint(NONE)`
+// Mutation: in `transpose_external_port`, call `set_layer_constraint(NONE)`
 // after the branches, whichever matched.
 #[test]
 fn transpose_leaves_a_dummy_that_no_branch_matches_not_explicit() {
@@ -782,7 +784,7 @@ fn transpose_leaves_a_dummy_that_no_branch_matches_not_explicit() {
 }
 
 // Mutations, one per group of rows:
-// - DOWN with reading direction: in `transpose_layer_constraint_for_external_port`, skip the write
+// - DOWN with reading direction: in `transpose_external_port`, skip the write
 //   where the transpose gives a separate layer constraint.
 // - UP with reading direction: in `ToInternalLeftToRight`, run `mirror_all_y` before
 //   `transpose_all`. The mirror then swaps top and bottom before the transpose reads them.
