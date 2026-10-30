@@ -119,8 +119,11 @@ fn staircase() -> ElkNode {
 // Mutation: put back the recursive `place_block` that commit `6554427` replaced in
 // `bk_compactor.rs`. It then calls itself once per block of the staircase and overflows the stack.
 //
-// The shape checks guard the graph, so the overflow check keeps something to guard. Each has a
-// mutation:
+// `placing_a_deep_chain_of_blocks_needs_no_deep_stack` in `src/phase/placement/bk/tests.rs` holds
+// `place_block` alone, on blocks set up by hand. This test stays for what that one cannot see:
+// the other phases on a graph of 4,000 layers, and the staircase the real pipeline builds from
+// it. The shape checks guard the graph, so the overflow check keeps something to guard. Each has
+// a mutation:
 // - In `place_nodes_brandes_koepf`, reverse the nodes of every odd layer. The order of `n{i}` and
 //   `m{i}` then changes from layer to layer.
 // - Drop the edges `n{i} -> m{i+1}` from `staircase()`. The `n{i}` then leave their layers.
