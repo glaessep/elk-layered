@@ -342,27 +342,31 @@ fn mirror_layer_constraint_x(layer_constraint: LayerConstraint) -> LayerConstrai
 
 /// Ports `GraphTransformer.transposeLayerConstraint`.
 ///
-/// Every branch sets the layer constraint with `setProperty` in ELK, so the constraint counts as
-/// explicit afterwards, even when the branch sets `NONE`.
+/// Every branch that sets a value sets it with `setProperty` in ELK, so the layer constraint
+/// counts as explicit afterwards, even when the branch sets `NONE`. A dummy that no branch
+/// matches keeps what it had.
 fn transpose_layer_constraint_for_external_port(
     external: &mut ExternalPortData,
     layer_constraint: &mut LayerConstraint,
 ) {
-    if *layer_constraint == LayerConstraint::FirstSeparate {
-        *layer_constraint = LayerConstraint::None;
-        external.in_layer_constraint = InLayerConstraint::Top;
-        external.layer_constraint_explicit = true;
-    } else if *layer_constraint == LayerConstraint::LastSeparate {
-        *layer_constraint = LayerConstraint::None;
-        external.in_layer_constraint = InLayerConstraint::Bottom;
-        external.layer_constraint_explicit = true;
-    } else if external.in_layer_constraint == InLayerConstraint::Top {
-        *layer_constraint = LayerConstraint::FirstSeparate;
-        external.in_layer_constraint = InLayerConstraint::None;
-        external.layer_constraint_explicit = true;
-    } else if external.in_layer_constraint == InLayerConstraint::Bottom {
-        *layer_constraint = LayerConstraint::LastSeparate;
-        external.in_layer_constraint = InLayerConstraint::None;
+    let transposed = match (*layer_constraint, external.in_layer_constraint) {
+        (LayerConstraint::FirstSeparate, _) => {
+            Some((LayerConstraint::None, InLayerConstraint::Top))
+        }
+        (LayerConstraint::LastSeparate, _) => {
+            Some((LayerConstraint::None, InLayerConstraint::Bottom))
+        }
+        (_, InLayerConstraint::Top) => {
+            Some((LayerConstraint::FirstSeparate, InLayerConstraint::None))
+        }
+        (_, InLayerConstraint::Bottom) => {
+            Some((LayerConstraint::LastSeparate, InLayerConstraint::None))
+        }
+        (_, InLayerConstraint::None) => None,
+    };
+    if let Some((new_layer_constraint, new_in_layer_constraint)) = transposed {
+        *layer_constraint = new_layer_constraint;
+        external.in_layer_constraint = new_in_layer_constraint;
         external.layer_constraint_explicit = true;
     }
 }
