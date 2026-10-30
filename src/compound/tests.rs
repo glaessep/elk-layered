@@ -89,6 +89,7 @@ fn node(id: &str) -> ElkInputNode {
         node_flexibility: crate::options::NodeFlexibility::None,
         ports_surrounding: None,
         nested_options: None,
+        compound_node: false,
         labels: Vec::new(),
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
@@ -305,6 +306,8 @@ fn a_made_up_port_keeps_its_net_flow_apart_from_a_named_port_of_the_same_id() {
         net_flow: 0,
         child_edges: 0,
         connected_to_external_nodes: false,
+        inside_connections: false,
+        has_edges: false,
         allow_non_flow_ports_to_switch_sides: false,
         labels: Vec::new(),
     };
@@ -1401,4 +1404,339 @@ fn two_parent_nodes_with_one_id_each_give_their_own_ports_to_their_graph() {
     };
     assert_eq!(dummy_side(lands[0]), PortSide::North);
     assert_eq!(dummy_side(lands[1]), PortSide::South);
+}
+
+// --- Room for the labels of a compound node's ports: `CompoundGraphPreprocessor`. ---
+
+mod port_label_room {
+    use super::*;
+    use crate::graph::{ExternalPortData, GraphNodeRef, LLabel, LSize};
+    use crate::options::PortLabelPlacement;
+
+    /// The outer graph, with a node holding one port of 6 by 4 on `side` with the labels, and the
+    /// graph inside it, with the dummy of that port.
+    fn setup(
+        side: PortSide,
+        placement: PortLabelPlacement,
+        labels: Vec<LLabel>,
+        constraints: PortConstraints,
+    ) -> (LGraph, LGraph, NodeId) {
+        let mut outer = LGraph::new("outer", LayeredOptions::default());
+        let node = outer.push_node_with(|_| LNode::new("cluster", 80.0, 40.0, None));
+        outer.layerless_nodes[node].port_label_placement = placement;
+        let port = outer
+            .add_port(node, PortType::Output, side, LPoint::default())
+            .unwrap();
+        outer.layerless_nodes[node].ports[port.port].size = LSize {
+            width: 6.0,
+            height: 4.0,
+        };
+        outer.layerless_nodes[node].ports[port.port].labels = labels;
+
+        let mut inner = LGraph::new("inner", LayeredOptions::default());
+        inner.id = GraphId::new(1);
+        let dummy = inner.push_node_with(|id| {
+            create_external_port_dummy(
+                id,
+                "dummy",
+                "dummy:0",
+                PortType::Output,
+                constraints,
+                side,
+                0,
+                LPoint::default(),
+                LSize {
+                    width: 6.0,
+                    height: 4.0,
+                },
+                LSize::default(),
+                0.0,
+                ElkDirection::Right,
+                ExternalPortData::default(),
+            )
+        });
+        outer.layerless_nodes[node].ports[port.port].port_dummy = Some(GraphNodeRef {
+            graph_id: GraphId::new(1),
+            node: dummy,
+        });
+        (outer, inner, dummy)
+    }
+
+    fn label(width: f64, height: f64, x: f64, y: f64) -> LLabel {
+        let mut label = LLabel::new("text", width, height);
+        label.position = LPoint { x, y };
+        label
+    }
+
+    fn room(
+        side: PortSide,
+        placement: PortLabelPlacement,
+        constraints: PortConstraints,
+        labels: Vec<LLabel>,
+    ) -> Vec<(f64, f64)> {
+        let (outer, mut inner, dummy) = setup(side, placement, labels, constraints);
+        let node = NodeId::new(0);
+        reserve_room_for_port_labels(&outer, node, PortId::new(0), &mut inner, constraints, side);
+        inner.layerless_nodes[dummy].ports[PortId::new(0)]
+            .labels
+            .iter()
+            .map(|label| (label.size.width, label.size.height))
+            .collect()
+    }
+
+    // Mutation: reduce the labels also under INSIDE port labels.
+    #[test]
+    fn inside_labels_keep_their_size() {
+        let labels = vec![label(20.0, 10.0, 0.0, 0.0), label(30.0, 6.0, 0.0, 0.0)];
+        for side in [PortSide::East, PortSide::North] {
+            assert_eq!(
+                room(
+                    side,
+                    PortLabelPlacement::INSIDE,
+                    PortConstraints::FixedSide,
+                    labels.clone()
+                ),
+                vec![(20.0, 10.0), (30.0, 6.0)]
+            );
+        }
+    }
+
+    // Mutation: reduce the height of a label on an east or west port, or its width on a north
+    // or south port.
+    #[test]
+    fn outside_labels_lose_the_size_along_the_axis_of_a_fixed_side() {
+        let labels = vec![label(20.0, 10.0, 0.0, 0.0)];
+        let outside = |side| {
+            room(
+                side,
+                PortLabelPlacement::OUTSIDE,
+                PortConstraints::FixedSide,
+                labels.clone(),
+            )
+        };
+        assert_eq!(outside(PortSide::East), vec![(0.0, 10.0)]);
+        assert_eq!(outside(PortSide::West), vec![(0.0, 10.0)]);
+        assert_eq!(outside(PortSide::North), vec![(20.0, 0.0)]);
+        assert_eq!(outside(PortSide::South), vec![(20.0, 0.0)]);
+    }
+
+    // Mutation: read the side of a port with free constraints, which the node may still change.
+    // ELK expects such a port on the east or west side: the width goes.
+    #[test]
+    fn outside_labels_of_a_free_port_lose_their_width_whatever_the_side() {
+        let labels = vec![label(20.0, 10.0, 0.0, 0.0)];
+        for side in [PortSide::North, PortSide::South, PortSide::East] {
+            assert_eq!(
+                room(
+                    side,
+                    PortLabelPlacement::OUTSIDE,
+                    PortConstraints::Free,
+                    labels.clone()
+                ),
+                vec![(0.0, 10.0)]
+            );
+        }
+    }
+
+    // Mutation: keep the inside part for placements that are not fixed, or take it with the
+    // border offset of the port.
+    #[test]
+    fn fixed_labels_keep_the_part_that_reaches_into_the_node() {
+        // A label 12 to the left of the east port: 12 of it lie in the node.
+        let east = vec![label(20.0, 10.0, -12.0, 0.0)];
+        assert_eq!(
+            room(
+                PortSide::East,
+                PortLabelPlacement::FIXED,
+                PortConstraints::FixedSide,
+                east.clone()
+            ),
+            vec![(12.0, 10.0)]
+        );
+        // The same label under OUTSIDE placement that is not fixed: nothing reaches in.
+        assert_eq!(
+            room(
+                PortSide::East,
+                PortLabelPlacement::OUTSIDE,
+                PortConstraints::FixedSide,
+                east
+            ),
+            vec![(0.0, 10.0)]
+        );
+        // On a north port, a label 1 below the port top reaches 10 + 1 - 4 = 7 into the node.
+        let north = vec![label(20.0, 10.0, 0.0, 1.0)];
+        assert_eq!(
+            room(
+                PortSide::North,
+                PortLabelPlacement::FIXED,
+                PortConstraints::FixedSide,
+                north
+            ),
+            vec![(20.0, 7.0)]
+        );
+    }
+
+    // Mutation: read the current side of the port, not the side the importer gave it. A dummy
+    // that links to the port changes the side, and ELK reads the old one: here "undefined",
+    // which gives a fixed label no part inside the node.
+    #[test]
+    fn the_inside_part_follows_the_side_the_importer_gave_the_port() {
+        let (outer, mut inner, dummy) = setup(
+            PortSide::East,
+            PortLabelPlacement::FIXED,
+            vec![label(20.0, 10.0, -12.0, 0.0)],
+            PortConstraints::Free,
+        );
+        reserve_room_for_port_labels(
+            &outer,
+            NodeId::new(0),
+            PortId::new(0),
+            &mut inner,
+            PortConstraints::Free,
+            PortSide::Undefined,
+        );
+        let at = &inner.layerless_nodes[dummy].ports[PortId::new(0)].labels[0];
+        assert_eq!((at.size.width, at.size.height), (0.0, 10.0));
+    }
+
+    // Mutation: read the current side of the port for the choice of the axis. The importer gave
+    // the port the north side, so ELK cuts the height of the label, not its width.
+    #[test]
+    fn the_axis_follows_the_side_the_importer_gave_the_port() {
+        let (outer, mut inner, dummy) = setup(
+            PortSide::East,
+            PortLabelPlacement::OUTSIDE,
+            vec![label(20.0, 10.0, 0.0, 0.0)],
+            PortConstraints::FixedSide,
+        );
+        reserve_room_for_port_labels(
+            &outer,
+            NodeId::new(0),
+            PortId::new(0),
+            &mut inner,
+            PortConstraints::FixedSide,
+            PortSide::North,
+        );
+        let at = &inner.layerless_nodes[dummy].ports[PortId::new(0)].labels[0];
+        assert_eq!((at.size.width, at.size.height), (20.0, 0.0));
+    }
+
+    // Mutation: leave out the `filter` on the graph of the dummy. A port whose dummy an earlier
+    // step put into another graph would give its labels to an unrelated node there.
+    #[test]
+    fn a_dummy_in_another_graph_gets_no_labels() {
+        let (mut outer, mut inner, dummy) = setup(
+            PortSide::East,
+            PortLabelPlacement::INSIDE,
+            vec![label(20.0, 10.0, 0.0, 0.0)],
+            PortConstraints::FixedSide,
+        );
+        outer.layerless_nodes[NodeId::new(0)].ports[PortId::new(0)].port_dummy =
+            Some(GraphNodeRef {
+                graph_id: GraphId::new(7),
+                node: dummy,
+            });
+        inner.id = GraphId::new(1);
+        reserve_room_for_port_labels(
+            &outer,
+            NodeId::new(0),
+            PortId::new(0),
+            &mut inner,
+            PortConstraints::FixedSide,
+            PortSide::East,
+        );
+        assert!(
+            inner.layerless_nodes[dummy].ports[PortId::new(0)]
+                .labels
+                .is_empty()
+        );
+    }
+
+    // Mutation: copy the labels in reverse, or only the first one.
+    #[test]
+    fn every_label_of_the_port_gets_one_on_the_dummy_in_order() {
+        let labels = vec![
+            label(20.0, 10.0, 0.0, 0.0),
+            label(30.0, 6.0, 0.0, 0.0),
+            label(5.0, 5.0, 0.0, 0.0),
+        ];
+        assert_eq!(
+            room(
+                PortSide::East,
+                PortLabelPlacement::INSIDE,
+                PortConstraints::FixedSide,
+                labels
+            ),
+            vec![(20.0, 10.0), (30.0, 6.0), (5.0, 5.0)]
+        );
+    }
+
+    // Mutation: copy the text of the label to the dummy's label. ELK makes a label without text.
+    #[test]
+    fn the_dummy_labels_have_no_text() {
+        let (outer, mut inner, dummy) = setup(
+            PortSide::East,
+            PortLabelPlacement::INSIDE,
+            vec![label(20.0, 10.0, 0.0, 0.0)],
+            PortConstraints::FixedSide,
+        );
+        reserve_room_for_port_labels(
+            &outer,
+            NodeId::new(0),
+            PortId::new(0),
+            &mut inner,
+            PortConstraints::FixedSide,
+            PortSide::East,
+        );
+        assert_eq!(
+            inner.layerless_nodes[dummy].ports[PortId::new(0)].labels[0].text,
+            ""
+        );
+    }
+
+    // Mutation: unwrap the dummy of the port, which panics for a port without one.
+    #[test]
+    fn a_port_without_a_dummy_gets_nothing() {
+        let (mut outer, mut inner, dummy) = setup(
+            PortSide::East,
+            PortLabelPlacement::INSIDE,
+            vec![label(20.0, 10.0, 0.0, 0.0)],
+            PortConstraints::FixedSide,
+        );
+        outer.layerless_nodes[NodeId::new(0)].ports[PortId::new(0)].port_dummy = None;
+        reserve_room_for_port_labels(
+            &outer,
+            NodeId::new(0),
+            PortId::new(0),
+            &mut inner,
+            PortConstraints::FixedSide,
+            PortSide::East,
+        );
+        assert!(
+            inner.layerless_nodes[dummy].ports[PortId::new(0)]
+                .labels
+                .is_empty()
+        );
+    }
+}
+
+// Mutation: read the first port for every port, or list the ports of a node without a graph.
+#[test]
+fn the_port_sides_are_kept_by_port_position_for_nodes_with_a_graph_only() {
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    let holder = graph.push_node_with(|_| LNode::new("holder", 10.0, 10.0, None));
+    let plain = graph.push_node_with(|_| LNode::new("plain", 10.0, 10.0, None));
+    graph.layerless_nodes[holder].nested_graph = Some(GraphId::new(1));
+    for (node, side) in [
+        (holder, PortSide::North),
+        (holder, PortSide::West),
+        (plain, PortSide::East),
+    ] {
+        graph
+            .add_port(node, PortType::Output, side, LPoint::default())
+            .unwrap();
+    }
+    let sides = port_sides_of(&graph);
+    assert_eq!(sides[holder], vec![PortSide::North, PortSide::West]);
+    assert!(sides[plain].is_empty());
 }

@@ -21,6 +21,7 @@ fn node(id: &str) -> ElkInputNode {
         node_flexibility: crate::options::NodeFlexibility::None,
         ports_surrounding: None,
         nested_options: None,
+        compound_node: false,
         labels: Vec::new(),
         node_size: Default::default(),
         self_loop_distribution: Default::default(),
@@ -334,7 +335,7 @@ fn separate_children_self_loop_graph_does_not_materialize_regular_children() {
 #[test]
 fn the_edge_containers_are_built_only_when_asked_for() {
     let input = graph(vec![node("a"), node("b")], vec![edge("e", "a", "b")]);
-    let scope = || (ElkPadding::uniform(0.0), ScopePorts::NONE);
+    let scope = || (ElkPadding::uniform(0.0), ScopePorts::none());
 
     let (padding, ports) = scope();
     let without = import_scope_with(&input, &[], padding, ports, false).unwrap();
@@ -363,7 +364,7 @@ fn an_edge_maps_to_the_graph_of_its_container_even_when_the_scope_has_that_name(
     input.id = "group".to_string();
     input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
 
-    let imported = import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::NONE).unwrap();
+    let imported = import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::none()).unwrap();
 
     let group_graph = imported.graphs.root().layerless_nodes[NodeId::new(0)]
         .nested_graph
@@ -382,7 +383,7 @@ fn an_edge_whose_container_holds_no_graph_is_refused() {
     // Flat hierarchy handling: no node gets a graph.
     let input = graph(vec![node("a"), node("b")], vec![contained]);
 
-    let error = import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::NONE)
+    let error = import_scope(&input, &[], ElkPadding::uniform(0.0), ScopePorts::none())
         .err()
         .expect("an error");
 
@@ -1667,6 +1668,8 @@ fn input_port(id: &str, side: PortSide) -> ElkInputPort {
         net_flow: 0,
         child_edges: 0,
         connected_to_external_nodes: false,
+        inside_connections: false,
+        has_edges: false,
         labels: Vec::new(),
     }
 }
@@ -2155,4 +2158,309 @@ fn ports_get_a_model_order_when_the_graph_asks_for_one() {
         .map(|p| p.model_order)
         .collect();
     assert_eq!(orders, [None, None]);
+}
+
+// --- Labels of the ports of a graph's node: `transformExternalPort`. ---
+
+mod external_port_labels {
+    use super::*;
+    use crate::graph::{DummyLabelSpacings, LSize};
+    use crate::options::PortLabelPlacement;
+
+    fn label(text: &str, width: f64, height: f64) -> ElkInputLabel {
+        ElkInputLabel {
+            source_index: None,
+            text: text.to_string(),
+            width,
+            height,
+            placement: crate::graph::EdgeLabelPlacement::Center,
+            inline: false,
+            node_label_placement: None,
+            x: 0.0,
+            y: 0.0,
+        }
+    }
+
+    /// A port of 6 by 4 with the given labels. `child_edges` of 1 makes it external by itself.
+    fn port(
+        id: &str,
+        side: PortSide,
+        child_edges: usize,
+        labels: Vec<ElkInputLabel>,
+    ) -> ElkInputPort {
+        ElkInputPort {
+            child_edges,
+            labels,
+            ..input_port(id, side)
+        }
+    }
+
+    /// Imports a graph of one node, run with the given ports as the ports of its own node.
+    fn import(
+        ports: &[ElkInputPort],
+        placement: PortLabelPlacement,
+        spacings: DummyLabelSpacings,
+    ) -> GraphArena {
+        let mut input = graph(vec![node("A")], vec![]);
+        input.options.port_label_placement = placement;
+        input.options.port_constraints = PortConstraints::FixedSide;
+        let scope = ScopePorts {
+            ports,
+            node_size: LSize {
+                width: 80.0,
+                height: 40.0,
+            },
+            label_spacings: spacings,
+        };
+        import_scope(&input, &[], ElkPadding::uniform(0.0), scope)
+            .unwrap()
+            .graphs
+    }
+
+    fn defaults() -> DummyLabelSpacings {
+        DummyLabelSpacings::default()
+    }
+
+    fn dummy_labels(graph: &GraphArena, port: &str) -> Vec<(f64, f64)> {
+        let dummy = graph
+            .root()
+            .layerless_nodes
+            .iter()
+            .find(|node| node.id == format!("root:external:{port}"))
+            .expect("the port has a dummy");
+        dummy.ports[PortId::new(0)]
+            .labels
+            .iter()
+            .map(|label| (label.size.width, label.size.height))
+            .collect()
+    }
+
+    // Mutation: leave out the `inside_port_labels &&` branch of the external check, or let the
+    // OUTSIDE placement count as well.
+    #[test]
+    fn a_label_makes_a_port_external_only_under_inside_port_labels() {
+        let ports = [port("p", PortSide::East, 0, vec![label("req", 20.0, 10.0)])];
+        let inside = import(&ports, PortLabelPlacement::INSIDE, defaults());
+        assert!(inside.root().graph_properties.external_ports);
+        assert!(!inside.root().graph_properties.hyperedges);
+        let outside = import(&ports, PortLabelPlacement::OUTSIDE, defaults());
+        assert!(!outside.root().graph_properties.external_ports);
+        assert!(
+            outside
+                .layerless_nodes
+                .iter()
+                .all(|n| n.id != "root:external:p")
+        );
+    }
+
+    // Mutation: look for a label with text in the external check, which skips this port.
+    #[test]
+    fn a_label_without_text_still_makes_a_port_external_but_gets_no_dummy_label() {
+        let ports = [port("p", PortSide::East, 0, vec![label("", 20.0, 10.0)])];
+        let graph = import(&ports, PortLabelPlacement::INSIDE, defaults());
+        assert!(graph.root().graph_properties.external_ports);
+        assert_eq!(dummy_labels(&graph, "p"), vec![]);
+    }
+
+    // Mutation: make a port without labels external under INSIDE port labels.
+    #[test]
+    fn inside_port_labels_alone_make_no_port_external() {
+        let ports = [port("p", PortSide::East, 0, vec![])];
+        let graph = import(&ports, PortLabelPlacement::INSIDE, defaults());
+        assert!(!graph.root().graph_properties.external_ports);
+    }
+
+    // Mutation: keep the full size of the label under OUTSIDE port labels, or reduce the
+    // height of an east label.
+    #[test]
+    fn outside_labels_lose_the_size_along_the_axis_of_their_side() {
+        let ports = [
+            port("e", PortSide::East, 1, vec![label("req", 20.0, 10.0)]),
+            port("w", PortSide::West, 1, vec![label("req", 20.0, 10.0)]),
+            port("n", PortSide::North, 1, vec![label("req", 20.0, 10.0)]),
+            port("s", PortSide::South, 1, vec![label("req", 20.0, 10.0)]),
+        ];
+        let graph = import(&ports, PortLabelPlacement::OUTSIDE, defaults());
+        assert_eq!(dummy_labels(&graph, "e"), vec![(0.0, 10.0)]);
+        assert_eq!(dummy_labels(&graph, "w"), vec![(0.0, 10.0)]);
+        assert_eq!(dummy_labels(&graph, "n"), vec![(20.0, 0.0)]);
+        assert_eq!(dummy_labels(&graph, "s"), vec![(20.0, 0.0)]);
+    }
+
+    // Mutation: reduce the size of the labels under INSIDE port labels too.
+    #[test]
+    fn inside_labels_keep_their_size() {
+        let ports = [port("e", PortSide::East, 1, vec![label("req", 20.0, 10.0)])];
+        let graph = import(&ports, PortLabelPlacement::INSIDE, defaults());
+        assert_eq!(dummy_labels(&graph, "e"), vec![(20.0, 10.0)]);
+    }
+
+    // Mutation: keep the label size of a label with a position under fixed placement, or take
+    // the inside part with the border offset of the port.
+    #[test]
+    fn fixed_labels_keep_the_part_that_reaches_into_the_node() {
+        let mut east = label("req", 20.0, 10.0);
+        // The label starts 12 left of the port: 12 of it lie in the node.
+        east.x = -12.0;
+        let mut north = label("req", 20.0, 10.0);
+        // The label ends 7 below the top edge of the port's bottom (4): 10 + 1 - 4 = 7.
+        north.y = 1.0;
+        let ports = [
+            port("e", PortSide::East, 1, vec![east]),
+            port("n", PortSide::North, 1, vec![north]),
+        ];
+        let graph = import(&ports, PortLabelPlacement::FIXED, defaults());
+        assert_eq!(dummy_labels(&graph, "e"), vec![(12.0, 10.0)]);
+        assert_eq!(dummy_labels(&graph, "n"), vec![(20.0, 7.0)]);
+    }
+
+    // Mutation: give the dummy the label's size rather than reducing it under non-fixed OUTSIDE
+    // placement, which would read the position of a label that has none.
+    #[test]
+    fn non_fixed_outside_labels_ignore_their_position() {
+        let mut moved = label("req", 20.0, 10.0);
+        moved.x = -12.0;
+        let ports = [port("e", PortSide::East, 1, vec![moved])];
+        let graph = import(&ports, PortLabelPlacement::OUTSIDE, defaults());
+        assert_eq!(dummy_labels(&graph, "e"), vec![(0.0, 10.0)]);
+    }
+
+    // Mutation: copy the position of the label to the dummy's label only for fixed placement.
+    #[test]
+    fn a_dummy_label_keeps_the_position_of_its_label() {
+        let mut moved = label("req", 20.0, 10.0);
+        moved.x = 3.0;
+        moved.y = 5.0;
+        let ports = [port("e", PortSide::East, 1, vec![moved])];
+        let graph = import(&ports, PortLabelPlacement::INSIDE, defaults());
+        let dummy = graph
+            .root()
+            .layerless_nodes
+            .iter()
+            .find(|node| node.id == "root:external:e")
+            .unwrap();
+        let at = dummy.ports[PortId::new(0)].labels[0].position;
+        assert_eq!((at.x, at.y), (3.0, 5.0));
+    }
+
+    // Mutation: leave the label spacings of the dummy at their defaults.
+    #[test]
+    fn the_dummy_carries_the_label_spacings_of_the_parent() {
+        let ports = [port("e", PortSide::East, 1, vec![])];
+        let spacings = DummyLabelSpacings {
+            label_port_horizontal: 7.0,
+            label_port_vertical: 8.0,
+            label_label: 9.0,
+        };
+        let graph = import(&ports, PortLabelPlacement::OUTSIDE, spacings);
+        let dummy = graph
+            .root()
+            .layerless_nodes
+            .iter()
+            .find(|node| node.id == "root:external:e")
+            .unwrap();
+        assert_eq!(dummy.external_port().unwrap().label_spacings, spacings);
+    }
+
+    // Mutation: copy only the first label of the port.
+    #[test]
+    fn every_label_with_text_reaches_the_dummy_in_order() {
+        let ports = [port(
+            "e",
+            PortSide::East,
+            1,
+            vec![
+                label("a", 20.0, 10.0),
+                label("", 5.0, 5.0),
+                label("b", 30.0, 6.0),
+            ],
+        )];
+        let graph = import(&ports, PortLabelPlacement::INSIDE, defaults());
+        assert_eq!(dummy_labels(&graph, "e"), vec![(20.0, 10.0), (30.0, 6.0)]);
+    }
+}
+
+// --- What the cells read from the ports of a node with children. ---
+
+mod cell_ports {
+    use super::*;
+    use crate::options::PortLabelPlacement;
+
+    fn cell_ports_of(ports: Vec<ElkInputPort>) -> Vec<crate::common::cells::CellPort> {
+        let mut group = node("g");
+        group.nested_options = Some(Box::default());
+        group.port_constraints = Some(PortConstraints::FixedSide);
+        group.port_label_placement = PortLabelPlacement::OUTSIDE;
+        group.ports = ports;
+        cell_node(&group).ports.ports
+    }
+
+    // Mutation: leave `has_edges` false in `cell_ports`. ELK asks the port adapter, which shows
+    // every edge of the port: a label may go next to a port only when no edge ends there.
+    #[test]
+    fn a_cell_port_has_edges_when_any_edge_ends_there() {
+        let mut with_edge = input_port("a", PortSide::West);
+        with_edge.has_edges = true;
+        let ports = cell_ports_of(vec![with_edge, input_port("b", PortSide::West)]);
+        assert!(ports[0].has_edges);
+        assert!(!ports[1].has_edges);
+    }
+
+    // Mutation: leave `has_compound_connections` false in `cell_ports`. Inside labels of a node
+    // with children go next to a port only when no edge to a descendant ends there.
+    #[test]
+    fn a_cell_port_has_compound_connections_when_a_descendant_reaches_it() {
+        let mut reached = input_port("a", PortSide::West);
+        reached.inside_connections = true;
+        let ports = cell_ports_of(vec![reached, input_port("b", PortSide::West)]);
+        assert!(ports[0].has_compound_connections);
+        assert!(!ports[1].has_compound_connections);
+    }
+
+    // Mutation: give the port a ratio from its position. An `ElkPort` has none: only the layered
+    // port gets one in `initializePort`, so the minimum size does not depend on ratios.
+    #[test]
+    fn a_cell_port_has_the_ratio_zero() {
+        let mut moved = input_port("a", PortSide::West);
+        moved.y = 20.0;
+        let ports = cell_ports_of(vec![moved]);
+        assert_eq!(ports[0].ratio_or_position, 0.0);
+    }
+}
+
+// --- The compound flag and the labels of a port. ---
+
+mod compound_flag_and_port_labels {
+    use super::*;
+
+    // Mutation: derive the flag from `nested_options` again. A leaf that carries options is no
+    // compound node, and a compound node without options is one.
+    #[test]
+    fn the_compound_flag_follows_the_field_not_the_options() {
+        let mut leaf_with_options = node("leaf");
+        leaf_with_options.nested_options = Some(Box::default());
+        let mut compound_without_options = node("compound");
+        compound_without_options.compound_node = true;
+        let imported = import_graph(&graph(
+            vec![leaf_with_options, compound_without_options],
+            vec![],
+        ))
+        .unwrap();
+        assert!(!layered_node(&imported, "leaf").compound_node);
+        assert!(layered_node(&imported, "compound").compound_node);
+    }
+
+    // Mutation: keep the labels without text in `port_labels_to_lgraph`, or drop the position.
+    #[test]
+    fn a_port_keeps_its_labels_with_text_and_the_position_they_have() {
+        let mut port = input_port("p", PortSide::East);
+        let mut at = ElkInputLabel::center("a", 10.0, 5.0);
+        at.x = 3.0;
+        at.y = -4.0;
+        port.labels = vec![ElkInputLabel::center("", 1.0, 1.0), at];
+        let labels: Vec<_> = port_labels_to_lgraph(&port).collect();
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].text, "a");
+        assert_eq!((labels[0].position.x, labels[0].position.y), (3.0, -4.0));
+    }
 }

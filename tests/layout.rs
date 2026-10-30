@@ -771,40 +771,237 @@ fn a_port_label_with_text_is_placed_but_one_without_is_dropped() {
     assert_eq!((labels[1].x, labels[1].y), (7.0, 5.0));
 }
 
-// Mutation: drop the check for labels on the ports of a node with children in `Tree::new`.
-#[test]
-fn a_port_label_with_text_on_a_group_is_unsupported_but_one_without_is_dropped() {
-    let mut p = port("p", 6.0, 4.0, "EAST");
-    p.labels = vec![label("", 10.0, 10.0)];
-    let mut g = group("g", vec![node("c", 20.0, 20.0)]);
-    g.ports = vec![p.clone()];
-    assert!(layout(&root(vec![g.clone()], vec![])).is_ok());
-    p.labels = vec![label("P", 10.0, 10.0)];
-    g.ports = vec![p];
-    assert!(matches!(
-        error_of(&root(vec![g], vec![])),
-        Error::Unsupported { element, feature }
-            if element == "port \"p\"" && feature == "a label on a port of a node with children"
-    ));
+/// A group `g` with the child `c` of 30 by 20 and the west port `p` of 6 by 4. The port has one
+/// label of 10 by 14 with the given text, and the group places its port labels as given.
+fn group_with_labelled_port(placement: &str, text: &str) -> ElkNode {
+    let mut p = port("p", 6.0, 4.0, "WEST");
+    p.labels = vec![label(text, 10.0, 14.0)];
+    let mut g = with_ports(
+        group("g", vec![node("c", 30.0, 20.0)]),
+        "FIXED_SIDE",
+        vec![p],
+    );
+    g.layout_options
+        .insert("elk.portLabels.placement".into(), placement.into());
+    g
 }
 
-// Mutation: drop the check for the port size constraints of a node with children in
+fn label_of_p(graph: &ElkNode) -> (f64, f64) {
+    let label = &find(graph, "g").ports[0].labels[0];
+    (label.x, label.y)
+}
+
+// Mutation: leave out the call of `reserve_room_for_port_labels` in
+// `ensure_direct_nested_external_dummies_for_parent_ports`. The included group would be 54 wide
+// with its inside label, not 65, and its outside label would still be -11 left of the port.
+#[test]
+fn an_included_group_makes_room_for_inside_labels_and_none_for_outside_labels() {
+    // elkjs 0.9.3 returns the same numbers as for the group laid out on its own.
+    for (placement, width, label_x) in [
+        ("[INSIDE, NEXT_TO_PORT_IF_POSSIBLE]", 65.0, 7.0),
+        ("OUTSIDE", 54.0, -11.0),
+    ] {
+        let mut g = group_with_labelled_port(placement, "in");
+        g.edges = vec![edge("e", "p", "c")];
+        let laid = layout(&include_children(root(vec![g], vec![]))).unwrap();
+        assert_eq!(size(&laid, "g"), (width, 51.0), "{placement}");
+        assert_eq!(label_of_p(&laid), (label_x, 5.0), "{placement}");
+    }
+}
+
+// Mutation: put back the check for labels on the ports of a node with children in
 // `Tree::new`.
 #[test]
-fn a_group_that_sizes_itself_to_its_ports_is_unsupported() {
-    for constraints in ["[PORTS]", "[PORT_LABELS]"] {
-        let mut g = group("g", vec![node("c", 20.0, 20.0)]);
-        g.layout_options = options(&[("elk.nodeSize.constraints", constraints)]);
-        assert!(
-            matches!(
-                error_of(&root(vec![g], vec![])),
-                Error::Unsupported { element, feature }
-                    if element == "node \"g\""
-                        && feature == "sizing a node with children to its ports"
-            ),
-            "{constraints}"
-        );
+fn a_group_with_a_labelled_port_is_laid_out() {
+    // elkjs 0.9.3 returns these numbers. The inside label needs room in the group: 65 against 54.
+    let mut g = group_with_labelled_port("[INSIDE, NEXT_TO_PORT_IF_POSSIBLE]", "in");
+    g.edges = vec![edge("e", "p", "c")];
+    let laid = layout(&root(vec![g], vec![])).unwrap();
+    assert_eq!(size(&laid, "g"), (65.0, 51.0));
+    assert_eq!(port_at(&laid, "g", "p"), (-6.0, 20.0));
+    assert_eq!(label_of_p(&laid), (7.0, 5.0));
+}
+
+// Mutation: leave `inside_connections` false in `transform_port`. A group port that a child
+// reaches then puts its label next to the port, at y = -5, instead of below it.
+#[test]
+fn an_inside_label_goes_below_a_group_port_that_a_child_reaches() {
+    let mut reached = group_with_labelled_port("[INSIDE, NEXT_TO_PORT_IF_POSSIBLE]", "in");
+    reached.edges = vec![edge("e", "p", "c")];
+    assert_eq!(
+        label_of_p(&layout(&root(vec![reached], vec![])).unwrap()),
+        (7.0, 5.0)
+    );
+}
+
+// Mutation: read `nested_graph` for the compound flag in `size_node_and_place_ports_and_labels`.
+// A group laid out without its children has no graph, and its inside labels would go next to
+// the port whatever reaches it.
+#[test]
+fn an_inside_label_goes_next_to_a_group_port_that_only_the_outside_reaches() {
+    // elkjs 0.9.3: the edge comes from `o` outside the group.
+    let g = group_with_labelled_port("[INSIDE, NEXT_TO_PORT_IF_POSSIBLE]", "in");
+    let graph = root(vec![g, node("o", 20.0, 20.0)], vec![edge("e", "o", "p")]);
+    let laid = layout(&graph).unwrap();
+    assert_eq!(label_of_p(&laid), (7.0, -5.0));
+    assert_eq!(size(&laid, "g"), (85.0, 44.0));
+}
+
+// Mutation: skip the reduction of the label under OUTSIDE port labels in
+// `import_external_ports`. The group would be 65 wide, as with inside labels.
+#[test]
+fn outside_labels_of_a_group_port_take_no_room_inside() {
+    let mut g = group_with_labelled_port("OUTSIDE", "in");
+    g.edges = vec![edge("e", "p", "c")];
+    let laid = layout(&root(vec![g], vec![])).unwrap();
+    assert_eq!(size(&laid, "g"), (54.0, 51.0));
+    assert_eq!(label_of_p(&laid), (-11.0, 5.0));
+}
+
+// Mutation: leave the label off the dummy in `import_external_ports`. The group with the label
+// would be 54 wide, as without one. A label without text gives the dummy no label, so that
+// group stays 54 wide; the importer tests hold the external check for it.
+#[test]
+fn inside_labels_make_room_for_a_label_with_text_but_not_for_one_without() {
+    let with_text = layout(&root(
+        vec![group_with_labelled_port("INSIDE", "in")],
+        vec![],
+    ))
+    .unwrap();
+    assert_eq!(size(&with_text, "g"), (85.0, 44.0));
+    assert_eq!(label_of_p(&with_text), (7.0, 5.0));
+    let without = layout(&root(vec![group_with_labelled_port("INSIDE", "")], vec![])).unwrap();
+    assert_eq!(size(&without, "g"), (54.0, 44.0));
+    assert_eq!(label_of_p(&without), (0.0, 0.0));
+}
+
+// Mutation: drop the refusal in `run_layered`. elkjs 0.9.3 fails on this graph with a
+// JavaScript error ("Cannot read properties of null"): ELK reads the parent of the root.
+#[test]
+fn a_labelled_port_of_the_root_under_inside_port_labels_is_refused() {
+    let mut p = port("p", 6.0, 4.0, "WEST");
+    p.labels = vec![label("in", 10.0, 14.0)];
+    let mut graph = with_ports(
+        root(vec![node("c", 30.0, 20.0)], vec![]),
+        "FIXED_SIDE",
+        vec![p],
+    );
+    graph
+        .layout_options
+        .insert("elk.portLabels.placement".into(), "INSIDE".into());
+    assert!(matches!(
+        error_of(&graph),
+        Error::Unsupported { element, feature }
+            if element == "port \"p\""
+                && feature == "a labelled port of the root graph under inside port labels"
+    ));
+    // The same label counts when it has no text: ELK asks for the list.
+    graph.ports[0].labels[0].text.clear();
+    assert!(matches!(error_of(&graph), Error::Unsupported { .. }));
+    // Under OUTSIDE port labels the root has no external port and ELK reads no parent.
+    graph
+        .layout_options
+        .insert("elk.portLabels.placement".into(), "OUTSIDE".into());
+    graph.ports[0].labels[0].text = "in".into();
+    assert!(layout(&graph).is_ok());
+}
+
+/// A group `g` with the child `c` of 10 by 10 and three west ports of 6 by 10, `pa`, `pb` and `pc`.
+/// With `labels`, each port has a label of 12 by 14. With `with_edge`, `pb` connects to `c`.
+fn sized_group(constraints: &str, placement: &str, with_edge: bool, labels: bool) -> ElkNode {
+    let ports = ["pa", "pb", "pc"]
+        .map(|id| {
+            let mut p = port(id, 6.0, 10.0, "WEST");
+            if labels {
+                p.labels = vec![label("l", 12.0, 14.0)];
+            }
+            p
+        })
+        .to_vec();
+    let mut g = with_ports(group("g", vec![node("c", 10.0, 10.0)]), "FIXED_SIDE", ports);
+    g.layout_options = options(&[
+        ("elk.portConstraints", "FIXED_SIDE"),
+        ("elk.nodeSize.constraints", constraints),
+        ("elk.portLabels.placement", placement),
+    ]);
+    if with_edge {
+        g.edges = vec![edge("e", "pb", "c")];
     }
+    g
+}
+
+/// The size of `g` laid out on its own and under `INCLUDE_CHILDREN`.
+fn sizes_of_sized_group(g: ElkNode) -> [(f64, f64); 2] {
+    let separate = layout(&root(vec![g.clone()], vec![])).unwrap();
+    let included = layout(&include_children(root(vec![g], vec![]))).unwrap();
+    [size(&separate, "g"), size(&included, "g")]
+}
+
+// Mutation: put back the check for the port size constraints of a node with children in
+// `Tree::new`.
+#[test]
+fn a_group_sized_to_its_ports_grows_to_hold_them() {
+    // elkjs 0.9.3 returns these numbers. Three ports of 10 and the spacing between them, and the
+    // child with its edge when the group is laid out on its own.
+    let g = sized_group("[PORTS]", "OUTSIDE", true, false);
+    assert_eq!(sizes_of_sized_group(g), [(34.0, 94.0), (34.0, 74.0)]);
+    let laid = layout(&root(
+        vec![sized_group("[PORTS]", "OUTSIDE", true, false)],
+        vec![],
+    ))
+    .unwrap();
+    assert_eq!(port_at(&laid, "g", "pa"), (-6.0, 12.0));
+    assert_eq!(port_at(&laid, "g", "pc"), (-6.0, 72.0));
+}
+
+// Mutation: put back the check for the port size constraints of a node with children in
+// `Tree::new`.
+#[test]
+fn a_group_sized_to_its_port_labels_grows_to_hold_them() {
+    let g = sized_group("[PORTS, PORT_LABELS]", "OUTSIDE", true, true);
+    assert_eq!(sizes_of_sized_group(g), [(34.0, 139.0), (34.0, 119.0)]);
+    let g = sized_group(
+        "[PORT_LABELS]",
+        "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+        true,
+        true,
+    );
+    assert_eq!(sizes_of_sized_group(g), [(34.0, 106.0), (34.0, 119.0)]);
+}
+
+// Mutation: leave the labels out of the ports in `cell_ports`, or give the cells no ports. The
+// group would be smaller than elkjs makes it: `pb` has an edge, so its label may not go next to
+// it, and the group is 106 high against 78 without the edge.
+#[test]
+fn labels_go_next_to_a_group_port_only_when_no_edge_ends_there() {
+    let with_edge = sized_group(
+        "[PORTS, PORT_LABELS]",
+        "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+        true,
+        true,
+    );
+    assert_eq!(sizes_of_sized_group(with_edge)[0], (34.0, 106.0));
+    let without = sized_group(
+        "[PORTS, PORT_LABELS]",
+        "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+        false,
+        true,
+    );
+    assert_eq!(sizes_of_sized_group(without), [(34.0, 78.0), (34.0, 78.0)]);
+}
+
+// Mutation: put back the check for the port size constraints of a node with children in
+// `Tree::new`. A child reaches `pb`, so its inside label goes below it: 117 high against 97
+// when the group is laid out in one run.
+#[test]
+fn inside_labels_of_a_sized_group_go_below_a_port_that_a_child_reaches() {
+    let g = sized_group(
+        "[PORTS, PORT_LABELS]",
+        "[INSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+        true,
+        true,
+    );
+    assert_eq!(sizes_of_sized_group(g), [(47.0, 117.0), (47.0, 97.0)]);
 }
 
 // Mutation: in `hierarchy_edge_end` of src/importer.rs, ignore the named port and make a port of

@@ -20,6 +20,7 @@ fn node(id: &str, width: f64, height: f64) -> ElkInputNode {
         node_flexibility: crate::options::NodeFlexibility::None,
         ports_surrounding: None,
         nested_options: None,
+        compound_node: false,
         labels: Vec::new(),
         node_size: Default::default(),
         self_loop_distribution: Default::default(),

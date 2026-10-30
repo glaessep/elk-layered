@@ -11,9 +11,9 @@ use crate::graph::{
     GraphArena, GraphId, GraphNodeRef, GraphParent, GraphPortRef, HierarchyEdge, HierarchyStep,
     IdVec, LGraph, LLabel, LNodeKind, LPoint, LPort, LSize, LayeredEdge, NodeId, PortId, PortRef,
     PortSide, PortType, apply_port_index_to_dummy, create_external_port_dummy,
-    port_side_from_direction,
+    outside_dummy_label_size, port_side_from_direction,
 };
-use crate::options::{ElkDirection, PortConstraints};
+use crate::options::{ElkDirection, PortConstraints, PortLabelPlacement};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingCompoundSegment {
@@ -412,8 +412,11 @@ fn preprocess_source_ported_compound_graph_observed(
     // `transformHierarchyEdges` reads the port constraints of each compound node before
     // `setSidesOfPortsToSidesOfDummyNodes` fixes them, so keep them.
     let mut original_constraints = vec![IdVec::new(); graphs.len()];
+    // The label loop of `transformHierarchyEdges` reads the port sides the importer gave, too.
+    let mut original_sides = vec![IdVec::new(); graphs.len()];
     for &graph in &order {
         original_constraints[graph.index()] = port_constraints_of(&graphs[graph]);
+        original_sides[graph.index()] = port_sides_of(&graphs[graph]);
     }
     let mut endpoint_plans = (0..graphs.len()).map(|_| None).collect::<Vec<_>>();
     for &graph in &order {
@@ -427,6 +430,7 @@ fn preprocess_source_ported_compound_graph_observed(
         graphs,
         &order,
         &original_constraints,
+        &original_sides,
         &original_net_flows,
     );
 }
@@ -469,6 +473,23 @@ fn original_net_flows(graphs: &GraphArena) -> HashMap<OriginalNetFlowKey, isize>
         }
     }
     flows
+}
+
+/// The side of each port of the nodes that hold a graph, in the order of the node's ports. The
+/// other nodes get an empty list: no label loop looks them up. A port the preprocessor adds later
+/// lies past the end of its list.
+fn port_sides_of(graph: &LGraph) -> IdVec<NodeId, Vec<PortSide>> {
+    graph
+        .layerless_nodes
+        .iter()
+        .map(|node| {
+            if node.nested_graph.is_some() {
+                node.ports.iter().map(|port| port.side).collect()
+            } else {
+                Vec::new()
+            }
+        })
+        .collect()
 }
 
 fn port_constraints_of(graph: &LGraph) -> IdVec<NodeId, PortConstraints> {
@@ -1467,6 +1488,7 @@ fn ensure_nested_external_dummies_for_parent_ports(
     graphs: &mut GraphArena,
     order: &[GraphId],
     original_constraints: &[IdVec<NodeId, PortConstraints>],
+    original_sides: &[IdVec<NodeId, Vec<PortSide>>],
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
     for &graph in order.iter().rev() {
@@ -1474,6 +1496,7 @@ fn ensure_nested_external_dummies_for_parent_ports(
             graphs,
             graph,
             &original_constraints[graph.index()],
+            &original_sides[graph.index()],
             net_flows,
         );
     }
@@ -1483,6 +1506,7 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
     graphs: &mut GraphArena,
     graph_id: GraphId,
     original_constraints: &IdVec<NodeId, PortConstraints>,
+    original_sides: &IdVec<NodeId, Vec<PortSide>>,
     net_flows: &HashMap<OriginalNetFlowKey, isize>,
 ) {
     for (node_index, &parent_constraints) in original_constraints.iter_with_ids() {
@@ -1506,61 +1530,123 @@ fn ensure_direct_nested_external_dummies_for_parent_ports(
             };
             if graph.layerless_nodes[node_index].ports[port_index]
                 .port_dummy
-                .is_some()
+                .is_none()
             {
-                continue;
-            }
+                let parent_port = PortRef {
+                    node: node_index,
+                    port: port_index,
+                };
+                let port = &graph.layerless_nodes[node_index].ports[port_index];
+                // `createExternalPortDummy(port, portConstraints, port.getSide(), ...)`: the node's
+                // constraints from before the dummies were linked, and the port's own side.
+                let (port_constraints, port_side) = (parent_constraints, port.side);
+                // ELK passes no position and no node size here: `new KVector()` and `null`. The node
+                // size only guards against a division by zero for fixed ratios, where ELK fails.
+                let dummy_node = nested_graph.push_node_with(|node| {
+                    let mut dummy = create_external_port_dummy(
+                        node,
+                        format!("external:{parent_node_id}"),
+                        format!("external:{parent_node_id}:0"),
+                        port.port_type,
+                        port_constraints,
+                        port_side,
+                        -net_flows
+                            .get(&(parent_node_id.clone(), port.id.clone(), port.named))
+                            .copied()
+                            .unwrap_or_else(|| port.net_flow()),
+                        LPoint::default(),
+                        port.size,
+                        parent_size,
+                        port.border_offset.unwrap_or(0.0),
+                        nested_direction,
+                        ExternalPortData {
+                            parent_port_key: Some(port.id.clone()),
+                            parent_port_type: Some(port.port_type),
+                            ..ExternalPortData::default()
+                        },
+                    );
+                    apply_port_index_to_dummy(&mut dummy, port_constraints, port.port_index);
+                    dummy
+                });
+                let dummy_side = nested_graph.layerless_nodes[dummy_node].external_port_side();
+                let dummy_border_offset = port.border_offset;
 
-            let parent_port = PortRef {
-                node: node_index,
-                port: port_index,
-            };
-            let port = &graph.layerless_nodes[node_index].ports[port_index];
-            // `createExternalPortDummy(port, portConstraints, port.getSide(), ...)`: the node's
-            // constraints from before the dummies were linked, and the port's own side.
-            let (port_constraints, port_side) = (parent_constraints, port.side);
-            // ELK passes no position and no node size here: `new KVector()` and `null`. The node
-            // size only guards against a division by zero for fixed ratios, where ELK fails.
-            let dummy_node = nested_graph.push_node_with(|node| {
-                let mut dummy = create_external_port_dummy(
-                    node,
-                    format!("external:{parent_node_id}"),
-                    format!("external:{parent_node_id}:0"),
-                    port.port_type,
-                    port_constraints,
-                    port_side,
-                    -net_flows
-                        .get(&(parent_node_id.clone(), port.id.clone(), port.named))
-                        .copied()
-                        .unwrap_or_else(|| port.net_flow()),
-                    LPoint::default(),
-                    port.size,
-                    parent_size,
-                    port.border_offset.unwrap_or(0.0),
-                    nested_direction,
-                    ExternalPortData {
-                        parent_port_key: Some(port.id.clone()),
-                        parent_port_type: Some(port.port_type),
-                        ..ExternalPortData::default()
-                    },
+                link_external_port_dummy(
+                    graph,
+                    parent_port,
+                    dummy_side,
+                    nested_graph_id,
+                    dummy_node,
+                    dummy_border_offset,
                 );
-                apply_port_index_to_dummy(&mut dummy, port_constraints, port.port_index);
-                dummy
-            });
-            let dummy_side = nested_graph.layerless_nodes[dummy_node].external_port_side();
-            let dummy_border_offset = port.border_offset;
-
-            link_external_port_dummy(
+                set_external_dummy_origin(nested_graph, dummy_node, graph_id, parent_port);
+            }
+            // A port the importer did not make has no label, so its side does not matter.
+            let side = original_sides[node_index]
+                .get(position)
+                .copied()
+                .unwrap_or(PortSide::Undefined);
+            reserve_room_for_port_labels(
                 graph,
-                parent_port,
-                dummy_side,
-                nested_graph_id,
-                dummy_node,
-                dummy_border_offset,
+                node_index,
+                port_index,
+                nested_graph,
+                parent_constraints,
+                side,
             );
-            set_external_dummy_origin(nested_graph, dummy_node, graph_id, parent_port);
         }
     }
+}
+
+/// Gives the dummy of a port, in the graph inside the port's node, a label for each label of the
+/// port, so the graph leaves room for them. `side` is the side the importer gave the port: the
+/// dummies have changed the sides of the ports by now, and ELK still reads the old ones.
+///
+/// Ports the label loop of `CompoundGraphPreprocessor.transformHierarchyEdges`. A port that is
+/// placed outside needs room only inside the node: the label keeps its size along the side's axis
+/// only if its placement is fixed and the label reaches into the node.
+fn reserve_room_for_port_labels(
+    graph: &LGraph,
+    node: NodeId,
+    port: PortId,
+    nested_graph: &mut LGraph,
+    parent_constraints: PortConstraints,
+    side: PortSide,
+) {
+    let node_data = &graph.layerless_nodes[node];
+    let port_data = &node_data.ports[port];
+    // The port may have been linked to a dummy in another graph by an earlier step.
+    let Some(dummy) = port_data
+        .port_dummy
+        .filter(|dummy| dummy.graph_id == nested_graph.id)
+    else {
+        return;
+    };
+    let inside_port_labels = node_data
+        .port_label_placement
+        .contains(PortLabelPlacement::INSIDE);
+    let placement_fixed = node_data.port_label_placement.is_fixed();
+    let mut labels = Vec::with_capacity(port_data.labels.len());
+    for label in &port_data.labels {
+        let mut dummy_label = LLabel::new("", label.size.width, label.size.height);
+        // At this point the side of the port may not be known if the port constraints are free.
+        // Then the port ends up on the east or west side (ELK issue 596).
+        if !inside_port_labels {
+            dummy_label.size = outside_dummy_label_size(
+                label.position,
+                label.size,
+                port_data.size,
+                side,
+                placement_fixed,
+                parent_constraints == PortConstraints::Free
+                    || matches!(side, PortSide::East | PortSide::West),
+            );
+        }
+        labels.push(dummy_label);
+    }
+    nested_graph.layerless_nodes[dummy.node].ports[PortId::new(0)]
+        .labels
+        .extend(labels);
 }
 
 #[derive(Debug, Clone)]

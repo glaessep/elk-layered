@@ -1,0 +1,61 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "g",
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.nodeSize.constraints": "[PORTS]",
+        "elk.portLabels.placement": "OUTSIDE"
+      },
+      "ports": [
+        {
+          "id": "pa",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          }
+        },
+        {
+          "id": "pb",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          }
+        },
+        {
+          "id": "pc",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          }
+        }
+      ],
+      "children": [
+        {
+          "id": "c",
+          "width": 10,
+          "height": 10
+        }
+      ],
+      "edges": [
+        {
+          "id": "e",
+          "sources": [
+            "pb"
+          ],
+          "targets": [
+            "c"
+          ]
+        }
+      ]
+    }
+  ]
+}

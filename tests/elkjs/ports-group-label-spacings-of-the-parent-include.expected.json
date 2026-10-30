@@ -1,0 +1,107 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.spacing.labelPortHorizontal": "7",
+    "elk.spacing.labelPortVertical": "5",
+    "elk.spacing.labelLabel": "3",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "g",
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.portLabels.placement": "INSIDE",
+        "elk.spacing.labelPortHorizontal": "2",
+        "elk.spacing.labelPortVertical": "9",
+        "elk.spacing.labelLabel": "11"
+      },
+      "ports": [
+        {
+          "id": "p",
+          "width": 6,
+          "height": 4,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "labels": [
+            {
+              "text": "a",
+              "width": 12,
+              "height": 14,
+              "x": 13,
+              "y": 9
+            },
+            {
+              "text": "b",
+              "width": 20,
+              "height": 9,
+              "x": 13,
+              "y": 26
+            }
+          ],
+          "x": -6,
+          "y": 15
+        },
+        {
+          "id": "q",
+          "width": 6,
+          "height": 4,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "x": -6,
+          "y": 53
+        }
+      ],
+      "children": [
+        {
+          "id": "c",
+          "width": 10,
+          "height": 10,
+          "$H": 285,
+          "x": 33,
+          "y": 12
+        }
+      ],
+      "edges": [
+        {
+          "id": "e",
+          "sources": [
+            "p"
+          ],
+          "targets": [
+            "c"
+          ],
+          "sections": [
+            {
+              "id": "e_s0",
+              "startPoint": {
+                "x": -6,
+                "y": 17
+              },
+              "endPoint": {
+                "x": 33,
+                "y": 17
+              },
+              "incomingShape": "p",
+              "outgoingShape": "c"
+            }
+          ],
+          "container": "g"
+        }
+      ],
+      "$H": 277,
+      "x": 18,
+      "y": 12,
+      "width": 55,
+      "height": 69
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 85,
+  "height": 93
+}

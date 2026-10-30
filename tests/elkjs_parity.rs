@@ -15,7 +15,7 @@ use serde_json::Value;
 
 /// Cases whose feature elk-layered does not have yet, each with the issue that adds it. A case
 /// leaves this list in the pull request that makes it pass.
-const NOT_YET: &[(&str, &str)] = &[];
+const NOT_YET: &[(&str, &str)] = &[("random-group-port-sizes/r013", "#62")];
 
 fn cases_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/elkjs")
@@ -29,7 +29,9 @@ fn cases_dir() -> PathBuf {
 /// `tests/elkjs/random-inline-labels/`, whose centre labels are often inline,
 /// `tests/elkjs/random-one-sided/`, which use the one-sided greedy switch,
 /// `tests/elkjs/random-port-labels/`, whose ports have labels, and
-/// `tests/elkjs/random-group-cross-ports/`, whose groups have ports on all four sides.
+/// `tests/elkjs/random-group-cross-ports/`, whose groups have ports on all four sides,
+/// `tests/elkjs/random-group-port-labels/`, whose groups have labelled ports, and
+/// `tests/elkjs/random-group-port-sizes/`, whose groups may size themselves to their ports.
 fn cases() -> Vec<PathBuf> {
     let mut inputs = Vec::new();
     for dir in [
@@ -43,6 +45,8 @@ fn cases() -> Vec<PathBuf> {
         cases_dir().join("random-one-sided"),
         cases_dir().join("random-port-labels"),
         cases_dir().join("random-group-cross-ports"),
+        cases_dir().join("random-group-port-labels"),
+        cases_dir().join("random-group-port-sizes"),
     ] {
         let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|_| panic!("{} exists", dir.display()))
@@ -420,6 +424,61 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    greedy-switch-one-sided-port-order. Its node n1 has two free ports with edges to one port of
 //    the next layer, so the order of collection decides which entries merge.
 // 78. In the same function, walk the edges of each port in reverse: the same 1 case.
+// 79. In `import_external_ports` (src/importer.rs), leave the labels off the dummy of a port
+//    (`let _ = llabel;`): 24 cases, such as random-group-port-labels/r009, r011 and r013.
+// 80. In `reserve_room_for_port_labels` (src/compound.rs), keep the full size of a label under
+//    OUTSIDE port labels too (`if false`): 45 cases, such as random-group-port-labels/r005, r018
+//    and r022.
+// 81. In `place_external_port_dummy_labels` (src/intermediate/label_and_node_size_processor.rs),
+//    leave `- box_width` out of the x of an east label under INSIDE port labels: 12 cases, such
+//    as random-group-port-labels/r006, r015 and r033.
+// 82. In the same function, leave `- port_position.y` out of the y of an inside label below its
+//    port: 12 cases, such as random-group-port-labels/r006, r033 and r068.
+// 83. In `label_next_to_port`, put an inside label next to its port also when edges end there
+//    (`true`): 4 cases, such as random-group-port-labels/r097, r103 and r149.
+// 84. In the same function, ask an outside label for `connected_to_external_nodes` the wrong way
+//    round: 12 cases, such as random-group-port-labels/r033, r041 and r053.
+// 85. In `place_external_port_dummy_labels`, leave `port_position.y` out of the y of an outside
+//    east or west label below its port: 43 cases, such as random-group-port-labels/r005, r009
+//    and r011.
+// 86. In `transform_port` (src/importer.rs), leave `inside_connections` false: 4 cases, such as
+//    random-group-port-labels/r015, r103 and r120.
+// 87. In `size_node_and_place_ports_and_labels` (src/common/nodespacing.rs), read `nested_graph`
+//    for the compound flag instead of `compound_node`: 9 cases, such as
+//    random-group-port-labels/r015, r075 and r093.
+// 88. In `border_to_content_area_y` (src/intermediate/hierarchical_port_position_processor.rs),
+//    subtract `padding.top + offset.y` in one step instead of the two one after the other
+//    (`position.y -= ..`): 2 cases, random-group-port-sizes/r193 and random-group-port-labels/r196.
+//    The same change in `border_to_content_area_x` of the router fails no case; a unit test in
+//    src/intermediate/tests.rs holds it.
+// 89. In `restore_north_south_dummy` (src/intermediate/hierarchical_port_orthogonal_edge_router.rs),
+//    skip the labels and the margins of the restored dummy (`if false`): 9 cases, such as
+//    random-group-port-sizes/r020, r036 and r054.
+// 90. In `cell_ports` (src/importer.rs), give the cells no ports (`.filter(|_| false)`): 4 cases,
+//    ports-group-sized-to-port-labels-next-to-free-ports and its include twin,
+//    random-group-port-sizes/r188 and random-group-port-labels/r071.
+// 91. In `apply_parent_node_layout` (src/layout.rs), set the size constraints to fixed also for a
+//    group that had `PORT_LABELS`: 3 cases, ports-group-sized-to-port-labels-next-to-free-ports,
+//    random-group-port-sizes/r011 and r124.
+// 92. In `port_has_edges` (src/common/nodespacing.rs), ignore the dummy of the port
+//    (`.filter(|_| false)`): 107 cases, such as ports-group-sized-to-port-labels-next-to-ports-include,
+//    ports-group-sized-to-port-labels-only-include and random-group-port-sizes/r001.
+// 93. In `reserve_room_for_port_labels` (src/compound.rs), read the current side of the port
+//    instead of the side the importer gave it: 1 case, random-group-port-sizes/r152.
+// 94. In `place_restored_dummy_labels`, leave `- port.position.x` out of the x of an outside label:
+//    9 cases, such as random-group-port-sizes/r020, r036 and r054.
+// 95. In `cell_ports` (src/importer.rs), leave `has_edges` or `has_compound_connections` false:
+//    no case fails. The group's graph holds a dummy with the same labels, and its size agrees with
+//    the cells in every case the corpus has. Unit tests in src/importer/tests.rs hold both.
+// 96. In `run_layered` (src/layout.rs), hand the dummies the label spacings of the scope's own
+//    options instead of those of its parent (`scope_info.settings.options.spacing`), or the
+//    defaults: 2 cases, ports-group-label-spacings-of-the-parent and its outside twin.
+// 97. In the function that makes the dummy of an edge across a level (src/compound.rs), give the
+//    dummy label spacings of 7, 5 and 3 instead of the defaults: 7 cases, such as
+//    ports-group-label-spacings-of-the-parent-include and ports-group-label-inside-child-edge-include.
+// 98. In `ensure_direct_nested_external_dummies_for_parent_ports` (src/compound.rs), read the side
+//    of the first port for every port of the node (`.get(0)`): 33 cases, such as
+//    random-group-port-sizes/r009, r054 and r057.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

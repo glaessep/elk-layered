@@ -1,6 +1,6 @@
 use super::*;
 use crate::graph::PortSide;
-use crate::graph::{EdgeLabelPlacement, LLabel, LNode, LPoint, LSize, PortType};
+use crate::graph::{EdgeLabelPlacement, GraphId, LLabel, LNode, LPoint, LSize, PortId, PortType};
 use crate::options::{ElkDirection, LayeredOptions, NodeLabelPlacement, PortConstraints};
 
 fn node_label(width: f64, height: f64) -> LLabel {
@@ -46,7 +46,7 @@ fn label_and_node_size_calculation_places_inside_top_center_node_labels() {
     graph.layerless_nodes.push(node);
     graph.set_node_layer(NodeId::new(0), 0);
 
-    calculate_label_and_node_sizes(&mut graph, [NodeId::new(0)]);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [NodeId::new(0)]);
     calculate_node_margins(&mut graph, [NodeId::new(0)]);
 
     assert_eq!(
@@ -74,7 +74,7 @@ fn horizontal_layout_mode_stacks_multiple_node_labels_vertically() {
     node.labels.push(node_label(30.0, 12.0));
     graph.layerless_nodes.push(node);
 
-    calculate_label_and_node_sizes(&mut graph, [NodeId::new(0)]);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [NodeId::new(0)]);
 
     assert_eq!(
         graph.layerless_nodes[NodeId::new(0)].labels[0].position,
@@ -98,7 +98,7 @@ fn vertical_layout_mode_stacks_transposed_node_labels_horizontally() {
     node.labels.push(node_label(12.0, 30.0));
     graph.layerless_nodes.push(node);
 
-    calculate_label_and_node_sizes(&mut graph, [NodeId::new(0)]);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [NodeId::new(0)]);
 
     assert_eq!(
         graph.layerless_nodes[NodeId::new(0)].labels[0].position,
@@ -145,7 +145,7 @@ fn southern_ports_sit_on_the_southern_border_for_every_port_constraint() {
             refs.push(port.port);
         }
 
-        calculate_label_and_node_sizes(&mut graph, [node]);
+        calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [node]);
 
         let ports = &graph.layerless_nodes[node].ports;
         // The northern port sits outside above the node, the southern port below it.
@@ -172,7 +172,7 @@ fn label_and_node_size_calculation_places_free_ports_on_node_border() {
         .unwrap();
     graph.layerless_nodes[node].ports[port.port].set_side(PortSide::East);
 
-    calculate_label_and_node_sizes(&mut graph, [node]);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [node]);
 
     let port = &graph.layerless_nodes[node].ports[port.port];
     assert_eq!(port.position.x, graph.layerless_nodes[node].size.width);
@@ -203,7 +203,7 @@ fn label_and_node_size_calculation_crams_distributed_ports_when_overhang_disable
         graph.layerless_nodes[node].ports[port.port].set_side(PortSide::South);
     }
 
-    calculate_label_and_node_sizes(&mut graph, [node]);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [node]);
 
     let expected_spacing = graph.layerless_nodes[node].size.width / 6.0;
     for (index, port) in graph.layerless_nodes[node].ports.iter_with_ids() {
@@ -245,7 +245,7 @@ fn a_node_places_its_free_ports_by_its_own_port_alignment() {
             port
         });
 
-        calculate_label_and_node_sizes(&mut graph, [node]);
+        calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [node]);
 
         graph.layerless_nodes[node].ports[ports[0].port].position.x
     };
@@ -283,7 +283,7 @@ fn label_and_node_size_calculation_places_west_ports_top_to_bottom() {
         graph.layerless_nodes[node].ports[port.port].set_side(PortSide::West);
     }
 
-    calculate_label_and_node_sizes(&mut graph, [node]);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [node]);
 
     let y_positions = graph.layerless_nodes[node]
         .ports
@@ -336,4 +336,117 @@ fn node_margin_calculation_includes_ports_and_port_labels() {
 
     assert_eq!(graph.layerless_nodes[node].margin.left, 0.0);
     assert!(graph.layerless_nodes[node].margin.right >= 22.0);
+}
+
+// --- Edges at the dummy of a port, inside the node: `LPortAdapter` with transparent edges. ---
+
+mod port_dummy_edges {
+    use super::*;
+    use crate::graph::{
+        ExternalPortData, GraphArena, GraphNodeRef, LayeredEdge, PortRef,
+        create_external_port_dummy,
+    };
+
+    /// An outer graph with the node `A` and its port `p`, linked to the dummy of `p` in the graph
+    /// inside `A`. With `edge`, the dummy's port has an edge to a node inside.
+    fn arena(edge: bool) -> (GraphArena, NodeId, PortId) {
+        let mut outer = LGraph::new("outer", LayeredOptions::default());
+        let a = outer.push_node_with(|_| LNode::new("A", 50.0, 20.0, None));
+        let p = outer
+            .add_port(a, PortType::Output, PortSide::West, LPoint::default())
+            .unwrap()
+            .port;
+        let mut inner = LGraph::new("inner", LayeredOptions::default());
+        let dummy = inner.push_node_with(|node| {
+            create_external_port_dummy(
+                node,
+                "dummy",
+                "dummy:0",
+                PortType::Output,
+                PortConstraints::FixedSide,
+                PortSide::West,
+                0,
+                LPoint::default(),
+                LSize::default(),
+                LSize::default(),
+                0.0,
+                ElkDirection::Right,
+                ExternalPortData::default(),
+            )
+        });
+        let inside = inner.push_node_with(|_| LNode::new("inside", 10.0, 10.0, None));
+        let inside_port = inner
+            .add_port(inside, PortType::Input, PortSide::West, LPoint::default())
+            .unwrap();
+        if edge {
+            inner
+                .add_edge(LayeredEdge::new(
+                    "e",
+                    PortRef {
+                        node: dummy,
+                        port: PortId::new(0),
+                    },
+                    inside_port,
+                ))
+                .unwrap();
+        }
+        let mut arena = GraphArena::new(outer);
+        let inner_id = arena.nest(GraphId::ROOT, a, inner);
+        arena.root_mut().layerless_nodes[a].ports[p].port_dummy = Some(GraphNodeRef {
+            graph_id: inner_id,
+            node: dummy,
+        });
+        (arena, a, p)
+    }
+
+    // Mutation: ignore the dummy of the port. The port then has no edge, whatever happens inside.
+    #[test]
+    fn an_edge_at_the_dummy_in_another_graph_counts_as_an_edge_of_the_port() {
+        let (mut with_edge, a, p) = arena(true);
+        let (root, others) = with_edge.split_mut(GraphId::ROOT);
+        assert!(port_has_edges(root, others, a, p, &[]));
+
+        let (mut without, a, p) = arena(false);
+        let (root, others) = without.split_mut(GraphId::ROOT);
+        assert!(!port_has_edges(root, others, a, p, &[]));
+    }
+
+    // Mutation: leave out the check of the port's own edges, or of the self loop ports.
+    #[test]
+    fn edges_of_the_port_itself_and_self_loops_count_too() {
+        let (mut arena, a, p) = arena(false);
+        let (root, others) = arena.split_mut(GraphId::ROOT);
+        assert!(port_has_edges(root, others, a, p, &[p]));
+        let other = root
+            .add_port(a, PortType::Input, PortSide::East, LPoint::default())
+            .unwrap();
+        root.add_edge(LayeredEdge::new("own", PortRef { node: a, port: p }, other))
+            .unwrap();
+        assert!(port_has_edges(root, others, a, p, &[]));
+    }
+
+    // Mutation: look the dummy up in the other graphs only. A view of the other graphs leaves
+    // out the graph the node is in, and ELK finds the dummy wherever it lies.
+    #[test]
+    fn a_dummy_in_the_graph_of_the_port_counts_too() {
+        let (mut arena, a, p) = arena(false);
+        let root = arena.root_mut();
+        let dummy = root.push_node_with(|_| LNode::new("same", 0.0, 0.0, None));
+        let dummy_port = root
+            .add_port(dummy, PortType::Output, PortSide::West, LPoint::default())
+            .unwrap();
+        let sink = root.push_node_with(|_| LNode::new("sink", 10.0, 10.0, None));
+        let sink_port = root
+            .add_port(sink, PortType::Input, PortSide::West, LPoint::default())
+            .unwrap();
+        root.add_edge(LayeredEdge::new("e", dummy_port, sink_port))
+            .unwrap();
+        let id = root.id;
+        root.layerless_nodes[a].ports[p].port_dummy = Some(GraphNodeRef {
+            graph_id: id,
+            node: dummy,
+        });
+        let (root, others) = arena.split_mut(GraphId::ROOT);
+        assert!(port_has_edges(root, others, a, p, &[]));
+    }
 }

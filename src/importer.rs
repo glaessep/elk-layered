@@ -14,15 +14,16 @@ use crate::compound::{
     source_ported_cross_hierarchy_segments,
 };
 use crate::graph::{
-    CompoundEdgeSegment, EdgeId, EdgeLabelPlacement, ExternalPortData, GraphArena, GraphId,
-    HierarchyEdge, HierarchyStep, LGraph, LLabel, LNode, LPoint, LPort, LSize, LayeredEdge, NodeId,
-    PlacementOptions, PortId, PortRef, PortSide, PortType, SelfLoopOptions,
-    apply_port_index_to_dummy, create_external_port_dummy, is_across_flow, port_box,
-    port_side_from_direction,
+    CompoundEdgeSegment, DummyLabelSpacings, EdgeId, EdgeLabelPlacement, ExternalPortData,
+    GraphArena, GraphId, HierarchyEdge, HierarchyStep, LGraph, LLabel, LNode, LPoint, LPort, LSize,
+    LayeredEdge, NodeId, PlacementOptions, PortId, PortRef, PortSide, PortType, SelfLoopOptions,
+    apply_port_index_to_dummy, create_external_port_dummy, is_across_flow,
+    outside_dummy_label_size, port_box, port_side_from_direction,
 };
 use crate::options::{
     CycleBreakingStrategy, ElkDirection, ElkPadding, HierarchyHandling, LayerConstraint,
     LayeredOptions, LayeringStrategy, NodeLabelPlacement, OrderingStrategy, PortConstraints,
+    PortLabelPlacement,
 };
 
 // `org.eclipse.elk.edge.thickness` defaults to 1 in the pinned elkjs 0.9.3 CoreOptions.
@@ -54,6 +55,9 @@ pub struct ElkInputNode {
     pub ports: Vec<ElkInputPort>,
     /// Resolved options for the graph inside this node. Absent values use ELK defaults.
     pub nested_options: Option<Box<LayeredOptions>>,
+    /// `InternalProperties.COMPOUND_NODE`: the node has children, or activates inside self
+    /// loops. It holds also when a run lays the node out without its children.
+    pub compound_node: bool,
     /// The node's labels, in input order. ELK drops a label with empty text from the layered
     /// graph but keeps it for the node size and label padding computations.
     pub labels: Vec<ElkInputLabel>,
@@ -107,6 +111,12 @@ pub struct ElkInputPort {
     /// Whether an edge at the port connects to a node outside the port's node.
     /// Ports `ElkGraphImporter.isConnectedToExternalNodes`.
     pub connected_to_external_nodes: bool,
+    /// Whether an edge at the port leads to or comes from a descendant of the port's node.
+    /// Ports the `connectionsToDescendants` of `ElkGraphImporter.transformPort`.
+    pub inside_connections: bool,
+    /// Whether any edge of the graph starts or ends at the port. The cells read it from
+    /// `ElkGraphAdapters.ElkPortAdapter` to place port labels next to the port.
+    pub has_edges: bool,
     /// The port's labels, in input order. ELK drops a label with empty text.
     pub labels: Vec<ElkInputLabel>,
 }
@@ -280,7 +290,7 @@ pub fn import_graph_with_segments(
         input,
         segments,
         ElkPadding::uniform(0.0),
-        ScopePorts::NONE,
+        ScopePorts::none(),
         false,
     )
     .map(|imported| imported.graphs)
@@ -303,18 +313,24 @@ pub(crate) struct ScopePorts<'a> {
     pub(crate) ports: &'a [ElkInputPort],
     /// The size of the node, which the dummies of ports with fixed ratios read.
     pub(crate) node_size: LSize,
+    /// The label spacings the parent of the node sets: `transformExternalPort` hands them to each
+    /// dummy.
+    pub(crate) label_spacings: DummyLabelSpacings,
 }
 
 impl ScopePorts<'_> {
     /// A graph whose node has no ports.
     #[cfg(test)]
-    pub(crate) const NONE: ScopePorts<'static> = ScopePorts {
-        ports: &[],
-        node_size: LSize {
-            width: 0.0,
-            height: 0.0,
-        },
-    };
+    pub(crate) fn none() -> ScopePorts<'static> {
+        ScopePorts {
+            ports: &[],
+            node_size: LSize {
+                width: 0.0,
+                height: 0.0,
+            },
+            label_spacings: DummyLabelSpacings::default(),
+        }
+    }
 }
 
 /// Imports a graph whose root has inside node labels. `root_label_padding` is the padding
@@ -400,16 +416,22 @@ fn import_scope_with(
 /// Makes the external port dummy of each port of the graph's node, if the graph has external
 /// ports. Gives the dummy of each port by the port's id.
 ///
-/// Ports `ElkGraphImporter.checkExternalPorts` and `transformExternalPort`. Port labels are
-/// refused before this runs, and an inside self loop at a port is refused, so a port is external
-/// only when an edge connects it to a child.
+/// Ports `ElkGraphImporter.checkExternalPorts` and `transformExternalPort`. A port is external when
+/// an edge connects it to a child, or when the node places its port labels `INSIDE` and the port
+/// has a label. An inside self loop at a port is refused.
 fn import_external_ports(
     root: &mut LGraph,
     scope: &ScopePorts<'_>,
     scope_id: &str,
 ) -> HashMap<String, NodeId> {
     let mut dummies = HashMap::new();
-    if scope.ports.iter().any(|port| port.child_edges > 0) {
+    let placement = root.options.port_label_placement;
+    let inside_port_labels = placement.contains(PortLabelPlacement::INSIDE);
+    if scope.ports.iter().any(|port| port.child_edges > 0)
+        // `portLabelPlacement.contains(INSIDE) && elkport.getLabels().size() > 0`: a label without
+        // text counts, because the check looks at the list.
+        || (inside_port_labels && scope.ports.iter().any(|port| !port.labels.is_empty()))
+    {
         root.graph_properties.external_ports = true;
     }
     if scope.ports.iter().any(|port| port.child_edges > 1) {
@@ -450,6 +472,7 @@ fn import_external_ports(
                 direction,
                 ExternalPortData {
                     scope_port: Some(position),
+                    label_spacings: scope.label_spacings,
                     ..ExternalPortData::default()
                 },
             );
@@ -457,6 +480,23 @@ fn import_external_ports(
             let dummy_port = &mut dummy.ports[PortId::new(0)];
             dummy_port.named = true;
             dummy_port.connected_to_external_nodes = port.connected_to_external_nodes;
+            // If the node places its port labels inside, the graph needs room for them. If it
+            // places them outside, the graph still needs room, so the ports do not clash outside;
+            // but inside it needs none on the axis along the port's side. So the label keeps only
+            // the part that lies inside the node: `insidePart`, which only fixed labels have.
+            for mut llabel in port_labels_to_lgraph(port) {
+                if !inside_port_labels && port.side != PortSide::Undefined {
+                    llabel.size = outside_dummy_label_size(
+                        llabel.position,
+                        llabel.size,
+                        port_size,
+                        port.side,
+                        placement.is_fixed(),
+                        matches!(port.side, PortSide::East | PortSide::West),
+                    );
+                }
+                dummy_port.labels.push(llabel);
+            }
             dummy
         });
         dummies.insert(port.id.clone(), node);
@@ -1266,9 +1306,8 @@ pub(crate) fn cell_node(node: &ElkInputNode) -> CellNode {
 /// The ports of a node of the input graph, as `ElkGraphAdapters.ElkPortAdapter` shows them to
 /// the cells.
 ///
-/// A node with children may not size itself to its ports, and their labels with text are
-/// refused, so the ports reach the minimum size only through `setupNodePaddingForPortsWithOffset`:
-/// a negative border offset, or the inside part of fixed labels.
+/// `ratio_or_position` stays 0, as on an `ElkPort`: only `LGraphUtil.initializePort` sets that
+/// property, on the layered port.
 fn cell_ports(node: &ElkInputNode) -> CellPorts {
     let parent = &node.parent_settings.options;
     CellPorts {
@@ -1305,8 +1344,8 @@ fn cell_ports(node: &ElkInputNode) -> CellPorts {
                         },
                     })
                     .collect(),
-                has_edges: false,
-                has_compound_connections: false,
+                has_edges: port.has_edges,
+                has_compound_connections: port.inside_connections,
             })
             .collect(),
         constraints: match node.port_constraints {
@@ -1372,6 +1411,7 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     lnode.node_size = node.node_size;
     lnode.port_label_placement = node.port_label_placement;
     lnode.port_labels_treat_as_group = node.port_labels_treat_as_group;
+    lnode.compound_node = node.compound_node;
     let node_size = lnode.size;
     let node_index = graph.push_node_with(|_| lnode);
     if node.layer_constraint.is_some() {
@@ -1431,19 +1471,10 @@ fn transform_port(
     lport.port_index = port.index.map(|index| index as isize);
     lport.border_offset = port.border_offset;
     lport.allow_non_flow_ports_to_switch_sides = port.allow_non_flow_ports_to_switch_sides;
-    // The input has no edge to or from a descendant of its node, because the node has no children.
-    // An inside self loop at a port is refused, so `INSIDE_CONNECTIONS` stays false.
+    // An inside self loop at a port is refused, so only an edge to or from a descendant counts.
+    lport.inside_connections = port.inside_connections;
     initialize_port(&mut lport, constraints, node_size, graph.options.direction);
-    for label in port.labels.iter().filter(|label| !label.text.is_empty()) {
-        // `transformLabel` keeps the given position. Only a port label reads it: one whose
-        // placement is fixed keeps it, and its bounds set the margins of its port.
-        let mut llabel = label_to_lgraph(label);
-        llabel.position = LPoint {
-            x: label.x,
-            y: label.y,
-        };
-        lport.labels.push(llabel);
-    }
+    lport.labels.extend(port_labels_to_lgraph(port));
 
     if is_across_flow(graph.options.direction, lport.side) {
         graph.graph_properties.north_south_ports = true;
@@ -2002,6 +2033,25 @@ fn ensure_port_at_node(
     });
     let port = graph.layerless_nodes[node].ports.push(implicit_port);
     Some(PortRef { node, port })
+}
+
+/// The labels of a port that ELK keeps: those with text, each with the position it was given.
+///
+/// Ports the label loops of `ElkGraphImporter.transformPort` and `transformExternalPort`, with
+/// `transformLabel`. Only a port label reads the position: one whose placement is fixed keeps it,
+/// and its bounds set the margins of its port.
+fn port_labels_to_lgraph(port: &ElkInputPort) -> impl Iterator<Item = LLabel> + '_ {
+    port.labels
+        .iter()
+        .filter(|label| !label.text.is_empty())
+        .map(|label| {
+            let mut llabel = label_to_lgraph(label);
+            llabel.position = LPoint {
+                x: label.x,
+                y: label.y,
+            };
+            llabel
+        })
 }
 
 fn label_to_lgraph(label: &ElkInputLabel) -> LLabel {

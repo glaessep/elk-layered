@@ -1,0 +1,810 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "38",
+    "elk.spacing.portsSurrounding": "[top=3,left=5,bottom=8,right=8]"
+  },
+  "children": [
+    {
+      "id": "g0",
+      "children": [
+        {
+          "id": "g2",
+          "children": [
+            {
+              "id": "n2",
+              "width": 80,
+              "height": 57.5,
+              "layoutOptions": {
+                "elk.portLabels.placement": "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+                "elk.nodeSize.constraints": "[PORTS]"
+              },
+              "ports": [
+                {
+                  "id": "p4",
+                  "width": 4,
+                  "height": 7
+                },
+                {
+                  "id": "p5",
+                  "width": 7,
+                  "height": 5
+                }
+              ]
+            }
+          ],
+          "layoutOptions": {
+            "elk.portConstraints": "FIXED_SIDE",
+            "elk.portLabels.placement": "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]"
+          },
+          "ports": [
+            {
+              "id": "p17",
+              "width": 8,
+              "height": 4,
+              "layoutOptions": {
+                "elk.port.side": "EAST"
+              },
+              "labels": [
+                {
+                  "text": "req",
+                  "width": 19.5,
+                  "height": 14
+                }
+              ]
+            },
+            {
+              "id": "p18",
+              "width": 4,
+              "height": 8,
+              "layoutOptions": {
+                "elk.port.side": "WEST"
+              },
+              "labels": [
+                {
+                  "text": "on",
+                  "width": 13,
+                  "height": 14
+                },
+                {
+                  "text": "brake request",
+                  "width": 84.5,
+                  "height": 14
+                }
+              ]
+            },
+            {
+              "id": "p19",
+              "width": 4,
+              "height": 8,
+              "layoutOptions": {
+                "elk.port.side": "EAST"
+              },
+              "labels": [
+                {
+                  "text": "brake request",
+                  "width": 84.5,
+                  "height": 14
+                },
+                {
+                  "text": "brake request",
+                  "width": 84.5,
+                  "height": 14
+                }
+              ]
+            },
+            {
+              "id": "p20",
+              "width": 5,
+              "height": 7,
+              "layoutOptions": {
+                "elk.port.side": "WEST"
+              },
+              "labels": [
+                {
+                  "text": "req",
+                  "width": 19.5,
+                  "height": 14
+                },
+                {
+                  "text": "1",
+                  "width": 6.5,
+                  "height": 14
+                }
+              ]
+            }
+          ],
+          "edges": [
+            {
+              "id": "e0",
+              "sources": [
+                "p4"
+              ],
+              "targets": [
+                "n2"
+              ],
+              "labels": [
+                {
+                  "text": "1",
+                  "width": 6.5,
+                  "height": 14
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "n0",
+          "width": 92,
+          "height": 29.5
+        },
+        {
+          "id": "n1",
+          "width": 72.5,
+          "height": 36,
+          "layoutOptions": {
+            "elk.portConstraints": "FIXED_RATIO",
+            "elk.portLabels.placement": "[INSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+            "elk.nodeSize.constraints": "[PORTS]"
+          },
+          "ports": [
+            {
+              "id": "p0",
+              "width": 8,
+              "height": 6,
+              "layoutOptions": {
+                "elk.port.side": "EAST"
+              },
+              "x": 72.5,
+              "y": 30,
+              "labels": [
+                {
+                  "text": "pedal %",
+                  "width": 45.5,
+                  "height": 14
+                },
+                {
+                  "text": "1",
+                  "width": 6.5,
+                  "height": 14
+                }
+              ]
+            },
+            {
+              "id": "p1",
+              "width": 6,
+              "height": 6,
+              "layoutOptions": {
+                "elk.port.side": "EAST"
+              },
+              "x": 72.5,
+              "y": 25,
+              "labels": [
+                {
+                  "text": "speed",
+                  "width": 32.5,
+                  "height": 14
+                },
+                {
+                  "text": "0..*",
+                  "width": 26,
+                  "height": 14
+                }
+              ]
+            },
+            {
+              "id": "p2",
+              "width": 6,
+              "height": 9,
+              "layoutOptions": {
+                "elk.port.side": "NORTH"
+              },
+              "x": 64,
+              "y": -9,
+              "labels": [
+                {
+                  "text": "brake request",
+                  "width": 84.5,
+                  "height": 14
+                }
+              ]
+            },
+            {
+              "id": "p3",
+              "width": 8,
+              "height": 4,
+              "layoutOptions": {
+                "elk.port.side": "NORTH"
+              },
+              "x": 36,
+              "y": -4
+            }
+          ]
+        },
+        {
+          "id": "n4",
+          "width": 63,
+          "height": 40,
+          "layoutOptions": {
+            "elk.portConstraints": "FIXED_SIDE",
+            "elk.portLabels.placement": "[OUTSIDE, ALWAYS_SAME_SIDE]",
+            "elk.nodeSize.constraints": "[PORTS, PORT_LABELS, NODE_LABELS, MINIMUM_SIZE]"
+          },
+          "ports": [
+            {
+              "id": "p10",
+              "width": 7,
+              "height": 6,
+              "layoutOptions": {
+                "elk.port.side": "EAST"
+              },
+              "labels": [
+                {
+                  "text": "1",
+                  "width": 6.5,
+                  "height": 14
+                }
+              ]
+            },
+            {
+              "id": "p11",
+              "width": 6,
+              "height": 6,
+              "layoutOptions": {
+                "elk.port.side": "NORTH"
+              },
+              "labels": [
+                {
+                  "text": "0..*",
+                  "width": 26,
+                  "height": 14
+                },
+                {
+                  "text": "brake request",
+                  "width": 84.5,
+                  "height": 14
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_ORDER",
+        "elk.portLabels.placement": "[]",
+        "elk.portLabels.treatAsGroup": "false"
+      },
+      "ports": [
+        {
+          "id": "p12",
+          "width": 8,
+          "height": 5,
+          "layoutOptions": {
+            "elk.port.side": "SOUTH"
+          },
+          "labels": [
+            {
+              "text": "0..*",
+              "width": 26,
+              "height": 14,
+              "x": -2,
+              "y": 20
+            },
+            {
+              "text": "brake request",
+              "width": 84.5,
+              "height": 14,
+              "x": -14,
+              "y": 2
+            }
+          ]
+        },
+        {
+          "id": "p13",
+          "width": 10,
+          "height": 5,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          },
+          "labels": [
+            {
+              "text": "speed",
+              "width": 32.5,
+              "height": 14,
+              "x": -20,
+              "y": 2
+            }
+          ]
+        },
+        {
+          "id": "p14",
+          "width": 8,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "SOUTH"
+          },
+          "labels": [
+            {
+              "text": "speed",
+              "width": 32.5,
+              "height": 14,
+              "x": -10,
+              "y": 15
+            }
+          ]
+        },
+        {
+          "id": "p15",
+          "width": 7,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "NORTH"
+          },
+          "labels": [
+            {
+              "text": "ack",
+              "width": 19.5,
+              "height": 14,
+              "x": 17,
+              "y": 5
+            },
+            {
+              "text": "brake request",
+              "width": 84.5,
+              "height": 14,
+              "x": -15,
+              "y": -16
+            }
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "id": "e2",
+          "sources": [
+            "n4"
+          ],
+          "targets": [
+            "p11"
+          ]
+        },
+        {
+          "id": "e3",
+          "sources": [
+            "p17"
+          ],
+          "targets": [
+            "p2"
+          ]
+        },
+        {
+          "id": "e6",
+          "sources": [
+            "p5"
+          ],
+          "targets": [
+            "p2"
+          ]
+        },
+        {
+          "id": "e11",
+          "sources": [
+            "p10"
+          ],
+          "targets": [
+            "p18"
+          ]
+        },
+        {
+          "id": "e22",
+          "sources": [
+            "n4"
+          ],
+          "targets": [
+            "n0"
+          ]
+        },
+        {
+          "id": "e24",
+          "sources": [
+            "n1"
+          ],
+          "targets": [
+            "p10"
+          ]
+        },
+        {
+          "id": "e28",
+          "sources": [
+            "p1"
+          ],
+          "targets": [
+            "p1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "g1",
+      "children": [
+        {
+          "id": "n5",
+          "width": 107,
+          "height": 43.5
+        }
+      ],
+      "width": 69,
+      "height": 77.5,
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_POS",
+        "elk.portLabels.placement": "[INSIDE, NEXT_TO_PORT_IF_POSSIBLE]",
+        "elk.nodeSize.options": "[UNIFORM_PORT_SPACING]"
+      },
+      "ports": [
+        {
+          "id": "p16",
+          "width": 10,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          },
+          "x": 69,
+          "y": 57,
+          "labels": [
+            {
+              "text": "0..*",
+              "width": 26,
+              "height": 14
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "width": 64,
+      "height": 56,
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_RATIO",
+        "elk.portLabels.placement": "[OUTSIDE, ALWAYS_OTHER_SAME_SIDE]"
+      },
+      "ports": [
+        {
+          "id": "p6",
+          "width": 9,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "x": -9,
+          "y": 40
+        },
+        {
+          "id": "p7",
+          "width": 9,
+          "height": 9,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "x": -9,
+          "y": 25
+        },
+        {
+          "id": "p8",
+          "width": 9,
+          "height": 9,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          },
+          "x": 64,
+          "y": 29,
+          "labels": [
+            {
+              "text": "1",
+              "width": 6.5,
+              "height": 14
+            }
+          ]
+        },
+        {
+          "id": "p9",
+          "width": 6,
+          "height": 7,
+          "layoutOptions": {
+            "elk.port.side": "SOUTH"
+          },
+          "x": 54,
+          "y": 56
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "sources": [
+        "p12"
+      ],
+      "targets": [
+        "p4"
+      ]
+    },
+    {
+      "id": "e4",
+      "sources": [
+        "n1"
+      ],
+      "targets": [
+        "p6"
+      ],
+      "labels": [
+        {
+          "text": "ack",
+          "width": 19.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "TAIL"
+          }
+        }
+      ]
+    },
+    {
+      "id": "e5",
+      "sources": [
+        "p14"
+      ],
+      "targets": [
+        "p20"
+      ]
+    },
+    {
+      "id": "e7",
+      "sources": [
+        "p15"
+      ],
+      "targets": [
+        "p3"
+      ]
+    },
+    {
+      "id": "e8",
+      "sources": [
+        "p9"
+      ],
+      "targets": [
+        "p16"
+      ]
+    },
+    {
+      "id": "e9",
+      "sources": [
+        "p14"
+      ],
+      "targets": [
+        "p7"
+      ]
+    },
+    {
+      "id": "e10",
+      "sources": [
+        "p8"
+      ],
+      "targets": [
+        "n1"
+      ]
+    },
+    {
+      "id": "e12",
+      "sources": [
+        "n3"
+      ],
+      "targets": [
+        "p9"
+      ],
+      "labels": [
+        {
+          "text": "x",
+          "width": 6.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "TAIL"
+          }
+        },
+        {
+          "text": "pedal %",
+          "width": 45.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "CENTER"
+          }
+        }
+      ]
+    },
+    {
+      "id": "e13",
+      "sources": [
+        "n4"
+      ],
+      "targets": [
+        "p12"
+      ]
+    },
+    {
+      "id": "e14",
+      "sources": [
+        "n5"
+      ],
+      "targets": [
+        "p13"
+      ]
+    },
+    {
+      "id": "e15",
+      "sources": [
+        "p7"
+      ],
+      "targets": [
+        "p9"
+      ],
+      "labels": [
+        {
+          "text": "req",
+          "width": 19.5,
+          "height": 14
+        },
+        {
+          "text": "pedal %",
+          "width": 45.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "CENTER"
+          }
+        }
+      ]
+    },
+    {
+      "id": "e16",
+      "sources": [
+        "p7"
+      ],
+      "targets": [
+        "p3"
+      ],
+      "labels": [
+        {
+          "text": "ack",
+          "width": 19.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "TAIL"
+          }
+        },
+        {
+          "text": "req",
+          "width": 19.5,
+          "height": 14
+        }
+      ]
+    },
+    {
+      "id": "e17",
+      "sources": [
+        "p9"
+      ],
+      "targets": [
+        "p10"
+      ]
+    },
+    {
+      "id": "e18",
+      "sources": [
+        "p1"
+      ],
+      "targets": [
+        "p7"
+      ]
+    },
+    {
+      "id": "e19",
+      "sources": [
+        "p8"
+      ],
+      "targets": [
+        "p4"
+      ]
+    },
+    {
+      "id": "e20",
+      "sources": [
+        "p4"
+      ],
+      "targets": [
+        "p12"
+      ]
+    },
+    {
+      "id": "e21",
+      "sources": [
+        "p7"
+      ],
+      "targets": [
+        "p20"
+      ],
+      "labels": [
+        {
+          "text": "speed",
+          "width": 32.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "CENTER"
+          }
+        },
+        {
+          "text": "req",
+          "width": 19.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "TAIL"
+          }
+        }
+      ]
+    },
+    {
+      "id": "e23",
+      "sources": [
+        "p10"
+      ],
+      "targets": [
+        "p5"
+      ]
+    },
+    {
+      "id": "e25",
+      "sources": [
+        "p20"
+      ],
+      "targets": [
+        "p13"
+      ]
+    },
+    {
+      "id": "e26",
+      "sources": [
+        "p19"
+      ],
+      "targets": [
+        "n3"
+      ]
+    },
+    {
+      "id": "e27",
+      "sources": [
+        "p19"
+      ],
+      "targets": [
+        "n3"
+      ]
+    },
+    {
+      "id": "e29",
+      "sources": [
+        "p16"
+      ],
+      "targets": [
+        "p12"
+      ]
+    },
+    {
+      "id": "e30",
+      "sources": [
+        "n3"
+      ],
+      "targets": [
+        "p1"
+      ]
+    }
+  ]
+}

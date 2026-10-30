@@ -2,15 +2,16 @@
 //!
 //! Source: https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/HierarchicalPortOrthogonalEdgeRouter.java
 
+use crate::common::nodespacing;
 use crate::graph::{
     LGraph, LNode, LPoint, LayeredEdge, NodeId, PortId, PortRef, PortSide, PortType,
 };
 use crate::intermediate::end_label_postprocessor::hand_back_end_labels;
 use crate::intermediate::hierarchical_port_position_processor::{
-    actual_graph_height, border_to_content_area_y, external_port_anchor,
+    actual_graph_height, border_to_content_area, external_port_anchor,
 };
 use crate::intermediate::long_edge_joiner::first_port_on_side;
-use crate::options::PortConstraints;
+use crate::options::{PortConstraints, PortLabelPlacement, SizeConstraints};
 use crate::phase::routing::orthogonal::{RoutingDirection, route_edges};
 
 pub fn process_hierarchical_port_orthogonal_edges(graph: &mut LGraph) {
@@ -81,6 +82,50 @@ fn restore_north_south_dummy(graph: &mut LGraph, dummy: NodeId) {
         side => side,
     };
     port.port_type = PortType::Output;
+
+    // Since the dummy was hidden from the algorithm, its port labels are not placed and its
+    // margins are not set. That needs a fix if port labels count for the size of the node.
+    if graph
+        .options
+        .node_size
+        .constraints
+        .contains(SizeConstraints::PORT_LABELS)
+    {
+        place_restored_dummy_labels(graph, dummy);
+        nodespacing::calculate_node_margins(graph, [dummy]);
+    }
+}
+
+/// Places the labels of a restored dummy: below the port under `INSIDE` port labels, beside it
+/// under `OUTSIDE` ones.
+///
+/// Ports the label part of `HierarchicalPortOrthogonalEdgeRouter.restoreDummy`.
+fn place_restored_dummy_labels(graph: &mut LGraph, dummy: NodeId) {
+    let placement = graph.options.port_label_placement;
+    let data = &mut graph.layerless_nodes[dummy];
+    let Some(external) = data.external_port() else {
+        return;
+    };
+    // The importer set the spacings on the dummy.
+    let spacings = external.label_spacings;
+    let dummy_width = data.size.width;
+    let Some(port) = data.ports.first_mut() else {
+        return;
+    };
+    if placement.contains(PortLabelPlacement::INSIDE) {
+        let mut current_y = spacings.label_port_vertical;
+        let x_centre_relative_to_port = dummy_width / 2.0 - port.position.x;
+        for label in &mut port.labels {
+            label.position.y = current_y;
+            label.position.x = x_centre_relative_to_port - label.size.width / 2.0;
+            current_y += label.size.height + spacings.label_label;
+        }
+    } else if placement.contains(PortLabelPlacement::OUTSIDE) {
+        // The labels have no height, but they need an x coordinate.
+        for label in &mut port.labels {
+            label.position.x = spacings.label_port_horizontal + dummy_width - port.position.x;
+        }
+    }
 }
 
 pub(crate) fn connect_replacement_dummy_to_original(
@@ -162,12 +207,12 @@ fn set_north_south_dummy_coordinates(graph: &mut LGraph, north_south_dummies: &[
             PortConstraints::FixedRatio => {
                 graph.layerless_nodes[*dummy].position.x =
                     graph_width * ratio_or_position - external_port_anchor(graph, *dummy).x;
-                border_to_content_area_x(graph, *dummy);
+                border_to_content_area(graph, *dummy, true, false);
             }
             PortConstraints::FixedPos => {
                 graph.layerless_nodes[*dummy].position.x =
                     ratio_or_position - external_port_anchor(graph, *dummy).x;
-                border_to_content_area_x(graph, *dummy);
+                border_to_content_area(graph, *dummy, true, false);
                 let required_width = graph.layerless_nodes[*dummy].position.x
                     + graph.layerless_nodes[*dummy].size.width / 2.0;
                 graph.size.width = graph.size.width.max(required_width);
@@ -232,10 +277,6 @@ fn calculate_north_south_dummy_position(graph: &mut LGraph, dummy: NodeId) {
         .sum::<f64>();
     graph.layerless_nodes[dummy].position.x =
         pos_sum / connected_ports.len() as f64 - external_port_anchor(graph, dummy).x;
-}
-
-fn border_to_content_area_x(graph: &mut LGraph, node: NodeId) {
-    graph.layerless_nodes[node].position.x -= graph.padding.left + graph.offset.x;
 }
 
 fn ensure_unique_north_south_positions(graph: &mut LGraph, dummies: &mut [NodeId]) {
@@ -565,12 +606,12 @@ fn fix_hierarchical_port_east_west_y_coordinate(
         graph.layerless_nodes[node].position.y =
             graph_actual_height * ratio_or_position - external_port_anchor(graph, node).y;
         required_actual_graph_height = graph.layerless_nodes[node].position.y + external_height;
-        border_to_content_area_y(graph, node);
+        border_to_content_area(graph, node, false, true);
     } else if graph.options.port_constraints.is_pos_fixed() {
         graph.layerless_nodes[node].position.y =
             ratio_or_position - external_port_anchor(graph, node).y;
         required_actual_graph_height = graph.layerless_nodes[node].position.y + external_height;
-        border_to_content_area_y(graph, node);
+        border_to_content_area(graph, node, false, true);
     }
 
     required_actual_graph_height

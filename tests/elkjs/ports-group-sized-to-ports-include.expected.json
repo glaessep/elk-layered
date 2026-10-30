@@ -1,0 +1,96 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "g",
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.nodeSize.constraints": "[PORTS]",
+        "elk.portLabels.placement": "OUTSIDE"
+      },
+      "ports": [
+        {
+          "id": "pa",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "x": -6,
+          "y": 32
+        },
+        {
+          "id": "pb",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "x": -6,
+          "y": 12
+        },
+        {
+          "id": "pc",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "WEST"
+          },
+          "x": -6,
+          "y": 52
+        }
+      ],
+      "children": [
+        {
+          "id": "c",
+          "width": 10,
+          "height": 10,
+          "$H": 283,
+          "x": 12,
+          "y": 12
+        }
+      ],
+      "edges": [
+        {
+          "id": "e",
+          "sources": [
+            "pb"
+          ],
+          "targets": [
+            "c"
+          ],
+          "sections": [
+            {
+              "id": "e_s0",
+              "startPoint": {
+                "x": -6,
+                "y": 17
+              },
+              "endPoint": {
+                "x": 12,
+                "y": 17
+              },
+              "incomingShape": "pb",
+              "outgoingShape": "c"
+            }
+          ],
+          "container": "g"
+        }
+      ],
+      "$H": 277,
+      "x": 18,
+      "y": 12,
+      "width": 34,
+      "height": 74
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 64,
+  "height": 98
+}
