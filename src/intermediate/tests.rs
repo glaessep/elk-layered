@@ -14,6 +14,7 @@ use crate::intermediate::end_label_preprocessor::{
     copy_gathered_end_labels_into_ports, gather_end_labels_for_node, preprocess_end_labels,
     remove_gathered_end_labels,
 };
+use crate::intermediate::graph_transformer::{GraphTransformMode, transform_graph_direction};
 use crate::intermediate::hierarchical_port_constraint_processor::process_hierarchical_port_constraints;
 use crate::intermediate::hierarchical_port_dummy_size_processor::process_hierarchical_port_dummy_sizes;
 use crate::intermediate::hierarchical_port_orthogonal_edge_router::{
@@ -1247,6 +1248,37 @@ fn layer_constraint_preprocessor_keeps_explicit_opposite_constraint() {
         graph.layerless_nodes[a].layer_constraint,
         LayerConstraint::None
     );
+}
+
+// Mutation: in `transpose_layer_constraint_for_external_port`, do not mark the layer constraint
+// explicit.
+#[test]
+fn layer_constraint_preprocessor_keeps_a_transposed_external_port_dummy_in_its_separate_layer() {
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    graph.options.direction = ElkDirection::Down;
+    let north = push_external_dummy(&mut graph, "north", PortSide::North, 0.0);
+    let south = push_external_dummy(&mut graph, "south", PortSide::South, 0.0);
+    graph.layerless_nodes[north]
+        .external_port_mut()
+        .unwrap()
+        .in_layer_constraint = InLayerConstraint::Top;
+    graph.layerless_nodes[south]
+        .external_port_mut()
+        .unwrap()
+        .in_layer_constraint = InLayerConstraint::Bottom;
+    graph
+        .add_port(north, PortType::Output, PortSide::East, Default::default())
+        .unwrap();
+    add_test_edge(&mut graph, "north-south", north, 1, south, 0);
+
+    transform_graph_direction(&mut graph, GraphTransformMode::ToInternalLeftToRight);
+    preprocess_layer_constraints(&mut graph).unwrap();
+
+    assert_eq!(
+        graph.layerless_nodes[south].layer_constraint,
+        LayerConstraint::LastSeparate
+    );
+    assert_eq!(graph.hidden_nodes, vec![north, south]);
 }
 
 #[test]

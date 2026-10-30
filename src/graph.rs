@@ -450,7 +450,8 @@ pub struct ExternalPortData {
     /// `InternalProperties.IN_LAYER_CONSTRAINT`.
     pub in_layer_constraint: InLayerConstraint,
     /// Whether ELK sets the layer constraint of the dummy on purpose, as it does for a west or
-    /// east dummy. Such a constraint counts as explicit.
+    /// east dummy, and for a north or south dummy once the graph is transposed. Such a constraint
+    /// counts as explicit.
     pub layer_constraint_explicit: bool,
     /// `LayeredOptions.PORT_ANCHOR` of the dummy: where its port's anchor sat when the dummy was
     /// made. `GraphTransformer` turns the port but not this property, so in a vertical layout it
@@ -1440,7 +1441,8 @@ impl LGraph {
         self.tables.port_alignment.get(node).copied()
     }
 
-    /// Whether the caller, or a hierarchical port dummy, set the layer constraint of `node`.
+    /// Whether the caller, a hierarchical port dummy, or the graph transform (which transposes a
+    /// north or south dummy) set the layer constraint of `node`.
     pub(crate) fn is_layer_constraint_explicit(&self, node: NodeId) -> bool {
         self.tables.layer_constraint_explicit.get(node).is_some()
             || self.layerless_nodes[node]

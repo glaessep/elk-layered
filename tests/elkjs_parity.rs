@@ -15,7 +15,10 @@ use serde_json::Value;
 
 /// Cases whose feature elk-layered does not have yet, each with the issue that adds it. A case
 /// leaves this list in the pull request that makes it pass.
-const NOT_YET: &[(&str, &str)] = &[];
+const NOT_YET: &[(&str, &str)] = &[(
+    "ports-group-down-inside-self-loop",
+    "glaessep/elk-layered#53",
+)];
 
 fn cases_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/elkjs")

@@ -13,6 +13,23 @@ fn graph(direction: ElkDirection) -> LGraph {
     )
 }
 
+/// An external port dummy in `graph`. The test sets its layer constraint by hand, so it can
+/// build a state that the importer never makes, such as a separate constraint that is not
+/// explicit.
+fn external_dummy(
+    graph: &mut LGraph,
+    side: PortSide,
+    layer_constraint: LayerConstraint,
+    in_layer_constraint: InLayerConstraint,
+) -> NodeId {
+    let mut node = LNode::new("external", 0.0, 0.0, None);
+    node.set_kind(crate::graph::LNodeKind::ExternalPort);
+    node.layer_constraint = layer_constraint;
+    node.external_port_mut().unwrap().side = side;
+    node.external_port_mut().unwrap().in_layer_constraint = in_layer_constraint;
+    graph.add_node_for_test(node)
+}
+
 #[test]
 fn node_label_placement_primitives_cover_every_axis_mapping() {
     use crate::options::NodeLabelLocation::*;
@@ -603,11 +620,12 @@ fn rotation_down_to_input_direction_rotates_counter_clockwise() {
 #[test]
 fn left_transform_mirrors_external_port_layer_constraint() {
     let mut graph = graph(ElkDirection::Left);
-    let mut node = LNode::new("external", 0.0, 0.0, None);
-    node.set_kind(crate::graph::LNodeKind::ExternalPort);
-    node.layer_constraint = LayerConstraint::FirstSeparate;
-    node.external_port_mut().unwrap().side = PortSide::West;
-    let node = graph.add_node_for_test(node);
+    let node = external_dummy(
+        &mut graph,
+        PortSide::West,
+        LayerConstraint::FirstSeparate,
+        InLayerConstraint::None,
+    );
 
     transform_graph_direction(&mut graph, GraphTransformMode::ToInputDirection);
 
@@ -624,11 +642,12 @@ fn left_transform_mirrors_external_port_layer_constraint() {
 #[test]
 fn transpose_preserves_external_port_layer_constraint_through_in_layer_constraint() {
     let mut graph = graph(ElkDirection::Down);
-    let mut node = LNode::new("external", 0.0, 0.0, None);
-    node.set_kind(crate::graph::LNodeKind::ExternalPort);
-    node.layer_constraint = LayerConstraint::FirstSeparate;
-    node.external_port_mut().unwrap().side = PortSide::South;
-    let node = graph.add_node_for_test(node);
+    let node = external_dummy(
+        &mut graph,
+        PortSide::South,
+        LayerConstraint::FirstSeparate,
+        InLayerConstraint::None,
+    );
 
     transform_graph_direction(&mut graph, GraphTransformMode::ToInputDirection);
 
@@ -665,6 +684,136 @@ fn transpose_preserves_external_port_layer_constraint_through_in_layer_constrain
         graph.layerless_nodes[node].external_port().unwrap().side,
         PortSide::South
     );
+}
+
+// Mutation: leave `layer_constraint_explicit` unset where the transpose turns a top or bottom
+// in-layer constraint into a separate layer constraint.
+#[test]
+fn transpose_marks_a_separate_layer_constraint_of_an_external_port_explicit() {
+    for (in_layer, layer_constraint) in [
+        (InLayerConstraint::Top, LayerConstraint::FirstSeparate),
+        (InLayerConstraint::Bottom, LayerConstraint::LastSeparate),
+    ] {
+        let mut graph = graph(ElkDirection::Down);
+        let node = external_dummy(&mut graph, PortSide::North, LayerConstraint::None, in_layer);
+        assert!(!graph.is_layer_constraint_explicit(node));
+
+        transform_graph_direction(&mut graph, GraphTransformMode::ToInternalLeftToRight);
+
+        assert_eq!(
+            graph.layerless_nodes[node].layer_constraint,
+            layer_constraint
+        );
+        assert!(graph.is_layer_constraint_explicit(node), "{in_layer:?}");
+    }
+}
+
+// Mutation: leave `layer_constraint_explicit` unset where the transpose turns a separate layer
+// constraint into an in-layer constraint. The state is built by hand: the importer sets the flag
+// whenever it sets a separate constraint, so no real input reaches the write. The test pins the
+// port of ELK's `setProperty(NONE)`.
+#[test]
+fn transpose_marks_the_layer_constraint_explicit_where_it_clears_a_separate_one() {
+    for layer_constraint in [
+        LayerConstraint::FirstSeparate,
+        LayerConstraint::LastSeparate,
+    ] {
+        let mut graph = graph(ElkDirection::Down);
+        let node = external_dummy(
+            &mut graph,
+            PortSide::East,
+            layer_constraint,
+            InLayerConstraint::None,
+        );
+        assert!(!graph.is_layer_constraint_explicit(node));
+
+        transform_graph_direction(&mut graph, GraphTransformMode::ToInputDirection);
+
+        assert_eq!(
+            graph.layerless_nodes[node].layer_constraint,
+            LayerConstraint::None
+        );
+        assert!(
+            graph.is_layer_constraint_explicit(node),
+            "{layer_constraint:?}"
+        );
+    }
+}
+
+// Mutation: set `layer_constraint_explicit` once after the branches, whichever matched.
+#[test]
+fn transpose_leaves_a_dummy_that_no_branch_matches_not_explicit() {
+    let mut graph = graph(ElkDirection::Down);
+    let node = external_dummy(
+        &mut graph,
+        PortSide::Undefined,
+        LayerConstraint::None,
+        InLayerConstraint::None,
+    );
+
+    transform_graph_direction(&mut graph, GraphTransformMode::ToInternalLeftToRight);
+
+    assert_eq!(
+        graph.layerless_nodes[node].layer_constraint,
+        LayerConstraint::None
+    );
+    assert!(!graph.is_layer_constraint_explicit(node));
+}
+
+// Mutations, one per group of rows:
+// - DOWN with reading direction: leave `layer_constraint_explicit` unset where the transpose
+//   gives a separate layer constraint.
+// - UP with reading direction: in `ToInternalLeftToRight`, run `mirror_all_y` before
+//   `transpose_all`. The mirror then swaps top and bottom before the transpose reads them.
+// - Rotation (DOWN and UP): in `mirror_node_x`, leave the layer constraint of an external port
+//   dummy as it is. The end constraint then keeps its side.
+#[test]
+fn every_direction_keeps_the_explicit_flag_of_a_transposed_external_port() {
+    use DirectionCongruency::{ReadingDirection, Rotation};
+    for (direction, congruency, top, bottom) in [
+        (
+            ElkDirection::Down,
+            ReadingDirection,
+            LayerConstraint::FirstSeparate,
+            LayerConstraint::LastSeparate,
+        ),
+        (
+            ElkDirection::Up,
+            ReadingDirection,
+            LayerConstraint::FirstSeparate,
+            LayerConstraint::LastSeparate,
+        ),
+        (
+            ElkDirection::Down,
+            Rotation,
+            LayerConstraint::LastSeparate,
+            LayerConstraint::FirstSeparate,
+        ),
+        (
+            ElkDirection::Up,
+            Rotation,
+            LayerConstraint::FirstSeparate,
+            LayerConstraint::LastSeparate,
+        ),
+    ] {
+        for (in_layer, want) in [
+            (InLayerConstraint::Top, top),
+            (InLayerConstraint::Bottom, bottom),
+        ] {
+            let mut graph = graph(direction);
+            graph.options.direction_congruency = congruency;
+            let node = external_dummy(&mut graph, PortSide::North, LayerConstraint::None, in_layer);
+
+            transform_graph_direction(&mut graph, GraphTransformMode::ToInternalLeftToRight);
+
+            let label = format!("{direction:?} {congruency:?} {in_layer:?}");
+            assert_eq!(
+                graph.layerless_nodes[node].layer_constraint, want,
+                "{label}"
+            );
+            assert!(graph.is_layer_constraint_explicit(node), "{label}");
+        }
+    }
 }
 
 #[test]
