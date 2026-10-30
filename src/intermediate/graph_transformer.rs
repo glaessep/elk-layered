@@ -102,7 +102,8 @@ fn mirror_node_x(node: &mut LNode, offset: f64) {
     }
     if let Some(external) = node.external_port_mut() {
         external.side = mirror_port_side_x(external.side);
-        // `mirrorX` rewrites only a constraint that is set; it never makes one explicit.
+        // `mirrorLayerConstraintX` writes only a value other than `NONE`, so an unset constraint
+        // stays unset. An explicit `NONE` is written back as `NONE`.
         if node.is_layer_constraint_explicit() {
             node.set_layer_constraint(mirror_layer_constraint_x(node.layer_constraint()));
         }
@@ -212,11 +213,9 @@ fn transpose_node(node: &mut LNode) {
     for port in node.ports.slots_mut() {
         transpose_port(port);
     }
-    if node.external_port().is_some() {
-        transpose_layer_constraint_for_external_port(node);
-        if let Some(external) = node.external_port_mut() {
-            external.side = transpose_port_side(external.side);
-        }
+    transpose_layer_constraint_for_external_port(node);
+    if let Some(external) = node.external_port_mut() {
+        external.side = transpose_port_side(external.side);
     }
     for label in &mut node.labels {
         label.node_label_placement = label.node_label_placement.map(|p| p.transpose());

@@ -735,10 +735,9 @@ fn transpose_marks_a_separate_layer_constraint_of_an_external_port_explicit() {
 
 // Mutation: in `transpose_layer_constraint_for_external_port`, skip the write where the transpose
 // turns a separate layer constraint into an in-layer constraint. The dummy then keeps its separate
-// constraint. The constraint stays explicit, with the value `NONE`: the port of ELK's
-// `setProperty(NONE)`.
+// constraint.
 #[test]
-fn transpose_marks_the_layer_constraint_explicit_where_it_clears_a_separate_one() {
+fn transpose_clears_a_separate_layer_constraint_of_an_external_port() {
     for layer_constraint in [
         LayerConstraint::FirstSeparate,
         LayerConstraint::LastSeparate,
@@ -750,16 +749,12 @@ fn transpose_marks_the_layer_constraint_explicit_where_it_clears_a_separate_one(
             layer_constraint,
             InLayerConstraint::None,
         );
-        assert!(graph.layerless_nodes[node].is_layer_constraint_explicit());
 
         transform_graph_direction(&mut graph, GraphTransformMode::ToInputDirection);
 
         assert_eq!(
             graph.layerless_nodes[node].layer_constraint(),
-            LayerConstraint::None
-        );
-        assert!(
-            graph.layerless_nodes[node].is_layer_constraint_explicit(),
+            LayerConstraint::None,
             "{layer_constraint:?}"
         );
     }

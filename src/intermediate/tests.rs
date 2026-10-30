@@ -1660,6 +1660,78 @@ fn hierarchical_port_constraint_processor_reuses_north_south_replacements_per_vi
     assert_eq!(graph.edges[outgoing_to_north].target().port, PortId::new(0));
 }
 
+/// Runs the hierarchical port constraint processor on a graph with one north dummy whose layer
+/// constraint is `layer_constraint` (`None` leaves it unset), and returns the replacement dummy.
+fn replacement_of_north_dummy(layer_constraint: Option<LayerConstraint>) -> (LGraph, NodeId) {
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    graph.options.port_constraints = PortConstraints::FixedSide;
+    let north = push_external_dummy(&mut graph, "north", PortSide::North, 0.42);
+    let target = push_normal_node(&mut graph, "target");
+    graph.layerless_nodes[north]
+        .external_port_mut()
+        .unwrap()
+        .in_layer_constraint = InLayerConstraint::Top;
+    if let Some(layer_constraint) = layer_constraint {
+        graph.layerless_nodes[north].set_layer_constraint(layer_constraint);
+    }
+    graph
+        .tables
+        .in_layer
+        .row_mut(north)
+        .successor_constraints
+        .push(target);
+    graph.set_node_layer(north, 0);
+    graph.set_node_layer(target, 0);
+    add_test_edge(&mut graph, "north-target", north, 0, target, 0);
+
+    process_hierarchical_port_constraints(&mut graph);
+
+    let replacement = graph
+        .nodes_with_ids()
+        .find_map(|(index, node)| {
+            (node
+                .external_port()
+                .and_then(|external| external.replaced_dummy)
+                == Some(north))
+            .then_some(index)
+        })
+        .unwrap();
+    (graph, replacement)
+}
+
+// Mutation: in `create_hierarchical_port_replacement_dummy`, call `set_layer_constraint` whether
+// or not the original dummy is explicit.
+#[test]
+fn a_replacement_dummy_of_an_unset_original_has_no_explicit_layer_constraint() {
+    let (graph, replacement) = replacement_of_north_dummy(None);
+
+    assert!(!graph.layerless_nodes[replacement].is_layer_constraint_explicit());
+    assert_eq!(
+        graph.layerless_nodes[replacement].layer_constraint(),
+        LayerConstraint::None
+    );
+}
+
+// Mutation: in `create_hierarchical_port_replacement_dummy`, write `LayerConstraint::None` in
+// place of the value of the original dummy.
+#[test]
+fn a_replacement_dummy_copies_the_layer_constraint_value_of_its_original() {
+    for layer_constraint in [
+        LayerConstraint::First,
+        LayerConstraint::FirstSeparate,
+        LayerConstraint::Last,
+        LayerConstraint::LastSeparate,
+    ] {
+        let (graph, replacement) = replacement_of_north_dummy(Some(layer_constraint));
+
+        assert!(graph.layerless_nodes[replacement].is_layer_constraint_explicit());
+        assert_eq!(
+            graph.layerless_nodes[replacement].layer_constraint(),
+            layer_constraint
+        );
+    }
+}
+
 // Mutation: in `create_hierarchical_port_replacement_dummy`, leave out the copy of the
 // successor constraints to the replacement dummy, or of the explicit layer constraint.
 #[test]

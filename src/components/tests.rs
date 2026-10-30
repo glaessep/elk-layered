@@ -217,7 +217,8 @@ fn a_graph_inside_a_node_follows_the_node_through_split_and_combine() {
 
 // Mutation: in `split`, leave out `tables` of a component. In `remap_references`, leave out
 // `map_node_ids`. In `combine`, leave the root's `tables` as they were. In `NodeTables`, leave
-// one of the five tables out of `subset` or `absorb`.
+// one of the four tables out of `subset` or `absorb`. The explicit layer constraint is no table
+// any more: it lives on the node, so its asserts only show that the node moves with its fields.
 #[test]
 fn the_side_tables_of_nodes_follow_them_through_split_and_combine() {
     let mut graph = LGraph::new("g", LayeredOptions::default());
