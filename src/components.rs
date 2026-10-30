@@ -431,18 +431,13 @@ fn drop_nodes_renumbered(
                 kind: "dropped node",
                 index: node.to_index(),
             })? = false;
-    }
-    // A dropped node that holds a graph would leave that graph without a node.
-    if let Some(&owner) = dropped.iter().find(|&&node| {
-        graph
-            .layerless_nodes
-            .get(node)
-            .is_some_and(|data| data.nested_graph.is_some())
-    }) {
-        return Err(ComponentError::InvalidReference {
-            kind: "dropped graph owner",
-            index: owner.to_index(),
-        });
+        // A dropped node that holds a graph would leave that graph without a node.
+        if graph.layerless_nodes[node].nested_graph.is_some() {
+            return Err(ComponentError::InvalidReference {
+                kind: "dropped graph owner",
+                index: node.to_index(),
+            });
+        }
     }
     if split == ComponentSplit::Active
         && let Some((owner, _)) = graph
@@ -510,14 +505,22 @@ fn drop_nodes_renumbered(
         remap_graph_references(&mut graphs[other], id, &node_map, &edge_map)?;
     }
     if split == ComponentSplit::Inactive {
-        // The nodes are in their new places now, so each holder names the id it has now.
+        // The nodes are in their new places now, so each holder names the id it has now. A node
+        // before the first dropped one kept its id.
         let holders = graphs[id]
             .nodes_with_ids()
+            .skip(first.to_index())
             .filter_map(|(node, data)| data.nested_graph.map(|nested| (node, nested)))
             .collect::<Vec<_>>();
         for (node, nested) in holders {
-            if let Some(parent) = &mut graphs[nested].parent {
-                parent.node = node;
+            match &mut graphs[nested].parent {
+                Some(parent) if parent.graph == id => parent.node = node,
+                _ => {
+                    return Err(ComponentError::InvalidReference {
+                        kind: "graph parent",
+                        index: node.to_index(),
+                    });
+                }
             }
         }
     }

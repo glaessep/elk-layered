@@ -231,6 +231,43 @@ fn compound_run_preserves_official_reverse_discovery_order() {
     );
 }
 
+// Mutation: leave out the refresh of `parent` in `CompoundRun::into_executions`. The report then
+// names node 1, which is `x` after the drop, as the node that holds the graph.
+#[test]
+fn a_compound_execution_names_the_node_that_holds_its_graph_after_a_drop() {
+    let mut root = LGraph::new("root", LayeredOptions::default());
+    root.layerless_nodes.push(LNode::new("x", 10.0, 10.0, None));
+    root.layerless_nodes.push(LNode::new("h", 10.0, 10.0, None));
+    let mut graphs = GraphArena::new(root);
+    let inner = graphs.nest(
+        GraphId::ROOT,
+        NodeId::new(1),
+        LGraph::new("inner", LayeredOptions::default()),
+    );
+    let run = compound_run(&graphs);
+    crate::components::drop_nodes(
+        &mut graphs,
+        GraphId::ROOT,
+        &[NodeId::new(0)],
+        ComponentSplit::Inactive,
+    )
+    .unwrap();
+
+    let executions = run.into_executions(&graphs);
+
+    let execution = executions
+        .iter()
+        .find(|execution| execution.graph == inner)
+        .unwrap();
+    assert_eq!(
+        execution.parent,
+        Some(GraphParent {
+            graph: GraphId::ROOT,
+            node: NodeId::new(0),
+        })
+    );
+}
+
 // Mutation: drop the `.rev()` in `CompoundRun::into_executions`. The results then come in
 // discovery order, root first.
 #[test]

@@ -574,6 +574,43 @@ fn outside_a_split_a_node_that_holds_a_graph_after_a_dropped_node_moves_down() {
     assert_eq!(graphs[after].parent.unwrap().node, NodeId::new(3));
 }
 
+// Mutation: write the new id into `GraphParent.node` without checking `GraphParent.graph`. The
+// graph that names another graph as its parent then gets a node id of the wrong graph, silently.
+#[test]
+fn a_graph_that_names_another_parent_is_an_error() {
+    let mut graphs = GraphArena::new(graph_with_a_node_to_drop());
+    let nested = graphs.nest(
+        GraphId::ROOT,
+        NodeId::new(4),
+        LGraph::new("inner", LayeredOptions::default()),
+    );
+    let other = graphs.nest(
+        GraphId::ROOT,
+        NodeId::new(0),
+        LGraph::new("other", LayeredOptions::default()),
+    );
+    graphs[nested].parent = Some(crate::graph::GraphParent {
+        graph: other,
+        node: NodeId::new(4),
+    });
+
+    let error = drop_nodes(
+        &mut graphs,
+        GraphId::ROOT,
+        &[NodeId::new(2)],
+        ComponentSplit::Inactive,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        ComponentError::DroppedReference {
+            kind: "graph parent",
+            index: 3
+        }
+    );
+}
+
 // Mutation: leave out the check that a dropped node holds no graph. The graph inside `r` then
 // stays in the arena, naming a node that is gone.
 #[test]
@@ -842,7 +879,7 @@ fn a_component_drops_a_node_between_split_and_combine() {
     }
     std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
     let r = graphs.root().node_named("r");
-    drop_nodes(&mut graphs, GraphId::ROOT, &[r], ComponentSplit::Inactive).unwrap();
+    drop_nodes(&mut graphs, GraphId::ROOT, &[r], ComponentSplit::Active).unwrap();
     std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
 
     combine(&mut graphs, components).unwrap();

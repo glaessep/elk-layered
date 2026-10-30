@@ -61,14 +61,19 @@ impl CompoundRun {
         Ok(Self { algorithms })
     }
 
-    fn into_executions(self) -> Vec<GraphExecution> {
+    pub(super) fn into_executions(self, graphs: &GraphArena) -> Vec<GraphExecution> {
         // ELK's `collectAllGraphsBottomUp` returns the reverse of discovery order. This is not
         // interchangeable with ordinary DFS postorder: sibling subtrees are interleaved in a
         // public, error-observable order.
         self.algorithms
             .into_iter()
             .rev()
-            .map(|algorithm| algorithm.execution)
+            .map(|mut algorithm| {
+                // The copy from the start of the run is stale when a drop moved the node that
+                // holds the graph.
+                algorithm.execution.parent = graphs[algorithm.execution.graph].parent;
+                algorithm.execution
+            })
             .collect()
     }
 }
@@ -129,7 +134,7 @@ pub fn execute_ported_compound_processors(
         execute_compound_graph_round(graphs, &mut run.algorithms)?;
     }
 
-    Ok(run.into_executions())
+    Ok(run.into_executions(graphs))
 }
 
 /// One round: every nested graph, deepest first, runs until it reaches a hierarchy-aware
@@ -166,7 +171,7 @@ fn execute_compound_algorithm_until_pause(
             processor,
         )?;
         if processor == Processor::Intermediate(IntermediateProcessor::HierarchicalNodeResizer)
-            && let Some(parent) = algorithm.execution.parent
+            && let Some(parent) = graphs[algorithm.execution.graph].parent
         {
             let size = actual_graph_size(&graphs[algorithm.execution.graph]);
             let (nested, parent_graph) = graphs.pair_mut(algorithm.execution.graph, parent.graph);
