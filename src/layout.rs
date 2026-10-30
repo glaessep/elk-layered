@@ -45,10 +45,8 @@ use crate::pipeline::{self, PipelineError};
 /// # Errors
 ///
 /// Returns an [`Error`] for a graph elk-layered cannot lay out exactly as elkjs does: one
-/// that uses a port elk-layered cannot place yet (a port on a side across the layout flow,
-/// or a port of a node with children that sits on such a side), a label on a port of a node
-/// with children, a node with children that sizes itself to its ports, an edge between a port
-/// of the root and a node inside it, an option elk-layered does not support or cannot
+/// with a label on a port of a node with children, a node with children that sizes itself to
+/// its ports, an edge between a port of the root and a node inside it, an option elk-layered does not support or cannot
 /// read, an id used twice or not found, or a size that is no finite, non-negative number.
 ///
 /// Ports `RecursiveGraphLayoutEngine.layout` with the JSON round trip of elkjs's `JsonImporter`.
