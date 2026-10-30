@@ -481,8 +481,9 @@ fn dedicated_cross_edge_ports_are_not_reused() {
     assert_eq!(imported.hierarchy_edges.len(), edge_count);
 }
 
-// Mutation: key the dummies of a loop by its node, not by its edge, in `inside_self_loop_port_key`.
-// The loops then share one pair of dummies and the nested graph has 2 nodes.
+// Mutation: reuse the dummies of the first loop of a node for its later loops in
+// `transform_inside_self_loop`. The loops then share one pair of dummies and the nested graph has
+// 2 nodes.
 #[test]
 fn each_inside_self_loop_gets_its_own_pair_of_dummies() {
     let edge_count = 32usize;
@@ -594,8 +595,8 @@ fn importer_creates_nested_graph_for_inside_self_loop() {
     assert!(node.nested_graph.is_some());
 }
 
-// Mutation: key the dummies of a loop by its node, not by its edge, in `inside_self_loop_port_key`.
-// The two loops then share one pair of dummies.
+// Mutation: reuse the dummies of the first loop of a node for its later loops in
+// `transform_inside_self_loop`. The two loops then share one pair of dummies.
 #[test]
 fn importer_gives_each_inside_self_loop_its_own_dummies() {
     let graph = graph(

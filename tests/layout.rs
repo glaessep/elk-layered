@@ -2411,8 +2411,8 @@ fn a_node_without_children_gets_an_inside_self_loop() {
     );
 }
 
-// Mutation: key the dummies of a loop by its node, not by its edge, in `inside_self_loop_port_key`.
-// The second loop then shares the first one's route.
+// Mutation: reuse the dummies of the first loop of a node for its later loops in
+// `transform_inside_self_loop`. The second loop then shares the first one's route.
 #[test]
 fn two_inside_self_loops_on_one_node_get_two_routes() {
     let mut graph = inside_self_loop_graph();
@@ -2531,4 +2531,27 @@ fn an_inside_self_loop_at_a_port_is_unsupported() {
             "{source} -> {target}"
         );
     }
+}
+
+// Mutation: give the dummies of a loop the key `"{edge id}:source"` and `"{edge id}:target"` in
+// `transform_inside_self_loop` (`parent_port_key`). The loop then links to the named ports, and
+// g keeps them as its own ends of the loop.
+#[test]
+fn an_inside_self_loop_never_takes_a_port_the_caller_named_after_it() {
+    let mut graph = inside_self_loop_graph();
+    graph.children[0] = with_ports(
+        graph.children[0].clone(),
+        "FIXED_SIDE",
+        vec![
+            port("loop:source", 6.0, 6.0, "WEST"),
+            port("loop:target", 6.0, 6.0, "EAST"),
+        ],
+    );
+    let laid = layout(&graph).unwrap();
+    assert_eq!(size(&laid, "root"), (121.0, 116.0));
+    assert_eq!(at(&laid, "g"), (18.0, 12.0));
+    assert_eq!(
+        route(find_edge(&laid, "loop")),
+        vec![(90.0, 12.0), (90.0, 104.0)]
+    );
 }

@@ -199,10 +199,14 @@ fn port_settings(port: &ElkPort) -> Result<(PortSettings, Vec<LabelSettings>), E
     Ok((settings, labels))
 }
 
+/// The `feature` of the refusal for an inside self loop in a graph laid out on its own: ELK's
+/// importer looks for the loop in the run of its node and finds no end for it:
+/// `UnsupportedGraphException`.
+const INSIDE_SELF_LOOP_ALONE: &str = "an inside self loop in a graph laid out on its own";
+
 /// The `feature` of the refusal for an edge end that ELK's importer cannot find, such as an edge
 /// between a node and its own children when the children are laid out on their own:
 /// `UnsupportedGraphException`.
-const INSIDE_SELF_LOOP_ALONE: &str = "an inside self loop in a graph laid out on its own";
 const UNKNOWN_EDGE_END: &str = "an edge between a node and its own children laid out on their own";
 
 /// The most levels a node may sit below the root. ELK has no such limit; Rust's stack needs one.
@@ -749,11 +753,10 @@ impl<'a, 't> Work<'a, 't> {
         for edge_index in candidates {
             let edge = &tree.edges[edge_index];
             let element = edge_element(&edge.edge.id);
+            let inside_self_loop = self.is_inside_self_loop(edge);
             // elkjs fails on an inside self loop at a port with a JavaScript error, so there is no
             // layout to hold ours to.
-            if self.is_inside_self_loop(edge)
-                && (edge.source_port.is_some() || edge.target_port.is_some())
-            {
+            if inside_self_loop && (edge.source_port.is_some() || edge.target_port.is_some()) {
                 return Err(Error::Unsupported {
                     element,
                     feature: "an inside self loop at a port".to_string(),
@@ -762,7 +765,7 @@ impl<'a, 't> Work<'a, 't> {
             // `ElkGraphImporter.importFlatGraph` skips an inside self loop here and looks for it
             // in the run of its node. That run holds the node's children, not the node, so ELK
             // cannot find the loop's end: `UnsupportedGraphException`.
-            if !include && self.is_inside_self_loop(edge) {
+            if !include && inside_self_loop {
                 return Err(Error::Unsupported {
                     element,
                     feature: INSIDE_SELF_LOOP_ALONE.to_string(),
@@ -1112,7 +1115,8 @@ impl<'a, 't> Work<'a, 't> {
     /// Whether the edge is a self loop that `insideSelfLoops.yo` and the `insideSelfLoops.activate`
     /// of its node route inside the node.
     ///
-    /// Ports the test in `ElkGraphImporter.transformEdges`.
+    /// Ports the `isInsideSelfLoop` tests in `ElkGraphImporter.importFlatGraph` and
+    /// `importHierarchicalGraph`.
     fn is_inside_self_loop(&self, edge: &EdgeInfo<'_>) -> bool {
         edge.source == edge.target
             && edge.settings.inside_self_loops_yo

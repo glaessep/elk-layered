@@ -486,12 +486,14 @@ fn inside_self_loops_activate_refuses_a_value_that_is_no_boolean() {
 }
 
 // Mutation: read `insideSelfLoops.yo` into no field of the edge's settings, so `true` stays
-// false.
+// false. Or set the field whenever the key is present, so `false` turns into `true`.
 #[test]
 fn an_edge_reads_inside_self_loops_yo() {
     assert!(!edge_settings(&map(&[])).unwrap().inside_self_loops_yo);
     let on = edge_settings(&map(&[("elk.insideSelfLoops.yo", "true")])).unwrap();
     assert!(on.inside_self_loops_yo);
+    let off = edge_settings(&map(&[("org.eclipse.elk.insideSelfLoops.yo", "FALSE")])).unwrap();
+    assert!(!off.inside_self_loops_yo);
 }
 
 // Mutation: ignore the parse error of `insideSelfLoops.yo`.
