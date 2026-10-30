@@ -845,7 +845,9 @@ pub struct LayeredOptions {
     pub hierarchy_handling: HierarchyHandling,
     pub separate_connected_components: bool,
     pub aspect_ratio: f64,
+    /// `portLabels.placement`, with the deprecated options folded in.
     pub port_label_placement: PortLabelPlacement,
+    /// `portLabels.treatAsGroup`.
     pub port_labels_treat_as_group: bool,
     pub inside_self_loops_activate: bool,
     pub edge_routing: EdgeRouting,

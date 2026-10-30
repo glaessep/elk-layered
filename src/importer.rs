@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::common::cells::{self, CellLabel, CellNode, CellPorts};
+use crate::common::cells::{self, CellLabel, CellNode, CellPort, CellPortLabel, CellPorts};
 use crate::compound::{
     PendingCompoundSegment, PendingSegmentEndpoint, ScopedHierarchySegment,
     compound_label_segment_index, introduce_source_ported_scoped_edge_segments,
@@ -1342,10 +1342,73 @@ pub(crate) fn cell_node(node: &ElkInputNode) -> CellNode {
         label_node_spacing: parent.spacing.label_node,
         label_label_spacing: parent.spacing.label_label,
         fixed_graph_size: false,
-        // ELK hands the node's ports to the cells too. A node with children may not size itself
-        // to its ports, and its ports have no labels, so they change the result only with a
-        // negative border offset. That case is not ported.
-        ports: CellPorts::default(),
+        ports: cell_ports(node),
+    }
+}
+
+/// The ports of a node of the input graph, as `ElkGraphAdapters.ElkPortAdapter` shows them to
+/// the cells.
+///
+/// A node with children may not size itself to its ports, and their labels with text are
+/// refused, so the ports reach the minimum size only through `setupNodePaddingForPortsWithOffset`:
+/// a negative border offset, or the inside part of fixed labels.
+fn cell_ports(node: &ElkInputNode) -> CellPorts {
+    let parent = &node.parent_settings.options;
+    CellPorts {
+        ports: node
+            .ports
+            .iter()
+            // `ensureDefinedPortSide` gives every port of a graph's node a side before ELK sizes
+            // the node. A port the caller left without one has no part in the size here.
+            .filter(|port| port.side != PortSide::Undefined)
+            .map(|port| CellPort {
+                side: port.side,
+                size: LSize {
+                    width: port.width,
+                    height: port.height,
+                },
+                position: LPoint {
+                    x: port.x,
+                    y: port.y,
+                },
+                border_offset: port.border_offset,
+                ratio_or_position: 0.0,
+                // The adapter shows every label, those without text too.
+                labels: port
+                    .labels
+                    .iter()
+                    .map(|label| CellPortLabel {
+                        size: LSize {
+                            width: label.width,
+                            height: label.height,
+                        },
+                        position: LPoint {
+                            x: label.x,
+                            y: label.y,
+                        },
+                    })
+                    .collect(),
+                has_edges: false,
+                has_compound_connections: false,
+            })
+            .collect(),
+        constraints: match node.port_constraints {
+            None | Some(PortConstraints::Undefined) => PortConstraints::Free,
+            Some(other) => other,
+        },
+        label_placement: node.port_label_placement,
+        treat_as_group: node.port_labels_treat_as_group,
+        compound: true,
+        port_port_spacing: parent.spacing.port_port,
+        label_port_horizontal: parent.spacing.label_port_horizontal,
+        label_port_vertical: parent.spacing.label_port_vertical,
+        surrounding: ElkPadding {
+            top: parent.spacing.ports_surrounding.top,
+            right: parent.spacing.ports_surrounding.right,
+            bottom: parent.spacing.ports_surrounding.bottom,
+            left: parent.spacing.ports_surrounding.left,
+        },
+        alignment: node.port_alignment.unwrap_or(parent.port_alignment_default),
     }
 }
 
@@ -1460,7 +1523,14 @@ fn transform_port(
     // Inside self loops are refused, so `INSIDE_CONNECTIONS` stays false.
     initialize_port(&mut lport, constraints, node_size, graph.options.direction);
     for label in port.labels.iter().filter(|label| !label.text.is_empty()) {
-        lport.labels.push(label_to_lgraph(label));
+        // `transformLabel` keeps the given position. Only a port label reads it: one whose
+        // placement is fixed keeps it, and its bounds set the margins of its port.
+        let mut llabel = label_to_lgraph(label);
+        llabel.position = LPoint {
+            x: label.x,
+            y: label.y,
+        };
+        lport.labels.push(llabel);
     }
 
     if is_across_flow(graph.options.direction, lport.side) {
@@ -2043,10 +2113,6 @@ fn label_to_lgraph(label: &ElkInputLabel) -> LLabel {
     llabel.inline = label.inline;
     llabel.label_side = None;
     llabel.node_label_placement = label.node_label_placement;
-    llabel.position = LPoint {
-        x: label.x,
-        y: label.y,
-    };
     llabel
 }
 

@@ -46,7 +46,8 @@
 // With `--port-labels`, the generator is that of `--ports`, with its own seed and count, but a
 // port may sit on any of the four sides, and most ports have labels. A node with ports draws its
 // port label placement, `portLabels.treatAsGroup` and its size constraints, `PORTS` and
-// `PORT_LABELS` among them. Under the empty placement, the labels keep the positions they are
+// `PORT_LABELS` among them. Some nodes fix the ratio or the position of their ports, and some
+// graphs set `spacing.portsSurrounding`. Under the empty placement, the labels keep the positions they are
 // given. elkjs crashes on some of these graphs; `--drop-crashes` lists them in `dropped.txt`.
 //
 // The seed is fixed, so the same command writes the same files. Change the generator only to add
@@ -112,8 +113,6 @@ function label(text) {
 
 const WORDS = ["req", "ack", "x", "speed", "0..*", "1", "pedal %", "brake request", "on"];
 
-// elkjs gives back every field of the input, an empty `edges` list too, and elk-layered writes no
-// empty list. So the generator writes none either: a list appears only with something in it.
 // Draws the port label options of a node, and gives whether its port labels are fixed.
 function portLabelOptions(node) {
   const options = (node.layoutOptions ??= {});
@@ -144,6 +143,8 @@ function portLabelOptions(node) {
   return placement === "[]";
 }
 
+// elkjs gives back every field of the input, an empty `edges` list too, and elk-layered writes no
+// empty list. So the generator writes none either: a list appears only with something in it.
 function graph() {
   const options = { "elk.algorithm": "layered" };
   const direction = rand.pick([null, "RIGHT", "LEFT", "DOWN", "UP"]);
@@ -161,6 +162,9 @@ function graph() {
   if (rand.chance(0.2)) options["elk.spacing.nodeNode"] = String(rand.int(5, 40));
   if (rand.chance(0.2)) options["elk.layered.spacing.nodeNodeBetweenLayers"] = String(rand.int(10, 60));
   if (rand.chance(0.15)) options["elk.separateConnectedComponents"] = "false";
+  if (portLabels && rand.chance(0.4)) {
+    options["elk.spacing.portsSurrounding"] = `[top=${rand.int(0, 8)},left=${rand.int(0, 8)},bottom=${rand.int(0, 8)},right=${rand.int(0, 8)}]`;
+  }
 
   const root = { id: "root", layoutOptions: options, children: [] };
   const leaves = [];
@@ -237,13 +241,28 @@ function graph() {
       const constraint = oneSided
         ? rand.pick([null, "FREE", "FIXED_SIDE", "FIXED_ORDER"])
         : rand.pick([null, "FIXED_SIDE", "FIXED_SIDE", "FIXED_ORDER"]);
-      if (constraint) (node.layoutOptions ??= {})["elk.portConstraints"] = constraint;
+      // In this mode a node may also fix the ratio or the position of its ports, which then get
+      // a place on their side.
+      const placed = portLabels && rand.chance(0.3) ? rand.pick(["FIXED_RATIO", "FIXED_POS"]) : null;
+      const nodeConstraint = placed ?? constraint;
+      if (nodeConstraint) (node.layoutOptions ??= {})["elk.portConstraints"] = nodeConstraint;
       // The draws happen only in this mode, so the other corpora keep their random numbers.
       const fixedLabels = portLabels && portLabelOptions(node);
       node.ports = [];
       for (let i = 0, n = rand.int(1, 4); i < n; i++) {
         const port = { id: `p${p++}`, width: rand.int(4, 10), height: rand.int(4, 10) };
-        if (constraint && constraint !== "FREE") port.layoutOptions = { "elk.port.side": rand.pick(flowSides) };
+        if (nodeConstraint && nodeConstraint !== "FREE") port.layoutOptions = { "elk.port.side": rand.pick(flowSides) };
+        if (placed) {
+          const side = port.layoutOptions["elk.port.side"];
+          const along = (length, own) => rand.int(0, Math.max(0, Math.floor(length - own)));
+          if (side === "NORTH" || side === "SOUTH") {
+            port.x = along(node.width, port.width);
+            port.y = side === "NORTH" ? -port.height : node.height;
+          } else {
+            port.x = side === "WEST" ? -port.width : node.width;
+            port.y = along(node.height, port.height);
+          }
+        }
         if (portLabels && rand.chance(0.75)) {
           port.labels = [];
           for (let l = 0, m = rand.int(1, 2); l < m; l++) {

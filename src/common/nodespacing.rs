@@ -5,30 +5,9 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/NodeLabelAndSizeCalculator.java
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/NodeMarginCalculator.java
 
-use super::cells::{self, CellLabel, CellNode, CellPort, CellPortLabel, CellPorts};
+use super::cells::{self, CellLabel, CellNode, CellPort, CellPortLabel, CellPorts, Rect};
 use crate::graph::{LGraph, LMargin, LPadding, NodeId, PortId};
 use crate::options::ElkPadding;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-struct Rect {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-}
-
-impl Rect {
-    fn union(&mut self, other: Self) {
-        let min_x = self.x.min(other.x);
-        let min_y = self.y.min(other.y);
-        let max_x = (self.x + self.width).max(other.x + other.width);
-        let max_y = (self.y + self.height).max(other.y + other.height);
-        self.x = min_x;
-        self.y = min_y;
-        self.width = max_x - min_x;
-        self.height = max_y - min_y;
-    }
-}
 
 /// Sizes each node and places its ports and labels.
 ///

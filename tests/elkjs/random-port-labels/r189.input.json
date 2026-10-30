@@ -2,30 +2,85 @@
   "id": "root",
   "layoutOptions": {
     "elk.algorithm": "layered",
-    "elk.direction": "LEFT",
-    "elk.randomSeed": "149790"
+    "elk.direction": "RIGHT",
+    "elk.spacing.nodeNode": "16",
+    "elk.separateConnectedComponents": "false"
   },
   "children": [
     {
       "id": "n0",
-      "width": 108.5,
-      "height": 48.5,
+      "width": 35.5,
+      "height": 41.3,
       "layoutOptions": {
-        "elk.portConstraints": "FIXED_SIDE",
-        "elk.portLabels.placement": "[INSIDE, NEXT_TO_PORT_IF_POSSIBLE]"
+        "elk.portConstraints": "FIXED_POS",
+        "elk.portLabels.placement": "[OUTSIDE, ALWAYS_OTHER_SAME_SIDE]",
+        "elk.portLabels.treatAsGroup": "false",
+        "elk.nodeSize.constraints": "[PORTS, PORT_LABELS, NODE_LABELS, MINIMUM_SIZE]",
+        "elk.nodeSize.options": "[PORTS_OVERHANG]"
       },
       "ports": [
         {
           "id": "p0",
-          "width": 10,
-          "height": 8,
+          "width": 5,
+          "height": 10,
           "layoutOptions": {
-            "elk.port.side": "SOUTH"
+            "elk.port.side": "WEST"
           },
+          "x": -5,
+          "y": 27,
           "labels": [
             {
-              "text": "ack",
+              "text": "on",
+              "width": 13,
+              "height": 14
+            },
+            {
+              "text": "0..*",
+              "width": 26,
+              "height": 14
+            }
+          ]
+        },
+        {
+          "id": "p1",
+          "width": 4,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "NORTH"
+          },
+          "x": 13,
+          "y": -8,
+          "labels": [
+            {
+              "text": "on",
+              "width": 13,
+              "height": 14
+            },
+            {
+              "text": "req",
               "width": 19.5,
+              "height": 14
+            }
+          ]
+        },
+        {
+          "id": "p2",
+          "width": 7,
+          "height": 5,
+          "layoutOptions": {
+            "elk.port.side": "NORTH"
+          },
+          "x": 13,
+          "y": -5,
+          "labels": [
+            {
+              "text": "req",
+              "width": 19.5,
+              "height": 14
+            },
+            {
+              "text": "pedal %",
+              "width": 45.5,
               "height": 14
             }
           ]
@@ -34,100 +89,104 @@
     },
     {
       "id": "n1",
-      "width": 33,
-      "height": 50.5,
-      "labels": [
-        {
-          "text": "A",
-          "width": 6.5,
-          "height": 14
-        }
-      ],
+      "width": 39.5,
+      "height": 30.5
+    },
+    {
+      "id": "n2",
+      "width": 97,
+      "height": 43,
       "layoutOptions": {
-        "elk.nodeLabels.placement": "[H_CENTER, V_CENTER, INSIDE]",
+        "elk.portConstraints": "FIXED_POS",
         "elk.portLabels.placement": "[]"
       },
       "ports": [
         {
-          "id": "p1",
-          "width": 4,
-          "height": 4
-        },
-        {
-          "id": "p2",
-          "width": 8,
-          "height": 5,
-          "labels": [
-            {
-              "text": "req",
-              "width": 19.5,
-              "height": 14,
-              "x": 8,
-              "y": -17
-            }
-          ]
-        },
-        {
           "id": "p3",
-          "width": 4,
-          "height": 5,
+          "width": 10,
+          "height": 6,
+          "layoutOptions": {
+            "elk.port.side": "EAST"
+          },
+          "x": 97,
+          "y": 28,
           "labels": [
             {
               "text": "req",
               "width": 19.5,
               "height": 14,
-              "x": -18,
-              "y": -11
-            },
-            {
-              "text": "brake request",
-              "width": 84.5,
-              "height": 14,
-              "x": -6,
-              "y": -17
+              "x": -9,
+              "y": -18
             }
           ]
         },
         {
           "id": "p4",
-          "width": 4,
-          "height": 9,
+          "width": 5,
+          "height": 7,
+          "layoutOptions": {
+            "elk.port.side": "SOUTH"
+          },
+          "x": 6,
+          "y": 43,
           "labels": [
             {
-              "text": "0..*",
-              "width": 26,
+              "text": "pedal %",
+              "width": 45.5,
               "height": 14,
-              "x": 9,
-              "y": -11
+              "x": -10,
+              "y": -19
+            }
+          ]
+        },
+        {
+          "id": "p5",
+          "width": 6,
+          "height": 10,
+          "layoutOptions": {
+            "elk.port.side": "NORTH"
+          },
+          "x": 40,
+          "y": -10,
+          "labels": [
+            {
+              "text": "1",
+              "width": 6.5,
+              "height": 14,
+              "x": 0,
+              "y": 10
             },
             {
-              "text": "brake request",
-              "width": 84.5,
+              "text": "speed",
+              "width": 32.5,
               "height": 14,
-              "x": -6,
-              "y": 5
+              "x": -3,
+              "y": -10
             }
           ]
         }
       ]
     },
     {
-      "id": "n2",
-      "width": 107,
-      "height": 49,
+      "id": "n3",
+      "width": 113,
+      "height": 26,
       "layoutOptions": {
-        "elk.portConstraints": "FIXED_SIDE",
-        "elk.portLabels.placement": "INSIDE",
-        "elk.nodeSize.constraints": "[PORTS]"
+        "elk.portConstraints": "FIXED_POS",
+        "elk.portLabels.placement": "[OUTSIDE, ALWAYS_SAME_SIDE]",
+        "elk.nodeSize.constraints": "[PORTS]",
+        "elk.nodeSize.options": "[UNIFORM_PORT_SPACING]"
       },
       "ports": [
         {
-          "id": "p5",
+          "id": "p6",
           "width": 6,
           "height": 5,
           "layoutOptions": {
-            "elk.port.side": "SOUTH"
+            "elk.port.side": "NORTH"
           },
+          "x": 95,
+          "y": -5,
           "labels": [
             {
               "text": "1",
@@ -140,53 +199,43 @@
               "height": 14
             }
           ]
-        }
-      ]
-    },
-    {
-      "id": "n3",
-      "width": 56,
-      "height": 58
-    },
-    {
-      "id": "n4",
-      "width": 59.5,
-      "height": 45,
-      "labels": [
+        },
         {
-          "text": "ECU",
-          "width": 19.5,
-          "height": 14
-        }
-      ],
-      "layoutOptions": {
-        "elk.nodeLabels.placement": "[H_CENTER, V_CENTER, INSIDE]",
-        "elk.portConstraints": "FIXED_SIDE",
-        "elk.portLabels.placement": "[]",
-        "elk.nodeSize.constraints": "[PORTS]"
-      },
-      "ports": [
-        {
-          "id": "p6",
+          "id": "p7",
           "width": 7,
-          "height": 9,
+          "height": 5,
           "layoutOptions": {
             "elk.port.side": "EAST"
           },
+          "x": 113,
+          "y": 14,
           "labels": [
-            {
-              "text": "brake request",
-              "width": 84.5,
-              "height": 14,
-              "x": 12,
-              "y": -20
-            },
             {
               "text": "ack",
               "width": 19.5,
-              "height": 14,
-              "x": -10,
-              "y": 2
+              "height": 14
+            },
+            {
+              "text": "x",
+              "width": 6.5,
+              "height": 14
+            }
+          ]
+        },
+        {
+          "id": "p8",
+          "width": 7,
+          "height": 7,
+          "layoutOptions": {
+            "elk.port.side": "SOUTH"
+          },
+          "x": 21,
+          "y": 26,
+          "labels": [
+            {
+              "text": "0..*",
+              "width": 26,
+              "height": 14
             }
           ]
         }
@@ -200,65 +249,44 @@
         "n2"
       ],
       "targets": [
-        "n3"
-      ]
-    },
-    {
-      "id": "e1",
-      "sources": [
-        "n3"
-      ],
-      "targets": [
-        "n2"
-      ]
-    },
-    {
-      "id": "e2",
-      "sources": [
-        "p1"
-      ],
-      "targets": [
-        "p5"
-      ]
-    },
-    {
-      "id": "e3",
-      "sources": [
-        "p1"
-      ],
-      "targets": [
         "n0"
-      ]
-    },
-    {
-      "id": "e4",
-      "sources": [
-        "n0"
-      ],
-      "targets": [
-        "p1"
       ],
       "labels": [
         {
-          "text": "speed",
-          "width": 32.5,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "CENTER"
-          }
-        },
-        {
           "text": "0..*",
           "width": 26,
+          "height": 14
+        },
+        {
+          "text": "pedal %",
+          "width": 45.5,
           "height": 14,
           "layoutOptions": {
-            "elk.edgeLabels.placement": "TAIL"
+            "elk.edgeLabels.placement": "HEAD"
           }
         }
       ]
     },
     {
-      "id": "e5",
+      "id": "e1",
+      "sources": [
+        "p6"
+      ],
+      "targets": [
+        "p7"
+      ]
+    },
+    {
+      "id": "e2",
+      "sources": [
+        "n1"
+      ],
+      "targets": [
+        "p6"
+      ]
+    },
+    {
+      "id": "e3",
       "sources": [
         "p4"
       ],
@@ -267,67 +295,21 @@
       ]
     },
     {
-      "id": "e6",
+      "id": "e4",
       "sources": [
-        "p5"
+        "p1"
       ],
       "targets": [
         "n2"
       ]
     },
     {
-      "id": "e7",
-      "sources": [
-        "p5"
-      ],
-      "targets": [
-        "p0"
-      ]
-    },
-    {
-      "id": "e8",
-      "sources": [
-        "n4"
-      ],
-      "targets": [
-        "p4"
-      ]
-    },
-    {
-      "id": "e9",
-      "sources": [
-        "n1"
-      ],
-      "targets": [
-        "p0"
-      ]
-    },
-    {
-      "id": "e10",
+      "id": "e5",
       "sources": [
         "n0"
       ],
       "targets": [
-        "p5"
-      ],
-      "labels": [
-        {
-          "text": "pedal %",
-          "width": 45.5,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "TAIL"
-          }
-        }
-      ]
-    },
-    {
-      "id": "e11",
-      "sources": [
-        "n2"
-      ],
-      "targets": [
-        "n3"
+        "p1"
       ],
       "labels": [
         {
@@ -337,79 +319,101 @@
           "layoutOptions": {
             "elk.edgeLabels.placement": "CENTER"
           }
+        },
+        {
+          "text": "brake request",
+          "width": 84.5,
+          "height": 14
         }
+      ]
+    },
+    {
+      "id": "e6",
+      "sources": [
+        "n0"
+      ],
+      "targets": [
+        "p5"
+      ]
+    },
+    {
+      "id": "e7",
+      "sources": [
+        "p7"
+      ],
+      "targets": [
+        "p6"
+      ]
+    },
+    {
+      "id": "e8",
+      "sources": [
+        "p7"
+      ],
+      "targets": [
+        "p6"
+      ]
+    },
+    {
+      "id": "e9",
+      "sources": [
+        "p3"
+      ],
+      "targets": [
+        "p6"
+      ],
+      "labels": [
+        {
+          "text": "1",
+          "width": 6.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "CENTER"
+          }
+        }
+      ]
+    },
+    {
+      "id": "e10",
+      "sources": [
+        "p4"
+      ],
+      "targets": [
+        "p5"
+      ]
+    },
+    {
+      "id": "e11",
+      "sources": [
+        "p7"
+      ],
+      "targets": [
+        "n2"
       ]
     },
     {
       "id": "e12",
       "sources": [
-        "n4"
+        "p7"
       ],
       "targets": [
         "n2"
-      ],
-      "labels": [
-        {
-          "text": "x",
-          "width": 6.5,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "TAIL"
-          }
-        }
       ]
     },
     {
       "id": "e13",
       "sources": [
-        "p5"
+        "n3"
       ],
       "targets": [
-        "p5"
-      ]
-    },
-    {
-      "id": "e14",
-      "sources": [
-        "p0"
-      ],
-      "targets": [
-        "p5"
+        "p1"
       ],
       "labels": [
         {
-          "text": "on",
-          "width": 13,
+          "text": "ack",
+          "width": 19.5,
           "height": 14
         },
-        {
-          "text": "req",
-          "width": 19.5,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "HEAD"
-          }
-        }
-      ]
-    },
-    {
-      "id": "e15",
-      "sources": [
-        "p0"
-      ],
-      "targets": [
-        "p5"
-      ]
-    },
-    {
-      "id": "e16",
-      "sources": [
-        "p5"
-      ],
-      "targets": [
-        "n2"
-      ],
-      "labels": [
         {
           "text": "0..*",
           "width": 26,
@@ -417,6 +421,100 @@
           "layoutOptions": {
             "elk.edgeLabels.placement": "HEAD"
           }
+        }
+      ]
+    },
+    {
+      "id": "e14",
+      "sources": [
+        "p1"
+      ],
+      "targets": [
+        "n2"
+      ]
+    },
+    {
+      "id": "e15",
+      "sources": [
+        "n3"
+      ],
+      "targets": [
+        "p8"
+      ],
+      "labels": [
+        {
+          "text": "speed",
+          "width": 32.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "TAIL"
+          }
+        },
+        {
+          "text": "1",
+          "width": 6.5,
+          "height": 14
+        }
+      ]
+    },
+    {
+      "id": "e16",
+      "sources": [
+        "n3"
+      ],
+      "targets": [
+        "p6"
+      ]
+    },
+    {
+      "id": "e17",
+      "sources": [
+        "p3"
+      ],
+      "targets": [
+        "n3"
+      ],
+      "labels": [
+        {
+          "text": "req",
+          "width": 19.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "HEAD"
+          }
+        },
+        {
+          "text": "0..*",
+          "width": 26,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "HEAD"
+          }
+        }
+      ]
+    },
+    {
+      "id": "e18",
+      "sources": [
+        "p7"
+      ],
+      "targets": [
+        "p5"
+      ]
+    },
+    {
+      "id": "e19",
+      "sources": [
+        "n2"
+      ],
+      "targets": [
+        "p6"
+      ],
+      "labels": [
+        {
+          "text": "ack",
+          "width": 19.5,
+          "height": 14
         }
       ]
     }

@@ -2118,7 +2118,7 @@ fn the_deprecated_space_efficient_size_option_becomes_a_port_label_placement() {
 }
 
 // Mutation: drop the `is_valid` check after the deprecated options in `node_settings`. elkjs
-// fails both graphs with "Invalid port label placement".
+// fails all four graphs with "Invalid port label placement", the root ones too.
 #[test]
 fn an_invalid_port_label_placement_is_an_error() {
     let cases: [&[(&str, &str)]; 2] = [
@@ -2136,6 +2136,13 @@ fn an_invalid_port_label_placement_is_an_error() {
         assert!(
             matches!(error_of(&graph), Error::InvalidOptionValue { .. }),
             "{opts:?}"
+        );
+        // elkjs refuses the set on the root too, though the root has no ports to place.
+        let mut graph = root(vec![node("a", 10.0, 10.0)], vec![]);
+        graph.layout_options = options(opts);
+        assert!(
+            matches!(error_of(&graph), Error::InvalidOptionValue { .. }),
+            "root {opts:?}"
         );
     }
 }
@@ -2262,4 +2269,25 @@ fn two_labels_with_one_right_border_hide_the_second_from_the_overlap_removal() {
         port_label_positions(&laid, "n"),
         [[(7.0, -9.0)], [(7.0, -18.0)], [(7.0, -18.0)]]
     );
+}
+
+// Mutation: in `cell_ports` of src/importer.rs, hand no ports to the cells. The group then loses
+// the 5 its port reaches into it.
+#[test]
+fn a_negative_border_offset_on_a_group_port_widens_the_group() {
+    // elkjs 0.9.3 returns these numbers. `calculateMinimumGraphSize` pads the node by the 5 the
+    // west port reaches inside.
+    let mut p = port("p", 6.0, 6.0, "WEST");
+    p.layout_options
+        .insert("elk.port.borderOffset".into(), "-5".into());
+    let mut g = group("g", vec![node("c", 20.0, 20.0)]);
+    g.labels = vec![label("Group", 40.0, 14.0)];
+    g.layout_options = options(&[
+        ("elk.nodeSize.constraints", "[NODE_LABELS]"),
+        ("elk.nodeLabels.placement", "[H_LEFT, V_TOP, INSIDE]"),
+        ("elk.portConstraints", "FIXED_SIDE"),
+    ]);
+    g.ports = vec![p];
+    let laid = layout(&root(vec![g], vec![])).unwrap();
+    assert_eq!(size(&laid, "g").0, 95.0);
 }

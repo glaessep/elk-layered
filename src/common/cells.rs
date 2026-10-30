@@ -165,17 +165,18 @@ pub(crate) struct CellResult {
     pub(crate) port_label_positions: Vec<Vec<Option<LPoint>>>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-struct Rect {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
+/// Source: `ElkRectangle`. `NodeMarginCalculator` in `nodespacing.rs` uses it too.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(super) struct Rect {
+    pub(super) x: f64,
+    pub(super) y: f64,
+    pub(super) width: f64,
+    pub(super) height: f64,
 }
 
 impl Rect {
     /// Source: `ElkRectangle.union`.
-    fn union(&mut self, other: Self) {
+    pub(super) fn union(&mut self, other: Self) {
         let mut x1 = f64::min(self.x, other.x);
         let mut y1 = f64::min(self.y, other.y);
         let mut x2 = f64::max(self.x + self.width, other.x + other.width);
@@ -1276,8 +1277,11 @@ impl<'a> Context<'a> {
             .collect()
     }
 
-    fn port(&self, context: usize) -> &CellPort {
-        &self.node.ports.ports[self.port_contexts[context].port]
+    /// The port of a context. It borrows from the node, not from `self`, so the cells and the
+    /// contexts stay free to change.
+    fn port(&self, context: usize) -> &'a CellPort {
+        let node: &'a CellNode = self.node;
+        &node.ports.ports[self.port_contexts[context].port]
     }
 
     fn inside_cell(&self, side: PortSide) -> CellId {
@@ -1408,7 +1412,7 @@ impl<'a> Context<'a> {
         let symmetry = !self.node.sizing.options.contains(SizeOptions::ASYMMETRICAL);
         let fixed = self.node.ports.label_placement.is_fixed();
         for context in 0..self.port_contexts.len() {
-            let port = self.port(context).clone();
+            let port = self.port(context);
             let padding = &mut self.cells.cells[self.node_container].padding;
             let mut port_border_offset = 0.0;
             if let Some(offset) = port.border_offset {
@@ -1424,7 +1428,7 @@ impl<'a> Context<'a> {
                 }
             }
             if fixed {
-                let inside_part = Self::compute_inside_part(&port, port_border_offset);
+                let inside_part = Self::compute_inside_part(port, port_border_offset);
                 match port.side {
                     PortSide::North => {
                         let bigger = inside_part > padding.top;
@@ -1530,8 +1534,9 @@ impl<'a> Context<'a> {
         let surrounding = ports.surrounding;
         let spacing = ports.port_port_spacing;
         // The vertical calculator sets up the margins once, before the loop. The horizontal one
-        // does it for every port, which gives the same margins.
-        if !horizontal && port_labels {
+        // does it again for every port, which gives the same margins each time, so here both do
+        // it once.
+        if port_labels {
             self.setup_port_margins(side);
         }
         let (near_surrounding, far_surrounding) = if horizontal {
@@ -1559,9 +1564,6 @@ impl<'a> Context<'a> {
             } else {
                 port.size.height
             };
-            if horizontal && port_labels {
-                self.setup_port_margins(side);
-            }
             let current_margin = self.port_contexts[context].margin;
             match previous {
                 None => {
@@ -1748,7 +1750,7 @@ impl<'a> Context<'a> {
             let label_width = self.port_contexts[context]
                 .label_cell
                 .map_or(0.0, |cell| self.cells.minimum_width(cell));
-            let port = self.port(context).clone();
+            let port = self.port(context);
             let next_to_port = self.port_contexts[context].labels_next_to_port;
             let margin = &mut self.port_contexts[context].margin;
             if label_width > 0.0 {
@@ -1762,7 +1764,7 @@ impl<'a> Context<'a> {
                     margin.right = self.node.ports.label_port_horizontal + label_width;
                 }
             } else if fixed {
-                let bounds = Self::labels_bounds(&port);
+                let bounds = Self::labels_bounds(port);
                 if bounds.x < 0.0 {
                     margin.left = -bounds.x;
                 }
@@ -1780,7 +1782,7 @@ impl<'a> Context<'a> {
         for &context in contexts {
             let label_cell = self.port_contexts[context].label_cell;
             let label_height = label_cell.map_or(0.0, |cell| self.cells.minimum_height(cell));
-            let port = self.port(context).clone();
+            let port = self.port(context);
             if label_height > 0.0 {
                 if self.port_contexts[context].labels_next_to_port {
                     let port_height = port.size.height;
@@ -1806,7 +1808,7 @@ impl<'a> Context<'a> {
                         self.node.ports.label_port_vertical + label_height;
                 }
             } else if fixed {
-                let bounds = Self::labels_bounds(&port);
+                let bounds = Self::labels_bounds(port);
                 let margin = &mut self.port_contexts[context].margin;
                 if bounds.y < 0.0 {
                     margin.top = -bounds.y;
@@ -2040,24 +2042,24 @@ impl<'a> Context<'a> {
             match self.node.ports.constraints {
                 PortConstraints::FixedPos => {
                     for context in self.side_contexts(side) {
-                        let port = self.port(context).clone();
+                        let port = self.port(context);
                         if horizontal {
-                            self.port_contexts[context].position.y = horizontal_port_y(&port);
+                            self.port_contexts[context].position.y = horizontal_port_y(port);
                         } else {
                             self.port_contexts[context].position.x =
-                                vertical_port_x(&port, self.node_size.width);
+                                vertical_port_x(port, self.node_size.width);
                         }
                     }
                 }
                 PortConstraints::FixedRatio => {
                     for context in self.side_contexts(side) {
-                        let port = self.port(context).clone();
+                        let port = self.port(context);
                         let position = &mut self.port_contexts[context].position;
                         if horizontal {
                             position.x = self.node_size.width * port.ratio_or_position;
-                            position.y = horizontal_port_y(&port);
+                            position.y = horizontal_port_y(port);
                         } else {
-                            position.x = vertical_port_x(&port, self.node_size.width);
+                            position.x = vertical_port_x(port, self.node_size.width);
                             position.y = self.node_size.height * port.ratio_or_position;
                         }
                     }
@@ -2148,15 +2150,15 @@ impl<'a> Context<'a> {
         }
         let node_width = self.node_size.width;
         for context in contexts {
-            let port = self.port(context).clone();
+            let port = self.port(context);
             let margin = self.port_contexts[context].margin;
             let position = &mut self.port_contexts[context].position;
             if horizontal {
                 position.x = current + margin.left;
-                position.y = horizontal_port_y(&port);
+                position.y = horizontal_port_y(port);
                 current += margin.left + port.size.width + margin.right + space_between_ports;
             } else {
-                position.x = vertical_port_x(&port, node_width);
+                position.x = vertical_port_x(port, node_width);
                 position.y = current + margin.top;
                 current += margin.top + port.size.height + margin.bottom + space_between_ports;
             }
@@ -2235,7 +2237,7 @@ impl<'a> Context<'a> {
             let Some(cell) = self.filled_label_cell(context) else {
                 continue;
             };
-            let port = self.port(context).clone();
+            let port = self.port(context);
             let next_to_port = self.port_contexts[context].labels_next_to_port;
             let port_border_offset = port.border_offset.unwrap_or(0.0);
             let (h, v) = match side {
@@ -2341,7 +2343,7 @@ impl<'a> Context<'a> {
             let Some(cell) = self.filled_label_cell(context) else {
                 continue;
             };
-            let port = self.port(context).clone();
+            let port = self.port(context);
             let position = self.port_contexts[context].position;
             let mut rect = self.size_label_cell(cell, HAlign::Right, vertical);
             center_port_label(&mut rect, position, port.size, left_border, right_border);

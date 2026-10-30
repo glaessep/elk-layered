@@ -2,152 +2,26 @@
   "id": "root",
   "layoutOptions": {
     "elk.algorithm": "layered",
-    "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES"
+    "elk.direction": "LEFT",
+    "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+    "elk.randomSeed": "1",
+    "elk.spacing.portsSurrounding": "[top=8,left=0,bottom=8,right=4]"
   },
   "children": [
     {
       "id": "n0",
-      "width": 110.5,
-      "height": 27.5,
+      "width": 34,
+      "height": 44,
       "layoutOptions": {
-        "elk.portConstraints": "FIXED_SIDE",
-        "elk.portLabels.placement": "[OUTSIDE, ALWAYS_OTHER_SAME_SIDE]"
-      },
-      "ports": [
-        {
-          "id": "p0",
-          "width": 9,
-          "height": 10,
-          "layoutOptions": {
-            "elk.port.side": "NORTH"
-          },
-          "labels": [
-            {
-              "text": "brake request",
-              "width": 84.5,
-              "height": 14,
-              "x": -85.5,
-              "y": -29
-            },
-            {
-              "text": "brake request",
-              "width": 84.5,
-              "height": 14,
-              "x": -85.5,
-              "y": -15
-            }
-          ],
-          "x": 50.75,
-          "y": -10
-        },
-        {
-          "id": "p1",
-          "width": 5,
-          "height": 10,
-          "layoutOptions": {
-            "elk.port.side": "SOUTH"
-          },
-          "labels": [
-            {
-              "text": "0..*",
-              "width": 26,
-              "height": 14,
-              "x": -27,
-              "y": 11
-            },
-            {
-              "text": "req",
-              "width": 19.5,
-              "height": 14,
-              "x": -20.5,
-              "y": 25
-            }
-          ],
-          "x": 52.75,
-          "y": 27.5
-        }
-      ],
-      "$H": 277,
-      "x": 1111.25,
-      "y": 475.66666666666663
-    },
-    {
-      "id": "n1",
-      "width": 0,
-      "height": 70,
-      "layoutOptions": {
-        "elk.portLabels.placement": "[OUTSIDE, SPACE_EFFICIENT]",
-        "elk.portLabels.treatAsGroup": "false",
+        "elk.portConstraints": "FIXED_ORDER",
+        "elk.portLabels.placement": "[OUTSIDE, ALWAYS_OTHER_SAME_SIDE]",
         "elk.nodeSize.constraints": "[PORTS]"
       },
       "ports": [
         {
-          "id": "p2",
+          "id": "p0",
           "width": 10,
-          "height": 9,
-          "labels": [
-            {
-              "text": "speed",
-              "width": 32.5,
-              "height": 14,
-              "x": 11,
-              "y": -29
-            },
-            {
-              "text": "pedal %",
-              "width": 45.5,
-              "height": 14,
-              "x": 11,
-              "y": -15
-            }
-          ],
-          "x": 0,
-          "y": 45.75
-        }
-      ],
-      "$H": 287,
-      "x": 867.6666666666666,
-      "y": 501.91666666666663
-    },
-    {
-      "id": "n2",
-      "width": 29,
-      "height": 30,
-      "layoutOptions": {
-        "elk.portConstraints": "FIXED_SIDE",
-        "elk.nodeSize.constraints": "[PORTS, PORT_LABELS, NODE_LABELS, MINIMUM_SIZE]"
-      },
-      "ports": [
-        {
-          "id": "p3",
-          "width": 4,
-          "height": 4,
-          "layoutOptions": {
-            "elk.port.side": "SOUTH"
-          },
-          "labels": [
-            {
-              "text": "0..*",
-              "width": 26,
-              "height": 14,
-              "x": 5,
-              "y": 5
-            },
-            {
-              "text": "on",
-              "width": 13,
-              "height": 14,
-              "x": 5,
-              "y": 19
-            }
-          ],
-          "x": 12.5,
-          "y": 30
-        },
-        {
-          "id": "p4",
-          "width": 9,
-          "height": 9,
+          "height": 10,
           "layoutOptions": {
             "elk.port.side": "NORTH"
           },
@@ -156,264 +30,271 @@
               "text": "1",
               "width": 6.5,
               "height": 14,
-              "x": 10,
-              "y": -29
-            },
-            {
-              "text": "speed",
-              "width": 32.5,
-              "height": 14,
-              "x": 10,
+              "x": 11,
               "y": -15
             }
           ],
-          "x": 10,
-          "y": -9
-        },
+          "x": 14,
+          "y": -10
+        }
+      ],
+      "$H": 277,
+      "x": 453,
+      "y": 58
+    },
+    {
+      "id": "n1",
+      "width": 88.5,
+      "height": 20,
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_POS",
+        "elk.portLabels.placement": "[]",
+        "elk.nodeSize.constraints": "[PORTS, PORT_LABELS, NODE_LABELS, MINIMUM_SIZE]"
+      },
+      "ports": [
         {
-          "id": "p5",
+          "id": "p1",
+          "width": 5,
+          "height": 8,
+          "layoutOptions": {
+            "elk.port.side": "SOUTH"
+          },
+          "x": 4,
+          "y": 20,
+          "labels": [
+            {
+              "text": "x",
+              "width": 6.5,
+              "height": 14,
+              "x": 16,
+              "y": -15
+            },
+            {
+              "text": "x",
+              "width": 6.5,
+              "height": 14,
+              "x": 16,
+              "y": 4
+            }
+          ]
+        }
+      ],
+      "$H": 283,
+      "x": 453,
+      "y": 172
+    },
+    {
+      "id": "n2",
+      "width": 4,
+      "height": 41,
+      "layoutOptions": {
+        "elk.portConstraints": "FIXED_POS",
+        "elk.portLabels.placement": "[OUTSIDE, ALWAYS_SAME_SIDE]",
+        "elk.nodeSize.constraints": "[PORTS]"
+      },
+      "ports": [
+        {
+          "id": "p2",
           "width": 9,
-          "height": 10,
+          "height": 5,
           "layoutOptions": {
             "elk.port.side": "WEST"
           },
+          "x": -9,
+          "y": 28,
           "labels": [
             {
               "text": "x",
               "width": 6.5,
               "height": 14,
               "x": -7.5,
-              "y": 11
+              "y": 6
             },
-            {
-              "text": "on",
-              "width": 13,
-              "height": 14,
-              "x": -14,
-              "y": 25
-            }
-          ],
-          "x": -9,
-          "y": 10
-        }
-      ],
-      "$H": 292,
-      "x": 499,
-      "y": 130.75
-    },
-    {
-      "id": "n3",
-      "width": 38,
-      "height": 50.5,
-      "$H": 303,
-      "x": 386.5,
-      "y": 471.25
-    },
-    {
-      "id": "n4",
-      "width": 39.5,
-      "height": 23.5,
-      "layoutOptions": {
-        "elk.portConstraints": "FIXED_SIDE",
-        "elk.portLabels.placement": "[OUTSIDE, ALWAYS_SAME_SIDE]"
-      },
-      "ports": [
-        {
-          "id": "p6",
-          "width": 7,
-          "height": 7,
-          "layoutOptions": {
-            "elk.port.side": "WEST"
-          },
-          "labels": [
             {
               "text": "req",
               "width": 19.5,
               "height": 14,
               "x": -20.5,
-              "y": 8
-            },
-            {
-              "text": "on",
-              "width": 13,
-              "height": 14,
-              "x": -14,
-              "y": 22
+              "y": 20
             }
-          ],
-          "x": -7,
-          "y": 11
+          ]
         }
       ],
-      "$H": 305,
-      "x": 386.5,
-      "y": 45
+      "$H": 288,
+      "x": 152,
+      "y": 12
     },
     {
-      "id": "n5",
-      "width": 119.5,
-      "height": 48.5,
-      "$H": 310,
-      "x": 658,
-      "y": 222.75
+      "id": "n3",
+      "width": 106.5,
+      "height": 49.5,
+      "$H": 293,
+      "x": 112.5,
+      "y": 94
     },
     {
-      "id": "n6",
-      "width": 103.5,
-      "height": 46,
-      "$H": 312,
-      "x": 836,
-      "y": 318.91666666666663
-    },
-    {
-      "id": "n7",
-      "width": 0,
-      "height": 88,
+      "id": "n4",
+      "width": 56.5,
+      "height": 109,
       "layoutOptions": {
         "elk.portConstraints": "FIXED_ORDER",
-        "elk.portLabels.placement": "[OUTSIDE, ALWAYS_SAME_SIDE]",
-        "elk.portLabels.treatAsGroup": "false",
+        "elk.portLabels.placement": "INSIDE",
         "elk.nodeSize.constraints": "[PORTS, PORT_LABELS]"
       },
       "ports": [
         {
-          "id": "p7",
+          "id": "p3",
           "width": 8,
-          "height": 9,
+          "height": 4,
           "layoutOptions": {
-            "elk.port.side": "EAST"
+            "elk.port.side": "WEST"
           },
           "labels": [
-            {
-              "text": "brake request",
-              "width": 84.5,
-              "height": 14,
-              "x": 9,
-              "y": 10
-            },
             {
               "text": "0..*",
               "width": 26,
               "height": 14,
               "x": 9,
+              "y": -5
+            }
+          ],
+          "x": -8,
+          "y": 44
+        },
+        {
+          "id": "p4",
+          "width": 4,
+          "height": 9,
+          "layoutOptions": {
+            "elk.port.side": "NORTH"
+          },
+          "labels": [
+            {
+              "text": "speed",
+              "width": 32.5,
+              "height": 14,
+              "x": -14.25,
+              "y": 10
+            },
+            {
+              "text": "ack",
+              "width": 19.5,
+              "height": 14,
+              "x": -7.75,
               "y": 24
             }
           ],
-          "x": 0,
-          "y": 10
+          "x": 28.25,
+          "y": -9
         }
       ],
-      "$H": 314,
-      "x": 217,
-      "y": 396.91666666666663
+      "$H": 295,
+      "x": 366.5,
+      "y": 191
     },
     {
-      "id": "n8",
-      "width": 61.5,
-      "height": 32,
+      "id": "n5",
+      "width": 72,
+      "height": 51,
+      "$H": 302,
+      "x": 12,
+      "y": 23.166666666666664
+    },
+    {
+      "id": "n6",
+      "width": 89.5,
+      "height": 57.5,
       "layoutOptions": {
-        "elk.portLabels.placement": "[OUTSIDE, NEXT_TO_PORT_IF_POSSIBLE]"
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.portLabels.placement": "INSIDE"
       },
       "ports": [
         {
-          "id": "p8",
-          "width": 10,
-          "height": 5,
-          "labels": [
-            {
-              "text": "speed",
-              "width": 32.5,
-              "height": 14,
-              "x": 11,
-              "y": 6
-            },
-            {
-              "text": "x",
-              "width": 6.5,
-              "height": 14,
-              "x": 11,
-              "y": 20
-            }
-          ],
-          "x": 61.5,
-          "y": 14.909090909090907
+          "id": "p5",
+          "width": 5,
+          "height": 6,
+          "layoutOptions": {
+            "elk.port.side": "NORTH"
+          },
+          "x": 44.25,
+          "y": -6
         },
         {
-          "id": "p9",
-          "width": 5,
-          "height": 8,
+          "id": "p6",
+          "width": 9,
+          "height": 7,
+          "layoutOptions": {
+            "elk.port.side": "SOUTH"
+          },
           "labels": [
             {
               "text": "speed",
               "width": 32.5,
               "height": 14,
-              "x": 6,
-              "y": 9
+              "x": -11.75,
+              "y": -29
+            },
+            {
+              "text": "on",
+              "width": 13,
+              "height": 14,
+              "x": -11.75,
+              "y": -15
             }
           ],
-          "x": 61.5,
-          "y": 5.18181818181818
+          "x": 42.25,
+          "y": 57.5
         }
       ],
-      "$H": 319,
-      "x": 12,
-      "y": 578.6439393939394
-    },
-    {
-      "id": "n9",
-      "width": 67,
-      "height": 57.5,
-      "$H": 326,
-      "x": 969.5,
-      "y": 463.41666666666663
+      "$H": 304,
+      "x": 239,
+      "y": 86.5
     }
   ],
   "edges": [
     {
       "id": "e0",
       "sources": [
-        "n4"
+        "n3"
       ],
       "targets": [
-        "p9"
+        "n5"
+      ],
+      "labels": [
+        {
+          "text": "x",
+          "width": 6.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "HEAD"
+          },
+          "x": 86,
+          "y": 57.833333333333336
+        }
       ],
       "sections": [
         {
           "id": "e0_s0",
           "startPoint": {
-            "x": 426,
-            "y": 50.875
+            "x": 112.5,
+            "y": 118.75
           },
           "endPoint": {
-            "x": 78.5,
-            "y": 587.8257575757575
+            "x": 84,
+            "y": 54.833333333333336
           },
           "bendPoints": [
             {
-              "x": 436,
-              "y": 50.875
+              "x": 102.5,
+              "y": 118.75
             },
             {
-              "x": 436,
-              "y": 34
-            },
-            {
-              "x": 147,
-              "y": 34
-            },
-            {
-              "x": 147,
-              "y": 587.8257575757575
+              "x": 102.5,
+              "y": 54.833333333333336
             }
           ],
-          "incomingShape": "n4",
-          "outgoingShape": "p9"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 436,
-          "y": 34
+          "incomingShape": "n3",
+          "outgoingShape": "n5"
         }
       ],
       "container": "root"
@@ -421,34 +302,34 @@
     {
       "id": "e1",
       "sources": [
-        "n7"
+        "n2"
       ],
       "targets": [
-        "p7"
+        "p2"
       ],
       "sections": [
         {
           "id": "e1_s0",
           "startPoint": {
-            "x": 217,
-            "y": 454.91666666666663
+            "x": 152,
+            "y": 12
           },
           "endPoint": {
-            "x": 225,
-            "y": 411.41666666666663
+            "x": 143,
+            "y": 42.5
           },
           "bendPoints": [
             {
-              "x": 320.5,
-              "y": 454.91666666666663
+              "x": 112.5,
+              "y": 12
             },
             {
-              "x": 320.5,
-              "y": 411.41666666666663
+              "x": 112.5,
+              "y": 42.5
             }
           ],
-          "incomingShape": "n7",
-          "outgoingShape": "p7"
+          "incomingShape": "n2",
+          "outgoingShape": "p2"
         }
       ],
       "container": "root"
@@ -456,815 +337,34 @@
     {
       "id": "e2",
       "sources": [
-        "p3"
+        "p0"
       ],
       "targets": [
-        "n5"
+        "p3"
       ],
       "sections": [
         {
           "id": "e2_s0",
           "startPoint": {
-            "x": 513.5,
-            "y": 164.75
+            "x": 472,
+            "y": 48
           },
           "endPoint": {
-            "x": 658,
-            "y": 247
+            "x": 358.5,
+            "y": 237
           },
           "bendPoints": [
             {
-              "x": 513.5,
-              "y": 247
-            }
-          ],
-          "incomingShape": "p3",
-          "outgoingShape": "n5"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 513.5,
-          "y": 247
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e3",
-      "sources": [
-        "p7"
-      ],
-      "targets": [
-        "p6"
-      ],
-      "sections": [
-        {
-          "id": "e3_s0",
-          "startPoint": {
-            "x": 225,
-            "y": 411.41666666666663
-          },
-          "endPoint": {
-            "x": 379.5,
-            "y": 59.5
-          },
-          "bendPoints": [
-            {
-              "x": 330.5,
-              "y": 411.41666666666663
+              "x": 472,
+              "y": 23
             },
             {
-              "x": 330.5,
-              "y": 59.5
-            }
-          ],
-          "incomingShape": "p7",
-          "outgoingShape": "p6"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e4",
-      "sources": [
-        "n8"
-      ],
-      "targets": [
-        "p5"
-      ],
-      "sections": [
-        {
-          "id": "e4_s0",
-          "startPoint": {
-            "x": 73.5,
-            "y": 580.3712121212121
-          },
-          "endPoint": {
-            "x": 490,
-            "y": 145.75
-          },
-          "bendPoints": [
-            {
-              "x": 127,
-              "y": 580.3712121212121
+              "x": 348.5,
+              "y": 23
             },
             {
-              "x": 127,
-              "y": 12
-            },
-            {
-              "x": 456,
-              "y": 12
-            },
-            {
-              "x": 456,
-              "y": 145.75
-            }
-          ],
-          "incomingShape": "n8",
-          "outgoingShape": "p5"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e5",
-      "sources": [
-        "p6"
-      ],
-      "targets": [
-        "p0"
-      ],
-      "sections": [
-        {
-          "id": "e5_s0",
-          "startPoint": {
-            "x": 379.5,
-            "y": 59.5
-          },
-          "endPoint": {
-            "x": 1166.5,
-            "y": 465.66666666666663
-          },
-          "bendPoints": [
-            {
-              "x": 330.5,
-              "y": 59.5
-            },
-            {
-              "x": 330.5,
-              "y": 374.91666666666663
-            },
-            {
-              "x": 1066.5,
-              "y": 374.91666666666663
-            },
-            {
-              "x": 1066.5,
-              "y": 334.25
-            },
-            {
-              "x": 1166.5,
-              "y": 334.25
-            }
-          ],
-          "incomingShape": "p6",
-          "outgoingShape": "p0"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 330.5,
-          "y": 374.91666666666663
-        },
-        {
-          "x": 1066.5,
-          "y": 374.91666666666663
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e6",
-      "sources": [
-        "p3"
-      ],
-      "targets": [
-        "n0"
-      ],
-      "sections": [
-        {
-          "id": "e6_s0",
-          "startPoint": {
-            "x": 513.5,
-            "y": 164.75
-          },
-          "endPoint": {
-            "x": 1111.25,
-            "y": 481.16666666666663
-          },
-          "bendPoints": [
-            {
-              "x": 513.5,
-              "y": 247
-            },
-            {
-              "x": 648,
-              "y": 247
-            },
-            {
-              "x": 648,
-              "y": 173.75
-            },
-            {
-              "x": 1066.5,
-              "y": 173.75
-            },
-            {
-              "x": 1066.5,
-              "y": 481.16666666666663
-            }
-          ],
-          "incomingShape": "p3",
-          "outgoingShape": "n0"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 648,
-          "y": 247
-        },
-        {
-          "x": 513.5,
-          "y": 247
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e7",
-      "sources": [
-        "n4"
-      ],
-      "targets": [
-        "p1"
-      ],
-      "sections": [
-        {
-          "id": "e7_s0",
-          "startPoint": {
-            "x": 426,
-            "y": 62.625
-          },
-          "endPoint": {
-            "x": 1166.5,
-            "y": 513.1666666666666
-          },
-          "bendPoints": [
-            {
-              "x": 436,
-              "y": 62.625
-            },
-            {
-              "x": 436,
-              "y": 292.25
-            },
-            {
-              "x": 1046.5,
-              "y": 292.25
-            },
-            {
-              "x": 1046.5,
-              "y": 552.1666666666666
-            },
-            {
-              "x": 1166.5,
-              "y": 552.1666666666666
-            }
-          ],
-          "incomingShape": "n4",
-          "outgoingShape": "p1"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 1046.5,
-          "y": 552.1666666666666
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e8",
-      "sources": [
-        "n9"
-      ],
-      "targets": [
-        "n0"
-      ],
-      "sections": [
-        {
-          "id": "e8_s0",
-          "startPoint": {
-            "x": 1036.5,
-            "y": 492.16666666666663
-          },
-          "endPoint": {
-            "x": 1111.25,
-            "y": 492.16666666666663
-          },
-          "incomingShape": "n9",
-          "outgoingShape": "n0"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e9",
-      "sources": [
-        "n4"
-      ],
-      "targets": [
-        "p4"
-      ],
-      "sections": [
-        {
-          "id": "e9_s0",
-          "startPoint": {
-            "x": 426,
-            "y": 56.75
-          },
-          "endPoint": {
-            "x": 513.5,
-            "y": 121.75
-          },
-          "bendPoints": [
-            {
-              "x": 513.5,
-              "y": 56.75
-            }
-          ],
-          "incomingShape": "n4",
-          "outgoingShape": "p4"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 513.5,
-          "y": 56.75
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e10",
-      "sources": [
-        "p6"
-      ],
-      "targets": [
-        "n1"
-      ],
-      "sections": [
-        {
-          "id": "e10_s0",
-          "startPoint": {
-            "x": 379.5,
-            "y": 59.5
-          },
-          "endPoint": {
-            "x": 867.6666666666666,
-            "y": 521.9166666666666
-          },
-          "bendPoints": [
-            {
-              "x": 330.5,
-              "y": 59.5
-            },
-            {
-              "x": 330.5,
-              "y": 374.91666666666663
-            },
-            {
-              "x": 446,
-              "y": 374.91666666666663
-            },
-            {
-              "x": 446,
-              "y": 281.25
-            },
-            {
-              "x": 797.5,
-              "y": 281.25
-            },
-            {
-              "x": 797.5,
-              "y": 521.9166666666666
-            }
-          ],
-          "incomingShape": "p6",
-          "outgoingShape": "n1"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 446,
-          "y": 374.91666666666663
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e11",
-      "sources": [
-        "p8"
-      ],
-      "targets": [
-        "n7"
-      ],
-      "sections": [
-        {
-          "id": "e11_s0",
-          "startPoint": {
-            "x": 83.5,
-            "y": 596.0530303030303
-          },
-          "endPoint": {
-            "x": 217,
-            "y": 440.91666666666663
-          },
-          "bendPoints": [
-            {
-              "x": 157,
-              "y": 596.0530303030303
-            },
-            {
-              "x": 157,
-              "y": 440.91666666666663
-            }
-          ],
-          "incomingShape": "p8",
-          "outgoingShape": "n7"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 157,
-          "y": 440.91666666666663
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e12",
-      "sources": [
-        "n6"
-      ],
-      "targets": [
-        "n0"
-      ],
-      "sections": [
-        {
-          "id": "e12_s0",
-          "startPoint": {
-            "x": 939.5,
-            "y": 349.5833333333333
-          },
-          "endPoint": {
-            "x": 1111.25,
-            "y": 486.66666666666663
-          },
-          "bendPoints": [
-            {
-              "x": 1056.5,
-              "y": 349.58333333333326
-            },
-            {
-              "x": 1056.5,
-              "y": 486.66666666666663
-            }
-          ],
-          "incomingShape": "n6",
-          "outgoingShape": "n0"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e13",
-      "sources": [
-        "n8"
-      ],
-      "targets": [
-        "n3"
-      ],
-      "labels": [
-        {
-          "text": "speed",
-          "width": 32.5,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "CENTER"
-          },
-          "x": 252.5,
-          "y": 507.91666666666663
-        },
-        {
-          "text": "1",
-          "width": 6.5,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "HEAD"
-          },
-          "x": 378,
-          "y": 507.91666666666663
-        }
-      ],
-      "sections": [
-        {
-          "id": "e13_s0",
-          "startPoint": {
-            "x": 73.5,
-            "y": 602.0075757575758
-          },
-          "endPoint": {
-            "x": 386.5,
-            "y": 504.9166666666667
-          },
-          "bendPoints": [
-            {
-              "x": 177,
-              "y": 602.0075757575758
-            },
-            {
-              "x": 177,
-              "y": 504.91666666666663
-            }
-          ],
-          "incomingShape": "n8",
-          "outgoingShape": "n3"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e14",
-      "sources": [
-        "p4"
-      ],
-      "targets": [
-        "p0"
-      ],
-      "sections": [
-        {
-          "id": "e14_s0",
-          "startPoint": {
-            "x": 513.5,
-            "y": 121.75
-          },
-          "endPoint": {
-            "x": 1166.5,
-            "y": 465.66666666666663
-          },
-          "bendPoints": [
-            {
-              "x": 513.5,
-              "y": 56.75
-            },
-            {
-              "x": 817.5,
-              "y": 56.75
-            },
-            {
-              "x": 817.5,
-              "y": 173.75
-            },
-            {
-              "x": 1066.5,
-              "y": 173.75
-            },
-            {
-              "x": 1066.5,
-              "y": 334.25
-            },
-            {
-              "x": 1166.5,
-              "y": 334.25
-            }
-          ],
-          "incomingShape": "p4",
-          "outgoingShape": "p0"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 817.5,
-          "y": 173.75
-        },
-        {
-          "x": 1066.5,
-          "y": 334.25
-        },
-        {
-          "x": 513.5,
-          "y": 56.75
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e15",
-      "sources": [
-        "n0"
-      ],
-      "targets": [
-        "p9"
-      ],
-      "sections": [
-        {
-          "id": "e15_s0",
-          "startPoint": {
-            "x": 1221.75,
-            "y": 489.41666666666663
-          },
-          "endPoint": {
-            "x": 78.5,
-            "y": 587.8257575757575
-          },
-          "bendPoints": [
-            {
-              "x": 1231.75,
-              "y": 489.41666666666663
-            },
-            {
-              "x": 1231.75,
-              "y": 34
-            },
-            {
-              "x": 147,
-              "y": 34
-            },
-            {
-              "x": 147,
-              "y": 587.8257575757575
-            }
-          ],
-          "incomingShape": "n0",
-          "outgoingShape": "p9"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e16",
-      "sources": [
-        "p3"
-      ],
-      "targets": [
-        "p0"
-      ],
-      "sections": [
-        {
-          "id": "e16_s0",
-          "startPoint": {
-            "x": 513.5,
-            "y": 164.75
-          },
-          "endPoint": {
-            "x": 1166.5,
-            "y": 465.66666666666663
-          },
-          "bendPoints": [
-            {
-              "x": 513.5,
-              "y": 247
-            },
-            {
-              "x": 648,
-              "y": 247
-            },
-            {
-              "x": 648,
-              "y": 173.75
-            },
-            {
-              "x": 1066.5,
-              "y": 173.75
-            },
-            {
-              "x": 1066.5,
-              "y": 334.25
-            },
-            {
-              "x": 1166.5,
-              "y": 334.25
-            }
-          ],
-          "incomingShape": "p3",
-          "outgoingShape": "p0"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 513.5,
-          "y": 247
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e17",
-      "sources": [
-        "n7"
-      ],
-      "targets": [
-        "n3"
-      ],
-      "sections": [
-        {
-          "id": "e17_s0",
-          "startPoint": {
-            "x": 217,
-            "y": 464.91666666666663
-          },
-          "endPoint": {
-            "x": 386.5,
-            "y": 488.0833333333333
-          },
-          "bendPoints": [
-            {
-              "x": 340.5,
-              "y": 464.91666666666663
-            },
-            {
-              "x": 340.5,
-              "y": 488.0833333333333
-            }
-          ],
-          "incomingShape": "n7",
-          "outgoingShape": "n3"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e18",
-      "sources": [
-        "n1"
-      ],
-      "targets": [
-        "n9"
-      ],
-      "sections": [
-        {
-          "id": "e18_s0",
-          "startPoint": {
-            "x": 867.6666666666666,
-            "y": 532.4166666666666
-          },
-          "endPoint": {
-            "x": 969.5,
-            "y": 492.16666666666663
-          },
-          "bendPoints": [
-            {
-              "x": 959.5,
-              "y": 532.4166666666666
-            },
-            {
-              "x": 959.5,
-              "y": 492.16666666666663
-            }
-          ],
-          "incomingShape": "n1",
-          "outgoingShape": "n9"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e19",
-      "sources": [
-        "p0"
-      ],
-      "targets": [
-        "p3"
-      ],
-      "sections": [
-        {
-          "id": "e19_s0",
-          "startPoint": {
-            "x": 1166.5,
-            "y": 465.66666666666663
-          },
-          "endPoint": {
-            "x": 513.5,
-            "y": 164.75
-          },
-          "bendPoints": [
-            {
-              "x": 1166.5,
-              "y": 334.25
-            },
-            {
-              "x": 1066.5,
-              "y": 334.25
-            },
-            {
-              "x": 1066.5,
-              "y": 173.75
-            },
-            {
-              "x": 648,
-              "y": 173.75
-            },
-            {
-              "x": 648,
-              "y": 247
-            },
-            {
-              "x": 513.5,
-              "y": 247
+              "x": 348.5,
+              "y": 237
             }
           ],
           "incomingShape": "p0",
@@ -1273,805 +373,391 @@
       ],
       "junctionPoints": [
         {
-          "x": 513.5,
-          "y": 247
+          "x": 348.5,
+          "y": 23
         }
       ],
       "container": "root"
     },
     {
-      "id": "e20",
+      "id": "e3",
       "sources": [
-        "n6"
-      ],
-      "targets": [
-        "p0"
-      ],
-      "labels": [
-        {
-          "text": "x",
-          "width": 6.5,
-          "height": 14,
-          "x": 999.75,
-          "y": 303.25
-        },
-        {
-          "text": "req",
-          "width": 19.5,
-          "height": 14,
-          "x": 993.25,
-          "y": 317.25
-        }
-      ],
-      "sections": [
-        {
-          "id": "e20_s0",
-          "startPoint": {
-            "x": 939.5,
-            "y": 334.24999999999994
-          },
-          "endPoint": {
-            "x": 1166.5,
-            "y": 465.66666666666663
-          },
-          "bendPoints": [
-            {
-              "x": 1166.5,
-              "y": 334.25
-            }
-          ],
-          "incomingShape": "n6",
-          "outgoingShape": "p0"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e21",
-      "sources": [
-        "n2"
-      ],
-      "targets": [
-        "n1"
-      ],
-      "labels": [
-        {
-          "text": "req",
-          "width": 19.5,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "CENTER"
-          },
-          "x": 708,
-          "y": 148.75
-        },
-        {
-          "text": "brake request",
-          "width": 84.5,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "TAIL"
-          },
-          "x": 553.5,
-          "y": 148.75
-        }
-      ],
-      "sections": [
-        {
-          "id": "e21_s0",
-          "startPoint": {
-            "x": 528,
-            "y": 145.75
-          },
-          "endPoint": {
-            "x": 867.6666666666666,
-            "y": 511.91666666666663
-          },
-          "bendPoints": [
-            {
-              "x": 807.5,
-              "y": 145.75
-            },
-            {
-              "x": 807.5,
-              "y": 511.91666666666663
-            }
-          ],
-          "incomingShape": "n2",
-          "outgoingShape": "n1"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e22",
-      "sources": [
-        "p3"
-      ],
-      "targets": [
-        "n6"
-      ],
-      "labels": [
-        {
-          "text": "1",
-          "width": 6.5,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "HEAD"
-          },
-          "x": 827.5,
-          "y": 337.25
-        },
-        {
-          "text": "on",
-          "width": 13,
-          "height": 14,
-          "x": 711.25,
-          "y": 187.75
-        }
-      ],
-      "sections": [
-        {
-          "id": "e22_s0",
-          "startPoint": {
-            "x": 513.5,
-            "y": 164.75
-          },
-          "endPoint": {
-            "x": 836,
-            "y": 334.24999999999994
-          },
-          "bendPoints": [
-            {
-              "x": 513.5,
-              "y": 247
-            },
-            {
-              "x": 648,
-              "y": 247
-            },
-            {
-              "x": 648,
-              "y": 184.75
-            },
-            {
-              "x": 817.5,
-              "y": 184.75
-            },
-            {
-              "x": 817.5,
-              "y": 334.25
-            }
-          ],
-          "incomingShape": "p3",
-          "outgoingShape": "n6"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 648,
-          "y": 184.75
-        },
-        {
-          "x": 513.5,
-          "y": 247
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e23",
-      "sources": [
-        "n6"
-      ],
-      "targets": [
-        "p8"
-      ],
-      "sections": [
-        {
-          "id": "e23_s0",
-          "startPoint": {
-            "x": 836,
-            "y": 349.5833333333333
-          },
-          "endPoint": {
-            "x": 83.5,
-            "y": 596.0530303030303
-          },
-          "bendPoints": [
-            {
-              "x": 787.5,
-              "y": 349.58333333333326
-            },
-            {
-              "x": 787.5,
-              "y": 385.91666666666663
-            },
-            {
-              "x": 157,
-              "y": 385.91666666666663
-            },
-            {
-              "x": 157,
-              "y": 596.0530303030303
-            }
-          ],
-          "incomingShape": "n6",
-          "outgoingShape": "p8"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e24",
-      "sources": [
-        "p1"
-      ],
-      "targets": [
-        "p2"
-      ],
-      "sections": [
-        {
-          "id": "e24_s0",
-          "startPoint": {
-            "x": 1166.5,
-            "y": 513.1666666666666
-          },
-          "endPoint": {
-            "x": 877.6666666666666,
-            "y": 552.1666666666666
-          },
-          "bendPoints": [
-            {
-              "x": 1166.5,
-              "y": 552.1666666666666
-            }
-          ],
-          "incomingShape": "p1",
-          "outgoingShape": "p2"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e25",
-      "sources": [
-        "n1"
-      ],
-      "targets": [
-        "p0"
-      ],
-      "labels": [
-        {
-          "text": "on",
-          "width": 13,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "TAIL"
-          },
-          "x": 926.1666666666666,
-          "y": 520.1666666666666
-        },
-        {
-          "text": "ack",
-          "width": 19.5,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "CENTER"
-          },
-          "x": 993.25,
-          "y": 428.41666666666663
-        }
-      ],
-      "sections": [
-        {
-          "id": "e25_s0",
-          "startPoint": {
-            "x": 867.6666666666666,
-            "y": 517.1666666666666
-          },
-          "endPoint": {
-            "x": 1166.5,
-            "y": 465.66666666666663
-          },
-          "bendPoints": [
-            {
-              "x": 949.5,
-              "y": 517.1666666666666
-            },
-            {
-              "x": 949.5,
-              "y": 425.41666666666663
-            },
-            {
-              "x": 1066.5,
-              "y": 425.41666666666663
-            },
-            {
-              "x": 1066.5,
-              "y": 334.25
-            },
-            {
-              "x": 1166.5,
-              "y": 334.25
-            }
-          ],
-          "incomingShape": "n1",
-          "outgoingShape": "p0"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 1066.5,
-          "y": 425.41666666666663
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e26",
-      "sources": [
-        "p3"
-      ],
-      "targets": [
-        "p4"
-      ],
-      "labels": [
-        {
-          "text": "ack",
-          "width": 19.5,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "CENTER"
-          },
-          "x": 494,
-          "y": 66.75
-        }
-      ],
-      "sections": [
-        {
-          "id": "e26_s0",
-          "startPoint": {
-            "x": 513.5,
-            "y": 164.75
-          },
-          "endPoint": {
-            "x": 513.5,
-            "y": 121.75
-          },
-          "bendPoints": [
-            {
-              "x": 513.5,
-              "y": 203.75
-            },
-            {
-              "x": 466,
-              "y": 203.75
-            },
-            {
-              "x": 466,
-              "y": 82.75
-            },
-            {
-              "x": 513.5,
-              "y": 82.75
-            }
-          ],
-          "incomingShape": "p3",
-          "outgoingShape": "p4"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e27",
-      "sources": [
-        "p8"
-      ],
-      "targets": [
-        "n1"
-      ],
-      "sections": [
-        {
-          "id": "e27_s0",
-          "startPoint": {
-            "x": 83.5,
-            "y": 596.0530303030303
-          },
-          "endPoint": {
-            "x": 867.6666666666666,
-            "y": 531.9166666666666
-          },
-          "bendPoints": [
-            {
-              "x": 157,
-              "y": 596.0530303030303
-            },
-            {
-              "x": 157,
-              "y": 385.91666666666663
-            },
-            {
-              "x": 787.5,
-              "y": 385.91666666666663
-            },
-            {
-              "x": 787.5,
-              "y": 531.9166666666666
-            }
-          ],
-          "incomingShape": "p8",
-          "outgoingShape": "n1"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 787.5,
-          "y": 385.91666666666663
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e28",
-      "sources": [
-        "n8"
-      ],
-      "targets": [
-        "n1"
-      ],
-      "labels": [
-        {
-          "text": "ack",
-          "width": 19.5,
-          "height": 14,
-          "x": 378.5,
-          "y": 544.9166666666666
-        }
-      ],
-      "sections": [
-        {
-          "id": "e28_s0",
-          "startPoint": {
-            "x": 73.5,
-            "y": 603.7348484848485
-          },
-          "endPoint": {
-            "x": 867.6666666666666,
-            "y": 541.9166666666666
-          },
-          "bendPoints": [
-            {
-              "x": 187,
-              "y": 603.7348484848485
-            },
-            {
-              "x": 187,
-              "y": 541.9166666666666
-            }
-          ],
-          "incomingShape": "n8",
-          "outgoingShape": "n1"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e29",
-      "sources": [
-        "n8"
-      ],
-      "targets": [
-        "n1"
-      ],
-      "sections": [
-        {
-          "id": "e29_s0",
-          "startPoint": {
-            "x": 73.5,
-            "y": 605.4621212121212
-          },
-          "endPoint": {
-            "x": 867.6666666666666,
-            "y": 551.9166666666666
-          },
-          "bendPoints": [
-            {
-              "x": 197,
-              "y": 605.4621212121212
-            },
-            {
-              "x": 197,
-              "y": 569.9166666666666
-            },
-            {
-              "x": 787.5,
-              "y": 569.9166666666666
-            },
-            {
-              "x": 787.5,
-              "y": 551.9166666666666
-            }
-          ],
-          "incomingShape": "n8",
-          "outgoingShape": "n1"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e30",
-      "sources": [
-        "n8"
-      ],
-      "targets": [
-        "p3"
-      ],
-      "sections": [
-        {
-          "id": "e30_s0",
-          "startPoint": {
-            "x": 73.5,
-            "y": 582.0984848484849
-          },
-          "endPoint": {
-            "x": 513.5,
-            "y": 164.75
-          },
-          "bendPoints": [
-            {
-              "x": 137,
-              "y": 582.0984848484849
-            },
-            {
-              "x": 137,
-              "y": 23
-            },
-            {
-              "x": 446,
-              "y": 23
-            },
-            {
-              "x": 446,
-              "y": 247
-            },
-            {
-              "x": 513.5,
-              "y": 247
-            }
-          ],
-          "incomingShape": "n8",
-          "outgoingShape": "p3"
-        }
-      ],
-      "junctionPoints": [
-        {
-          "x": 513.5,
-          "y": 247
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e31",
-      "sources": [
-        "n1"
-      ],
-      "targets": [
-        "n8"
-      ],
-      "labels": [
-        {
-          "text": "on",
-          "width": 13,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "CENTER"
-          },
-          "x": 381.75,
-          "y": 583.9166666666666
-        }
-      ],
-      "sections": [
-        {
-          "id": "e31_s0",
-          "startPoint": {
-            "x": 867.6666666666666,
-            "y": 561.9166666666666
-          },
-          "endPoint": {
-            "x": 73.5,
-            "y": 607.1893939393939
-          },
-          "bendPoints": [
-            {
-              "x": 797.5,
-              "y": 561.9166666666666
-            },
-            {
-              "x": 797.5,
-              "y": 580.9166666666666
-            },
-            {
-              "x": 207,
-              "y": 580.9166666666666
-            },
-            {
-              "x": 207,
-              "y": 607.1893939393939
-            }
-          ],
-          "incomingShape": "n1",
-          "outgoingShape": "n8"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e32",
-      "sources": [
-        "p2"
-      ],
-      "targets": [
-        "p1"
-      ],
-      "sections": [
-        {
-          "id": "e32_s0",
-          "startPoint": {
-            "x": 877.6666666666666,
-            "y": 552.1666666666666
-          },
-          "endPoint": {
-            "x": 1166.5,
-            "y": 513.1666666666666
-          },
-          "bendPoints": [
-            {
-              "x": 1166.5,
-              "y": 552.1666666666666
-            }
-          ],
-          "incomingShape": "p2",
-          "outgoingShape": "p1"
-        }
-      ],
-      "container": "root"
-    },
-    {
-      "id": "e33",
-      "sources": [
-        "n8"
+        "n0"
       ],
       "targets": [
         "n0"
       ],
+      "labels": [
+        {
+          "text": "pedal %",
+          "width": 45.5,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "HEAD"
+          },
+          "x": 447.25,
+          "y": 114
+        },
+        {
+          "text": "0..*",
+          "width": 26,
+          "height": 14,
+          "layoutOptions": {
+            "elk.edgeLabels.placement": "HEAD"
+          },
+          "x": 457,
+          "y": 128
+        }
+      ],
       "sections": [
         {
-          "id": "e33_s0",
+          "id": "e3_s0",
           "startPoint": {
-            "x": 73.5,
-            "y": 608.9166666666666
+            "x": 453,
+            "y": 80
           },
           "endPoint": {
-            "x": 1111.25,
-            "y": 497.66666666666663
+            "x": 487,
+            "y": 85
           },
           "bendPoints": [
             {
-              "x": 1056.5,
-              "y": 608.9166666666666
+              "x": 443,
+              "y": 80
             },
             {
-              "x": 1056.5,
-              "y": 497.66666666666663
+              "x": 443,
+              "y": 112
+            },
+            {
+              "x": 497,
+              "y": 112
+            },
+            {
+              "x": 497,
+              "y": 85
             }
           ],
-          "incomingShape": "n8",
+          "incomingShape": "n0",
           "outgoingShape": "n0"
         }
       ],
       "container": "root"
     },
     {
-      "id": "e34",
+      "id": "e4",
       "sources": [
-        "n7"
+        "p6"
       ],
       "targets": [
-        "n8"
+        "n1"
       ],
       "sections": [
         {
-          "id": "e34_s0",
+          "id": "e4_s0",
           "startPoint": {
-            "x": 217,
-            "y": 474.91666666666663
+            "x": 285.75,
+            "y": 151
           },
           "endPoint": {
-            "x": 73.5,
-            "y": 600.280303030303
+            "x": 541.5,
+            "y": 172
           },
           "bendPoints": [
             {
-              "x": 330.5,
-              "y": 474.91666666666663
+              "x": 285.75,
+              "y": 161
             },
             {
-              "x": 330.5,
-              "y": 494.91666666666663
+              "x": 338.5,
+              "y": 161
             },
             {
-              "x": 167,
-              "y": 494.91666666666663
+              "x": 338.5,
+              "y": 12
             },
             {
-              "x": 167,
-              "y": 600.280303030303
+              "x": 561.5,
+              "y": 12
+            },
+            {
+              "x": 561.5,
+              "y": 172
             }
           ],
-          "incomingShape": "n7",
-          "outgoingShape": "n8"
+          "incomingShape": "p6",
+          "outgoingShape": "n1"
+        }
+      ],
+      "junctionPoints": [
+        {
+          "x": 338.5,
+          "y": 161
         }
       ],
       "container": "root"
     },
     {
-      "id": "e35",
+      "id": "e5",
       "sources": [
-        "p9"
-      ],
-      "targets": [
         "n4"
       ],
-      "labels": [
-        {
-          "text": "speed",
-          "width": 32.5,
-          "height": 14,
-          "x": 252.5,
-          "y": 53.5
-        },
-        {
-          "text": "1",
-          "width": 6.5,
-          "height": 14,
-          "layoutOptions": {
-            "elk.edgeLabels.placement": "HEAD"
-          },
-          "x": 350.5,
-          "y": 53.5
-        }
+      "targets": [
+        "p6"
       ],
       "sections": [
         {
-          "id": "e35_s0",
+          "id": "e5_s0",
           "startPoint": {
-            "x": 78.5,
-            "y": 587.8257575757575
+            "x": 366.5,
+            "y": 254
           },
           "endPoint": {
-            "x": 386.5,
-            "y": 50.5
+            "x": 285.75,
+            "y": 151
           },
           "bendPoints": [
             {
-              "x": 147,
-              "y": 587.8257575757575
+              "x": 338.5,
+              "y": 254
             },
             {
-              "x": 147,
-              "y": 50.5
+              "x": 338.5,
+              "y": 161
+            },
+            {
+              "x": 285.75,
+              "y": 161
             }
           ],
-          "incomingShape": "p9",
-          "outgoingShape": "n4"
+          "incomingShape": "n4",
+          "outgoingShape": "p6"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e6",
+      "sources": [
+        "p0"
+      ],
+      "targets": [
+        "p5"
+      ],
+      "sections": [
+        {
+          "id": "e6_s0",
+          "startPoint": {
+            "x": 472,
+            "y": 48
+          },
+          "endPoint": {
+            "x": 285.75,
+            "y": 80.5
+          },
+          "bendPoints": [
+            {
+              "x": 472,
+              "y": 23
+            },
+            {
+              "x": 285.75,
+              "y": 23
+            }
+          ],
+          "incomingShape": "p0",
+          "outgoingShape": "p5"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e7",
+      "sources": [
+        "n1"
+      ],
+      "targets": [
+        "p6"
+      ],
+      "sections": [
+        {
+          "id": "e7_s0",
+          "startPoint": {
+            "x": 453,
+            "y": 172
+          },
+          "endPoint": {
+            "x": 285.75,
+            "y": 151
+          },
+          "bendPoints": [
+            {
+              "x": 433,
+              "y": 172
+            },
+            {
+              "x": 433,
+              "y": 161
+            },
+            {
+              "x": 285.75,
+              "y": 161
+            }
+          ],
+          "incomingShape": "n1",
+          "outgoingShape": "p6"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e8",
+      "sources": [
+        "n1"
+      ],
+      "targets": [
+        "n1"
+      ],
+      "sections": [
+        {
+          "id": "e8_s0",
+          "startPoint": {
+            "x": 453,
+            "y": 172
+          },
+          "endPoint": {
+            "x": 541.5,
+            "y": 172
+          },
+          "bendPoints": [
+            {
+              "x": 443,
+              "y": 172
+            },
+            {
+              "x": 443,
+              "y": 162
+            },
+            {
+              "x": 551.5,
+              "y": 162
+            },
+            {
+              "x": 551.5,
+              "y": 172
+            }
+          ],
+          "incomingShape": "n1",
+          "outgoingShape": "n1"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e9",
+      "sources": [
+        "n1"
+      ],
+      "targets": [
+        "p4"
+      ],
+      "sections": [
+        {
+          "id": "e9_s0",
+          "startPoint": {
+            "x": 453,
+            "y": 172
+          },
+          "endPoint": {
+            "x": 396.75,
+            "y": 182
+          },
+          "bendPoints": [
+            {
+              "x": 396.75,
+              "y": 172
+            }
+          ],
+          "incomingShape": "n1",
+          "outgoingShape": "p4"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e10",
+      "sources": [
+        "p2"
+      ],
+      "targets": [
+        "n5"
+      ],
+      "sections": [
+        {
+          "id": "e10_s0",
+          "startPoint": {
+            "x": 143,
+            "y": 42.5
+          },
+          "endPoint": {
+            "x": 84,
+            "y": 42.5
+          },
+          "incomingShape": "p2",
+          "outgoingShape": "n5"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e11",
+      "sources": [
+        "p6"
+      ],
+      "targets": [
+        "n0"
+      ],
+      "sections": [
+        {
+          "id": "e11_s0",
+          "startPoint": {
+            "x": 285.75,
+            "y": 151
+          },
+          "endPoint": {
+            "x": 487,
+            "y": 75
+          },
+          "bendPoints": [
+            {
+              "x": 285.75,
+              "y": 161
+            },
+            {
+              "x": 338.5,
+              "y": 161
+            },
+            {
+              "x": 338.5,
+              "y": 12
+            },
+            {
+              "x": 561.5,
+              "y": 12
+            },
+            {
+              "x": 561.5,
+              "y": 75
+            }
+          ],
+          "incomingShape": "p6",
+          "outgoingShape": "n0"
         }
       ],
       "junctionPoints": [
         {
-          "x": 147,
-          "y": 50.5
+          "x": 561.5,
+          "y": 75
         }
       ],
       "container": "root"
@@ -2080,6 +766,6 @@
   "$H": 13,
   "x": 0,
   "y": 0,
-  "width": 1243.75,
-  "height": 639.5530303030303
+  "width": 573.5,
+  "height": 312
 }
