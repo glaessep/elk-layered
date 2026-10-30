@@ -693,10 +693,10 @@ fn transpose_marks_a_separate_layer_constraint_of_an_external_port_explicit() {
     }
 }
 
-// Mutation: mark the layer constraint explicit where the transpose turns a separate layer
+// Mutation: leave `layer_constraint_explicit` unset where the transpose turns a separate layer
 // constraint into an in-layer constraint.
 #[test]
-fn transpose_leaves_the_explicit_flag_alone_when_it_clears_a_layer_constraint() {
+fn transpose_marks_the_layer_constraint_explicit_where_it_clears_a_separate_one() {
     for layer_constraint in [
         LayerConstraint::FirstSeparate,
         LayerConstraint::LastSeparate,
@@ -707,6 +707,7 @@ fn transpose_leaves_the_explicit_flag_alone_when_it_clears_a_layer_constraint() 
         node.layer_constraint = layer_constraint;
         node.external_port_mut().unwrap().side = PortSide::East;
         let node = graph.add_node_for_test(node);
+        assert!(!graph.is_layer_constraint_explicit(node));
 
         transform_graph_direction(&mut graph, GraphTransformMode::ToInputDirection);
 
@@ -715,9 +716,65 @@ fn transpose_leaves_the_explicit_flag_alone_when_it_clears_a_layer_constraint() 
             LayerConstraint::None
         );
         assert!(
-            !graph.is_layer_constraint_explicit(node),
+            graph.is_layer_constraint_explicit(node),
             "{layer_constraint:?}"
         );
+    }
+}
+
+// Mutation: leave `layer_constraint_explicit` unset where the transpose gives a separate layer
+// constraint. The directions that mirror around the transpose (`Up`, and rotation) must keep
+// the flag.
+#[test]
+fn every_direction_keeps_the_explicit_flag_of_a_transposed_external_port() {
+    use DirectionCongruency::{ReadingDirection, Rotation};
+    for (direction, congruency, top, bottom) in [
+        (
+            ElkDirection::Down,
+            ReadingDirection,
+            LayerConstraint::FirstSeparate,
+            LayerConstraint::LastSeparate,
+        ),
+        (
+            ElkDirection::Up,
+            ReadingDirection,
+            LayerConstraint::FirstSeparate,
+            LayerConstraint::LastSeparate,
+        ),
+        (
+            ElkDirection::Down,
+            Rotation,
+            LayerConstraint::LastSeparate,
+            LayerConstraint::FirstSeparate,
+        ),
+        (
+            ElkDirection::Up,
+            Rotation,
+            LayerConstraint::FirstSeparate,
+            LayerConstraint::LastSeparate,
+        ),
+    ] {
+        for (in_layer, want) in [
+            (InLayerConstraint::Top, top),
+            (InLayerConstraint::Bottom, bottom),
+        ] {
+            let mut graph = graph(direction);
+            graph.options.direction_congruency = congruency;
+            let mut node = LNode::new("external", 0.0, 0.0, None);
+            node.set_kind(crate::graph::LNodeKind::ExternalPort);
+            node.external_port_mut().unwrap().side = PortSide::North;
+            node.external_port_mut().unwrap().in_layer_constraint = in_layer;
+            let node = graph.add_node_for_test(node);
+
+            transform_graph_direction(&mut graph, GraphTransformMode::ToInternalLeftToRight);
+
+            let label = format!("{direction:?} {congruency:?} {in_layer:?}");
+            assert_eq!(
+                graph.layerless_nodes[node].layer_constraint, want,
+                "{label}"
+            );
+            assert!(graph.is_layer_constraint_explicit(node), "{label}");
+        }
     }
 }
 

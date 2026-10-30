@@ -340,6 +340,10 @@ fn mirror_layer_constraint_x(layer_constraint: LayerConstraint) -> LayerConstrai
     }
 }
 
+/// Ports `GraphTransformer.transposeLayerConstraint`.
+///
+/// Every branch sets the layer constraint with `setProperty` in ELK, so the constraint counts as
+/// explicit afterwards, even when the branch sets `NONE`.
 fn transpose_layer_constraint_for_external_port(
     external: &mut ExternalPortData,
     layer_constraint: &mut LayerConstraint,
@@ -347,13 +351,14 @@ fn transpose_layer_constraint_for_external_port(
     if *layer_constraint == LayerConstraint::FirstSeparate {
         *layer_constraint = LayerConstraint::None;
         external.in_layer_constraint = InLayerConstraint::Top;
+        external.layer_constraint_explicit = true;
     } else if *layer_constraint == LayerConstraint::LastSeparate {
         *layer_constraint = LayerConstraint::None;
         external.in_layer_constraint = InLayerConstraint::Bottom;
+        external.layer_constraint_explicit = true;
     } else if external.in_layer_constraint == InLayerConstraint::Top {
         *layer_constraint = LayerConstraint::FirstSeparate;
         external.in_layer_constraint = InLayerConstraint::None;
-        // ELK sets the constraint with `setProperty`, so it counts as explicit from here on.
         external.layer_constraint_explicit = true;
     } else if external.in_layer_constraint == InLayerConstraint::Bottom {
         *layer_constraint = LayerConstraint::LastSeparate;

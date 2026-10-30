@@ -450,7 +450,8 @@ pub struct ExternalPortData {
     /// `InternalProperties.IN_LAYER_CONSTRAINT`.
     pub in_layer_constraint: InLayerConstraint,
     /// Whether ELK sets the layer constraint of the dummy on purpose, as it does for a west or
-    /// east dummy. Such a constraint counts as explicit.
+    /// east dummy, and for a north or south dummy once the graph is turned. Such a constraint
+    /// counts as explicit.
     pub layer_constraint_explicit: bool,
     /// `LayeredOptions.PORT_ANCHOR` of the dummy: where its port's anchor sat when the dummy was
     /// made. `GraphTransformer` turns the port but not this property, so in a vertical layout it
