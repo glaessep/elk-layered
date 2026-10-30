@@ -609,3 +609,135 @@ fn a_long_edge_end_at_a_dropped_node_is_cleared() {
         Some("b")
     );
 }
+
+// Mutation: in `drop_nodes`, renumber `long_edge_target_node` instead of clearing it when it
+// names a dropped node. The drop then fails on the port of `b`.
+#[test]
+fn a_long_edge_target_at_a_dropped_node_is_cleared() {
+    let mut graph = graph_with_a_node_to_drop();
+    let b = NodeId::new(3);
+    graph.layerless_nodes[b].ports[PortId::new(0)].long_edge_target_node = Some(NodeId::new(2));
+    graph.layerless_nodes[b].ports[PortId::new(1)].long_edge_target_node = Some(NodeId::new(4));
+    let mut graphs = GraphArena::new(graph);
+
+    drop_nodes(&mut graphs, GraphId::ROOT, &[NodeId::new(2)]).unwrap();
+
+    let graph = graphs.root();
+    let ports = &graph.layerless_nodes[graph.node_named("b")].ports;
+    assert_eq!(ports[PortId::new(0)].long_edge_target_node, None);
+    assert_eq!(
+        ports[PortId::new(1)]
+            .long_edge_target_node
+            .map(|node| node_name(graph, node)),
+        Some("c")
+    );
+}
+
+// Mutation: in `drop_nodes`, skip a dropped id past the end of the node list. The call then
+// succeeds and drops nothing.
+#[test]
+fn dropping_a_node_that_does_not_exist_is_an_error() {
+    let mut graphs = GraphArena::new(graph_with_a_node_to_drop());
+
+    let error = drop_nodes(&mut graphs, GraphId::ROOT, &[NodeId::new(9)]).unwrap_err();
+
+    assert_eq!(
+        error,
+        ComponentError::InvalidReference {
+            kind: "dropped node",
+            index: 9
+        }
+    );
+}
+
+// Mutation: in `drop_nodes`, return an `InvalidReference` error when `dropped` is empty. The
+// routing of a graph without replacements then fails.
+#[test]
+fn dropping_no_node_leaves_the_graph_as_it_is() {
+    let mut graphs = GraphArena::new(graph_with_a_node_to_drop());
+    let before = graphs.root().clone();
+
+    drop_nodes(&mut graphs, GraphId::ROOT, &[]).unwrap();
+
+    assert_eq!(graphs.root(), &before);
+}
+
+// Mutation: in `drop_nodes`, index the keep flags with an edge's node id directly. An edge that
+// names a node past the end then panics instead of giving an error.
+#[test]
+fn an_edge_that_names_a_missing_node_is_an_error_not_a_panic() {
+    let mut graph = graph_with_a_node_to_drop();
+    graph.edges[EdgeId::new(2)]
+        .map_ports(|port| {
+            port.node = NodeId::new(9);
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+    let mut graphs = GraphArena::new(graph);
+
+    let error = drop_nodes(&mut graphs, GraphId::ROOT, &[NodeId::new(2)]).unwrap_err();
+
+    assert_eq!(
+        error,
+        ComponentError::InvalidReference {
+            kind: "port node",
+            index: 9
+        }
+    );
+}
+
+// Mutation: in `drop_nodes`, close the gap of a dropped node with the last node, as a
+// swap-remove does, instead of moving every later node down in order. `combine` then puts the
+// dummies `d2` and `d1` in the wrong order.
+#[test]
+fn a_component_drops_a_node_between_split_and_combine() {
+    let mut graph = LGraph::new("g", LayeredOptions::default());
+    for id in ["alone", "x", "y"] {
+        graph.layerless_nodes.push(LNode::new(id, 10.0, 10.0, None));
+    }
+    let x_out = graph
+        .add_port(
+            NodeId::new(1),
+            PortType::Output,
+            PortSide::East,
+            LPoint::default(),
+        )
+        .unwrap();
+    let y_in = graph
+        .add_port(
+            NodeId::new(2),
+            PortType::Input,
+            PortSide::West,
+            LPoint::default(),
+        )
+        .unwrap();
+    graph.add_edge(edge_between("e", x_out, y_in)).unwrap();
+    let mut graphs = GraphArena::new(graph);
+    let mut components = split(&mut graphs).unwrap().unwrap();
+    // The second component is `x` and `y`. A processor then adds `r`, `d1` and `d2`, and `r`
+    // goes again, as a replacement does.
+    let component = &mut components[1];
+    for id in ["r", "d1", "d2"] {
+        component
+            .graph
+            .layerless_nodes
+            .push(LNode::new(id, 1.0, 1.0, None));
+    }
+    std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
+    let r = graphs.root().node_named("r");
+    drop_nodes(&mut graphs, GraphId::ROOT, &[r]).unwrap();
+    std::mem::swap(&mut graphs[GraphId::ROOT], &mut component.graph);
+
+    combine(&mut graphs, components).unwrap();
+
+    let names = graphs
+        .root()
+        .layerless_nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["alone", "x", "y", "d1", "d2"]);
+    let edge = &graphs.root().edges[EdgeId::new(0)];
+    assert_eq!(node_name(graphs.root(), edge.source().node), "x");
+    assert_eq!(node_name(graphs.root(), edge.target().node), "y");
+}

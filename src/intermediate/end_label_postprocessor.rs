@@ -24,8 +24,11 @@ pub fn postprocess_end_labels(graph: &mut LGraph) {
             let Some(cell) = graph.layerless_nodes[node].ports[port_index].end_label_cell else {
                 continue;
             };
-            // Java walks the layers, so a node that left its layer keeps its end labels where
-            // they are. This crate holds them at the port, so it hands them back unplaced.
+            // Java walks the layers, so a node outside a layer keeps its end labels where they
+            // are. This crate holds them at the port, so it hands them back unplaced. No known
+            // node reaches here today: the replacements of north and south external port
+            // dummies, the only ones that did, leave the graph after the hierarchical port
+            // routing. The branch stays so that such a node keeps Java's behaviour.
             if graph.layerless_nodes[node].layer_index().is_none() {
                 hand_back_end_labels(graph, node, port_index);
                 continue;
@@ -67,7 +70,6 @@ fn apply_end_label_cell_layout(
     return_labels_to_edges(graph, node, port_index, labels);
 }
 
-/// Puts end labels back on the edges they belong to.
 /// Hands the end labels that the port `port_index` of `node` holds back to their edges, unplaced,
 /// as a node that `EndLabelPostprocessor` never visits keeps them in Java.
 pub(crate) fn hand_back_end_labels(graph: &mut LGraph, node: NodeId, port_index: PortId) {
@@ -76,6 +78,7 @@ pub(crate) fn hand_back_end_labels(graph: &mut LGraph, node: NodeId, port_index:
     graph.layerless_nodes[node].ports[port_index].end_label_cell = None;
 }
 
+/// Puts end labels back on the edges they belong to.
 fn return_labels_to_edges(
     graph: &mut LGraph,
     node: NodeId,

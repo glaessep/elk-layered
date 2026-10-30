@@ -408,21 +408,30 @@ pub(crate) fn drop_nodes(
     let keep_edge = graph
         .edges
         .iter()
-        .map(|edge| keep_node[edge.source().node] && keep_node[edge.target().node])
+        .map(|edge| {
+            is_kept(&keep_node, edge.source().node) && is_kept(&keep_node, edge.target().node)
+        })
         .collect::<IdVec<EdgeId, bool>>();
     let (node_map, kept_nodes) = renumber(&keep_node);
     let (edge_map, _) = renumber(&keep_edge);
 
     let graph = &mut graphs[id];
-    // A long edge dummy of an inverted port can name a port of a dropped node as its end. Java
-    // keeps that reference to a node that is gone, and no step after the routing reads it, so
-    // the end is cleared here instead of renumbered.
+    // A long edge dummy of an inverted port can name a port of a dropped node as its end, and
+    // the model order sorting copies that end into `long_edge_target_node` of the ports along
+    // the edge. Java keeps these references to a node that is gone, and no step after the
+    // routing reads them, so they are cleared here instead of renumbered.
+    let is_dropped = |node: NodeId| !is_kept(&keep_node, node);
     for node in graph.layerless_nodes.iter_mut() {
         if let Some(ends) = node.long_edge_ends_mut() {
             for end in [&mut ends.source, &mut ends.target] {
-                if end.is_some_and(|port| !keep_node[port.node]) {
+                if end.is_some_and(|port| is_dropped(port.node)) {
                     *end = None;
                 }
+            }
+        }
+        for port in node.ports.slots_mut() {
+            if port.long_edge_target_node.is_some_and(is_dropped) {
+                port.long_edge_target_node = None;
             }
         }
     }
@@ -441,12 +450,7 @@ pub(crate) fn drop_nodes(
         .collect();
     remap_references(graph, &node_map, &edge_map)?;
 
-    let nested = graphs[id]
-        .layerless_nodes
-        .iter()
-        .filter_map(|node| node.nested_graph)
-        .flat_map(|nested| graphs.preorder(nested))
-        .collect::<Vec<_>>();
+    let nested = graphs_inside(graphs, &graphs[id]);
     let mut above = Vec::new();
     let mut parent = graphs[id].parent;
     while let Some(GraphParent { graph, .. }) = parent {
@@ -457,6 +461,12 @@ pub(crate) fn drop_nodes(
         remap_graph_references(&mut graphs[other], id, &node_map, &edge_map)?;
     }
     Ok(())
+}
+
+/// Whether `node` stays. An id past the end counts as kept, so that the renumbering reports it as
+/// an error instead of a panic here.
+fn is_kept(keep: &IdVec<NodeId, bool>, node: NodeId) -> bool {
+    keep.get(node).copied().unwrap_or(true)
 }
 
 /// For a list of keep flags, the new id of each kept entry, and the old id of each new one.
@@ -478,16 +488,20 @@ fn remap_nested_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     nodes: &IdVec<NodeId, N>,
     edges: &IdVec<EdgeId, E>,
 ) -> Result<(), ComponentError> {
-    let nested = graph
+    for id in graphs_inside(graphs, graph) {
+        remap_graph_references(&mut graphs[id], graph.id, nodes, edges)?;
+    }
+    Ok(())
+}
+
+/// Every graph inside the nodes of `graph`, at any depth.
+fn graphs_inside(graphs: &GraphArena, graph: &LGraph) -> Vec<GraphId> {
+    graph
         .layerless_nodes
         .iter()
         .filter_map(|node| node.nested_graph)
         .flat_map(|nested| graphs.preorder(nested))
-        .collect::<Vec<_>>();
-    for id in nested {
-        remap_graph_references(&mut graphs[id], graph.id, nodes, edges)?;
-    }
-    Ok(())
+        .collect()
 }
 
 /// Maps the references in `current` that name the graph `graph_id`.
