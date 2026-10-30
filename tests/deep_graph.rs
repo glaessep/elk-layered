@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use elk_layered::{ElkEdge, ElkNode, layout};
+use elk_layered::{ElkEdge, ElkNode, Error, layout};
 
 const DEPTH: usize = 10_000;
 
@@ -49,13 +49,26 @@ fn closed_chain() -> ElkNode {
     }
 }
 
+/// Lays `graph` out on a thread with the small `STACK`. A stack overflow aborts the whole test
+/// run, so a graph that gets this far has not recursed too deep.
+fn lay_out_on_small_stack(graph: ElkNode) -> Result<ElkNode, Error> {
+    std::thread::Builder::new()
+        .stack_size(STACK)
+        .spawn(move || layout(&graph))
+        .unwrap()
+        .join()
+        .unwrap()
+}
+
 /// Steps in the staircase. Each step is one block that `place_block` waits on.
 const STEPS: usize = 4_000;
 
-/// A staircase of blocks. Layer `i` holds `n{i}` above `m{i}`, and the edges are
-/// `m{i} -> m{i+1}` and `n{i} -> m{i+1}`. The Brandes-Koepf aligner joins `n{i}` and `m{i+1}` into
-/// one block, whose root `n{i}` sits one layer earlier than the root of the block below it.
-/// Placing block `i` needs block `i + 1` first, then block `i + 2`, and so on down the staircase.
+/// A staircase of blocks. Layer `i` holds `n{i}` and `m{i}`, and the edges are `m{i} -> m{i+1}`
+/// and `n{i} -> m{i+1}`. The last layer holds only `m{STEPS - 1}`. The crossing minimiser picks
+/// the order inside a layer, and the staircase goes deep for either order, because one
+/// Brandes-Koepf direction always waits on the next block. That direction joins `n{i}` and
+/// `m{i+1}` into one block, whose root `n{i}` sits one layer earlier than the root of the block
+/// beside it. Placing block `i` needs block `i + 1` first, then block `i + 2`, and so on.
 fn staircase() -> ElkNode {
     let edge = |id: String, source: String, target: String| ElkEdge {
         id,
@@ -87,7 +100,15 @@ fn staircase() -> ElkNode {
     }
     ElkNode {
         id: "root".to_string(),
-        layout_options: BTreeMap::from([("elk.algorithm".to_string(), "layered".to_string())]),
+        // The component packer would put loose nodes in a row whose spacing can match the layer
+        // spacing, and hide a lost edge from the shape test.
+        layout_options: BTreeMap::from([
+            ("elk.algorithm".to_string(), "layered".to_string()),
+            (
+                "elk.separateConnectedComponents".to_string(),
+                "false".to_string(),
+            ),
+        ]),
         children,
         edges,
         ..ElkNode::default()
@@ -98,26 +119,35 @@ fn staircase() -> ElkNode {
 // it calls itself once per block of the staircase.
 #[test]
 fn a_staircase_of_blocks_is_placed_on_a_small_stack() {
-    let graph = staircase();
-    let laid_out = std::thread::Builder::new()
-        .stack_size(STACK)
-        .spawn(move || layout(&graph).map(|out| out.children.len()))
-        .unwrap()
-        .join()
-        .unwrap();
-    assert_eq!(laid_out, Ok(2 * STEPS - 1));
+    let laid_out = lay_out_on_small_stack(staircase()).unwrap();
+    assert_eq!(laid_out.children.len(), 2 * STEPS - 1);
+}
+
+// Mutation: drop the edges `n{i} -> m{i+1}` from `staircase()`, so the `n{i}` all fall into the
+// first layer and the staircase is gone.
+#[test]
+fn the_staircase_keeps_the_shape_that_makes_place_block_go_deep() {
+    let laid_out = lay_out_on_small_stack(staircase()).unwrap();
+    let x_of: BTreeMap<&str, f64> = laid_out
+        .children
+        .iter()
+        .map(|node| (node.id.as_str(), node.x))
+        .collect();
+    // The right direction puts a layer at one x. `n{i}` shares the layer of `m{i}` and lies before
+    // `m{i+1}`, so the block `n{i}, m{i+1}` spans two layers.
+    for i in 0..STEPS - 1 {
+        assert_eq!(
+            x_of[format!("n{i}").as_str()],
+            x_of[format!("m{i}").as_str()]
+        );
+        assert!(x_of[format!("n{i}").as_str()] < x_of[format!("m{}", i + 1).as_str()]);
+    }
 }
 
 // Mutation: let `connected_components_dfs` of the network simplex layerer, `tight_tree_dfs` or
 // `postorder_traversal` of the network simplex, or `collect_depth_first_back_edges` recurse again.
 #[test]
 fn a_graph_10000_nodes_deep_lays_out_on_a_small_stack() {
-    let graph = closed_chain();
-    let laid_out = std::thread::Builder::new()
-        .stack_size(STACK)
-        .spawn(move || layout(&graph).map(|out| out.children.len()))
-        .unwrap()
-        .join()
-        .unwrap();
+    let laid_out = lay_out_on_small_stack(closed_chain()).map(|out| out.children.len());
     assert_eq!(laid_out, Ok(DEPTH));
 }
