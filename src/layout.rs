@@ -104,6 +104,8 @@ struct EdgeInfo<'a> {
     target_port: Option<usize>,
     /// The node ELK moves the edge to: `ElkGraphUtil.findBestEdgeContainment`.
     container: usize,
+    /// Whether the edge is an inside self loop: decided once, by `is_inside_self_loop`.
+    inside_self_loop: bool,
     settings: EdgeSettings,
     labels: Vec<LabelSettings>,
 }
@@ -133,6 +135,16 @@ fn port_element(id: &str) -> String {
 /// No ELK counterpart: names an edge in an error.
 fn edge_element(id: &str) -> String {
     format!("edge \"{id}\"")
+}
+
+/// Whether an edge is a self loop that `insideSelfLoops.yo` of the edge and `insideSelfLoops.activate`
+/// of its node route inside the node. This is the one place that decides; the importer reads the
+/// answer from `ElkInputEdge::inside_self_loops_yo`.
+///
+/// Ports the `isInsideSelfLoop` tests in `ElkGraphImporter.importFlatGraph` and
+/// `importHierarchicalGraph`.
+fn is_inside_self_loop(source: usize, target: usize, yo: bool, activate: bool) -> bool {
+    source == target && yo && activate
 }
 
 /// No ELK counterpart: turns a refused option into an `Error`.
@@ -360,6 +372,15 @@ impl<'a> Tree<'a> {
                 let settings = layout_options::edge_settings(&edge.layout_options)
                     .map_err(|error| option_error(element.clone(), error))?;
                 let labels = label_settings(&edge.labels, &element)?;
+                let inside_self_loop = is_inside_self_loop(
+                    sources[0].0,
+                    targets[0].0,
+                    settings.inside_self_loops_yo,
+                    nodes[sources[0].0]
+                        .settings
+                        .options
+                        .inside_self_loops_activate,
+                );
                 edges.push(EdgeInfo {
                     edge,
                     given_in,
@@ -369,6 +390,7 @@ impl<'a> Tree<'a> {
                     source_port: sources[0].1,
                     target_port: targets[0].1,
                     container: 0,
+                    inside_self_loop,
                     settings,
                     labels,
                 });
@@ -733,7 +755,7 @@ impl<'a, 't> Work<'a, 't> {
         for edge_index in candidates {
             let edge = &tree.edges[edge_index];
             let element = edge_element(&edge.edge.id);
-            let inside_self_loop = self.is_inside_self_loop(edge);
+            let inside_self_loop = edge.inside_self_loop;
             // elkjs fails on an inside self loop at a port with a JavaScript error, so there is no
             // layout to hold ours to.
             if inside_self_loop && (edge.source_port.is_some() || edge.target_port.is_some()) {
@@ -1104,20 +1126,6 @@ impl<'a, 't> Work<'a, 't> {
         self.tree.nodes[node].node.ports[port].id.clone()
     }
 
-    /// Whether the edge is a self loop that `insideSelfLoops.yo` and the `insideSelfLoops.activate`
-    /// of its node route inside the node.
-    ///
-    /// Ports the `isInsideSelfLoop` tests in `ElkGraphImporter.importFlatGraph` and
-    /// `importHierarchicalGraph`.
-    fn is_inside_self_loop(&self, edge: &EdgeInfo<'_>) -> bool {
-        edge.source == edge.target
-            && edge.settings.inside_self_loops_yo
-            && self.tree.nodes[edge.source]
-                .settings
-                .options
-                .inside_self_loops_activate
-    }
-
     /// No ELK counterpart: maps the elkjs JSON tree onto the importer's input.
     fn input_edge(&self, edge: usize) -> ElkInputEdge {
         let info = &self.tree.edges[edge];
@@ -1136,7 +1144,8 @@ impl<'a, 't> Work<'a, 't> {
                 .map(|(index, (label, settings))| input_label(index, label, settings))
                 .collect(),
             minlen: 1,
-            inside_self_loops_yo: info.settings.inside_self_loops_yo,
+            // The importer reads this alone; `is_inside_self_loop` has already looked at the node.
+            inside_self_loops_yo: info.inside_self_loop,
             model_order: None,
             priority_direction: info.settings.priority_direction,
             priority_shortness: info.settings.priority_shortness,
@@ -1349,7 +1358,7 @@ impl<'a, 't> Work<'a, 't> {
             // inside self loop relative to its node's top left corner. Once the node has its final
             // place, the loop moves by that place, into the coordinates of its container. elkjs
             // moves the labels of the loop too, which the Java method does not do.
-            let inside_self_loop = self.is_inside_self_loop(info);
+            let inside_self_loop = info.inside_self_loop;
             let by = inside_self_loop.then(|| {
                 let at = self.out_node_ref(info.source);
                 LPoint { x: at.x, y: at.y }

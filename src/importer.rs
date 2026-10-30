@@ -147,6 +147,9 @@ pub struct ElkInputEdge {
     pub target: String,
     pub labels: Vec<ElkInputLabel>,
     pub minlen: usize,
+    /// Whether the edge is an inside self loop. The caller has already combined the edge's
+    /// `insideSelfLoops.yo` with the `insideSelfLoops.activate` of its node, so the importer
+    /// reads this alone.
     pub inside_self_loops_yo: bool,
     /// Explicit input-model position within the edge's owning hierarchy scope.
     ///
@@ -1029,7 +1032,7 @@ fn import_hierarchical_graph(
                 .then(|| edge.model_order.unwrap_or(edge_order));
             let source_parent = index.node_parent(edge.source.as_str());
             let target_parent = index.node_parent(edge.target.as_str());
-            if is_inside_self_loop(&index.nodes, edge) {
+            if edge.inside_self_loops_yo {
                 let graph_slot = arena.graph_slot_for_parent(index, Some(edge.source.as_str()));
                 let graph = &mut arena.graphs[graph_slot];
                 transform_inside_self_loop(edge, graph, edge_model_order);
@@ -2082,30 +2085,6 @@ fn node_needs_nested_graph(
         || index.inside_self_loop_nodes.contains(node.id.as_str())
 }
 
-/// Whether the node itself sets `insideSelfLoops.activate`.
-///
-/// Ports the reads of `LayeredOptions.INSIDE_SELF_LOOPS_ACTIVATE` on a node in
-/// `ElkGraphImporter.importFlatGraph`, `importHierarchicalGraph`, `hasInsideSelfLoops` and
-/// `transformNode`. A node's own options travel in `nested_options`.
-fn node_activates_inside_self_loops(node: &ElkInputNode) -> bool {
-    node.nested_options
-        .as_deref()
-        .is_some_and(|options| options.inside_self_loops_activate)
-}
-
-/// Whether the edge is a self loop that the edge's `insideSelfLoops.yo` and its node's
-/// `insideSelfLoops.activate` route inside the node.
-///
-/// Ports the `isInsideSelfLoop` tests in `ElkGraphImporter.importFlatGraph` and
-/// `importHierarchicalGraph`.
-fn is_inside_self_loop(nodes: &HashMap<&str, &ElkInputNode>, edge: &ElkInputEdge) -> bool {
-    edge.inside_self_loops_yo
-        && edge.source == edge.target
-        && nodes
-            .get(edge.source.as_str())
-            .is_some_and(|node| node_activates_inside_self_loops(node))
-}
-
 /// Source: `LGraphUtil.getDirection`, which `ElkGraphImporter.createLGraph` uses for a graph
 /// without a direction.
 pub(crate) fn resolve_direction(direction: ElkDirection, aspect_ratio: f64) -> ElkDirection {
@@ -2337,7 +2316,7 @@ impl<'a> InputIndex<'a> {
         let inside_self_loop_nodes = input
             .edges
             .iter()
-            .filter(|edge| is_inside_self_loop(&nodes, edge))
+            .filter(|edge| edge.inside_self_loops_yo)
             .map(|edge| edge.source.as_str())
             .collect::<HashSet<_>>();
         let mut result = Self {

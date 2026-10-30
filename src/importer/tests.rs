@@ -482,6 +482,31 @@ fn dedicated_cross_edge_ports_are_not_reused() {
     assert_eq!(imported.hierarchy_edges.len(), edge_count);
 }
 
+// Mutation: where the importer transforms an edge, test the node's `insideSelfLoops.activate`
+// again. The node here sets no option, because the caller already decided, so its loop would then
+// be an ordinary self loop of the outer graph.
+#[test]
+fn importer_trusts_the_edge_and_does_not_read_the_node_options() {
+    let graph = graph(
+        vec![node("A")],
+        vec![ElkInputEdge {
+            source_port: None,
+            target_port: None,
+            inside_self_loops_yo: true,
+            ..edge("A-A", "A", "A")
+        }],
+    );
+
+    let lgraph = import_graph(&graph).unwrap();
+    let nested = lgraph
+        .layerless_nodes
+        .iter()
+        .find(|node| node.id == "A")
+        .and_then(|node| node.nested_graph.map(|id| &lgraph[id]))
+        .expect("an inside self loop creates a nested graph");
+    assert!(nested.graph_properties.self_loops);
+}
+
 // Mutation: reuse the dummies of the first loop of a node for its later loops in
 // `transform_inside_self_loop`. The loops then share one pair of dummies and the nested graph has
 // 2 nodes.
@@ -574,7 +599,7 @@ fn imports_mermaid_flowchart_nodes_edges_labels_and_model_order() {
     assert!(lgraph.options.graph_has_center_labels);
 }
 
-// Mutation: make `node_activates_inside_self_loops` return false.
+// Mutation: make the importer ignore `inside_self_loops_yo`.
 #[test]
 fn importer_creates_nested_graph_for_inside_self_loop() {
     let graph = graph(
