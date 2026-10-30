@@ -9,6 +9,7 @@ use super::{
     PipelineError, PipelineResult, actual_graph_size, check_external_port_sides,
     validate_node_size_minima,
 };
+use crate::components::ComponentSplit;
 use crate::compound::preprocess_source_ported_compound_graph;
 use crate::configurator::{check_random_seeds, configure_graph_properties};
 use crate::graph::{
@@ -157,7 +158,13 @@ fn execute_compound_algorithm_until_pause(
             break;
         }
 
-        execute_in_arena(graphs, algorithm.execution.graph, true, processor)?;
+        execute_in_arena(
+            graphs,
+            algorithm.execution.graph,
+            true,
+            ComponentSplit::Inactive,
+            processor,
+        )?;
         if processor == Processor::Intermediate(IntermediateProcessor::HierarchicalNodeResizer)
             && let Some(parent) = algorithm.execution.parent
         {

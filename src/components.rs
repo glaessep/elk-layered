@@ -373,6 +373,15 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     remap_graph_references(graph, graph.id, nodes, edges)
 }
 
+/// Whether the root graph of the run stands in for a component of a split.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ComponentSplit {
+    /// Between `split` and the end of `combine`.
+    Active,
+    /// Every other run: a flat run without components, and a compound run.
+    Inactive,
+}
+
 /// Takes the nodes `dropped` out of the graph `id`, together with every edge that ends at one of
 /// them. The other nodes and edges keep their order and close the gaps, and every reference to
 /// them moves along: in the graph, in the graphs inside its nodes, and in the graphs above it.
@@ -382,17 +391,21 @@ fn remap_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
 /// once they leave their layer. A dropped node must be in no layer, and no node that stays may
 /// name it: such a reference is an error.
 ///
-/// A node that holds a graph must come before every dropped node, so that it keeps its id. The
-/// graph inside it names it in `GraphParent.node`, and during a component split that field keeps
-/// the node's index in the whole graph, so this function cannot map it.
+/// A dropped node must hold no graph.
+///
+/// The graph inside a kept node names it in `GraphParent.node`. Outside a component split, this
+/// function renumbers that field with the node. During a split (`split` is `Active`), the field
+/// keeps the node's index in the whole graph on purpose, so this function cannot map it. A node
+/// that holds a graph must then come before every dropped node, so that it keeps its id.
 pub(crate) fn drop_nodes(
     graphs: &mut GraphArena,
     id: GraphId,
     dropped: &[NodeId],
+    split: ComponentSplit,
 ) -> Result<(), ComponentError> {
     // The renumbering shares its helpers with the component split, which report
     // `InvalidReference`. Here no component is involved, so the error says what really failed.
-    drop_nodes_renumbered(graphs, id, dropped).map_err(|error| match error {
+    drop_nodes_renumbered(graphs, id, dropped, split).map_err(|error| match error {
         ComponentError::InvalidReference { kind, index } => {
             ComponentError::DroppedReference { kind, index }
         }
@@ -404,6 +417,7 @@ fn drop_nodes_renumbered(
     graphs: &mut GraphArena,
     id: GraphId,
     dropped: &[NodeId],
+    split: ComponentSplit,
 ) -> Result<(), ComponentError> {
     let Some(&first) = dropped.iter().min() else {
         return Ok(());
@@ -418,9 +432,22 @@ fn drop_nodes_renumbered(
                 index: node.to_index(),
             })? = false;
     }
-    if let Some((owner, _)) = graph
-        .nodes_with_ids()
-        .find(|(node, data)| data.nested_graph.is_some() && *node >= first)
+    // A dropped node that holds a graph would leave that graph without a node.
+    if let Some(&owner) = dropped.iter().find(|&&node| {
+        graph
+            .layerless_nodes
+            .get(node)
+            .is_some_and(|data| data.nested_graph.is_some())
+    }) {
+        return Err(ComponentError::InvalidReference {
+            kind: "dropped graph owner",
+            index: owner.to_index(),
+        });
+    }
+    if split == ComponentSplit::Active
+        && let Some((owner, _)) = graph
+            .nodes_with_ids()
+            .find(|(node, data)| data.nested_graph.is_some() && *node >= first)
     {
         return Err(ComponentError::InvalidReference {
             kind: "graph owner after a dropped node",
@@ -481,6 +508,18 @@ fn drop_nodes_renumbered(
     }
     for other in nested.into_iter().chain(above) {
         remap_graph_references(&mut graphs[other], id, &node_map, &edge_map)?;
+    }
+    if split == ComponentSplit::Inactive {
+        // The nodes are in their new places now, so each holder names the id it has now.
+        let holders = graphs[id]
+            .nodes_with_ids()
+            .filter_map(|(node, data)| data.nested_graph.map(|nested| (node, nested)))
+            .collect::<Vec<_>>();
+        for (node, nested) in holders {
+            if let Some(parent) = &mut graphs[nested].parent {
+                parent.node = node;
+            }
+        }
     }
     Ok(())
 }
