@@ -1115,6 +1115,7 @@ fn reordering_ports_changes_no_edge_and_no_other_reference() {
         thickness: 0.0,
         original_opposite_port: Some(a[1]),
         compound_segment: None,
+        inside_self_loop: false,
     };
     graph.add_edge(edge("e0", a[0], b));
     graph.add_edge(edge("e1", a[2], b));

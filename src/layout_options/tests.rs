@@ -346,7 +346,6 @@ fn options_with_unported_values_are_refused_only_for_those_values() {
             "elk.layered.nodePlacement.networkSimplex.nodeFlexibility",
             "NODE_SIZE",
         ),
-        ("elk.insideSelfLoops.activate", "true"),
         ("elk.port.side", "WEST"),
     ] {
         assert!(
@@ -383,6 +382,7 @@ fn edge_and_label_options_are_read() {
             priority_direction: 3,
             priority_shortness: -1,
             priority_straightness: 2,
+            inside_self_loops_yo: false,
         }
     );
     let label = label_settings(&map(&[
@@ -463,4 +463,42 @@ fn every_supported_node_option_is_read() {
         node(&[("elk.layered.thoroughness", "-1")]),
         Err(OptionProblem::InvalidValue)
     ));
+}
+
+// Mutation: leave `insideSelfLoops.activate` out of the node's options, so `true` stays false.
+#[test]
+fn a_node_reads_inside_self_loops_activate() {
+    let off = node(&[]).unwrap();
+    assert!(!off.options.inside_self_loops_activate);
+    let on = node(&[("elk.insideSelfLoops.activate", "true")]).unwrap();
+    assert!(on.options.inside_self_loops_activate);
+    let off = node(&[("org.eclipse.elk.insideSelfLoops.activate", "FALSE")]).unwrap();
+    assert!(!off.options.inside_self_loops_activate);
+}
+
+// Mutation: ignore the parse error of `insideSelfLoops.activate`.
+#[test]
+fn inside_self_loops_activate_refuses_a_value_that_is_no_boolean() {
+    assert!(matches!(
+        node(&[("elk.insideSelfLoops.activate", "maybe")]),
+        Err(OptionProblem::InvalidValue)
+    ));
+}
+
+// Mutation: read `insideSelfLoops.yo` into no field of the edge's settings, so `true` stays
+// false. Or set the field whenever the key is present, so `false` turns into `true`.
+#[test]
+fn an_edge_reads_inside_self_loops_yo() {
+    assert!(!edge_settings(&map(&[])).unwrap().inside_self_loops_yo);
+    let on = edge_settings(&map(&[("elk.insideSelfLoops.yo", "true")])).unwrap();
+    assert!(on.inside_self_loops_yo);
+    let off = edge_settings(&map(&[("org.eclipse.elk.insideSelfLoops.yo", "FALSE")])).unwrap();
+    assert!(!off.inside_self_loops_yo);
+}
+
+// Mutation: ignore the parse error of `insideSelfLoops.yo`.
+#[test]
+fn inside_self_loops_yo_refuses_a_value_that_is_no_boolean() {
+    let error = edge_settings(&map(&[("elk.insideSelfLoops.yo", "maybe")])).unwrap_err();
+    assert_eq!(error.problem, OptionProblem::InvalidValue);
 }

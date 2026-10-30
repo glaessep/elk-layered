@@ -519,10 +519,13 @@ fn is_original_edge(graph: &LGraph, index: EdgeId, input: &TransferInput<'_>) ->
                 list.contains(&index)
             })
     };
+    // The ends of an inside self loop are dummies that stand for no port of the input, so the
+    // importer marks the edge. Indexing is safe after `attached`: it saw both nodes.
     attached(edge.source(), true)
         && attached(edge.target(), false)
-        && is_input_end(&graph.layerless_nodes[edge.source().node])
-        && is_input_end(&graph.layerless_nodes[edge.target().node])
+        && (edge.inside_self_loop
+            || (is_input_end(&graph.layerless_nodes[edge.source().node])
+                && is_input_end(&graph.layerless_nodes[edge.target().node])))
 }
 
 /// Whether a node stands for something the input has: a node, or a port of the graph's own node.

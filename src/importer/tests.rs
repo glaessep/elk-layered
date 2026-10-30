@@ -294,11 +294,21 @@ fn hierarchy_query_index_answers_ancestry_across_branches_and_forests() {
     assert!(!queries.is_ancestor(root_b, left_leaf));
 }
 
+/// A node that sets `insideSelfLoops.activate` itself. ELK reads the option from the node of the
+/// loop, not from the graph around it.
+fn activating(mut node: ElkInputNode) -> ElkInputNode {
+    node.nested_options = Some(Box::new(LayeredOptions {
+        inside_self_loops_activate: true,
+        ..Default::default()
+    }));
+    node
+}
+
 // Mutation: in `import_hierarchical_graph`, queue the children of every node that gets a nested
 // graph (`if true`). The dummy-only graph of `group` then holds `child`.
 #[test]
 fn separate_children_self_loop_graph_does_not_materialize_regular_children() {
-    let mut group = node("group");
+    let mut group = activating(node("group"));
     group.hierarchy_handling = Some(HierarchyHandling::SeparateChildren);
     let mut child = node("child");
     child.parent = Some("group".to_string());
@@ -310,7 +320,6 @@ fn separate_children_self_loop_graph_does_not_materialize_regular_children() {
     };
     let mut input = graph(vec![group, child], vec![loop_edge]);
     input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
-    input.options.inside_self_loops_activate = true;
 
     let imported = import_graph(&input).unwrap();
     let nested = imported.layerless_nodes[NodeId::new(0)]
@@ -472,10 +481,11 @@ fn dedicated_cross_edge_ports_are_not_reused() {
     assert_eq!(imported.hierarchy_edges.len(), edge_count);
 }
 
-// Mutation: in `ensure_inside_self_loop_dummy`, ignore the dummy found in the port index. Each
-// loop then makes two new dummies, not one pair for all.
+// Mutation: reuse the dummies of the first loop of a node for its later loops in
+// `transform_inside_self_loop`. The loops then share one pair of dummies and the nested graph has
+// 2 nodes.
 #[test]
-fn inside_self_loops_share_one_dummy_per_node_and_role() {
+fn each_inside_self_loop_gets_its_own_pair_of_dummies() {
     let edge_count = 32usize;
     let edges = (0..edge_count)
         .map(|index| ElkInputEdge {
@@ -485,16 +495,15 @@ fn inside_self_loops_share_one_dummy_per_node_and_role() {
             ..edge(format!("loop-{index}").as_str(), "A", "A")
         })
         .collect::<Vec<_>>();
-    let mut input = graph(vec![node("A")], edges);
+    let mut input = graph(vec![activating(node("A"))], edges);
     input.options.hierarchy_handling = HierarchyHandling::IncludeChildren;
-    input.options.inside_self_loops_activate = true;
 
     let imported = import_graph(&input).unwrap();
 
     let nested = &imported[imported.layerless_nodes[NodeId::new(0)]
         .nested_graph
         .unwrap()];
-    assert_eq!(nested.layerless_nodes.len(), 2);
+    assert_eq!(nested.layerless_nodes.len(), 2 * edge_count);
     assert_eq!(nested.edges.len(), edge_count);
 }
 
@@ -564,10 +573,11 @@ fn imports_mermaid_flowchart_nodes_edges_labels_and_model_order() {
     assert!(lgraph.options.graph_has_center_labels);
 }
 
+// Mutation: make `node_activates_inside_self_loops` return false.
 #[test]
 fn importer_creates_nested_graph_for_inside_self_loop() {
-    let mut graph = graph(
-        vec![node("A")],
+    let graph = graph(
+        vec![activating(node("A"))],
         vec![ElkInputEdge {
             source_port: None,
             target_port: None,
@@ -575,7 +585,6 @@ fn importer_creates_nested_graph_for_inside_self_loop() {
             ..edge("A-A", "A", "A")
         }],
     );
-    graph.options.inside_self_loops_activate = true;
 
     let lgraph = import_graph(&graph).unwrap();
     let node = lgraph
@@ -586,12 +595,12 @@ fn importer_creates_nested_graph_for_inside_self_loop() {
     assert!(node.nested_graph.is_some());
 }
 
-// Mutation: in `ensure_inside_self_loop_dummy`, ignore the dummy found in the port index. Each
-// loop then makes two new dummies, not one pair for all.
+// Mutation: reuse the dummies of the first loop of a node for its later loops in
+// `transform_inside_self_loop`. The two loops then share one pair of dummies.
 #[test]
-fn importer_reuses_inside_self_loop_dummies_per_node_role() {
-    let mut graph = graph(
-        vec![node("A")],
+fn importer_gives_each_inside_self_loop_its_own_dummies() {
+    let graph = graph(
+        vec![activating(node("A"))],
         vec![
             ElkInputEdge {
                 source_port: None,
@@ -607,7 +616,6 @@ fn importer_reuses_inside_self_loop_dummies_per_node_role() {
             },
         ],
     );
-    graph.options.inside_self_loops_activate = true;
 
     let lgraph = import_graph(&graph).unwrap();
     let node = lgraph
@@ -622,24 +630,20 @@ fn importer_reuses_inside_self_loop_dummies_per_node_role() {
         .filter(|candidate| candidate.kind() == LNodeKind::ExternalPort)
         .collect::<Vec<_>>();
 
-    assert_eq!(external_dummies.len(), 2);
-    let input_dummy = external_dummies
-        .iter()
-        .find(|dummy| dummy.external_port().unwrap().parent_port_type == Some(PortType::Input))
-        .expect("inside self-loop input dummy should exist");
-    let output_dummy = external_dummies
-        .iter()
-        .find(|dummy| dummy.external_port().unwrap().parent_port_type == Some(PortType::Output))
-        .expect("inside self-loop output dummy should exist");
-    assert_eq!(input_dummy.ports[PortId::new(0)].incoming_edges().len(), 2);
-    assert_eq!(output_dummy.ports[PortId::new(0)].outgoing_edges().len(), 2);
+    // `ElkGraphImporter.transformEdge` makes a new port for each loop, so each loop gets an input
+    // dummy and an output dummy of its own.
+    assert_eq!(external_dummies.len(), 4);
+    for dummy in external_dummies {
+        let port = &dummy.ports[PortId::new(0)];
+        assert_eq!(port.incoming_edges().len() + port.outgoing_edges().len(), 1);
+    }
 }
 
 // Mutation: in `transform_inside_self_loop`, drop `graph_properties.self_loops = true`.
 #[test]
 fn importer_marks_inside_self_loops_as_graph_self_loops() {
-    let mut graph = graph(
-        vec![node("A")],
+    let graph = graph(
+        vec![activating(node("A"))],
         vec![ElkInputEdge {
             source_port: None,
             target_port: None,
@@ -647,7 +651,6 @@ fn importer_marks_inside_self_loops_as_graph_self_loops() {
             ..edge("A-A", "A", "A")
         }],
     );
-    graph.options.inside_self_loops_activate = true;
 
     let lgraph = import_graph(&graph).unwrap();
     let nested = lgraph

@@ -401,8 +401,8 @@ fn import_scope_with(
 /// ports. Gives the dummy of each port by the port's id.
 ///
 /// Ports `ElkGraphImporter.checkExternalPorts` and `transformExternalPort`. Port labels are
-/// refused before this runs, and inside self loops are refused, so a port is external only
-/// when an edge connects it to a child.
+/// refused before this runs, and an inside self loop at a port is refused, so a port is external
+/// only when an edge connects it to a child.
 fn import_external_ports(
     root: &mut LGraph,
     scope: &ScopePorts<'_>,
@@ -738,9 +738,7 @@ struct ImportNodePortIndex {
 
 #[derive(Default)]
 struct ImportGraphPortIndex {
-    /// `None` is the parent boundary: the dummy of an inside self loop belongs to no node of the
-    /// graph.
-    nodes: HashMap<Option<NodeId>, ImportNodePortIndex>,
+    nodes: HashMap<NodeId, ImportNodePortIndex>,
 }
 
 struct ImportPortIndex {
@@ -798,7 +796,7 @@ impl ImportPortIndex {
     fn get(
         &mut self,
         graph_parent: Option<&str>,
-        node: Option<NodeId>,
+        node: NodeId,
         port_key: &str,
         port_type: PortType,
     ) -> Option<PortRef> {
@@ -816,7 +814,7 @@ impl ImportPortIndex {
     fn insert(
         &mut self,
         graph_parent: Option<&str>,
-        node: Option<NodeId>,
+        node: NodeId,
         port_key: &str,
         port_type: PortType,
         port: PortRef,
@@ -991,16 +989,10 @@ fn import_hierarchical_graph(
                 .then(|| edge.model_order.unwrap_or(edge_order));
             let source_parent = index.node_parent(edge.source.as_str());
             let target_parent = index.node_parent(edge.target.as_str());
-            let source_container_slot = arena.graph_slot_for_parent(index, source_parent);
-            let inside_self_loops_activate = arena.graphs[source_container_slot]
-                .options
-                .inside_self_loops_activate;
-
-            if edge.inside_self_loops_yo && edge.source == edge.target && inside_self_loops_activate
-            {
+            if is_inside_self_loop(&index.nodes, edge) {
                 let graph_slot = arena.graph_slot_for_parent(index, Some(edge.source.as_str()));
                 let graph = &mut arena.graphs[graph_slot];
-                transform_inside_self_loop(edge, graph, edge_model_order, port_index);
+                transform_inside_self_loop(edge, graph, edge_model_order);
             } else if source_parent == target_parent {
                 let graph = &mut arena.graphs[owner_slot];
                 transform_edge(
@@ -1039,28 +1031,18 @@ fn import_hierarchical_graph(
     Ok(arena.into_graphs())
 }
 
+/// Ports `ElkGraphImporter.importHierarchicalGraph` and `transformEdge` for an inside self loop.
+///
+/// `transformEdge` makes a new port for each end of an edge that has none, so each loop gets a
+/// source dummy and a target dummy of its own. No port holds more than one edge, and the loop is
+/// no hyperedge.
 fn transform_inside_self_loop(
     edge: &ElkInputEdge,
     graph: &mut LGraph,
     model_order: Option<usize>,
-    port_index: &mut ImportPortIndex,
 ) -> EdgeId {
-    let source_port_key = inside_self_loop_port_key(edge.source.as_str(), "source");
-    let target_port_key = inside_self_loop_port_key(edge.target.as_str(), "target");
-    let source = ensure_inside_self_loop_dummy(
-        graph,
-        edge.source.as_str(),
-        PortType::Output,
-        source_port_key.as_str(),
-        port_index,
-    );
-    let target = ensure_inside_self_loop_dummy(
-        graph,
-        edge.target.as_str(),
-        PortType::Input,
-        target_port_key.as_str(),
-        port_index,
-    );
+    let source = make_inside_self_loop_dummy(graph, edge.source.as_str(), PortType::Output);
+    let target = make_inside_self_loop_dummy(graph, edge.target.as_str(), PortType::Input);
 
     let mut labels = Vec::new();
     for label in &edge.labels {
@@ -1085,30 +1067,25 @@ fn transform_inside_self_loop(
             built_edge.priority_shortness = edge.priority_shortness;
             built_edge.priority_straightness = edge.priority_straightness;
             built_edge.thickness = ELK_DEFAULT_EDGE_THICKNESS;
+            built_edge.inside_self_loop = true;
             built_edge
         })
         .expect("inside self-loop dummies were created before adding edge");
 
     graph.graph_properties.self_loops = true;
-    if has_parallel_port_edges(&graph.layerless_nodes[source.node].ports[source.port])
-        || has_parallel_port_edges(&graph.layerless_nodes[target.node].ports[target.port])
-    {
-        graph.graph_properties.hyperedges = true;
-    }
 
     edge_index
 }
 
-fn ensure_inside_self_loop_dummy(
+/// Makes the external port dummy for one end of an inside self loop.
+///
+/// The dummy has no key of its own. The compound preprocessor then makes a new port on the node
+/// for it, as `LGraphUtil.createPort` does in ELK, and never matches a port the caller named.
+fn make_inside_self_loop_dummy(
     graph: &mut LGraph,
     parent_node_id: &str,
     port_type: PortType,
-    parent_port_key: &str,
-    port_index: &mut ImportPortIndex,
 ) -> PortRef {
-    if let Some(port) = port_index.get(Some(parent_node_id), None, parent_port_key, port_type) {
-        return port;
-    }
     graph.graph_properties.external_ports = true;
     graph.graph_properties.non_free_ports = true;
 
@@ -1118,7 +1095,7 @@ fn ensure_inside_self_loop_dummy(
         create_external_port_dummy(
             node,
             dummy_id,
-            parent_port_key.to_string(),
+            String::new(),
             port_type,
             PortConstraints::Free,
             PortSide::Undefined,
@@ -1132,22 +1109,15 @@ fn ensure_inside_self_loop_dummy(
             0.0,
             direction,
             ExternalPortData {
-                parent_port_key: Some(parent_port_key.to_string()),
                 parent_port_type: Some(port_type),
                 ..ExternalPortData::default()
             },
         )
     });
-    let port = PortRef {
+    PortRef {
         node,
         port: PortId::new(0),
-    };
-    port_index.insert(Some(parent_node_id), None, parent_port_key, port_type, port);
-    port
-}
-
-fn inside_self_loop_port_key(node_id: &str, role: &str) -> String {
-    format!("{node_id}:{role}")
+    }
 }
 
 /// Mirrors `ElkGraphImporter#needsModelOrder(...)`.
@@ -1462,7 +1432,7 @@ fn transform_port(
     lport.border_offset = port.border_offset;
     lport.allow_non_flow_ports_to_switch_sides = port.allow_non_flow_ports_to_switch_sides;
     // The input has no edge to or from a descendant of its node, because the node has no children.
-    // Inside self loops are refused, so `INSIDE_CONNECTIONS` stays false.
+    // An inside self loop at a port is refused, so `INSIDE_CONNECTIONS` stays false.
     initialize_port(&mut lport, constraints, node_size, graph.options.direction);
     for label in port.labels.iter().filter(|label| !label.text.is_empty()) {
         // `transformLabel` keeps the given position. Only a port label reads it: one whose
@@ -2005,9 +1975,7 @@ fn ensure_port_at_node(
 
     if graph.options.merge_edges && !graph.layerless_nodes[node].port_constraints.is_side_fixed() {
         let collector_key = hierarchy_port_key(node_id, 0, "collector", true, port_type);
-        if let Some(port) =
-            port_index.get(graph_parent, Some(node), collector_key.as_str(), port_type)
-        {
+        if let Some(port) = port_index.get(graph_parent, node, collector_key.as_str(), port_type) {
             return Some(port);
         }
         let default_side = port_side_from_direction(graph.options.direction);
@@ -2017,13 +1985,7 @@ fn ensure_port_at_node(
         };
         let port = graph.provide_collector_port(node, port_type, side);
         if let Some(port) = port {
-            port_index.insert(
-                graph_parent,
-                Some(node),
-                collector_key.as_str(),
-                port_type,
-                port,
-            );
+            port_index.insert(graph_parent, node, collector_key.as_str(), port_type, port);
         }
         return port;
     }
@@ -2040,12 +2002,6 @@ fn ensure_port_at_node(
     });
     let port = graph.layerless_nodes[node].ports.push(implicit_port);
     Some(PortRef { node, port })
-}
-
-/// `ElkGraphImporter.transformEdge` marks hyperedges when a port has more than one incoming
-/// or more than one outgoing edge. One of each is not a hyperedge.
-fn has_parallel_port_edges(port: &LPort) -> bool {
-    port.incoming_edges().len() > 1 || port.outgoing_edges().len() > 1
 }
 
 fn label_to_lgraph(label: &ElkInputLabel) -> LLabel {
@@ -2076,8 +2032,31 @@ fn node_needs_nested_graph(
     // SeparateChildren may still need a dummy-only nested graph for activated inside self-loops;
     // that must not be confused with permission to materialize the node's ordinary children.
     node_materializes_children(index, parent_options, node)
-        || (parent_options.inside_self_loops_activate
-            && index.inside_self_loop_nodes.contains(node.id.as_str()))
+        || index.inside_self_loop_nodes.contains(node.id.as_str())
+}
+
+/// Whether the node itself sets `insideSelfLoops.activate`.
+///
+/// Ports the reads of `LayeredOptions.INSIDE_SELF_LOOPS_ACTIVATE` on a node in
+/// `ElkGraphImporter.importFlatGraph`, `importHierarchicalGraph`, `hasInsideSelfLoops` and
+/// `transformNode`. A node's own options travel in `nested_options`.
+fn node_activates_inside_self_loops(node: &ElkInputNode) -> bool {
+    node.nested_options
+        .as_deref()
+        .is_some_and(|options| options.inside_self_loops_activate)
+}
+
+/// Whether the edge is a self loop that the edge's `insideSelfLoops.yo` and its node's
+/// `insideSelfLoops.activate` route inside the node.
+///
+/// Ports the `isInsideSelfLoop` tests in `ElkGraphImporter.importFlatGraph` and
+/// `importHierarchicalGraph`.
+fn is_inside_self_loop(nodes: &HashMap<&str, &ElkInputNode>, edge: &ElkInputEdge) -> bool {
+    edge.inside_self_loops_yo
+        && edge.source == edge.target
+        && nodes
+            .get(edge.source.as_str())
+            .is_some_and(|node| node_activates_inside_self_loops(node))
 }
 
 /// Source: `LGraphUtil.getDirection`, which `ElkGraphImporter.createLGraph` uses for a graph
@@ -2311,7 +2290,7 @@ impl<'a> InputIndex<'a> {
         let inside_self_loop_nodes = input
             .edges
             .iter()
-            .filter(|edge| edge.inside_self_loops_yo && edge.source == edge.target)
+            .filter(|edge| is_inside_self_loop(&nodes, edge))
             .map(|edge| edge.source.as_str())
             .collect::<HashSet<_>>();
         let mut result = Self {

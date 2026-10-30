@@ -2349,3 +2349,220 @@ fn a_west_port_of_a_group_in_a_downward_layout_keeps_the_anchor_from_before_the_
     assert_eq!(port_at(&laid, "g", "p"), (-6.0, 12.0));
     assert_eq!(at(&laid, "c"), (32.0, 32.0));
 }
+
+/// A group `g` with two children and an inside self loop on it, in an `INCLUDE_CHILDREN` graph
+/// that runs downward: the graph of the elkjs case `ports-group-down-inside-self-loop`.
+fn inside_self_loop_graph() -> ElkNode {
+    let mut g = group("g", vec![node("a", 50.0, 24.0), node("b", 50.0, 24.0)]);
+    g.edges = vec![edge("ab", "a", "b")];
+    g.layout_options
+        .insert("elk.insideSelfLoops.activate".into(), "true".into());
+    let mut graph = include_children(root(vec![g], vec![inside_self_loop("loop")]));
+    graph
+        .layout_options
+        .insert("elk.direction".into(), "DOWN".into());
+    graph
+}
+
+/// A self loop of `g` that `insideSelfLoops.yo` sends inside `g`.
+fn inside_self_loop(id: &str) -> ElkEdge {
+    let mut loop_edge = edge(id, "g", "g");
+    loop_edge
+        .layout_options
+        .insert("elk.insideSelfLoops.yo".into(), "true".into());
+    loop_edge
+}
+
+// Mutation: skip the shift by the node's place in `finish`. The loop then stays at 72, relative
+// to `g`, and ignores that `h` holds the edge.
+#[test]
+fn an_inside_self_loop_comes_back_in_the_coordinates_of_the_node_that_holds_it() {
+    let mut inner = inside_self_loop_graph();
+    let mut h = group("h", std::mem::take(&mut inner.children));
+    h.edges = std::mem::take(&mut inner.edges);
+    inner.children = vec![h];
+    let laid = layout(&inner).unwrap();
+    assert_eq!(size(&laid, "root"), (133.0, 140.0));
+    assert_eq!(at(&laid, "h"), (12.0, 12.0));
+    assert_eq!(at(&laid, "g"), (12.0, 12.0));
+    assert_eq!(size(&laid, "g"), (85.0, 92.0));
+    assert_eq!(
+        route(find_edge(&laid, "loop")),
+        vec![(84.0, 12.0), (84.0, 104.0)]
+    );
+}
+
+// Mutation: build the nested options only for a node with children in `input_node`. A node
+// without children then loses `insideSelfLoops.activate`, and its loop runs around it.
+#[test]
+fn a_node_without_children_gets_an_inside_self_loop() {
+    let mut graph = inside_self_loop_graph();
+    graph.children[0].children.clear();
+    graph.children[0].edges.clear();
+    graph.children[0].width = 60.0;
+    graph.children[0].height = 40.0;
+    let laid = layout(&graph).unwrap();
+    assert_eq!(size(&laid, "root"), (48.0, 48.0));
+    assert_eq!(at(&laid, "g"), (12.0, 12.0));
+    assert_eq!(size(&laid, "g"), (24.0, 24.0));
+    assert_eq!(
+        route(find_edge(&laid, "loop")),
+        vec![(24.0, 12.0), (24.0, 36.0)]
+    );
+}
+
+// Mutation: reuse the dummies of the first loop of a node for its later loops in
+// `transform_inside_self_loop`. The second loop then shares the first one's route.
+#[test]
+fn two_inside_self_loops_on_one_node_get_two_routes() {
+    let mut graph = inside_self_loop_graph();
+    graph.edges.push(inside_self_loop("loop2"));
+    let laid = layout(&graph).unwrap();
+    assert_eq!(size(&laid, "root"), (120.0, 116.0));
+    assert_eq!(size(&laid, "g"), (96.0, 92.0));
+    assert_eq!(
+        route(find_edge(&laid, "loop")),
+        vec![(84.0, 12.0), (84.0, 104.0)]
+    );
+    assert_eq!(
+        route(find_edge(&laid, "loop2")),
+        vec![(95.0, 12.0), (95.0, 104.0)]
+    );
+}
+
+// Mutation: leave the label out of the shift in `finish`. It then sits at (85, 19), relative to
+// `g`, 12 short of elkjs in both directions.
+#[test]
+fn the_label_of_an_inside_self_loop_moves_with_the_loop() {
+    let mut graph = inside_self_loop_graph();
+    graph.edges[0].labels = vec![label("x", 10.0, 10.0)];
+    let laid = layout(&graph).unwrap();
+    assert_eq!(size(&laid, "root"), (131.0, 116.0));
+    assert_eq!(size(&laid, "g"), (107.0, 92.0));
+    assert_eq!(
+        route(find_edge(&laid, "loop")),
+        vec![(94.0, 12.0), (94.0, 104.0)]
+    );
+    let label = &find_edge(&laid, "loop").labels[0];
+    assert_eq!((label.x, label.y), (97.0, 31.0));
+}
+
+/// What a test compares of a laid out loop: the size of `g` and the route of `loop`.
+fn loop_summary(graph: &ElkNode) -> ((f64, f64), Vec<(f64, f64)>) {
+    (size(graph, "g"), route(find_edge(graph, "loop")))
+}
+
+// Mutation: ignore `insideSelfLoops.activate` of the node in `is_inside_self_loop`. The loop then
+// runs inside `g`, though nothing allows it.
+#[test]
+fn a_loop_that_says_yo_stays_outside_a_node_that_does_not_activate() {
+    let mut yo_only = inside_self_loop_graph();
+    yo_only.children[0].layout_options.clear();
+    let mut plain = yo_only.clone();
+    plain.edges[0].layout_options.clear();
+    let laid = layout(&yo_only).unwrap();
+    assert_eq!(loop_summary(&laid), loop_summary(&layout(&plain).unwrap()));
+    // The loop runs around `g`, so it bends left of its start.
+    assert!(route(find_edge(&laid, "loop")).len() > 2);
+}
+
+// Mutation: ignore `insideSelfLoops.yo` of the edge in `is_inside_self_loop`. The loop then runs
+// inside `g`, though its edge does not ask for it.
+#[test]
+fn a_node_that_activates_keeps_a_loop_outside_that_does_not_say_yo() {
+    let mut activate_only = inside_self_loop_graph();
+    activate_only.edges[0].layout_options.clear();
+    let mut plain = activate_only.clone();
+    plain.children[0].layout_options.clear();
+    let laid = layout(&activate_only).unwrap();
+    assert_eq!(loop_summary(&laid), loop_summary(&layout(&plain).unwrap()));
+    assert!(route(find_edge(&laid, "loop")).len() > 2);
+}
+
+// Mutation: drop the check of the run's own edges in `run_layered`. ELK fails on this graph, and
+// elk-layered would give it a layout.
+#[test]
+fn an_inside_self_loop_in_a_graph_with_separate_children_is_unsupported() {
+    let mut graph = inside_self_loop_graph();
+    graph.layout_options.remove("elk.hierarchyHandling");
+    assert!(matches!(
+        error_of(&graph),
+        Error::Unsupported { element, feature }
+            if element == "edge \"loop\""
+                && feature == "an inside self loop in a graph laid out on its own"
+    ));
+    // The same goes for a node without children.
+    graph.children[0].children.clear();
+    graph.children[0].edges.clear();
+    assert!(matches!(error_of(&graph), Error::Unsupported { .. }));
+}
+
+// Mutation: drop the `SEPARATE_CHILDREN` test of the loop's node in `run_layered`. The node laid
+// out on its own then lets its loop go through.
+#[test]
+fn an_inside_self_loop_on_a_node_laid_out_on_its_own_is_unsupported() {
+    let mut graph = inside_self_loop_graph();
+    graph.children[0]
+        .layout_options
+        .insert("elk.hierarchyHandling".into(), "SEPARATE_CHILDREN".into());
+    for childless in [false, true] {
+        if childless {
+            graph.children[0].children.clear();
+            graph.children[0].edges.clear();
+            graph.children[0].width = 60.0;
+            graph.children[0].height = 40.0;
+        }
+        assert!(
+            matches!(
+                error_of(&graph),
+                Error::Unsupported { element, feature }
+                    if element == "edge \"loop\""
+                        && feature == "an inside self loop in a graph laid out on its own"
+            ),
+            "childless: {childless}"
+        );
+    }
+}
+
+// Mutation: drop the port check in `run_layered`. elkjs fails on this graph with a JavaScript
+// error, and elk-layered would give it a layout.
+#[test]
+fn an_inside_self_loop_at_a_port_is_unsupported() {
+    let mut graph = inside_self_loop_graph();
+    graph.children[0].ports = vec![port("p", 6.0, 6.0, "")];
+    for (source, target) in [("p", "g"), ("g", "p"), ("p", "p")] {
+        graph.edges[0].sources = vec![source.into()];
+        graph.edges[0].targets = vec![target.into()];
+        assert!(
+            matches!(
+                error_of(&graph),
+                Error::Unsupported { element, feature }
+                    if element == "edge \"loop\"" && feature == "an inside self loop at a port"
+            ),
+            "{source} -> {target}"
+        );
+    }
+}
+
+// Mutation: give the dummies of a loop the key `"{edge id}:source"` and `"{edge id}:target"` in
+// `transform_inside_self_loop` (`parent_port_key`). The loop then links to the named ports, and
+// g keeps them as its own ends of the loop.
+#[test]
+fn an_inside_self_loop_never_takes_a_port_the_caller_named_after_it() {
+    let mut graph = inside_self_loop_graph();
+    graph.children[0] = with_ports(
+        graph.children[0].clone(),
+        "FIXED_SIDE",
+        vec![
+            port("loop:source", 6.0, 6.0, "WEST"),
+            port("loop:target", 6.0, 6.0, "EAST"),
+        ],
+    );
+    let laid = layout(&graph).unwrap();
+    assert_eq!(size(&laid, "root"), (121.0, 116.0));
+    assert_eq!(at(&laid, "g"), (18.0, 12.0));
+    assert_eq!(
+        route(find_edge(&laid, "loop")),
+        vec![(90.0, 12.0), (90.0, 104.0)]
+    );
+}
