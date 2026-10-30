@@ -1,6 +1,6 @@
 use super::assembler::{
-    CrossingMinimizer, CycleBreaker, EdgeRouter, IntermediateProcessor, Layerer, NodePlacer,
-    Strategies, assemble, assemble_graph,
+    CrossingMinimizer, CycleBreaker, EdgeRouter, IntermediateProcessor, Layerer, NodePlacer, Place,
+    Strategies, assemble, assemble_graph, hypernodes_refusal,
 };
 use super::compound::{CompoundRun, check_strategies, execute_compound_graph_round};
 use super::execute::{execute_in_arena, execute_processor, resize_layered_node};
@@ -537,8 +537,8 @@ fn flowchart_test_defaults_insert_direction_model_order_and_hierarchy_processors
     );
 }
 
-// Mutation: refuse a graph with `wrapping_multi_edge_improve_cuts` set, instead of a graph with a
-// wrapping strategy, in `Strategies::select`.
+// Mutation: in `Strategies::select`, refuse a graph with `wrapping_multi_edge_improve_cuts` set,
+// instead of calling `wrapping_refusal(options.wrapping_strategy)`.
 #[test]
 fn mermaid_wrapping_flags_do_not_enable_wrapping_processors_without_strategy() {
     let options = LayeredOptions::flowchart_test_defaults(ElkDirection::Down);
@@ -2545,12 +2545,12 @@ fn every_phase_strategy_selects_its_processor_or_is_refused() {
 #[test]
 fn wrapping_strategies_are_refused() {
     let cases = [
-        // Mutation: let `WrappingStrategy::SingleEdge` through in `Strategies::select`.
+        // Mutation: return `None` for `WrappingStrategy::SingleEdge` in `wrapping_refusal`.
         (
             WrappingStrategy::SingleEdge,
             UnportedProcessor::SingleEdgeGraphWrapper,
         ),
-        // Mutation: let `WrappingStrategy::MultiEdge` through in `Strategies::select`.
+        // Mutation: return `None` for `WrappingStrategy::MultiEdge` in `wrapping_refusal`.
         (
             WrappingStrategy::MultiEdge,
             UnportedProcessor::BreakingPointInserter,
@@ -2565,7 +2565,7 @@ fn wrapping_strategies_are_refused() {
     }
 }
 
-// Mutation: leave out the `properties.hypernodes` check in `Strategies::select`.
+// Mutation: make `hypernodes_refusal` return `None`.
 #[test]
 fn a_graph_with_hypernodes_is_refused() {
     let mut graph = LGraph::new("root", LayeredOptions::default());
@@ -2581,7 +2581,8 @@ fn a_graph_with_hypernodes_is_refused() {
 #[test]
 fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
     let cases = [
-        // Mutation: check the wrapping strategies before the layerer in `Strategies::select`.
+        // Mutation: give `WrappingStrategy::MultiEdge` the place
+        // `Place::Before(LayeredPhase::P1CycleBreaking)` in `wrapping_refusal`.
         (
             options_with(|o| {
                 o.layering_strategy = LayeringStrategy::BreadthFirstModelOrder;
@@ -2589,8 +2590,8 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
             }),
             UnportedProcessor::BreadthFirstModelOrderLayerer,
         ),
-        // Mutation: check the crossing minimizer before the multi-edge breaking points in
-        // `Strategies::select`.
+        // Mutation: give the interactive crossing minimizer the place
+        // `Place::Before(LayeredPhase::P2Layering)` in `CrossingMinimizer::select`.
         (
             options_with(|o| {
                 o.crossing_minimization_strategy = CrossingMinimizationStrategy::Interactive;
@@ -2598,7 +2599,8 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
             }),
             UnportedProcessor::BreakingPointInserter,
         ),
-        // Mutation: check the edge router before the node placer in `Strategies::select`.
+        // Mutation: give the polyline edge router the place
+        // `Place::Before(LayeredPhase::P4NodePlacement)` in `EdgeRouter::select`.
         (
             options_with(|o| {
                 o.node_placement_strategy = NodePlacementStrategy::Interactive;
@@ -2606,8 +2608,8 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
             }),
             UnportedProcessor::InteractiveNodePlacer,
         ),
-        // Mutation: check the single-edge wrapper before the crossing minimizer in
-        // `Strategies::select`.
+        // Mutation: give `WrappingStrategy::SingleEdge` the place
+        // `Place::Before(LayeredPhase::P3NodeOrdering)` in `wrapping_refusal`.
         (
             options_with(|o| {
                 o.crossing_minimization_strategy = CrossingMinimizationStrategy::Interactive;
@@ -2615,8 +2617,8 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
             }),
             UnportedProcessor::InteractiveCrossingMinimizer,
         ),
-        // Mutation: check the node placer before the single-edge wrapper in
-        // `Strategies::select`.
+        // Mutation: give `WrappingStrategy::SingleEdge` the place
+        // `Place::After(LayeredPhase::P4NodePlacement)` in `wrapping_refusal`.
         (
             options_with(|o| {
                 o.node_placement_strategy = NodePlacementStrategy::Interactive;
@@ -2637,12 +2639,180 @@ fn the_first_unported_processor_is_the_one_the_schedule_reaches_first() {
         options_with(|o| o.edge_routing = EdgeRouting::Polyline),
     );
     graph.graph_properties.hypernodes = true;
-    // Mutation: check hypernodes before the edge router in `Strategies::select`.
+    // Mutation: in `hypernodes_refusal`, ignore the edge router and give the refusal the place
+    // `Place::Before(LayeredPhase::P5EdgeRouting)`.
     assert_eq!(
         try_graph_kinds(&graph),
         Err(PipelineError::UnsupportedProcessor {
             kind: UnportedProcessor::PolylineEdgeRouter,
         })
+    );
+}
+
+// Mutation: in `hypernodes_refusal`, drop the `EdgeRouting::Orthogonal` check. A graph with
+// hypernodes is then refused under a router that never asks for `HYPERNODE_PROCESSOR`.
+#[test]
+fn hypernodes_are_refused_only_for_the_router_that_asks_for_their_processor() {
+    let with = GraphProperties {
+        hypernodes: true,
+        ..Default::default()
+    };
+    assert!(hypernodes_refusal(&with, EdgeRouting::Orthogonal).is_some());
+    assert!(hypernodes_refusal(&with, EdgeRouting::Polyline).is_none());
+    assert!(hypernodes_refusal(&with, EdgeRouting::Splines).is_none());
+    let without = GraphProperties::default();
+    assert!(hypernodes_refusal(&without, EdgeRouting::Orthogonal).is_none());
+}
+
+// The table guards three things, one mutation each:
+// - Mutation: leave `hypernodes_refusal(properties)` out of `refusals` in `Strategies::select`.
+//   The row checked alone then gives no refusal.
+// - Mutation: use `max_by_key` instead of `min_by_key` in `Strategies::select`. Every pair then
+//   names the later processor.
+// - Mutation: give the refusal of `HypernodesProcessor` the place
+//   `Place::Before(LayeredPhase::P1CycleBreaking)` in `hypernodes_refusal`. It then beats every
+//   other refusal, and each pair that lists it second fails.
+#[test]
+fn of_two_refusals_the_one_earlier_in_the_schedule_wins() {
+    type Trigger = fn(&mut LayeredOptions, &mut GraphProperties);
+    // Each row: the option or property it sets, what a run is refused for, and how to set it.
+    // The rows stand in the order of the schedule in ELK's `GraphConfigurator` and the phases.
+    let schedule: [(&str, UnportedProcessor, Trigger); 10] = [
+        (
+            "layering",
+            UnportedProcessor::BreadthFirstModelOrderLayerer,
+            |o, _| o.layering_strategy = LayeringStrategy::BreadthFirstModelOrder,
+        ),
+        (
+            "layering",
+            UnportedProcessor::DepthFirstModelOrderLayerer,
+            |o, _| o.layering_strategy = LayeringStrategy::DepthFirstModelOrder,
+        ),
+        (
+            "wrapping",
+            UnportedProcessor::BreakingPointInserter,
+            |o, _| o.wrapping_strategy = WrappingStrategy::MultiEdge,
+        ),
+        (
+            "crossing",
+            UnportedProcessor::InteractiveCrossingMinimizer,
+            |o, _| o.crossing_minimization_strategy = CrossingMinimizationStrategy::Interactive,
+        ),
+        (
+            "wrapping",
+            UnportedProcessor::SingleEdgeGraphWrapper,
+            |o, _| o.wrapping_strategy = WrappingStrategy::SingleEdge,
+        ),
+        (
+            "placement",
+            UnportedProcessor::InteractiveNodePlacer,
+            |o, _| o.node_placement_strategy = NodePlacementStrategy::Interactive,
+        ),
+        (
+            "placement",
+            UnportedProcessor::LinearSegmentsNodePlacer,
+            |o, _| o.node_placement_strategy = NodePlacementStrategy::LinearSegments,
+        ),
+        ("routing", UnportedProcessor::PolylineEdgeRouter, |o, _| {
+            o.edge_routing = EdgeRouting::Polyline
+        }),
+        ("routing", UnportedProcessor::SplineEdgeRouter, |o, _| {
+            o.edge_routing = EdgeRouting::Splines
+        }),
+        (
+            "hypernodes",
+            UnportedProcessor::HypernodesProcessor,
+            |_, p| p.hypernodes = true,
+        ),
+    ];
+
+    let refused_for = |triggers: &[Trigger]| {
+        let mut options = LayeredOptions::default();
+        let mut properties = GraphProperties::default();
+        for trigger in triggers {
+            trigger(&mut options, &mut properties);
+        }
+        Strategies::select(&options, &properties).err()
+    };
+
+    let mut pairs = 0;
+    for (i, (first_field, first_kind, first)) in schedule.iter().enumerate() {
+        assert_eq!(
+            refused_for(&[*first]),
+            Some(PipelineError::UnsupportedProcessor { kind: *first_kind })
+        );
+        for (second_field, _, second) in &schedule[i + 1..] {
+            // Two values of one option cannot be set together.
+            if first_field == second_field {
+                continue;
+            }
+            pairs += 1;
+            assert_eq!(
+                refused_for(&[*first, *second]),
+                Some(PipelineError::UnsupportedProcessor { kind: *first_kind })
+            );
+        }
+    }
+    assert_eq!(pairs, 41);
+}
+
+// Mutation: in `Config::add_after`, use `slot_before` instead of `slot_after`. The processor that
+// ELK adds after phase five then runs in front of the router, and the order of the places no
+// longer matches the order of the run.
+#[test]
+fn the_places_stand_in_the_order_of_the_assembled_run() {
+    let run = kinds(&LayeredOptions::default());
+    let phase_index = |phase: LayeredPhase| {
+        run.iter()
+            .position(|processor| processor.phase() == Some(phase))
+            .unwrap()
+    };
+    let index_of = |processor: IntermediateProcessor| {
+        run.iter()
+            .position(|candidate| *candidate == Processor::Intermediate(processor))
+            .unwrap()
+    };
+    // Each row is a step of the real run and the place that names it.
+    let mut steps = vec![
+        (
+            Place::In(LayeredPhase::P2Layering),
+            phase_index(LayeredPhase::P2Layering),
+        ),
+        (
+            Place::In(LayeredPhase::P3NodeOrdering),
+            phase_index(LayeredPhase::P3NodeOrdering),
+        ),
+        (
+            Place::In(LayeredPhase::P4NodePlacement),
+            phase_index(LayeredPhase::P4NodePlacement),
+        ),
+        (
+            Place::In(LayeredPhase::P5EdgeRouting),
+            phase_index(LayeredPhase::P5EdgeRouting),
+        ),
+        (
+            Place::Before(LayeredPhase::P4NodePlacement),
+            index_of(IntermediateProcessor::InnermostNodeMarginCalculator),
+        ),
+        (
+            Place::Before(LayeredPhase::P5EdgeRouting),
+            index_of(IntermediateProcessor::LayerSizeAndGraphHeightCalculator),
+        ),
+        (
+            Place::After(LayeredPhase::P5EdgeRouting),
+            index_of(IntermediateProcessor::EndLabelSorter),
+        ),
+    ];
+    steps.sort_by_key(|(place, _)| place.position());
+    let indices: Vec<usize> = steps.iter().map(|(_, index)| *index).collect();
+    assert!(
+        indices.windows(2).all(|pair| pair[0] < pair[1]),
+        "the places and the run disagree: {steps:?}"
+    );
+    // A slot after one phase is the slot in front of the next.
+    assert_eq!(
+        Place::After(LayeredPhase::P2Layering).position(),
+        Place::Before(LayeredPhase::P3NodeOrdering).position()
     );
 }
 

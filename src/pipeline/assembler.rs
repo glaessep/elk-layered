@@ -45,8 +45,51 @@ pub(crate) enum LayeredPhase {
 
 impl LayeredPhase {
     /// The slot in front of the phase: the variants stand in the order of the phases.
-    fn ordinal(self) -> usize {
+    fn slot_before(self) -> usize {
         self as usize
+    }
+
+    /// The slot after the phase. It is the slot in front of the next phase.
+    fn slot_after(self) -> usize {
+        self as usize + 1
+    }
+}
+
+/// A point in the schedule: in front of a phase, in the phase, or after it.
+///
+/// The slots of [`Config`] and the places of the refusals count the same way. `After(p)` and
+/// `Before(p + 1)` are one slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Place {
+    Before(LayeredPhase),
+    /// The algorithm of the phase itself.
+    In(LayeredPhase),
+    After(LayeredPhase),
+}
+
+impl Place {
+    /// Where the place stands on the line of the whole run: slot, phase, slot, phase, and so on.
+    /// A smaller number runs first. A phase sits between its two slots.
+    pub(super) fn position(self) -> usize {
+        match self {
+            Self::Before(phase) => 2 * phase.slot_before(),
+            Self::In(phase) => 2 * phase.slot_before() + 1,
+            Self::After(phase) => 2 * phase.slot_after(),
+        }
+    }
+}
+
+/// An option or graph property that needs a processor this crate has not ported, and the place in
+/// the schedule where a run would reach that processor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Refusal {
+    place: Place,
+    processor: UnportedProcessor,
+}
+
+impl Refusal {
+    fn new(place: Place, processor: UnportedProcessor) -> Self {
+        Self { place, processor }
     }
 }
 
@@ -169,8 +212,10 @@ pub enum UnportedProcessor {
     HypernodesProcessor,
 }
 
-fn unported(kind: UnportedProcessor) -> PipelineError {
-    PipelineError::UnsupportedProcessor { kind }
+fn refused(refusal: Refusal) -> PipelineError {
+    PipelineError::UnsupportedProcessor {
+        kind: refusal.processor,
+    }
 }
 
 impl CycleBreaker {
@@ -186,7 +231,7 @@ impl CycleBreaker {
 }
 
 impl Layerer {
-    fn select(strategy: LayeringStrategy) -> PipelineResult<Self> {
+    fn select(strategy: LayeringStrategy) -> Result<Self, Refusal> {
         match strategy {
             LayeringStrategy::NetworkSimplex => Ok(Self::NetworkSimplex),
             LayeringStrategy::LongestPath => Ok(Self::LongestPath),
@@ -195,52 +240,97 @@ impl Layerer {
             LayeringStrategy::Interactive => Ok(Self::Interactive),
             LayeringStrategy::StretchWidth => Ok(Self::StretchWidth),
             LayeringStrategy::MinWidth => Ok(Self::MinWidth),
-            LayeringStrategy::BreadthFirstModelOrder => {
-                Err(unported(UnportedProcessor::BreadthFirstModelOrderLayerer))
-            }
-            LayeringStrategy::DepthFirstModelOrder => {
-                Err(unported(UnportedProcessor::DepthFirstModelOrderLayerer))
-            }
+            LayeringStrategy::BreadthFirstModelOrder => Err(Refusal::new(
+                Place::In(LayeredPhase::P2Layering),
+                UnportedProcessor::BreadthFirstModelOrderLayerer,
+            )),
+            LayeringStrategy::DepthFirstModelOrder => Err(Refusal::new(
+                Place::In(LayeredPhase::P2Layering),
+                UnportedProcessor::DepthFirstModelOrderLayerer,
+            )),
         }
     }
 }
 
 impl CrossingMinimizer {
-    fn select(strategy: CrossingMinimizationStrategy) -> PipelineResult<Self> {
+    fn select(strategy: CrossingMinimizationStrategy) -> Result<Self, Refusal> {
         match strategy {
             CrossingMinimizationStrategy::LayerSweep => Ok(Self::LayerSweep),
             CrossingMinimizationStrategy::None => Ok(Self::NoMinimizer),
-            CrossingMinimizationStrategy::Interactive => {
-                Err(unported(UnportedProcessor::InteractiveCrossingMinimizer))
-            }
+            CrossingMinimizationStrategy::Interactive => Err(Refusal::new(
+                Place::In(LayeredPhase::P3NodeOrdering),
+                UnportedProcessor::InteractiveCrossingMinimizer,
+            )),
         }
     }
 }
 
 impl NodePlacer {
-    fn select(strategy: NodePlacementStrategy) -> PipelineResult<Self> {
+    fn select(strategy: NodePlacementStrategy) -> Result<Self, Refusal> {
         match strategy {
             NodePlacementStrategy::Simple => Ok(Self::Simple),
             NodePlacementStrategy::BrandesKoepf => Ok(Self::BrandesKoepf),
             NodePlacementStrategy::NetworkSimplex => Ok(Self::NetworkSimplex),
-            NodePlacementStrategy::Interactive => {
-                Err(unported(UnportedProcessor::InteractiveNodePlacer))
-            }
-            NodePlacementStrategy::LinearSegments => {
-                Err(unported(UnportedProcessor::LinearSegmentsNodePlacer))
-            }
+            NodePlacementStrategy::Interactive => Err(Refusal::new(
+                Place::In(LayeredPhase::P4NodePlacement),
+                UnportedProcessor::InteractiveNodePlacer,
+            )),
+            NodePlacementStrategy::LinearSegments => Err(Refusal::new(
+                Place::In(LayeredPhase::P4NodePlacement),
+                UnportedProcessor::LinearSegmentsNodePlacer,
+            )),
         }
     }
 }
 
 impl EdgeRouter {
-    fn select(strategy: EdgeRouting) -> PipelineResult<Self> {
+    fn select(strategy: EdgeRouting) -> Result<Self, Refusal> {
+        let place = Place::In(LayeredPhase::P5EdgeRouting);
         match strategy {
             EdgeRouting::Orthogonal => Ok(Self::Orthogonal),
-            EdgeRouting::Polyline => Err(unported(UnportedProcessor::PolylineEdgeRouter)),
-            EdgeRouting::Splines => Err(unported(UnportedProcessor::SplineEdgeRouter)),
+            EdgeRouting::Polyline => {
+                Err(Refusal::new(place, UnportedProcessor::PolylineEdgeRouter))
+            }
+            EdgeRouting::Splines => Err(Refusal::new(place, UnportedProcessor::SplineEdgeRouter)),
         }
     }
+}
+
+/// The refusal of a wrapping strategy. Wrapping adds processors in front of a phase, not a phase.
+///
+/// Java: `GraphConfigurator.getPhaseIndependentLayoutProcessorConfiguration`, the switch on
+/// `WRAPPING_STRATEGY`. `SINGLE_EDGE` adds `SINGLE_EDGE_GRAPH_WRAPPER` before phase four.
+/// `MULTI_EDGE` adds `BREAKING_POINT_INSERTER` before phase three, and two more processors that
+/// this crate does not need to name, because the first one already refuses.
+fn wrapping_refusal(strategy: WrappingStrategy) -> Option<Refusal> {
+    match strategy {
+        WrappingStrategy::Off => None,
+        WrappingStrategy::SingleEdge => Some(Refusal::new(
+            Place::Before(LayeredPhase::P4NodePlacement),
+            UnportedProcessor::SingleEdgeGraphWrapper,
+        )),
+        WrappingStrategy::MultiEdge => Some(Refusal::new(
+            Place::Before(LayeredPhase::P3NodeOrdering),
+            UnportedProcessor::BreakingPointInserter,
+        )),
+    }
+}
+
+/// The refusal of a graph with hypernodes.
+///
+/// Java: `OrthogonalEdgeRouter.getLayoutProcessorConfiguration` adds `HYPERNODE_PROCESSOR` after
+/// phase five when the graph has the `HYPERNODES` property. The router adds it, not the
+/// configurator, so no other router asks for it.
+pub(super) fn hypernodes_refusal(
+    properties: &GraphProperties,
+    edge_routing: EdgeRouting,
+) -> Option<Refusal> {
+    (properties.hypernodes && edge_routing == EdgeRouting::Orthogonal).then(|| {
+        Refusal::new(
+            Place::After(LayeredPhase::P5EdgeRouting),
+            UnportedProcessor::HypernodesProcessor,
+        )
+    })
 }
 
 /// One step of a run: a processor of a phase or an intermediate processor.
@@ -304,34 +394,44 @@ impl Strategies {
     /// Picks the processor of each phase, then refuses the options and graph properties that
     /// need a processor this crate has not ported.
     ///
-    /// The first refusal is the one a run would reach first. The checks stand in the order of
-    /// the schedule: the layerer (phase two), the multi-edge breaking points (in front of phase
-    /// three), the crossing minimizer, the single-edge wrapper (in front of phase four), the node
-    /// placer, the edge router and the hypernodes processor (after phase five).
+    /// The refusal a run would reach first is the one it reports. Each refusal carries its
+    /// [`Place`] in the schedule, so the order comes from there. Two refusals at one place keep
+    /// the order in which they are gathered below. No two share a place today. If a new one
+    /// does, gather it in the order ELK's `EnumSet` runs them, and add the pair to
+    /// `of_two_refusals_the_one_earlier_in_the_schedule_wins`.
     pub(crate) fn select(
         options: &LayeredOptions,
         properties: &GraphProperties,
     ) -> PipelineResult<Self> {
         let cycle_breaker = CycleBreaker::select(options.cycle_breaking_strategy);
-        let layerer = Layerer::select(options.layering_strategy)?;
-        if options.wrapping_strategy == WrappingStrategy::MultiEdge {
-            return Err(unported(UnportedProcessor::BreakingPointInserter));
+        let layerer = Layerer::select(options.layering_strategy);
+        let crossing_minimizer = CrossingMinimizer::select(options.crossing_minimization_strategy);
+        let node_placer = NodePlacer::select(options.node_placement_strategy);
+        let edge_router = EdgeRouter::select(options.edge_routing);
+
+        let refusals = [
+            layerer.err(),
+            wrapping_refusal(options.wrapping_strategy),
+            crossing_minimizer.err(),
+            node_placer.err(),
+            edge_router.err(),
+            hypernodes_refusal(properties, options.edge_routing),
+        ];
+        if let Some(first) = refusals
+            .into_iter()
+            .flatten()
+            .min_by_key(|refusal| refusal.place.position())
+        {
+            return Err(refused(first));
         }
-        let crossing_minimizer = CrossingMinimizer::select(options.crossing_minimization_strategy)?;
-        if options.wrapping_strategy == WrappingStrategy::SingleEdge {
-            return Err(unported(UnportedProcessor::SingleEdgeGraphWrapper));
-        }
-        let node_placer = NodePlacer::select(options.node_placement_strategy)?;
-        let edge_router = EdgeRouter::select(options.edge_routing)?;
-        if properties.hypernodes {
-            return Err(unported(UnportedProcessor::HypernodesProcessor));
-        }
+        // Every `Err` below is in `refusals`, so the `?` never returns here. It stays as the
+        // form that cannot panic if that ever changes.
         Ok(Self {
             cycle_breaker,
-            layerer,
-            crossing_minimizer,
-            node_placer,
-            edge_router,
+            layerer: layerer.map_err(refused)?,
+            crossing_minimizer: crossing_minimizer.map_err(refused)?,
+            node_placer: node_placer.map_err(refused)?,
+            edge_router: edge_router.map_err(refused)?,
         })
     }
 
@@ -361,11 +461,11 @@ struct Config {
 
 impl Config {
     fn add_before(&mut self, phase: LayeredPhase, processor: IntermediateProcessor) {
-        self.slots[phase.ordinal()].insert(processor);
+        self.slots[phase.slot_before()].insert(processor);
     }
 
     fn add_after(&mut self, phase: LayeredPhase, processor: IntermediateProcessor) {
-        self.slots[phase.ordinal() + 1].insert(processor);
+        self.slots[phase.slot_after()].insert(processor);
     }
 
     fn merge(&mut self, other: Config) {
