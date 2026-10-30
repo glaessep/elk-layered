@@ -171,7 +171,7 @@ fn edge(id: &str, source: &str, target: &str) -> ElkInputEdge {
         target: target.to_string(),
         labels: Vec::new(),
         minlen: 1,
-        inside_self_loops_yo: false,
+        inside_self_loop: false,
         model_order: None,
         priority_direction: 0,
         priority_shortness: 0,

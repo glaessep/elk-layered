@@ -94,3 +94,47 @@ fn a_port_is_connected_to_external_nodes_when_a_node_outside_is_at_the_other_end
     assert!(!facts[0].connected_to_external_nodes);
     assert!(facts[1].connected_to_external_nodes);
 }
+
+// Mutation, one per row: drop `source == target` (row 3), drop `yo` (row 2) or drop `activate`
+// (row 1) from `is_inside_self_loop`. The row's answer then flips to true.
+#[test]
+fn an_edge_is_an_inside_self_loop_only_when_all_three_inputs_hold() {
+    // (source, target, yo, activate, expected)
+    let rows = [
+        (1, 1, true, false, false),
+        (1, 1, false, true, false),
+        (1, 2, true, true, false),
+        (1, 1, true, true, true),
+    ];
+    for (source, target, yo, activate, expected) in rows {
+        assert_eq!(
+            is_inside_self_loop(source, target, yo, activate),
+            expected,
+            "source {source}, target {target}, yo {yo}, activate {activate}"
+        );
+    }
+}
+
+// Mutation: build `EdgeInfo` with `settings.inside_self_loops_yo` as `inside_self_loop`. A `yo`
+// on an edge between two nodes then reaches the importer as an inside self loop.
+#[test]
+fn an_edge_between_two_activating_nodes_ignores_yo() {
+    let mut g = node("g");
+    let mut h = node("h");
+    for n in [&mut g, &mut h] {
+        n.layout_options
+            .insert("elk.insideSelfLoops.activate".into(), "true".into());
+    }
+    let mut between = edge("gh", "g", "h");
+    between
+        .layout_options
+        .insert("elk.insideSelfLoops.yo".into(), "true".into());
+    let tree_root = ElkNode {
+        id: "root".into(),
+        children: vec![g, h],
+        edges: vec![between],
+        ..Default::default()
+    };
+    let tree = Tree::new(&tree_root).unwrap();
+    assert!(!tree.edges[0].inside_self_loop);
+}
