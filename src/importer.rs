@@ -15,8 +15,8 @@ use crate::compound::{
 };
 use crate::graph::{
     CompoundEdgeSegment, EdgeId, EdgeLabelPlacement, ExternalPortData, GraphArena, GraphId,
-    HierarchyEdge, HierarchyStep, LGraph, LLabel, LNode, LNodeKind, LPoint, LPort, LSize,
-    LayeredEdge, NodeId, PlacementOptions, PortId, PortRef, PortSide, PortType, SelfLoopOptions,
+    HierarchyEdge, HierarchyStep, LGraph, LLabel, LNode, LPoint, LPort, LSize, LayeredEdge, NodeId,
+    PlacementOptions, PortId, PortRef, PortSide, PortType, SelfLoopOptions,
     apply_port_index_to_dummy, create_external_port_dummy, is_across_flow, port_box,
     port_side_from_direction,
 };
@@ -238,10 +238,6 @@ pub enum ImportError {
         node_id: String,
         port_id: String,
     },
-    /// A node with children has a port across the layout flow, which needs the hierarchical part
-    /// of the north and south port steps.
-    #[error("ELK port `{port_id}` of node `{node_id}` is on a north or south side")]
-    NorthSouthPort { node_id: String, port_id: String },
     #[error("ELK node `{node_id}` references missing parent `{parent_id}`")]
     MissingParent { node_id: String, parent_id: String },
     #[error("ELK parent assignment would create a cycle at node `{node_id}`")]
@@ -363,7 +359,6 @@ fn import_scope_with(
             (GraphArena::new(root), vec![None; index.node_ids.len()])
         };
 
-    check_north_south_ports(&graphs)?;
     // The graph inside a node, if it has one.
     let nested_of = |node: &str| index.node_index(node).and_then(|node| nested_graphs[node]);
     // A node without a graph reads as the root, as `graph_slot_for_parent` does.
@@ -467,54 +462,6 @@ fn import_external_ports(
         dummies.insert(port.id.clone(), node);
     }
     dummies
-}
-
-/// Refuses a node with children that has a port across the layout flow, while its graph has
-/// ports that are not free.
-///
-/// `NorthSouthPortPreprocessor` handles the ports across the flow of a node without children. A
-/// node with children needs more: its ports have dummies inside the node as well, and the sweep
-/// over the hierarchy must place them. That part is not ported. The condition is the one of
-/// `OrthogonalEdgeRouter.getLayoutProcessorConfiguration`, which adds the step when a graph has
-/// ports that are not free and a port across the layout flow. A graph with only free ports needs
-/// no step: `PortSideProcessor` puts every port on a side along the flow.
-fn check_north_south_ports(graphs: &GraphArena) -> ImportResult<()> {
-    let mut pending = vec![GraphId::ROOT];
-    while let Some(id) = pending.pop() {
-        let graph = &graphs[id];
-        let properties = &graph.graph_properties;
-        if properties.north_south_ports && properties.non_free_ports {
-            let offender = graph
-                .layerless_nodes
-                .iter()
-                .filter(|node| has_children(graphs, node))
-                .flat_map(|node| node.ports.iter().map(move |port| (node, port)))
-                .find(|(_, port)| {
-                    port.input_index.is_some() && is_across_flow(graph.options.direction, port.side)
-                });
-            if let Some((node, port)) = offender {
-                return Err(ImportError::NorthSouthPort {
-                    node_id: node.id.clone(),
-                    port_id: port.id.clone(),
-                });
-            }
-        }
-        pending.extend(graphs.children(id).into_iter().rev());
-    }
-    Ok(())
-}
-
-/// Whether the importer put children into the nested graph of a node. A node can also have a
-/// nested graph of dummies only, for an inside self loop: it has no children, as
-/// `node_materializes_children` says, and every node the importer makes for a child is a normal
-/// node.
-fn has_children(graphs: &GraphArena, node: &LNode) -> bool {
-    node.nested_graph.is_some_and(|nested| {
-        graphs[nested]
-            .layerless_nodes
-            .iter()
-            .any(|child| child.kind() == LNodeKind::Normal)
-    })
 }
 
 /// Rejects a scoped segment before any graph object is built. It checks that every endpoint is

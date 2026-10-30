@@ -4,7 +4,7 @@
 
 use crate::graph::{LGraph, LPoint, LayeredEdge, NodeId, PortId, PortRef, PortSide, PortType};
 use crate::intermediate::hierarchical_port_position_processor::{
-    actual_graph_height, border_to_content_area_y, first_port_anchor_y,
+    actual_graph_height, border_to_content_area_y, external_port_anchor,
 };
 use crate::intermediate::long_edge_joiner::first_port_on_side;
 use crate::options::PortConstraints;
@@ -162,12 +162,12 @@ fn set_north_south_dummy_coordinates(graph: &mut LGraph, north_south_dummies: &[
             }
             PortConstraints::FixedRatio => {
                 graph.layerless_nodes[*dummy].position.x =
-                    graph_width * ratio_or_position - first_port_anchor_x(graph, *dummy);
+                    graph_width * ratio_or_position - external_port_anchor(graph, *dummy).x;
                 border_to_content_area_x(graph, *dummy);
             }
             PortConstraints::FixedPos => {
                 graph.layerless_nodes[*dummy].position.x =
-                    ratio_or_position - first_port_anchor_x(graph, *dummy);
+                    ratio_or_position - external_port_anchor(graph, *dummy).x;
                 border_to_content_area_x(graph, *dummy);
                 let required_width = graph.layerless_nodes[*dummy].position.x
                     + graph.layerless_nodes[*dummy].size.width / 2.0;
@@ -232,15 +232,7 @@ fn calculate_north_south_dummy_position(graph: &mut LGraph, dummy: NodeId) {
         .map(|port_ref| absolute_port_anchor(graph, *port_ref).x)
         .sum::<f64>();
     graph.layerless_nodes[dummy].position.x =
-        pos_sum / connected_ports.len() as f64 - first_port_anchor_x(graph, dummy);
-}
-
-fn first_port_anchor_x(graph: &LGraph, node: NodeId) -> f64 {
-    graph.layerless_nodes[node]
-        .ports
-        .first()
-        .map(|port| port.position.x)
-        .unwrap_or(0.0)
+        pos_sum / connected_ports.len() as f64 - external_port_anchor(graph, dummy).x;
 }
 
 fn border_to_content_area_x(graph: &mut LGraph, node: NodeId) {
@@ -541,12 +533,12 @@ fn fix_hierarchical_port_east_west_y_coordinate(
 
     if graph.options.port_constraints.is_ratio_fixed() {
         graph.layerless_nodes[node].position.y =
-            graph_actual_height * ratio_or_position - first_port_anchor_y(graph, node);
+            graph_actual_height * ratio_or_position - external_port_anchor(graph, node).y;
         required_actual_graph_height = graph.layerless_nodes[node].position.y + external_height;
         border_to_content_area_y(graph, node);
     } else if graph.options.port_constraints.is_pos_fixed() {
         graph.layerless_nodes[node].position.y =
-            ratio_or_position - first_port_anchor_y(graph, node);
+            ratio_or_position - external_port_anchor(graph, node).y;
         required_actual_graph_height = graph.layerless_nodes[node].position.y + external_height;
         border_to_content_area_y(graph, node);
     }

@@ -45,11 +45,10 @@ use crate::pipeline::{self, PipelineError};
 /// # Errors
 ///
 /// Returns an [`Error`] for a graph elk-layered cannot lay out exactly as elkjs does: one
-/// that uses a port elk-layered cannot place yet (a port on a side across the layout flow,
-/// or a port of a node with children that sits on such a side), a label on a port of a node
-/// with children, a node with children that sizes itself to its ports, an edge between a port
-/// of the root and a node inside it, an option elk-layered does not support or cannot
-/// read, an id used twice or not found, or a size that is no finite, non-negative number.
+/// with a label on a port of a node with children, a node with children that sizes itself to
+/// its ports, an edge between a port of the root and a node inside it, an option elk-layered
+/// does not support or cannot read, an id used twice or not found, or a size that is no finite,
+/// non-negative number.
 ///
 /// Ports `RecursiveGraphLayoutEngine.layout` with the JSON round trip of elkjs's `JsonImporter`.
 pub fn layout(graph: &ElkNode) -> Result<ElkNode, Error> {
@@ -883,12 +882,6 @@ impl<'a, 't> Work<'a, 't> {
                 importer::ImportError::NodeSize(_) => Error::Unsolvable {
                     element: node_element(&scope_info.node.id),
                     reason: error.to_string(),
-                },
-                // A port across the flow of a node with children needs a step that is not ported
-                // yet.
-                importer::ImportError::NorthSouthPort { port_id, .. } => Error::Unsupported {
-                    element: port_element(&port_id),
-                    feature: "north and south ports on a node with children".to_string(),
                 },
                 // A port of the scope without a dummy: ELK cannot find the end of the edge.
                 importer::ImportError::ScopePortWithoutDummy { edge_id } => Error::Unsupported {

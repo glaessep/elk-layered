@@ -2,7 +2,7 @@
 //!
 //! Source: https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/HierarchicalPortPositionProcessor.java
 
-use crate::graph::{LGraph, NodeId, PortSide};
+use crate::graph::{LGraph, LPoint, NodeId, PortSide};
 
 pub fn process_hierarchical_port_positions(graph: &mut LGraph) {
     if !(graph.options.port_constraints.is_ratio_fixed()
@@ -35,7 +35,7 @@ fn process_hierarchical_port_positions_for_layer(graph: &mut LGraph, layer_index
             final_y_coordinate *= graph_height;
         }
 
-        let port_anchor_y = first_port_anchor_y(graph, node);
+        let port_anchor_y = external_port_anchor(graph, node).y;
         graph.layerless_nodes[node].position.y = final_y_coordinate - port_anchor_y;
         border_to_content_area_y(graph, node);
     }
@@ -45,12 +45,15 @@ pub(crate) fn actual_graph_height(graph: &LGraph) -> f64 {
     graph.size.height + graph.padding.top + graph.padding.bottom
 }
 
-pub(crate) fn first_port_anchor_y(graph: &LGraph, node: NodeId) -> f64 {
+/// The `LayeredOptions.PORT_ANCHOR` of an external port dummy, which
+/// `HierarchicalPortPositionProcessor.fixCoordinates` and
+/// `HierarchicalPortOrthogonalEdgeRouter.fixCoordinates`, `calculateNorthSouthDummyPositions` and
+/// `applyNorthSouthDummyRatio` read. It is not the position of the dummy's port: Java turns the
+/// port with the graph, but not this property.
+pub(crate) fn external_port_anchor(graph: &LGraph, node: NodeId) -> LPoint {
     graph.layerless_nodes[node]
-        .ports
-        .first()
-        .map(|port| port.position.y)
-        .unwrap_or(0.0)
+        .external_port()
+        .map_or(LPoint::default(), |external| external.anchor)
 }
 
 pub(crate) fn border_to_content_area_y(graph: &mut LGraph, node: NodeId) {

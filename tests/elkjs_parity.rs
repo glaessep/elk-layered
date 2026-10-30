@@ -15,112 +15,7 @@ use serde_json::Value;
 
 /// Cases whose feature elk-layered does not have yet, each with the issue that adds it. A case
 /// leaves this list in the pull request that makes it pass.
-const NOT_YET: &[(&str, &str)] = &[
-    (
-        "random-group-ports/r010",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r013",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r019",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r025",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r029",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r033",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r035",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r043",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r044",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r045",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r048",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r064",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r074",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r077",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r078",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r082",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r106",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r111",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r112",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r125",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r127",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r131",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r134",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r135",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r140",
-        "ports across the flow on a group, #24",
-    ),
-    (
-        "random-group-ports/r147",
-        "ports across the flow on a group, #24",
-    ),
-];
+const NOT_YET: &[(&str, &str)] = &[];
 
 fn cases_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/elkjs")
@@ -132,8 +27,9 @@ fn cases_dir() -> PathBuf {
 /// `tests/elkjs/random-group-ports/`, whose groups have ports too, and
 /// `tests/elkjs/random-cross-ports/`, whose ports sit on all four sides,
 /// `tests/elkjs/random-inline-labels/`, whose centre labels are often inline,
-/// `tests/elkjs/random-one-sided/`, which use the one-sided greedy switch, and
-/// `tests/elkjs/random-port-labels/`, whose ports have labels.
+/// `tests/elkjs/random-one-sided/`, which use the one-sided greedy switch,
+/// `tests/elkjs/random-port-labels/`, whose ports have labels, and
+/// `tests/elkjs/random-group-cross-ports/`, whose groups have ports on all four sides.
 fn cases() -> Vec<PathBuf> {
     let mut inputs = Vec::new();
     for dir in [
@@ -146,6 +42,7 @@ fn cases() -> Vec<PathBuf> {
         cases_dir().join("random-inline-labels"),
         cases_dir().join("random-one-sided"),
         cases_dir().join("random-port-labels"),
+        cases_dir().join("random-group-cross-ports"),
     ] {
         let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|_| panic!("{} exists", dir.display()))

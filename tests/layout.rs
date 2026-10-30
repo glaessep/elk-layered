@@ -648,61 +648,6 @@ fn a_port_on_a_north_side_is_laid_out_while_the_ports_are_free() {
     assert_eq!(port_at(&laid, "b", "q"), (40.0, 17.333_333_333_333_332));
 }
 
-// Mutation: drop the `NorthSouthPort` mapping in `run_layered`, which then reports an internal
-// error, or let a node with children through.
-#[test]
-fn a_port_across_the_flow_of_a_node_with_children_is_unsupported() {
-    // Right: north and south are across. Down: east and west are across.
-    for (direction, side) in [
-        ("RIGHT", "NORTH"),
-        ("LEFT", "SOUTH"),
-        ("DOWN", "EAST"),
-        ("UP", "WEST"),
-    ] {
-        let mut graph = include_children(root(
-            vec![with_ports(
-                group("a", vec![node("c", 40.0, 30.0)]),
-                "FIXED_SIDE",
-                vec![port("p", 6.0, 4.0, side)],
-            )],
-            vec![],
-        ));
-        graph
-            .layout_options
-            .insert("elk.direction".into(), direction.into());
-        assert!(
-            matches!(
-                error_of(&graph),
-                Error::Unsupported { element, feature }
-                    if element == "port \"p\""
-                        && feature == "north and south ports on a node with children"
-            ),
-            "{direction} {side}"
-        );
-    }
-}
-
-// Mutation: in `check_north_south_ports`, call the north and south sides across the flow in a
-// vertical layout too. The refusal then names `n`.
-#[test]
-fn the_refusal_names_the_port_across_the_flow() {
-    let mut graph = include_children(root(
-        vec![with_ports(
-            group("a", vec![node("c", 40.0, 30.0)]),
-            "FIXED_SIDE",
-            vec![port("n", 6.0, 4.0, "NORTH"), port("e", 6.0, 4.0, "EAST")],
-        )],
-        vec![],
-    ));
-    graph
-        .layout_options
-        .insert("elk.direction".into(), "DOWN".into());
-    assert!(matches!(
-        error_of(&graph),
-        Error::Unsupported { element, .. } if element == "port \"e\""
-    ));
-}
-
 // Mutation: leave the southern port at the top of the node, or put the ports of a vertical
 // layout on the sides of the horizontal one.
 #[test]
@@ -1261,52 +1206,6 @@ fn a_fixed_ratio_port_of_a_group_is_unsupported_only_without_a_size() {
     ));
     assert!(layout(&build(0.0, 100.0)).is_ok());
     assert!(layout(&build(100.0, 100.0)).is_ok());
-}
-
-// Mutation: drop `check_external_port_sides` in src/pipeline.rs. The group would get a layout
-// that is not elkjs's. Or cut "which wait for issue #24" from its reason: the text must say what the refusal
-// waits for.
-#[test]
-fn a_dummy_for_a_group_port_on_a_side_across_the_flow_is_unsupported() {
-    let across = |graph: &ElkNode| {
-        matches!(
-            error_of(graph),
-            Error::Unsupported { feature, .. }
-                if feature == "ports of a node with children on a side across the layout direction, \
-                    which wait for issue #24"
-        )
-    };
-    // The group lays out its own children, and a port of it becomes an external port of that
-    // layout. The port sides along the flow are fine, and the ones across it are not.
-    for (direction, side) in [
-        ("RIGHT", "NORTH"),
-        ("LEFT", "SOUTH"),
-        ("DOWN", "EAST"),
-        ("UP", "WEST"),
-    ] {
-        let mut a = group("a", vec![node("c", 40.0, 30.0)]);
-        a.layout_options
-            .insert("elk.portConstraints".into(), "FIXED_SIDE".into());
-        a.layout_options
-            .insert("elk.direction".into(), direction.into());
-        a.ports = vec![port("p", 6.0, 4.0, side)];
-        a.edges = vec![edge("e", "p", "c")];
-        assert!(across(&root(vec![a], vec![])), "{direction} {side}");
-    }
-    // With INCLUDE_CHILDREN, a group that fixes the sides of its ports gets the dummy of an edge
-    // that leaves it on the east side, whatever the direction is.
-    let mut a = group("a", vec![node("c", 40.0, 30.0)]);
-    a.layout_options
-        .insert("elk.portConstraints".into(), "FIXED_SIDE".into());
-    let mut graph = include_children(root(
-        vec![a, node("y", 40.0, 30.0)],
-        vec![edge("e", "c", "y")],
-    ));
-    assert!(layout(&graph).is_ok());
-    graph
-        .layout_options
-        .insert("elk.direction".into(), "DOWN".into());
-    assert!(across(&graph));
 }
 
 // Mutation: drop the `Undefined` arm of `check_external_port_sides`. ELK fails on the graph, and
@@ -2340,4 +2239,113 @@ fn a_port_keeps_its_own_label_beside_the_end_label_of_its_edge() {
     assert_eq!(port_label_positions(&laid, "a"), [[(7.0, 7.0)]]);
     let tail = &find_edge(&laid, "e").labels[0];
     assert_eq!((tail.x, tail.y), (61.0, 80.0));
+}
+
+// --- Ports across the flow on a node with children. elkjs 0.9.3 returns the numbers. ---
+
+// Mutation: in `is_external_west_or_east_port`, read the side of the dummy's first port. The
+// replacement dummy of the north dummy then counts as a west one, its layer loses the spacing
+// to the next layer, and n3 moves up by 20.
+#[test]
+fn a_layer_of_north_dummy_replacements_keeps_its_spacing_to_the_next_layer() {
+    let mut g0 = group("g0", vec![node("n3", 29.0, 49.0)]);
+    g0.layout_options = options(&[("elk.portConstraints", "FIXED_SIDE")]);
+    g0.ports = vec![port("p9", 9.0, 8.0, "SOUTH")];
+    let n2 = with_ports(
+        node("n2", 110.5, 36.0),
+        "FIXED_SIDE",
+        vec![
+            port("p5", 5.0, 5.0, "NORTH"),
+            port("p6", 10.0, 6.0, "NORTH"),
+            port("p7", 8.0, 6.0, "NORTH"),
+            port("p8", 10.0, 8.0, "NORTH"),
+        ],
+    );
+    let mut g1 = group("g1", vec![n2]);
+    g1.labels = vec![label("Brake System Controller", 149.5, 14.0)];
+    g1.layout_options = options(&[
+        ("elk.nodeLabels.placement", "[H_LEFT, V_TOP, INSIDE]"),
+        ("elk.nodeSize.constraints", "[NODE_LABELS]"),
+    ]);
+    let mut graph = include_children(root(vec![g0, g1], vec![edge("e7", "p6", "n3")]));
+    graph
+        .layout_options
+        .insert("elk.direction".into(), "DOWN".into());
+    let laid = layout(&graph).unwrap();
+    assert_eq!(at(&laid, "n3"), (12.0, 32.0));
+    assert_eq!(size(&laid, "g0"), (53.0, 93.0));
+}
+
+// Mutation: in `transfer_external_port_dummy_layout_to_parent_node`, let a replacement dummy
+// write its position to the port of the group. Both ports of g0 then get the same place, and
+// e66 gets a slanted segment.
+#[test]
+fn a_replacement_dummy_leaves_the_port_of_its_group_alone() {
+    let mut n9 = with_ports(
+        node("n9", 22.5, 43.5),
+        "",
+        vec![
+            port("p10", 7.0, 7.0, ""),
+            port("p11", 5.0, 8.0, ""),
+            port("p12", 7.0, 4.0, ""),
+            port("p13", 10.0, 5.0, ""),
+        ],
+    );
+    n9.labels = vec![label("Sensor", 39.0, 14.0)];
+    n9.layout_options = options(&[("elk.nodeLabels.placement", "[H_CENTER, V_CENTER, INSIDE]")]);
+    let mut g0 = group("g0", vec![n9]);
+    g0.layout_options = options(&[("elk.portConstraints", "FIXED_SIDE")]);
+    g0.ports = vec![port("p16", 6.0, 9.0, "SOUTH")];
+    let n7 = with_ports(node("n7", 24.5, 24.0), "", vec![port("p8", 9.0, 4.0, "")]);
+    let mut g1 = group("g1", vec![n7]);
+    g1.layout_options = options(&[("elk.portConstraints", "FIXED_SIDE")]);
+    g1.ports = vec![port("p17", 5.0, 8.0, "SOUTH")];
+    let mut e66 = edge("e66", "p11", "p8");
+    let mut tail = label("0..*", 26.0, 14.0);
+    tail.layout_options = options(&[("elk.edgeLabels.placement", "TAIL")]);
+    e66.labels = vec![label("1", 6.5, 14.0), tail];
+    let mut graph = include_children(root(vec![g0, g1], vec![e66, edge("e67", "p13", "n7")]));
+    graph.layout_options.extend(options(&[
+        ("elk.direction", "DOWN"),
+        ("elk.layered.considerModelOrder.strategy", "NODES_AND_EDGES"),
+        ("elk.layered.spacing.nodeNodeBetweenLayers", "27"),
+    ]));
+    let laid = layout(&graph).unwrap();
+    assert_eq!(
+        route(find_edge(&laid, "e66"))[..4],
+        [
+            (37.25, 82.5),
+            (37.25, 118.5),
+            (83.25, 118.5),
+            (83.25, 239.5)
+        ]
+    );
+}
+
+// Mutation: in `external_port_anchor`, read the turned position of the dummy's port instead of
+// the anchor from before the turn. The group then loses the 20 for the routing at its north
+// dummy, and its port moves by half its height.
+#[test]
+fn a_west_port_of_a_group_in_a_downward_layout_keeps_the_anchor_from_before_the_turn() {
+    let mut p = port("p", 6.0, 10.0, "WEST");
+    p.x = -6.0;
+    p.y = 30.0;
+    let mut g = with_ports(
+        group("g", vec![node("c", 20.0, 20.0)]),
+        "FIXED_SIDE",
+        vec![p],
+    );
+    g.width = 100.0;
+    g.height = 80.0;
+    let mut graph = include_children(root(
+        vec![g, node("o", 20.0, 20.0)],
+        vec![edge("e1", "o", "p"), edge("e2", "p", "c")],
+    ));
+    graph
+        .layout_options
+        .insert("elk.direction".into(), "DOWN".into());
+    let laid = layout(&graph).unwrap();
+    assert_eq!(size(&laid, "g"), (64.0, 64.0));
+    assert_eq!(port_at(&laid, "g", "p"), (-6.0, 12.0));
+    assert_eq!(at(&laid, "c"), (32.0, 32.0));
 }
