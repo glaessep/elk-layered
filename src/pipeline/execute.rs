@@ -7,6 +7,7 @@ use super::assembler::{
 use super::{PipelineError, PipelineResult};
 use crate::graph::{GraphArena, GraphId, LGraph, LNode, LSize, OtherGraphs, PortSide};
 use crate::intermediate::graph_transformer::{GraphTransformMode, transform_graph_direction};
+use crate::intermediate::hierarchical_port_orthogonal_edge_router::release_temporary_north_south_dummies;
 use crate::intermediate::{
     calculate_innermost_node_margins, calculate_label_and_node_sizes, process_in_layer_constraints,
 };
@@ -42,6 +43,8 @@ use crate::selfloop::{
 ///
 /// The layer sweep needs the arena, because it is the one port of `LayerSweepCrossingMinimizer`
 /// that also serves `INCLUDE_CHILDREN`. Every other processor runs through `execute_processor`.
+/// After the hierarchical port routing, the arena is needed once more: dropping the replacement
+/// dummies renumbers the references that the graphs around this one hold.
 pub(super) fn execute_in_arena(
     graphs: &mut GraphArena,
     id: GraphId,
@@ -53,7 +56,17 @@ pub(super) fn execute_in_arena(
         return Ok(());
     }
     let (graph, others) = graphs.split_mut(id);
-    execute_processor(graph, others, processor)
+    execute_processor(graph, others, processor)?;
+    if processor
+        == Processor::Intermediate(IntermediateProcessor::HierarchicalPortOrthogonalEdgeRouter)
+    {
+        // Java's replacement dummies were never in `getLayerlessNodes()`, so they are gone once
+        // they leave their layer. Here they must leave the node list too, so no later step meets
+        // them.
+        let released = release_temporary_north_south_dummies(&mut graphs[id]);
+        crate::components::drop_nodes(graphs, id, &released)?;
+    }
+    Ok(())
 }
 
 /// Runs `processor` on `graph`. `others` are the graphs inside its nodes. The layer sweep is no

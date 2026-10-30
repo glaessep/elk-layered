@@ -2,7 +2,10 @@
 //!
 //! Source: https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.layered/src/org/eclipse/elk/alg/layered/intermediate/HierarchicalPortOrthogonalEdgeRouter.java
 
-use crate::graph::{LGraph, LPoint, LayeredEdge, NodeId, PortId, PortRef, PortSide, PortType};
+use crate::graph::{
+    LGraph, LNode, LPoint, LayeredEdge, NodeId, PortId, PortRef, PortSide, PortType,
+};
+use crate::intermediate::end_label_postprocessor::hand_back_end_labels;
 use crate::intermediate::hierarchical_port_position_processor::{
     actual_graph_height, border_to_content_area_y, external_port_anchor,
 };
@@ -37,11 +40,7 @@ pub(crate) fn restore_north_south_dummies(graph: &mut LGraph) -> Vec<NodeId> {
         .layers()
         .iter()
         .flat_map(|layer| layer.nodes().iter().copied())
-        .filter(|node| {
-            graph.layerless_nodes[*node]
-                .external_port()
-                .is_some_and(|external| external.replaced_dummy.is_some())
-        })
+        .filter(|node| is_temporary_replacement(&graph.layerless_nodes[*node]))
         .collect::<Vec<_>>();
 
     for replacement in replacement_nodes {
@@ -362,11 +361,7 @@ pub(crate) fn remove_temporary_north_south_dummies(graph: &mut LGraph) {
         .layers()
         .iter()
         .flat_map(|layer| layer.nodes().iter().copied())
-        .filter(|node| {
-            graph.layerless_nodes[*node]
-                .external_port()
-                .is_some_and(|external| external.replaced_dummy.is_some())
-        })
+        .filter(|node| is_temporary_replacement(&graph.layerless_nodes[*node]))
         .collect::<Vec<_>>();
 
     for node in &temporary_nodes {
@@ -376,6 +371,41 @@ pub(crate) fn remove_temporary_north_south_dummies(graph: &mut LGraph) {
     for node in temporary_nodes {
         graph.remove_node_from_layer(node);
     }
+}
+
+/// Whether `node` is a temporary replacement of a north or south external port dummy, as
+/// `HierarchicalPortConstraintProcessor` makes it.
+fn is_temporary_replacement(node: &LNode) -> bool {
+    node.external_port()
+        .is_some_and(|external| external.replaced_dummy.is_some())
+}
+
+/// The temporary replacements that [`remove_temporary_north_south_dummies`] took out of their
+/// layers and cut loose from every edge, for the caller to drop from the graph. Their end labels
+/// go back to their edges first, unplaced, as the end label postprocessing never sees these nodes
+/// in Java.
+///
+/// A replacement that still has an edge stays: one of the early returns of
+/// [`remove_temporary_north_south_dummy`] left it connected, and dropping it would break the
+/// edge. It then stays in the node list, as it did before this step dropped any.
+pub(crate) fn release_temporary_north_south_dummies(graph: &mut LGraph) -> Vec<NodeId> {
+    let released = graph
+        .nodes_with_ids()
+        .filter(|(_, node)| {
+            is_temporary_replacement(node)
+                && node.layer_index().is_none()
+                && node.ports.iter().all(|port| {
+                    port.incoming_edges().is_empty() && port.outgoing_edges().is_empty()
+                })
+        })
+        .map(|(id, _)| id)
+        .collect::<Vec<_>>();
+    for &node in &released {
+        for port in graph.layerless_nodes[node].ports.ids().collect::<Vec<_>>() {
+            hand_back_end_labels(graph, node, port);
+        }
+    }
+    released
 }
 
 pub(crate) fn remove_temporary_north_south_dummy(graph: &mut LGraph, node: NodeId) {

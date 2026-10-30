@@ -2276,9 +2276,9 @@ fn a_layer_of_north_dummy_replacements_keeps_its_spacing_to_the_next_layer() {
     assert_eq!(size(&laid, "g0"), (53.0, 93.0));
 }
 
-// Mutation: in `transfer_external_port_dummy_layout_to_parent_node`, let a replacement dummy
-// write its position to the port of the group. Both ports of g0 then get the same place, and
-// e66 gets a slanted segment.
+// Mutation: in `execute_in_arena`, keep the replacement dummies in the node list after the
+// hierarchical port routing. One then writes its position to the port of the group: both ports
+// of g0 get the same place, and e66 gets a slanted segment.
 #[test]
 fn a_replacement_dummy_leaves_the_port_of_its_group_alone() {
     let mut n9 = with_ports(
