@@ -27,13 +27,13 @@ fn edge(id: &str, source: &str, target: &str) -> ElkEdge {
     }
 }
 
-/// A group `g` with the ports `p` and `q` and the child `c`, which holds the grandchild `d`. The
+/// A group `g` with the ports `p`, `q` and `r` and the child `c`, which holds the grandchild `d`. The
 /// node `o` lies beside `g`.
 fn root_with(edges: Vec<ElkEdge>) -> ElkNode {
     let mut c = node("c");
     c.children = vec![node("d")];
     let mut g = node("g");
-    g.ports = vec![port("p"), port("q")];
+    g.ports = vec![port("p"), port("q"), port("r")];
     g.children = vec![c];
     ElkNode {
         id: "root".into(),
@@ -77,9 +77,14 @@ fn a_port_has_inside_connections_when_a_descendant_is_at_the_other_end() {
 // and the checks for external ports read that count.
 #[test]
 fn only_an_edge_to_a_direct_child_counts_as_a_child_edge() {
-    let facts = facts_of_g(vec![edge("e1", "p", "c"), edge("e2", "d", "q")]);
+    let facts = facts_of_g(vec![
+        edge("e1", "p", "c"),
+        edge("e2", "d", "q"),
+        edge("e3", "r", "d"),
+    ]);
     assert_eq!(facts[0].child_edges, 1);
     assert_eq!(facts[1].child_edges, 0);
+    assert_eq!(facts[2].child_edges, 0);
 }
 
 // Mutation: set `connected_to_external_nodes` for an edge to a descendant.

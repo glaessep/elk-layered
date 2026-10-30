@@ -938,7 +938,7 @@ fn sizes_of_sized_group(g: ElkNode) -> [(f64, f64); 2] {
 }
 
 // Mutation: put back the check for the port size constraints of a node with children in
-// `Tree::new`, or give the cells no ports in `cell_ports`: the group would not hold its ports.
+// `Tree::new`.
 #[test]
 fn a_group_sized_to_its_ports_grows_to_hold_them() {
     // elkjs 0.9.3 returns these numbers. Three ports of 10 and the spacing between them, and the
@@ -954,8 +954,8 @@ fn a_group_sized_to_its_ports_grows_to_hold_them() {
     assert_eq!(port_at(&laid, "g", "pc"), (-6.0, 72.0));
 }
 
-// Mutation: leave the labels out of the size in `cell_ports`, or ignore `PORT_LABELS` in the
-// group's constraints: the group would be as high as without labels.
+// Mutation: put back the check for the port size constraints of a node with children in
+// `Tree::new`.
 #[test]
 fn a_group_sized_to_its_port_labels_grows_to_hold_them() {
     let g = sized_group("[PORTS, PORT_LABELS]", "OUTSIDE", true, true);
@@ -969,8 +969,9 @@ fn a_group_sized_to_its_port_labels_grows_to_hold_them() {
     assert_eq!(sizes_of_sized_group(g), [(34.0, 106.0), (34.0, 119.0)]);
 }
 
-// Mutation: let `has_edges` of a port stay false in `cell_ports`. The port `pb` has an edge, so
-// its label may not go next to it: the group is 106 high against 78 without the edge.
+// Mutation: leave the labels out of the ports in `cell_ports`, or give the cells no ports. The
+// group would be smaller than elkjs makes it: `pb` has an edge, so its label may not go next to
+// it, and the group is 106 high against 78 without the edge.
 #[test]
 fn labels_go_next_to_a_group_port_only_when_no_edge_ends_there() {
     let with_edge = sized_group(
@@ -989,8 +990,9 @@ fn labels_go_next_to_a_group_port_only_when_no_edge_ends_there() {
     assert_eq!(sizes_of_sized_group(without), [(34.0, 78.0), (34.0, 78.0)]);
 }
 
-// Mutation: let `has_compound_connections` of a port stay false in `cell_ports`. A child reaches
-// `pb`, so its inside label goes below it: 117 high against 97 when laid out in one run.
+// Mutation: put back the check for the port size constraints of a node with children in
+// `Tree::new`. A child reaches `pb`, so its inside label goes below it: 117 high against 97
+// when the group is laid out in one run.
 #[test]
 fn inside_labels_of_a_sized_group_go_below_a_port_that_a_child_reaches() {
     let g = sized_group(
