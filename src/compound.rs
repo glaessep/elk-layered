@@ -888,10 +888,11 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
     );
 }
 
-/// Where each original edge that has labels first appears in the order the segments are
-/// introduced in, by the edge's id.
+/// Where each original edge first appears in the order the segments are introduced in, by the
+/// edge's id. Empty when no segment has a label: nothing then needs the order.
 ///
-/// ELK moves the labels of the original edges in `moveLabelsAndRemoveOriginalEdges`, after all
+/// Source: `CompoundGraphPreprocessor.moveLabelsAndRemoveOriginalEdges`
+/// (`CompoundGraphPreprocessor.java`). ELK moves the labels of the original edges after all
 /// segments exist. It walks `crossHierarchyMap.keySet()`, a `HashMultimap`, which elkjs iterates
 /// in insertion order (see `crate::gwt::LinkedSet`). The first `put` of an original edge happens
 /// where its first segment is introduced, and the segments here are in that order already. An
@@ -900,15 +901,13 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
 fn first_put_order_of_labelled_edges(
     segments: &[ScopedHierarchySegment],
 ) -> HashMap<String, usize> {
-    let labelled = segments
-        .iter()
-        .filter(|scoped| !scoped.labels.is_empty())
-        .map(|scoped| scoped.edge.id.as_str())
-        .collect::<HashSet<_>>();
     let mut order = HashMap::new();
+    if segments.iter().all(|scoped| scoped.labels.is_empty()) {
+        return order;
+    }
     for (position, scoped) in segments.iter().enumerate() {
-        if labelled.contains(scoped.edge.id.as_str()) {
-            order.entry(scoped.edge.id.clone()).or_insert(position);
+        if !order.contains_key(&scoped.edge.id) {
+            order.insert(scoped.edge.id.clone(), position);
         }
     }
     order
@@ -917,7 +916,8 @@ fn first_put_order_of_labelled_edges(
 /// Puts the labels of an edge that several original edges merged into in the order ELK moved
 /// them in: by `first_put_order`, and a label keeps its place among the labels of its own
 /// original edge. The segments are introduced in the order of the ports, but the labels follow the
-/// order of the keys of `crossHierarchyMap`.
+/// order of the keys of `crossHierarchyMap` (`moveLabelsAndRemoveOriginalEdges` in
+/// `CompoundGraphPreprocessor.java`).
 fn order_labels_of_merged_edges(
     graph: &mut LGraph,
     merged_label_edges: &[EdgeId],
@@ -926,12 +926,14 @@ fn order_labels_of_merged_edges(
     for &edge in merged_label_edges {
         // The sort is stable, so labels of one original edge keep their order.
         graph.edges[edge].labels.sort_by_cached_key(|label| {
-            label
+            let rank = label
                 .original_label_edge
                 .as_ref()
                 .and_then(|id| first_put_order.get(id))
-                .copied()
-                .unwrap_or(usize::MAX)
+                .copied();
+            // Every label on a merged edge was moved from an original edge that has a segment.
+            debug_assert!(rank.is_some(), "a merged label has no first-put rank");
+            rank.unwrap_or(usize::MAX)
         });
     }
 }
@@ -1227,7 +1229,7 @@ fn introduce_hierarchical_edge_segment(
             external_port.original_edges.push(edge.id.clone());
             debug_assert_eq!(external_port.original_edges.last(), Some(&edge.id));
             apply_label_graph_properties(graph, &labels);
-            if !labels.is_empty() {
+            if !labels.is_empty() && !state.merged_label_edges.contains(&external_port.new_edge) {
                 state.merged_label_edges.push(external_port.new_edge);
             }
             graph.edges[external_port.new_edge].labels.extend(labels);

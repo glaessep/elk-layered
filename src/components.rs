@@ -424,11 +424,11 @@ fn drop_nodes_renumbered(
             });
         }
     }
-    if let Some((owner, _)) = graph.nodes_with_ids().find(|(_, data)| {
+    if let Some((owner, _)) = graph.nodes_with_ids().find(|(node, data)| {
         data.nested_graph.is_some_and(|nested| {
             graphs[nested]
                 .parent
-                .is_none_or(|parent| parent.graph != id)
+                .is_none_or(|parent| parent.graph != id || parent.node != *node)
         })
     }) {
         // The check runs before anything changes, like the others, and names the id before the
@@ -513,8 +513,8 @@ fn renumber<I: VecId>(keep: &IdVec<I, bool>) -> (IdVec<I, Option<I>>, IdVec<I, I
 }
 
 /// Maps the references that the graphs inside the component's nodes hold to the component's
-/// graph: the origin of an external port dummy, and the cross-hierarchy edges that name an edge
-/// of it. `graph` is the component, and the graphs it holds are in `graphs`.
+/// graph: the origin of an external port dummy, the port dummies, the cross-hierarchy edges that
+/// name an edge of it, and the parent node of a graph. `graph` is the component, and the graphs it holds are in `graphs`.
 fn remap_nested_references<N: Slot<NodeId>, E: Slot<EdgeId>>(
     graphs: &mut GraphArena,
     graph: &LGraph,
