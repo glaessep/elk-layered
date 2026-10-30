@@ -70,6 +70,8 @@ struct PortFacts {
     connected_to_external_nodes: bool,
     /// Whether an edge at the port leads to or comes from a descendant of its node.
     inside_connections: bool,
+    /// Whether any edge starts or ends at the port: what `ElkPortAdapter` shows the cells.
+    has_edges: bool,
 }
 
 /// One node of the input, with what `layout` reads from it.
@@ -387,24 +389,6 @@ impl<'a> Tree<'a> {
             tree.edges_by_container[container].push(edge);
         }
         tree.count_port_facts();
-        for info in &tree.nodes {
-            if info.children.is_empty() {
-                continue;
-            }
-            // `ElkGraphImporter.calculateMinimumGraphSize` runs the cells over the node's ports
-            // as well. That is not ported, so a node with children may not size itself to them.
-            // It skips the root.
-            let constraints = info.settings.node_size.constraints;
-            if info.parent.is_some()
-                && (constraints.contains(SizeConstraints::PORTS)
-                    || constraints.contains(SizeConstraints::PORT_LABELS))
-            {
-                return Err(Error::Unsupported {
-                    element: node_element(&info.node.id),
-                    feature: "sizing a node with children to its ports".to_string(),
-                });
-            }
-        }
         Ok(tree)
     }
 
@@ -428,6 +412,7 @@ impl<'a> Tree<'a> {
                 }
                 facts.connected_to_external_nodes |= outside;
                 facts.inside_connections |= !outside;
+                facts.has_edges = true;
             }
             if let Some(port) = self.edges[index].target_port {
                 let from_child = self.nodes[source].parent == Some(target);
@@ -439,6 +424,7 @@ impl<'a> Tree<'a> {
                 }
                 facts.connected_to_external_nodes |= outside;
                 facts.inside_connections |= !outside;
+                facts.has_edges = true;
             }
         }
     }
@@ -1073,6 +1059,7 @@ impl<'a, 't> Work<'a, 't> {
                 child_edges: facts.child_edges,
                 connected_to_external_nodes: facts.connected_to_external_nodes,
                 inside_connections: facts.inside_connections,
+                has_edges: facts.has_edges,
                 labels: port
                     .labels
                     .iter()
@@ -1258,6 +1245,9 @@ impl<'a, 't> Work<'a, 't> {
         if external_ports {
             self.placed_ports[scope] = true;
         }
+        let included_port_labels = self.sizing[scope]
+            .constraints
+            .contains(SizeConstraints::PORT_LABELS);
         let mut new_size = self.sizing[scope].effective_minimum().unwrap_or_default();
         new_size.width = f64::max(new_size.width, actual.width);
         new_size.height = f64::max(new_size.height, actual.height);
@@ -1339,8 +1329,14 @@ impl<'a, 't> Work<'a, 't> {
                 }
             }
         }
-        // `ElkUtil.resizeNode` sets the node's size constraints to fixed.
-        self.sizing[scope].constraints = SizeConstraints::FIXED;
+        // `ElkUtil.resizeNode` sets the node's size constraints to fixed. Then
+        // `applyParentNodeLayout` gives back `PORT_LABELS` to a node that had it, or the ports of
+        // its parent's run would be placed without their labels.
+        self.sizing[scope].constraints = if included_port_labels {
+            SizeConstraints::PORT_LABELS
+        } else {
+            SizeConstraints::FIXED
+        };
     }
 
     /// Writes the edge routes and containers.

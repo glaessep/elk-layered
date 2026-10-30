@@ -1668,6 +1668,7 @@ fn input_port(id: &str, side: PortSide) -> ElkInputPort {
         child_edges: 0,
         connected_to_external_nodes: false,
         inside_connections: false,
+        has_edges: false,
         labels: Vec::new(),
     }
 }

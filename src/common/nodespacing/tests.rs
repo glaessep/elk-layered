@@ -46,7 +46,7 @@ fn label_and_node_size_calculation_places_inside_top_center_node_labels() {
     graph.layerless_nodes.push(node);
     graph.set_node_layer(NodeId::new(0), 0);
 
-    calculate_label_and_node_sizes(&mut graph, [NodeId::new(0)]);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [NodeId::new(0)]);
     calculate_node_margins(&mut graph, [NodeId::new(0)]);
 
     assert_eq!(
@@ -74,7 +74,7 @@ fn horizontal_layout_mode_stacks_multiple_node_labels_vertically() {
     node.labels.push(node_label(30.0, 12.0));
     graph.layerless_nodes.push(node);
 
-    calculate_label_and_node_sizes(&mut graph, [NodeId::new(0)]);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [NodeId::new(0)]);
 
     assert_eq!(
         graph.layerless_nodes[NodeId::new(0)].labels[0].position,
@@ -98,7 +98,7 @@ fn vertical_layout_mode_stacks_transposed_node_labels_horizontally() {
     node.labels.push(node_label(12.0, 30.0));
     graph.layerless_nodes.push(node);
 
-    calculate_label_and_node_sizes(&mut graph, [NodeId::new(0)]);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [NodeId::new(0)]);
 
     assert_eq!(
         graph.layerless_nodes[NodeId::new(0)].labels[0].position,
@@ -145,7 +145,7 @@ fn southern_ports_sit_on_the_southern_border_for_every_port_constraint() {
             refs.push(port.port);
         }
 
-        calculate_label_and_node_sizes(&mut graph, [node]);
+        calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [node]);
 
         let ports = &graph.layerless_nodes[node].ports;
         // The northern port sits outside above the node, the southern port below it.
@@ -172,7 +172,7 @@ fn label_and_node_size_calculation_places_free_ports_on_node_border() {
         .unwrap();
     graph.layerless_nodes[node].ports[port.port].set_side(PortSide::East);
 
-    calculate_label_and_node_sizes(&mut graph, [node]);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [node]);
 
     let port = &graph.layerless_nodes[node].ports[port.port];
     assert_eq!(port.position.x, graph.layerless_nodes[node].size.width);
@@ -203,7 +203,7 @@ fn label_and_node_size_calculation_crams_distributed_ports_when_overhang_disable
         graph.layerless_nodes[node].ports[port.port].set_side(PortSide::South);
     }
 
-    calculate_label_and_node_sizes(&mut graph, [node]);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [node]);
 
     let expected_spacing = graph.layerless_nodes[node].size.width / 6.0;
     for (index, port) in graph.layerless_nodes[node].ports.iter_with_ids() {
@@ -245,7 +245,7 @@ fn a_node_places_its_free_ports_by_its_own_port_alignment() {
             port
         });
 
-        calculate_label_and_node_sizes(&mut graph, [node]);
+        calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [node]);
 
         graph.layerless_nodes[node].ports[ports[0].port].position.x
     };
@@ -283,7 +283,7 @@ fn label_and_node_size_calculation_places_west_ports_top_to_bottom() {
         graph.layerless_nodes[node].ports[port.port].set_side(PortSide::West);
     }
 
-    calculate_label_and_node_sizes(&mut graph, [node]);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none(), [node]);
 
     let y_positions = graph.layerless_nodes[node]
         .ports

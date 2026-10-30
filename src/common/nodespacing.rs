@@ -6,16 +6,23 @@
 //! - https://github.com/eclipse-elk/elk/blob/62d5909f96fad541bc101ad52dabaece6b7eab7e/plugins/org.eclipse.elk.alg.common/src/org/eclipse/elk/alg/common/nodespacing/NodeMarginCalculator.java
 
 use super::cells::{self, CellLabel, CellNode, CellPort, CellPortLabel, CellPorts, Rect};
-use crate::graph::{LGraph, LMargin, LPadding, NodeId, PortId};
+use crate::graph::{LGraph, LMargin, LPadding, NodeId, OtherGraphs, PortId};
 
 /// Sizes each node and places its ports and labels.
 ///
 /// Source: `NodeLabelAndSizeCalculator.process(graph, node, true, false)`, through
 /// `LGraphAdapters.adapt(graph, true, true, ...)`: edges at north and south port dummies count
 /// as edges of their ports.
-pub fn calculate_label_and_node_sizes(graph: &mut LGraph, nodes: impl IntoIterator<Item = NodeId>) {
+///
+/// `others` are the graphs inside the nodes of `graph`: the edges at the dummy of a port, inside
+/// the node, count as edges of the port.
+pub fn calculate_label_and_node_sizes(
+    graph: &mut LGraph,
+    others: OtherGraphs<'_>,
+    nodes: impl IntoIterator<Item = NodeId>,
+) {
     for node in nodes {
-        size_node_and_place_ports_and_labels(graph, node);
+        size_node_and_place_ports_and_labels(graph, others, node);
     }
 }
 
@@ -30,21 +37,30 @@ pub fn calculate_node_margins(graph: &mut LGraph, nodes: impl IntoIterator<Item 
 /// port dummy, and its self loops, which the self loop holder keeps apart.
 ///
 /// `self_loop_ports` holds the ports of the node's self loops.
-fn port_has_edges(graph: &LGraph, node: NodeId, port: PortId, self_loop_ports: &[PortId]) -> bool {
+fn port_has_edges(
+    graph: &LGraph,
+    others: OtherGraphs<'_>,
+    node: NodeId,
+    port: PortId,
+    self_loop_ports: &[PortId],
+) -> bool {
     let data = &graph.layerless_nodes[node].ports[port];
     if !data.incoming_edges().is_empty() || !data.outgoing_edges().is_empty() {
         return true;
     }
-    // A port of a node with children has its dummy in the graph inside the node. Its labels
-    // are refused, and only labels read the edges, so that dummy is left out.
-    if let Some(dummy) = data.port_dummy
-        && dummy.graph_id == graph.id
-    {
-        let dummy = &graph.layerless_nodes[dummy.node];
-        if dummy
-            .ports
-            .iter()
-            .any(|p| !p.incoming_edges().is_empty() || !p.outgoing_edges().is_empty())
+    // A port of a node with children has its dummy in the graph inside the node, and ELK counts
+    // the edges of that dummy as edges of the port.
+    if let Some(dummy) = data.port_dummy {
+        let inner = if dummy.graph_id == graph.id {
+            Some(graph)
+        } else {
+            others.get(dummy.graph_id)
+        };
+        if let Some(inner) = inner
+            && inner.layerless_nodes[dummy.node]
+                .ports
+                .iter()
+                .any(|p| !p.incoming_edges().is_empty() || !p.outgoing_edges().is_empty())
         {
             return true;
         }
@@ -66,7 +82,7 @@ fn self_loop_ports(graph: &LGraph, node: NodeId) -> Vec<PortId> {
 
 /// Runs ELK's cell system on one node: its size, when its size constraints are not fixed, the
 /// positions of its ports, and the positions of the labels it places.
-fn size_node_and_place_ports_and_labels(graph: &mut LGraph, node: NodeId) {
+fn size_node_and_place_ports_and_labels(graph: &mut LGraph, others: OtherGraphs<'_>, node: NodeId) {
     let horizontal_layout_mode = !graph.options.direction.is_vertical();
     let data = &graph.layerless_nodes[node];
     let self_loop_ports = self_loop_ports(graph, node);
@@ -88,7 +104,7 @@ fn size_node_and_place_ports_and_labels(graph: &mut LGraph, node: NodeId) {
                         position: label.position,
                     })
                     .collect(),
-                has_edges: port_has_edges(graph, node, id, &self_loop_ports),
+                has_edges: port_has_edges(graph, others, node, id, &self_loop_ports),
                 has_compound_connections: port.inside_connections,
             })
             .collect(),

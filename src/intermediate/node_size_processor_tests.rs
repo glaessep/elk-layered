@@ -1,9 +1,9 @@
 //! Tests of `InLayerConstraintProcessor`, `LabelAndNodeSizeProcessor` and
 //! `InnermostNodeMarginCalculator`.
 
-use crate::graph::PortId;
 use crate::graph::{EdgeLabelPlacement, LLabel, LSize, PortSide};
 use crate::graph::{InLayerConstraint, LGraph, LNodeKind, NodeId};
+use crate::graph::{OtherGraphs, PortId};
 use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
 use crate::intermediate::{
     calculate_innermost_node_margins, calculate_label_and_node_sizes, process_in_layer_constraints,
@@ -144,7 +144,7 @@ fn label_and_node_size_processor_delegates_common_node_spacing() {
     graph.set_node_layer(b, 1);
     graph.layerless_nodes[a].ports[PortId::new(0)].set_side(PortSide::East);
 
-    calculate_label_and_node_sizes(&mut graph);
+    calculate_label_and_node_sizes(&mut graph, OtherGraphs::none());
 
     let port = &graph.layerless_nodes[a].ports[PortId::new(0)];
     assert_eq!(port.position.x, graph.layerless_nodes[a].size.width);
@@ -404,13 +404,13 @@ mod external_port_dummy_labels {
     fn the_processor_places_dummy_labels_only_in_a_graph_with_external_ports() {
         let (mut plain, dummy) = dummy_with_labels(PortSide::North, spacings(1.0, 1.0, 0.0));
         plain.options.port_label_placement = PortLabelPlacement::INSIDE;
-        calculate_label_and_node_sizes(&mut plain);
+        calculate_label_and_node_sizes(&mut plain, OtherGraphs::none());
         assert_eq!(positions(&plain, dummy), vec![(0.0, 0.0), (0.0, 0.0)]);
 
         let (mut external, dummy) = dummy_with_labels(PortSide::North, spacings(1.0, 1.0, 0.0));
         external.options.port_label_placement = PortLabelPlacement::INSIDE;
         external.graph_properties.external_ports = true;
-        calculate_label_and_node_sizes(&mut external);
+        calculate_label_and_node_sizes(&mut external, OtherGraphs::none());
         assert_eq!(
             positions(&external, dummy),
             vec![(-15.0, 1.0), (-15.0, 11.0)]
@@ -425,7 +425,7 @@ mod external_port_dummy_labels {
             PortLabelPlacement::INSIDE | PortLabelPlacement::NEXT_TO_PORT_IF_POSSIBLE;
         graph.options.port_labels_treat_as_group = true;
         graph.graph_properties.external_ports = true;
-        calculate_label_and_node_sizes(&mut graph);
+        calculate_label_and_node_sizes(&mut graph, OtherGraphs::none());
         assert_eq!(positions(&graph, dummy)[0].1, -8.0);
     }
 }

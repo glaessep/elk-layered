@@ -306,6 +306,7 @@ fn a_made_up_port_keeps_its_net_flow_apart_from_a_named_port_of_the_same_id() {
         child_edges: 0,
         connected_to_external_nodes: false,
         inside_connections: false,
+        has_edges: false,
         allow_non_flow_ports_to_switch_sides: false,
         labels: Vec::new(),
     };
@@ -1473,7 +1474,7 @@ mod port_label_room {
     ) -> Vec<(f64, f64)> {
         let (outer, mut inner, dummy) = setup(side, placement, labels, constraints);
         let node = NodeId::new(0);
-        reserve_room_for_port_labels(&outer, node, PortId::new(0), &mut inner, constraints);
+        reserve_room_for_port_labels(&outer, node, PortId::new(0), &mut inner, constraints, side);
         inner.layerless_nodes[dummy].ports[PortId::new(0)]
             .labels
             .iter()
@@ -1573,6 +1574,51 @@ mod port_label_room {
         );
     }
 
+    // Mutation: read the current side of the port, not the side the importer gave it. A dummy
+    // that links to the port changes the side, and ELK reads the old one: here "undefined",
+    // which gives a fixed label no part inside the node.
+    #[test]
+    fn the_inside_part_follows_the_side_the_importer_gave_the_port() {
+        let (outer, mut inner, dummy) = setup(
+            PortSide::East,
+            PortLabelPlacement::FIXED,
+            vec![label(20.0, 10.0, -12.0, 0.0)],
+            PortConstraints::Free,
+        );
+        reserve_room_for_port_labels(
+            &outer,
+            NodeId::new(0),
+            PortId::new(0),
+            &mut inner,
+            PortConstraints::Free,
+            PortSide::Undefined,
+        );
+        let at = &inner.layerless_nodes[dummy].ports[PortId::new(0)].labels[0];
+        assert_eq!((at.size.width, at.size.height), (0.0, 10.0));
+    }
+
+    // Mutation: read the current side of the port for the choice of the axis. The importer gave
+    // the port the north side, so ELK cuts the height of the label, not its width.
+    #[test]
+    fn the_axis_follows_the_side_the_importer_gave_the_port() {
+        let (outer, mut inner, dummy) = setup(
+            PortSide::East,
+            PortLabelPlacement::OUTSIDE,
+            vec![label(20.0, 10.0, 0.0, 0.0)],
+            PortConstraints::FixedSide,
+        );
+        reserve_room_for_port_labels(
+            &outer,
+            NodeId::new(0),
+            PortId::new(0),
+            &mut inner,
+            PortConstraints::FixedSide,
+            PortSide::North,
+        );
+        let at = &inner.layerless_nodes[dummy].ports[PortId::new(0)].labels[0];
+        assert_eq!((at.size.width, at.size.height), (20.0, 0.0));
+    }
+
     // Mutation: copy the labels in reverse, or only the first one.
     #[test]
     fn every_label_of_the_port_gets_one_on_the_dummy_in_order() {
@@ -1607,6 +1653,7 @@ mod port_label_room {
             PortId::new(0),
             &mut inner,
             PortConstraints::FixedSide,
+            PortSide::East,
         );
         assert_eq!(
             inner.layerless_nodes[dummy].ports[PortId::new(0)].labels[0].text,
@@ -1630,6 +1677,7 @@ mod port_label_room {
             PortId::new(0),
             &mut inner,
             PortConstraints::FixedSide,
+            PortSide::East,
         );
         assert!(
             inner.layerless_nodes[dummy].ports[PortId::new(0)]
