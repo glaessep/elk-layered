@@ -1032,7 +1032,7 @@ fn import_hierarchical_graph(
                 .then(|| edge.model_order.unwrap_or(edge_order));
             let source_parent = index.node_parent(edge.source.as_str());
             let target_parent = index.node_parent(edge.target.as_str());
-            if edge.inside_self_loops_yo {
+            if is_inside_self_loop(edge) {
                 let graph_slot = arena.graph_slot_for_parent(index, Some(edge.source.as_str()));
                 let graph = &mut arena.graphs[graph_slot];
                 transform_inside_self_loop(edge, graph, edge_model_order);
@@ -2085,6 +2085,23 @@ fn node_needs_nested_graph(
         || index.inside_self_loop_nodes.contains(node.id.as_str())
 }
 
+/// Whether the edge is an inside self loop.
+///
+/// Ports the `isInsideSelfLoop` tests in `ElkGraphImporter.importFlatGraph`,
+/// `importHierarchicalGraph` and `hasInsideSelfLoops`. Java reads `isSelfloop()`, the node's
+/// `INSIDE_SELF_LOOPS_ACTIVATE` and the edge's `INSIDE_SELF_LOOPS_YO` here. The caller has already
+/// read all three (`is_inside_self_loop` in `layout.rs`) and sets `inside_self_loops_yo` to the
+/// answer, so the importer reads that field alone.
+fn is_inside_self_loop(edge: &ElkInputEdge) -> bool {
+    // A caller bug, not caller input: only `layout.rs` sets the field.
+    debug_assert!(
+        !edge.inside_self_loops_yo || edge.source == edge.target,
+        "inside self loop \"{}\" joins two nodes",
+        edge.id
+    );
+    edge.inside_self_loops_yo
+}
+
 /// Source: `LGraphUtil.getDirection`, which `ElkGraphImporter.createLGraph` uses for a graph
 /// without a direction.
 pub(crate) fn resolve_direction(direction: ElkDirection, aspect_ratio: f64) -> ElkDirection {
@@ -2316,7 +2333,7 @@ impl<'a> InputIndex<'a> {
         let inside_self_loop_nodes = input
             .edges
             .iter()
-            .filter(|edge| edge.inside_self_loops_yo)
+            .filter(|edge| is_inside_self_loop(edge))
             .map(|edge| edge.source.as_str())
             .collect::<HashSet<_>>();
         let mut result = Self {

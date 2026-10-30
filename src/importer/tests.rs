@@ -295,8 +295,9 @@ fn hierarchy_query_index_answers_ancestry_across_branches_and_forests() {
     assert!(!queries.is_ancestor(root_b, left_leaf));
 }
 
-/// A node that sets `insideSelfLoops.activate` itself. ELK reads the option from the node of the
-/// loop, not from the graph around it.
+/// A node whose own options set `insideSelfLoops.activate`, as `layout.rs` passes them in
+/// `nested_options`. The importer does not read the option for a loop: the edge carries that
+/// decision in `inside_self_loops_yo`.
 fn activating(mut node: ElkInputNode) -> ElkInputNode {
     node.nested_options = Some(Box::new(LayeredOptions {
         inside_self_loops_activate: true,
@@ -505,6 +506,25 @@ fn importer_trusts_the_edge_and_does_not_read_the_node_options() {
         .and_then(|node| node.nested_graph.map(|id| &lgraph[id]))
         .expect("an inside self loop creates a nested graph");
     assert!(nested.graph_properties.self_loops);
+}
+
+// Mutation: drop the `debug_assert!` in `is_inside_self_loop`. An edge between two nodes then
+// becomes a fake loop in the nested graph of its source, with no error.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "joins two nodes")]
+fn importer_refuses_an_inside_self_loop_flag_on_an_edge_between_two_nodes() {
+    let graph = graph(
+        vec![node("A"), node("B")],
+        vec![ElkInputEdge {
+            source_port: None,
+            target_port: None,
+            inside_self_loops_yo: true,
+            ..edge("A-B", "A", "B")
+        }],
+    );
+
+    let _ = import_graph(&graph);
 }
 
 // Mutation: reuse the dummies of the first loop of a node for its later loops in

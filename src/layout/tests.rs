@@ -129,13 +129,12 @@ fn an_edge_between_two_activating_nodes_ignores_yo() {
     between
         .layout_options
         .insert("elk.insideSelfLoops.yo".into(), "true".into());
-    let root = |edge: ElkEdge| ElkNode {
+    let tree_root = ElkNode {
         id: "root".into(),
-        children: vec![g.clone(), h.clone()],
-        edges: vec![edge],
+        children: vec![g, h],
+        edges: vec![between],
         ..Default::default()
     };
-    let tree_root = root(between);
     let tree = Tree::new(&tree_root).unwrap();
     assert!(!tree.edges[0].inside_self_loop);
 }
