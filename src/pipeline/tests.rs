@@ -904,6 +904,7 @@ fn graph_properties_insert_label_self_loop_and_external_port_processors() {
     )));
 }
 
+// Mutation: read `insideSelfLoops.activate` from the graph that holds the edge, not from the node.
 #[test]
 fn inside_self_loops_enable_self_loop_processors_on_nested_graphs() {
     let mut input = ElkInputGraph {
@@ -948,7 +949,11 @@ fn inside_self_loops_enable_self_loop_processors_on_nested_graphs() {
             container: None,
         }],
     };
-    input.options.inside_self_loops_activate = true;
+    let own_options = LayeredOptions {
+        inside_self_loops_activate: true,
+        ..Default::default()
+    };
+    input.nodes[0].nested_options = Some(Box::new(own_options));
 
     let mut graph = import_graph(&input).unwrap();
 

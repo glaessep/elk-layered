@@ -606,6 +606,8 @@ pub(crate) struct EdgeSettings {
     pub(crate) priority_direction: i32,
     pub(crate) priority_shortness: i32,
     pub(crate) priority_straightness: i32,
+    /// `insideSelfLoops.yo`: a self loop on a node with `insideSelfLoops.activate` runs inside it.
+    pub(crate) inside_self_loops_yo: bool,
 }
 
 /// What a port's `layoutOptions` set.
@@ -728,7 +730,7 @@ pub(crate) fn edge_settings(
                 parse_int(value).map(|v| settings.priority_straightness = v)
             }
             "org.eclipse.elk.insideSelfLoops.yo" => {
-                parse_bool(value).and_then(|v| refuse_true(v, INSIDE_SELF_LOOPS))
+                parse_bool(value).map(|v| settings.inside_self_loops_yo = v)
             }
             _ => Err(OptionProblem::Unsupported(NOT_PORTED)),
         };
@@ -823,7 +825,6 @@ const WRONG_TARGET: &str = "the option does not apply to this kind of element";
 const PORT_ALIGNMENT_BY_SIDE: &str = "port alignment by side is not supported yet";
 const PORT_ANCHOR: &str = "an explicit port anchor is not supported yet";
 const INTERACTIVE: &str = "interactive strategies need input positions, which are not read";
-const INSIDE_SELF_LOOPS: &str = "inside self-loops are not supported";
 const JUNCTION_POINTS: &str = "merged edges need junction points, which are not ported";
 
 /// No ELK counterpart: refuses a value whose effect is not ported.
@@ -889,7 +890,7 @@ fn apply_node_option(s: &mut NodeSettings, id: &str, value: &str) -> Result<(), 
             o.port_labels_treat_as_group = parse_bool(value)?;
         }
         "org.eclipse.elk.insideSelfLoops.activate" => {
-            refuse_true(parse_bool(value)?, INSIDE_SELF_LOOPS)?;
+            o.inside_self_loops_activate = parse_bool(value)?;
         }
         "org.eclipse.elk.edgeRouting" => {
             // Layered routes `UNDEFINED` orthogonally, but other steps treat it apart from

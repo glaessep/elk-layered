@@ -401,8 +401,8 @@ fn import_scope_with(
 /// ports. Gives the dummy of each port by the port's id.
 ///
 /// Ports `ElkGraphImporter.checkExternalPorts` and `transformExternalPort`. Port labels are
-/// refused before this runs, and inside self loops are refused, so a port is external only
-/// when an edge connects it to a child.
+/// refused before this runs, and an inside self loop at a port is refused, so a port is external
+/// only when an edge connects it to a child.
 fn import_external_ports(
     root: &mut LGraph,
     scope: &ScopePorts<'_>,
@@ -991,10 +991,12 @@ fn import_hierarchical_graph(
                 .then(|| edge.model_order.unwrap_or(edge_order));
             let source_parent = index.node_parent(edge.source.as_str());
             let target_parent = index.node_parent(edge.target.as_str());
-            let source_container_slot = arena.graph_slot_for_parent(index, source_parent);
-            let inside_self_loops_activate = arena.graphs[source_container_slot]
-                .options
-                .inside_self_loops_activate;
+            // `ElkGraphImporter.transformEdges` reads the activation from the edge's source
+            // node, not from the graph that holds the edge.
+            let inside_self_loops_activate = index
+                .nodes
+                .get(edge.source.as_str())
+                .is_some_and(|node| node_activates_inside_self_loops(node));
 
             if edge.inside_self_loops_yo && edge.source == edge.target && inside_self_loops_activate
             {
@@ -1045,8 +1047,8 @@ fn transform_inside_self_loop(
     model_order: Option<usize>,
     port_index: &mut ImportPortIndex,
 ) -> EdgeId {
-    let source_port_key = inside_self_loop_port_key(edge.source.as_str(), "source");
-    let target_port_key = inside_self_loop_port_key(edge.target.as_str(), "target");
+    let source_port_key = inside_self_loop_port_key(edge.id.as_str(), "source");
+    let target_port_key = inside_self_loop_port_key(edge.id.as_str(), "target");
     let source = ensure_inside_self_loop_dummy(
         graph,
         edge.source.as_str(),
@@ -1146,8 +1148,13 @@ fn ensure_inside_self_loop_dummy(
     port
 }
 
-fn inside_self_loop_port_key(node_id: &str, role: &str) -> String {
-    format!("{node_id}:{role}")
+/// The key of the port an inside self loop gets on its node.
+///
+/// `ElkGraphImporter.transformEdge` makes a new port for every edge without one, so two loops on
+/// one node never share a port. The index looks a port up by node first, so the edge's id
+/// is enough to tell them apart.
+fn inside_self_loop_port_key(edge_id: &str, role: &str) -> String {
+    format!("{edge_id}:{role}")
 }
 
 /// Mirrors `ElkGraphImporter#needsModelOrder(...)`.
@@ -1462,7 +1469,7 @@ fn transform_port(
     lport.border_offset = port.border_offset;
     lport.allow_non_flow_ports_to_switch_sides = port.allow_non_flow_ports_to_switch_sides;
     // The input has no edge to or from a descendant of its node, because the node has no children.
-    // Inside self loops are refused, so `INSIDE_CONNECTIONS` stays false.
+    // An inside self loop at a port is refused, so `INSIDE_CONNECTIONS` stays false.
     initialize_port(&mut lport, constraints, node_size, graph.options.direction);
     for label in port.labels.iter().filter(|label| !label.text.is_empty()) {
         // `transformLabel` keeps the given position. Only a port label reads it: one whose
@@ -2076,8 +2083,18 @@ fn node_needs_nested_graph(
     // SeparateChildren may still need a dummy-only nested graph for activated inside self-loops;
     // that must not be confused with permission to materialize the node's ordinary children.
     node_materializes_children(index, parent_options, node)
-        || (parent_options.inside_self_loops_activate
+        || (node_activates_inside_self_loops(node)
             && index.inside_self_loop_nodes.contains(node.id.as_str()))
+}
+
+/// Whether the node itself sets `insideSelfLoops.activate`.
+///
+/// Ports the node-level reads of `LayeredOptions.INSIDE_SELF_LOOPS_ACTIVATE` in
+/// `ElkGraphImporter`. A node's own options travel in `nested_options`.
+fn node_activates_inside_self_loops(node: &ElkInputNode) -> bool {
+    node.nested_options
+        .as_deref()
+        .is_some_and(|options| options.inside_self_loops_activate)
 }
 
 /// Source: `LGraphUtil.getDirection`, which `ElkGraphImporter.createLGraph` uses for a graph

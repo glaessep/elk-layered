@@ -202,6 +202,7 @@ fn port_settings(port: &ElkPort) -> Result<(PortSettings, Vec<LabelSettings>), E
 /// The `feature` of the refusal for an edge end that ELK's importer cannot find, such as an edge
 /// between a node and its own children when the children are laid out on their own:
 /// `UnsupportedGraphException`.
+const INSIDE_SELF_LOOP_ALONE: &str = "an inside self loop in a graph laid out on its own";
 const UNKNOWN_EDGE_END: &str = "an edge between a node and its own children laid out on their own";
 
 /// The most levels a node may sit below the root. ELK has no such limit; Rust's stack needs one.
@@ -420,8 +421,8 @@ impl<'a> Tree<'a> {
     /// Ports `ElkGraphImporter.calculateNetFlow`, `checkExternalPorts` and
     /// `isConnectedToExternalNodes`. An edge into a child of the port's node, or out of one,
     /// votes that the port is an input port of the node and an output port, in that order.
-    /// Every other edge votes the other way round. A self loop votes as an edge to the outside:
-    /// inside self loops are refused.
+    /// Every other edge votes the other way round. A self loop votes as an edge to the outside. An
+    /// inside self loop at a port never gets here: it is refused.
     fn count_port_facts(&mut self) {
         for index in 0..self.edges.len() {
             let (source, target) = (self.edges[index].source, self.edges[index].target);
@@ -707,6 +708,20 @@ impl<'a, 't> Work<'a, 't> {
                     .to_string(),
             });
         }
+        // `ElkGraphImporter.importFlatGraph` looks for the inside self loops of the node whose
+        // children it lays out among the edges of the node's parent. It finds no end for them, as
+        // in the check of the edges below: the run has the children, not the node.
+        if !include
+            && let Some(parent) = scope_info.parent
+            && let Some(&edge) = tree.edges_by_container[parent].iter().find(|&&edge| {
+                tree.edges[edge].source == scope && self.is_inside_self_loop(&tree.edges[edge])
+            })
+        {
+            return Err(Error::Unsupported {
+                element: edge_element(&tree.edges[edge].edge.id),
+                feature: INSIDE_SELF_LOOP_ALONE.to_string(),
+            });
+        }
         let run_nodes = self.run_nodes(scope, include);
         let in_run: HashSet<usize> = run_nodes.iter().copied().collect();
         // The nodes whose insides belong to this run.
@@ -734,6 +749,25 @@ impl<'a, 't> Work<'a, 't> {
         for edge_index in candidates {
             let edge = &tree.edges[edge_index];
             let element = edge_element(&edge.edge.id);
+            // elkjs fails on an inside self loop at a port with a JavaScript error, so there is no
+            // layout to hold ours to.
+            if self.is_inside_self_loop(edge)
+                && (edge.source_port.is_some() || edge.target_port.is_some())
+            {
+                return Err(Error::Unsupported {
+                    element,
+                    feature: "an inside self loop at a port".to_string(),
+                });
+            }
+            // `ElkGraphImporter.importFlatGraph` skips an inside self loop here and looks for it
+            // in the run of its node. That run holds the node's children, not the node, so ELK
+            // cannot find the loop's end: `UnsupportedGraphException`.
+            if !include && self.is_inside_self_loop(edge) {
+                return Err(Error::Unsupported {
+                    element,
+                    feature: INSIDE_SELF_LOOP_ALONE.to_string(),
+                });
+            }
             if !include {
                 // `ElkGraphImporter.importFlatGraph` takes an edge between two children and
                 // leaves edges into other levels unrouted.
@@ -977,7 +1011,8 @@ impl<'a, 't> Work<'a, 't> {
             node_flexibility: info.settings.node_flexibility,
             ports_surrounding: None,
             ports: self.input_ports(node),
-            nested_options: (!info.children.is_empty())
+            nested_options: (!info.children.is_empty()
+                || info.settings.options.inside_self_loops_activate)
                 .then(|| Box::new(info.settings.options.clone())),
             labels: current
                 .labels
@@ -1074,6 +1109,19 @@ impl<'a, 't> Work<'a, 't> {
         self.tree.nodes[node].node.ports[port].id.clone()
     }
 
+    /// Whether the edge is a self loop that `insideSelfLoops.yo` and the `insideSelfLoops.activate`
+    /// of its node route inside the node.
+    ///
+    /// Ports the test in `ElkGraphImporter.transformEdges`.
+    fn is_inside_self_loop(&self, edge: &EdgeInfo<'_>) -> bool {
+        edge.source == edge.target
+            && edge.settings.inside_self_loops_yo
+            && self.tree.nodes[edge.source]
+                .settings
+                .options
+                .inside_self_loops_activate
+    }
+
     /// No ELK counterpart: maps the elkjs JSON tree onto the importer's input.
     fn input_edge(&self, edge: usize) -> ElkInputEdge {
         let info = &self.tree.edges[edge];
@@ -1092,7 +1140,7 @@ impl<'a, 't> Work<'a, 't> {
                 .map(|(index, (label, settings))| input_label(index, label, settings))
                 .collect(),
             minlen: 1,
-            inside_self_loops_yo: false,
+            inside_self_loops_yo: info.settings.inside_self_loops_yo,
             model_order: None,
             priority_direction: info.settings.priority_direction,
             priority_shortness: info.settings.priority_shortness,
@@ -1290,8 +1338,32 @@ impl<'a, 't> Work<'a, 't> {
             };
             let incoming_shape = shape(info.source, info.source_port);
             let outgoing_shape = shape(info.target, info.target_port);
-            let route = self.routes.remove(&index);
-            let labels = self.edge_labels.remove(&index).unwrap_or_default();
+            let mut route = self.routes.remove(&index);
+            let mut labels = self.edge_labels.remove(&index).unwrap_or_default();
+            // `RecursiveGraphLayoutEngine.postProcessInsideSelfLoops`: the layered run routes an
+            // inside self loop relative to its node's top left corner. Once the node has its final
+            // place, the loop moves by that place, into the coordinates of its container. elkjs
+            // moves the labels of the loop too, which the Java method does not do.
+            let inside_self_loop = self.is_inside_self_loop(info);
+            let by = inside_self_loop.then(|| {
+                let at = self.out_node_ref(info.source);
+                LPoint { x: at.x, y: at.y }
+            });
+            let shift = |p: &mut LPoint| {
+                if let Some(by) = by {
+                    p.x += by.x;
+                    p.y += by.y;
+                }
+            };
+            if let Some(route) = route.as_mut() {
+                shift(&mut route.start);
+                shift(&mut route.end);
+                route.bend_points.iter_mut().for_each(shift);
+                route.junction_points.iter_mut().for_each(shift);
+            }
+            for (_, position, _) in &mut labels {
+                shift(position);
+            }
             let node = self.out_node(info.given_in);
             let edge = &mut node.edges[info.index];
             edge.container = Some(container);
