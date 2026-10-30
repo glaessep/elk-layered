@@ -736,7 +736,9 @@ pub(crate) fn combine(
         let mut node_map = component.original_nodes;
         // A component may add nodes, such as temporary dummies, but never drop one of its own: the
         // maps below, and with them every reference of the nested graphs, would then point at the
-        // wrong whole-graph node. `drop_nodes` would let it, so this checks.
+        // wrong whole-graph node. `drop_nodes` would let it, so this checks, for edges too. The
+        // importer refuses duplicate ids, so an original id names one node. The check misses a drop
+        // only if an added node reuses the id of the dropped one.
         let added_nodes = component
             .graph
             .layerless_nodes
@@ -772,6 +774,20 @@ pub(crate) fn combine(
                 kind: "component edge count",
                 index: edge_map.len(),
             })?;
+        for (local, &original) in edge_map.iter_with_ids() {
+            let whole = graphs
+                .root()
+                .edges
+                .get(original)
+                .map(|edge| edge.id.as_str());
+            if whole != Some(component.graph.edges[local].id.as_str()) {
+                return Err(ComponentError::InvalidReference {
+                    kind: "component edge",
+                    index: original.index(),
+                }
+                .into());
+            }
+        }
         edge_map.extend((next_edge..next_edge + added_edges).map(EdgeId::new));
         next_edge += added_edges;
         component.graph.clear_layers();

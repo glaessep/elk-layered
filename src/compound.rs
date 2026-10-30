@@ -879,7 +879,16 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
                     scoped.pending.segment,
                 );
             }
-            order_labels_of_merged_edges(graph, &state.merged_label_edges, &first_put_order);
+            if !first_put_order.is_empty() {
+                // Each edge is sorted on its own, so the order of the map cannot reach the result.
+                let merged = state
+                    .external_ports
+                    .values()
+                    .filter(|port| port.original_edges.len() > 1)
+                    .map(|port| port.new_edge)
+                    .collect::<Vec<_>>();
+                order_labels_of_merged_edges(graph, &merged, &first_put_order);
+            }
         }
     }
     assert!(
@@ -914,8 +923,15 @@ fn first_put_order_of_labelled_edges(
     if !two_edges {
         return order;
     }
+    // Only the labelled edges are looked up later. Their first segment can have no label, so the
+    // positions come from all segments, but only a labelled edge is cloned into the map.
+    let labelled = segments
+        .iter()
+        .filter(|scoped| !scoped.labels.is_empty())
+        .map(|scoped| scoped.edge.id.as_str())
+        .collect::<HashSet<_>>();
     for (position, scoped) in segments.iter().enumerate() {
-        if !order.contains_key(&scoped.edge.id) {
+        if labelled.contains(scoped.edge.id.as_str()) && !order.contains_key(&scoped.edge.id) {
             order.insert(scoped.edge.id.clone(), position);
         }
     }
@@ -955,9 +971,6 @@ struct SegmentState {
     /// The dummy of each port of the parent node that the caller named, by the port's key.
     /// `dummyNodeMap` keeps one dummy for a port, however many edges end at it.
     parent_dummies: HashMap<String, PortRef>,
-    /// The edges that took the labels of a second original edge, by merging into an exported
-    /// external port.
-    merged_label_edges: Vec<EdgeId>,
 }
 
 #[derive(Debug, Clone)]
@@ -968,8 +981,6 @@ struct ExternalPort {
     dummy_port: PortRef,
     port_type: PortType,
     exported: bool,
-    /// Whether `new_edge` is in `SegmentState::merged_label_edges` already.
-    labels_merged: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1240,10 +1251,6 @@ fn introduce_hierarchical_edge_segment(
             external_port.original_edges.push(edge.id.clone());
             debug_assert_eq!(external_port.original_edges.last(), Some(&edge.id));
             apply_label_graph_properties(graph, &labels);
-            if !labels.is_empty() && !external_port.labels_merged {
-                external_port.labels_merged = true;
-                state.merged_label_edges.push(external_port.new_edge);
-            }
             graph.edges[external_port.new_edge].labels.extend(labels);
             return external_port.new_edge;
         }
@@ -1308,7 +1315,6 @@ fn introduce_hierarchical_edge_segment(
                 dummy_port,
                 port_type,
                 exported,
-                labels_merged: false,
             };
             if exported {
                 state.external_ports.insert(

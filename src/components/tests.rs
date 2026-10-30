@@ -969,6 +969,58 @@ fn a_component_that_lost_a_node_is_an_error_in_combine() {
     ));
 }
 
+// Mutation: leave out the `checked_sub` for edges in `combine`: the subtraction then overflows
+// and panics.
+#[test]
+fn a_component_that_lost_an_edge_is_an_error_in_combine() {
+    let (mut graphs, _) = graphs_with_a_holder_in_a_component();
+    let mut components = split(&mut graphs).unwrap().unwrap();
+    // The nodes are all there, but the edge is not. The ports let go of it first, as a step
+    // that removes an edge does.
+    components[1].graph.detach_edge(EdgeId::new(0));
+    components[1].graph.edges = IdVec::new();
+
+    let error = combine(&mut graphs, components).unwrap_err();
+
+    assert!(matches!(
+        error,
+        crate::pipeline::PipelineError::Component(ComponentError::InvalidReference {
+            kind: "component edge count",
+            index: 1
+        })
+    ));
+}
+
+// Mutation: leave out the comparison of the edge ids in `combine`. The added edge `swapped` then
+// takes the place of the original edge `e` without an error.
+#[test]
+fn a_component_that_swapped_an_edge_is_an_error_in_combine() {
+    let (mut graphs, _) = graphs_with_a_holder_in_a_component();
+    let mut components = split(&mut graphs).unwrap().unwrap();
+    let component = &mut components[1];
+    let (out, inp) = {
+        let edge = &component.graph.edges[EdgeId::new(0)];
+        (edge.source(), edge.target())
+    };
+    // `swapped` replaces `e`, and an added edge `extra` keeps the count up.
+    component.graph.edges = [
+        edge_between("swapped", out, inp),
+        edge_between("extra", out, inp),
+    ]
+    .into_iter()
+    .collect();
+
+    let error = combine(&mut graphs, components).unwrap_err();
+
+    assert!(matches!(
+        error,
+        crate::pipeline::PipelineError::Component(ComponentError::InvalidReference {
+            kind: "component edge",
+            index: 0
+        })
+    ));
+}
+
 // Mutation: leave out the comparison of the node ids in `combine`. `r` takes the place of `x`
 // in the count, and `holder` is then mapped to the whole-graph id of `x`.
 #[test]
