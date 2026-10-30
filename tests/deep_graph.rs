@@ -11,7 +11,8 @@ use elk_layered::{ElkEdge, ElkNode, Error, layout};
 const DEPTH: usize = 10_000;
 
 /// Far less than the 2 MiB a Rust thread gets by default. A step that recurses once per node of
-/// the chain needs more than this, in a debug and in a release build.
+/// the chain, or once per block of the staircase, needs more than this, in a debug and in a
+/// release build. Both builds were checked against the recursive `place_block`.
 const STACK: usize = 256 * 1024;
 
 /// The chain `n0 -> n1 -> ... -> n9999`, with an edge `n9999 -> n0` that closes a cycle through
@@ -64,11 +65,11 @@ fn lay_out_on_small_stack(graph: ElkNode) -> Result<ElkNode, Error> {
 const STEPS: usize = 4_000;
 
 /// A staircase of blocks. Layer `i` holds `n{i}` and `m{i}`, and the edges are `m{i} -> m{i+1}`
-/// and `n{i} -> m{i+1}`. The last layer holds only `m{STEPS - 1}`. The crossing minimiser picks
-/// the order inside a layer, and the staircase goes deep for either order, because one
-/// Brandes-Koepf direction always waits on the next block. That direction joins `n{i}` and
-/// `m{i+1}` into one block, whose root `n{i}` sits one layer earlier than the root of the block
-/// beside it. Placing block `i` needs block `i + 1` first, then block `i + 2`, and so on.
+/// and `n{i} -> m{i+1}`. The last layer holds only `m{STEPS - 1}`. One Brandes-Koepf direction
+/// joins `n{i}` and `m{i+1}` into one block, whose root `n{i}` sits one layer earlier than the
+/// root of the block beside it. Placing block `i` needs block `i + 1` first, then block `i + 2`,
+/// and so on. That needs the same order of `n{i}` and `m{i}` in every layer. The crossing
+/// minimiser picks the order, so the test checks it.
 fn staircase() -> ElkNode {
     let edge = |id: String, source: String, target: String| ElkEdge {
         id,
@@ -115,32 +116,31 @@ fn staircase() -> ElkNode {
     }
 }
 
-// Mutation: put the recursive `place_block` of commit `7bb277d` back into `bk_compactor.rs`, so
-// it calls itself once per block of the staircase.
+// Mutation: put back the recursive `place_block` that commit `6554427` replaced in
+// `bk_compactor.rs`. It then calls itself once per block of the staircase and overflows the stack.
+//
+// The shape checks guard the graph, so the overflow check keeps something to guard. Each has a
+// mutation:
+// - In `place_nodes_brandes_koepf`, reverse the nodes of every odd layer. The order of `n{i}` and
+//   `m{i}` then changes from layer to layer.
+// - Drop the edges `n{i} -> m{i+1}` from `staircase()`. The `n{i}` then leave their layers.
 #[test]
 fn a_staircase_of_blocks_is_placed_on_a_small_stack() {
     let laid_out = lay_out_on_small_stack(staircase()).unwrap();
-    assert_eq!(laid_out.children.len(), 2 * STEPS - 1);
-}
-
-// Mutation: drop the edges `n{i} -> m{i+1}` from `staircase()`, so the `n{i}` all fall into the
-// first layer and the staircase is gone.
-#[test]
-fn the_staircase_keeps_the_shape_that_makes_place_block_go_deep() {
-    let laid_out = lay_out_on_small_stack(staircase()).unwrap();
-    let x_of: BTreeMap<&str, f64> = laid_out
+    let at: BTreeMap<&str, (f64, f64)> = laid_out
         .children
         .iter()
-        .map(|node| (node.id.as_str(), node.x))
+        .map(|node| (node.id.as_str(), (node.x, node.y)))
         .collect();
+    let at = |id: String| at[id.as_str()];
+
     // The right direction puts a layer at one x. `n{i}` shares the layer of `m{i}` and lies before
     // `m{i+1}`, so the block `n{i}, m{i+1}` spans two layers.
+    let n_above_m = at("n0".into()).1 < at("m0".into()).1;
     for i in 0..STEPS - 1 {
-        assert_eq!(
-            x_of[format!("n{i}").as_str()],
-            x_of[format!("m{i}").as_str()]
-        );
-        assert!(x_of[format!("n{i}").as_str()] < x_of[format!("m{}", i + 1).as_str()]);
+        assert_eq!(at(format!("n{i}")).0, at(format!("m{i}")).0);
+        assert!(at(format!("n{i}")).0 < at(format!("m{}", i + 1)).0);
+        assert_eq!(at(format!("n{i}")).1 < at(format!("m{i}")).1, n_above_m);
     }
 }
 
