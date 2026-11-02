@@ -1763,8 +1763,7 @@ fn hierarchy_edge_from_group(id: &str) -> HierarchyEdge {
 }
 
 // Mutation: in `first_put_positions`, overwrite the position at each segment (`insert`) instead of
-// keeping the first one. Every segment then names the last segment of its edge. Leave out `base`:
-// the positions then start at 0.
+// keeping the first one. Every segment then names the last segment of its edge.
 #[test]
 fn every_segment_names_the_first_segment_of_its_original_edge() {
     let segments = ["u", "b", "a"]
@@ -1778,10 +1777,7 @@ fn every_segment_names_the_first_segment_of_its_original_edge() {
     // Each edge has more than one segment, so the first and the last segment differ.
     assert_eq!(ids, ["u", "u", "u", "b", "b", "b", "a", "a", "a"]);
 
-    assert_eq!(
-        first_put_positions(&segments, 10),
-        [10, 10, 10, 13, 13, 13, 16, 16, 16]
-    );
+    assert_eq!(first_put_positions(&segments), [0, 0, 0, 3, 3, 3, 6, 6, 6]);
 }
 
 /// The tail labels `texts` that one original edge gives to `edge` in `graph`.
@@ -1873,13 +1869,15 @@ fn a_moved_label_sets_both_label_properties_of_its_graph_only() {
     assert!(!nested.end_labels && !nested.center_labels);
 }
 
-// Mutation: in `introduce_segments_of_scope`, push a move for a segment without labels too. Every
-// graph that takes a hierarchy segment then gets both label properties.
+// Mutation: in `introduce_segments_of_scope`, push a move for a segment without labels too. The
+// graphs of `p0` and `p1`, which take only segments of the unlabelled edge, then get both label
+// properties.
 #[test]
-fn a_hierarchy_edge_without_labels_sets_no_label_property() {
+fn a_segment_without_labels_sets_no_label_property() {
     let options = LayeredOptions::default();
     let mut graphs = GraphArena::new(LGraph::new("root", options.clone()));
-    for (position, holder) in ["p0", "p1"].into_iter().enumerate() {
+    let mut inside = Vec::new();
+    for (position, holder) in ["p0", "p1", "p2", "p3"].into_iter().enumerate() {
         graphs
             .root_mut()
             .layerless_nodes
@@ -1888,25 +1886,40 @@ fn a_hierarchy_edge_without_labels_sets_no_label_property() {
         nested
             .layerless_nodes
             .push(LNode::new(format!("{holder}-child"), 1.0, 1.0, None));
-        graphs.nest(GraphId::ROOT, NodeId::new(position), nested);
+        inside.push(graphs.nest(GraphId::ROOT, NodeId::new(position), nested));
     }
-    let mut edge = hierarchy_edge_from_group("e");
-    edge.source_node_id = "p0-child".into();
-    edge.target_node_id = "p1-child".into();
-    edge.source_path = vec![HierarchyStep {
-        node_id: "p0".into(),
-        graph: GraphId::new(1),
-    }];
-    edge.target_path = vec![HierarchyStep {
-        node_id: "p1".into(),
-        graph: GraphId::new(2),
-    }];
-    let segments = materialize_hierarchy_edge_segments(&edge);
+    let edge_between = |id: &str, from: usize, to: usize| {
+        let mut edge = hierarchy_edge_from_group(id);
+        edge.source_node_id = format!("p{from}-child");
+        edge.target_node_id = format!("p{to}-child");
+        edge.source_path = vec![HierarchyStep {
+            node_id: format!("p{from}"),
+            graph: inside[from],
+        }];
+        edge.target_path = vec![HierarchyStep {
+            node_id: format!("p{to}"),
+            graph: inside[to],
+        }];
+        edge
+    };
+    let unlabelled = edge_between("e", 0, 1);
+    // A center label lands on the segment in the root, so only the root gets the properties.
+    let mut labelled = edge_between("f", 2, 3);
+    let mut label = LLabel::new("c", 10.0, 10.0);
+    label.placement = EdgeLabelPlacement::Center;
+    labelled.labels.push(label);
+    let segments = [unlabelled, labelled]
+        .iter()
+        .flat_map(materialize_hierarchy_edge_segments)
+        .collect();
 
     introduce_source_ported_scoped_edge_segments(&mut graphs, GraphId::ROOT, segments);
 
-    assert!(graphs.root().edges.len() + graphs[GraphId::new(1)].edges.len() > 0);
-    for graph in graphs.iter() {
-        assert!(!graph.graph_properties.end_labels && !graph.graph_properties.center_labels);
+    let root = &graphs.root().graph_properties;
+    assert!(root.end_labels && root.center_labels);
+    for graph in inside {
+        assert_eq!(graphs[graph].edges.len(), 1);
+        let properties = &graphs[graph].graph_properties;
+        assert!(!properties.end_labels && !properties.center_labels);
     }
 }

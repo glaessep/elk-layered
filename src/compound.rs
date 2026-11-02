@@ -504,13 +504,11 @@ fn introduce_source_ported_hierarchy_edge_segments(graphs: &mut GraphArena) {
     if !hierarchy_has_pending_edges(graphs) {
         return;
     }
+    // The labels move once, after the segments of every scope exist.
+    let mut label_moves = Vec::new();
     // A hierarchy edge owns a traversal of its relative graph scope. Skipping empty owners is
     // essential on deep compound chains: otherwise every graph would rescan its remaining
     // subtree even though the official preprocessor has no segments to introduce.
-    // The labels move once, after the segments of every scope exist. Each scope's first-put
-    // positions start after those of the scopes before it, so the keys of all moves compare.
-    let mut label_moves = Vec::new();
-    let mut first_put_base = 0;
     for graph in graphs.breadth_first(GraphId::ROOT) {
         if graphs[graph].hierarchy_edges.is_empty() {
             continue;
@@ -520,9 +518,7 @@ fn introduce_source_ported_hierarchy_edge_segments(graphs: &mut GraphArena) {
         for edge in hierarchy_edges {
             segments.extend(materialize_hierarchy_edge_segments(&edge));
         }
-        let count = segments.len();
-        introduce_segments_of_scope(graphs, graph, segments, first_put_base, &mut label_moves);
-        first_put_base += count;
+        introduce_segments_of_scope(graphs, graph, segments, &mut label_moves);
     }
     move_labels_to_segments(graphs, label_moves);
 }
@@ -792,17 +788,16 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
     segments: Vec<ScopedHierarchySegment>,
 ) {
     let mut label_moves = Vec::new();
-    introduce_segments_of_scope(graphs, scope, segments, 0, &mut label_moves);
+    introduce_segments_of_scope(graphs, scope, segments, &mut label_moves);
     move_labels_to_segments(graphs, label_moves);
 }
 
 /// Introduces the segments in `scope` and the graphs below it, and adds what their labels need to
-/// `label_moves`. The first-put positions of this scope start at `first_put_base`.
+/// `label_moves`.
 fn introduce_segments_of_scope(
     graphs: &mut GraphArena,
     scope: GraphId,
     segments: Vec<ScopedHierarchySegment>,
-    first_put_base: usize,
     label_moves: &mut Vec<LabelMove>,
 ) {
     if segments.is_empty() {
@@ -810,25 +805,24 @@ fn introduce_segments_of_scope(
     }
     let publications = order_segments_by_publication(graphs, scope, segments);
     // Most compound graphs have no edge labels. Their segments need no positions.
-    let first_puts = if publications
+    let first_puts = publications
         .segments
         .iter()
         .any(|scoped| !scoped.labels.is_empty())
-    {
-        first_put_positions(&publications.segments, first_put_base)
-    } else {
-        vec![0; publications.segments.len()]
-    };
+        .then(|| first_put_positions(&publications.segments));
     let parent_port_flows = parent_port_net_flows(&publications.segments);
     let mut local_port_publications = publications.local_ports;
-    // Each segment with the first-put position of its original edge.
-    let mut segments_by_parent: HashMap<Option<GraphId>, Vec<(usize, ScopedHierarchySegment)>> =
-        HashMap::new();
+    // Each segment with the first-put position of its original edge, if the scope has labels.
+    let mut segments_by_parent: HashMap<
+        Option<GraphId>,
+        Vec<(Option<usize>, ScopedHierarchySegment)>,
+    > = HashMap::new();
     // What the parent node of each graph with a parent boundary tells its segments, by the id of
     // that graph. The parent node's own id cannot key this: two nodes in different graphs may
     // share it.
     let mut original_parent_offsets: HashMap<GraphId, ParentNodeInfo> = HashMap::new();
-    for (scoped, first_put) in publications.segments.into_iter().zip(first_puts) {
+    for (index, scoped) in publications.segments.into_iter().enumerate() {
+        let first_put = first_puts.as_ref().map(|positions| positions[index]);
         let has_parent_boundary = [&scoped.pending.source, &scoped.pending.target]
             .into_iter()
             .any(|endpoint| matches!(endpoint, PendingSegmentEndpoint::ParentBoundary { .. }));
@@ -902,7 +896,9 @@ fn introduce_segments_of_scope(
                         net_flows: &parent_port_flows,
                     },
                 );
-                if !scoped.labels.is_empty() {
+                if let Some(first_put) = first_put
+                    && !scoped.labels.is_empty()
+                {
                     label_moves.push(LabelMove {
                         first_put,
                         graph: graph_id,
@@ -927,8 +923,9 @@ fn introduce_segments_of_scope(
     );
 }
 
-/// For each segment, `base` plus the position of the first segment of its original edge in
-/// `segments`, which are in publication order (`order_segments_by_publication`).
+/// For each segment, the position of the first segment of its original edge in `segments`, which
+/// are in publication order (`order_segments_by_publication`). The positions compare only within
+/// one scope.
 ///
 /// ELK puts a segment into `crossHierarchyMap` when it introduces it, so the first `put` of an
 /// original edge happens at its first segment. `transformHierarchyEdges` recurses into the
@@ -938,19 +935,20 @@ fn introduce_segments_of_scope(
 /// come from publication order, not from the order of introduction here. An edge's first segment
 /// can lie in another graph than the one a label lands in: the edge from `g1`'s child to `g2`'s
 /// child is put when `g1`'s segment is made, before the segment in `g2`.
-fn first_put_positions(segments: &[ScopedHierarchySegment], base: usize) -> Vec<usize> {
+fn first_put_positions(segments: &[ScopedHierarchySegment]) -> Vec<usize> {
     let mut first = HashMap::with_capacity(segments.len());
     segments
         .iter()
         .enumerate()
-        .map(|(position, scoped)| base + *first.entry(scoped.edge.id.as_str()).or_insert(position))
+        .map(|(position, scoped)| *first.entry(scoped.edge.id.as_str()).or_insert(position))
         .collect()
 }
 
 /// The labels one segment takes from its original edge, once every segment exists.
 #[derive(Debug)]
 struct LabelMove {
-    /// The first-put position of the original edge, from [`first_put_positions`].
+    /// The first-put position of the original edge, from [`first_put_positions`]. It compares
+    /// only with moves of the same scope.
     first_put: usize,
     /// The graph the segment lies in.
     graph: GraphId,
@@ -968,9 +966,12 @@ struct LabelMove {
 /// `put` of each original edge. It appends each label of an edge to the segment its placement
 /// picks. The segment for each label was picked in `materialize_hierarchy_edge_segments`.
 fn move_labels_to_segments(graphs: &mut GraphArena, mut moves: Vec<LabelMove>) {
-    // The sort is stable: the labels of one original edge keep their order. Where several
-    // original edges merged into one segment, their labels follow the order of the keys.
-    moves.sort_by_key(|label_move| label_move.first_put);
+    // Only the order of the moves onto one edge matters: there, the labels of several merged
+    // original edges follow the order of the keys. The order across edges does not reach the
+    // result, so the moves are grouped by edge first. All moves onto one edge come from one
+    // scope, as the merge state lives in one scope, so their positions compare. The sort is
+    // stable: the labels of one original edge keep their order.
+    moves.sort_by_key(|label_move| (label_move.graph, label_move.edge, label_move.first_put));
     for label_move in moves {
         let graph = &mut graphs[label_move.graph];
         // ELK adds both properties for every label it moves, whatever its placement
