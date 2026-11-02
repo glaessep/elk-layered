@@ -1764,47 +1764,50 @@ fn hierarchy_edge_with_head_label(id: &str, labelled: bool) -> HierarchyEdge {
     }
 }
 
-// Mutation: in `first_put_order_of_labelled_edges`, leave out the early return for fewer than two
-// labelled edges. The map then holds the one labelled edge `a`. Insert the ids of the edges
-// without a label too (leave out the `labelled.contains` test): the map then holds `u`.
+// Mutation: in `first_put_positions`, overwrite the position at each segment (`insert`) instead of
+// keeping the first one. Every segment then names the last segment of its edge.
 #[test]
-fn the_first_put_order_is_built_only_for_two_labelled_edges() {
-    let segments_of = |ids: &[(&str, bool)]| {
-        ids.iter()
-            .flat_map(|(id, labelled)| {
-                materialize_hierarchy_edge_segments(&hierarchy_edge_with_head_label(id, *labelled))
-            })
-            .collect::<Vec<_>>()
-    };
+fn every_segment_names_the_first_segment_of_its_original_edge() {
+    let segments = [("u", false), ("b", true), ("a", true)]
+        .into_iter()
+        .flat_map(|(id, labelled)| {
+            materialize_hierarchy_edge_segments(&hierarchy_edge_with_head_label(id, labelled))
+        })
+        .collect::<Vec<_>>();
+    let ids = segments
+        .iter()
+        .map(|scoped| scoped.edge.id.as_str())
+        .collect::<Vec<_>>();
+    // Each edge has more than one segment, so the first and the last segment differ.
+    assert_eq!(ids, ["u", "u", "u", "b", "b", "b", "a", "a", "a"]);
 
-    let one_labelled = segments_of(&[("u", false), ("a", true)]);
-    assert!(first_put_order_of_labelled_edges(&one_labelled).is_empty());
-
-    // `u` has no label, and its segments come first. `b` is before `a`: ids sort the other way.
-    let two_labelled = segments_of(&[("u", false), ("b", true), ("a", true)]);
-    let order = first_put_order_of_labelled_edges(&two_labelled);
-    let first_position = |id: &str| {
-        two_labelled
-            .iter()
-            .position(|scoped| scoped.edge.id == id)
-            .unwrap()
-    };
-    assert_eq!(order.len(), 2);
-    assert_eq!(order["b"], first_position("b"));
-    assert_eq!(order["a"], first_position("a"));
-    assert!(order["b"] < order["a"]);
+    assert_eq!(first_put_positions(&segments), [0, 0, 0, 3, 3, 3, 6, 6, 6]);
 }
 
-// Mutation: in `order_labels_of_merged_edges`, give a label with no original edge the rank 0
-// instead of `usize::MAX`. It then comes first. Reverse the labels after the sort: `b` and `none`
-// then come first, and `a2` comes before `a1`.
-#[test]
-fn merged_labels_follow_the_first_put_order_and_a_label_without_an_edge_goes_last() {
-    let mut graph = LGraph::new("g", LayeredOptions::default());
-    for id in ["x", "y"] {
-        graph.layerless_nodes.push(LNode::new(id, 10.0, 10.0, None));
+/// The tail labels `texts` that one original edge gives to `edge` in `graph`.
+fn label_move(first_put: usize, graph: GraphId, edge: EdgeId, texts: &[&str]) -> LabelMove {
+    LabelMove {
+        first_put,
+        graph,
+        edge,
+        labels: texts
+            .iter()
+            .map(|text| {
+                let mut label = LLabel::new(*text, 10.0, 10.0);
+                label.placement = EdgeLabelPlacement::Tail;
+                label
+            })
+            .collect(),
     }
-    let out = graph
+}
+
+/// An arena whose root holds an edge, and a nested graph without edges.
+fn arena_with_one_edge() -> (GraphArena, EdgeId, GraphId) {
+    let mut root = LGraph::new("root", LayeredOptions::default());
+    for id in ["x", "y"] {
+        root.layerless_nodes.push(LNode::new(id, 10.0, 10.0, None));
+    }
+    let out = root
         .add_port(
             NodeId::new(0),
             PortType::Output,
@@ -1812,7 +1815,7 @@ fn merged_labels_follow_the_first_put_order_and_a_label_without_an_edge_goes_las
             LPoint::default(),
         )
         .unwrap();
-    let inp = graph
+    let inp = root
         .add_port(
             NodeId::new(1),
             PortType::Input,
@@ -1820,30 +1823,52 @@ fn merged_labels_follow_the_first_put_order_and_a_label_without_an_edge_goes_las
             LPoint::default(),
         )
         .unwrap();
-    let edge = graph
-        .add_edge(LayeredEdge::new("merged", out, inp))
-        .unwrap();
-    graph.edges[edge].labels = [
-        ("b", Some("b")),
-        ("none", None),
-        ("a1", Some("a")),
-        ("a2", Some("a")),
-    ]
-    .into_iter()
-    .map(|(text, original)| {
-        let mut label = LLabel::new(text, 10.0, 10.0);
-        label.original_label_edge = original.map(str::to_string);
-        label
-    })
-    .collect();
-    let order = HashMap::from([("a".to_string(), 0), ("b".to_string(), 1)]);
+    let edge = root.add_edge(LayeredEdge::new("merged", out, inp)).unwrap();
+    let mut graphs = GraphArena::new(root);
+    let nested = graphs.nest(
+        GraphId::ROOT,
+        NodeId::new(0),
+        LGraph::new("nested", LayeredOptions::default()),
+    );
+    (graphs, edge, nested)
+}
 
-    order_labels_of_merged_edges(&mut graph, &[edge], &order);
+// Mutation: in `move_labels_to_segments`, leave out the sort. The labels of `b`, whose segment came
+// first, then come first. Sort by `Reverse(first_put)`: `b` comes first as well.
+#[test]
+fn labels_of_merged_edges_follow_the_first_put_of_their_original_edge() {
+    let (mut graphs, edge, _) = arena_with_one_edge();
+    // `b` merged into the segment before `a`, but `a`'s first segment came earlier.
+    let moves = vec![
+        label_move(4, GraphId::ROOT, edge, &["b1"]),
+        label_move(1, GraphId::ROOT, edge, &["a1", "a2"]),
+        label_move(4, GraphId::ROOT, edge, &["b2"]),
+    ];
 
-    let texts = graph.edges[edge]
+    move_labels_to_segments(&mut graphs, moves);
+
+    let texts = graphs.root().edges[edge]
         .labels
         .iter()
         .map(|label| label.text.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(texts, ["a1", "a2", "b", "none"]);
+    assert_eq!(texts, ["a1", "a2", "b1", "b2"]);
+}
+
+// Mutation: in `move_labels_to_segments`, set only the property the placement asks for, as the
+// importer does for an edge inside one graph. A tail label then leaves `center_labels` false.
+// Set them on every graph of the arena: the nested graph, which gets no label, then has both.
+#[test]
+fn a_moved_label_sets_both_label_properties_of_its_graph_only() {
+    let (mut graphs, edge, nested) = arena_with_one_edge();
+
+    move_labels_to_segments(
+        &mut graphs,
+        vec![label_move(0, GraphId::ROOT, edge, &["t"])],
+    );
+
+    let root = &graphs.root().graph_properties;
+    assert!(root.end_labels && root.center_labels);
+    let nested = &graphs[nested].graph_properties;
+    assert!(!nested.end_labels && !nested.center_labels);
 }

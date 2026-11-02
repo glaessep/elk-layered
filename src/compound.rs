@@ -786,16 +786,17 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
         return;
     }
     let publications = order_segments_by_publication(graphs, scope, segments);
-    let first_put_order = first_put_order_of_labelled_edges(&publications.segments);
+    let first_puts = first_put_positions(&publications.segments);
     let parent_port_flows = parent_port_net_flows(&publications.segments);
     let mut local_port_publications = publications.local_ports;
-    let mut segments_by_parent: HashMap<Option<GraphId>, Vec<ScopedHierarchySegment>> =
+    // Each segment with the first-put position of its original edge.
+    let mut segments_by_parent: HashMap<Option<GraphId>, Vec<(usize, ScopedHierarchySegment)>> =
         HashMap::new();
     // What the parent node of each graph with a parent boundary tells its segments, by the id of
     // that graph. The parent node's own id cannot key this: two nodes in different graphs may
     // share it.
     let mut original_parent_offsets: HashMap<GraphId, ParentNodeInfo> = HashMap::new();
-    for scoped in publications.segments {
+    for (scoped, first_put) in publications.segments.into_iter().zip(first_puts) {
         let has_parent_boundary = [&scoped.pending.source, &scoped.pending.target]
             .into_iter()
             .any(|endpoint| matches!(endpoint, PendingSegmentEndpoint::ParentBoundary { .. }));
@@ -805,8 +806,9 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
         segments_by_parent
             .entry(scoped.pending.lands_in)
             .or_default()
-            .push(scoped);
+            .push((first_put, scoped));
     }
+    let mut label_moves = Vec::new();
     let mut first_graph = true;
     for graph_id in graphs.preorder(scope) {
         let graph = &mut graphs[graph_id];
@@ -857,12 +859,11 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
                     .ensure_local_node_port(graph, &port.node_id, &port.port_key, port.port_type)
                     .expect("scoped local endpoints were validated before publication");
             }
-            for scoped in segments {
+            for (first_put, scoped) in segments {
                 let edge_index = introduce_hierarchical_edge_segment(
                     graph,
                     &scoped.edge,
                     &scoped.pending,
-                    scoped.labels,
                     &mut state,
                     &mut local_ports,
                     &ParentPorts {
@@ -870,6 +871,14 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
                         net_flows: &parent_port_flows,
                     },
                 );
+                if !scoped.labels.is_empty() {
+                    label_moves.push(LabelMove {
+                        first_put,
+                        graph: graph_id,
+                        edge: edge_index,
+                        labels: scoped.labels,
+                    });
+                }
                 let model_order = scoped.edge.model_order;
                 record_cross_hierarchy_edge_segment(
                     graph,
@@ -879,87 +888,63 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
                     scoped.pending.segment,
                 );
             }
-            if !first_put_order.is_empty() {
-                // Each edge is sorted on its own, so the order of the map cannot reach the result.
-                let merged = state
-                    .external_ports
-                    .values()
-                    .filter(|port| port.original_edges.len() > 1)
-                    .map(|port| port.new_edge)
-                    .collect::<Vec<_>>();
-                order_labels_of_merged_edges(graph, &merged, &first_put_order);
-            }
         }
     }
     assert!(
         segments_by_parent.is_empty(),
         "scoped hierarchy segment owners were validated before graph mutation"
     );
+    move_labels_to_segments(graphs, label_moves);
 }
 
-/// Where each original edge first appears in the order the segments are introduced in, by the
-/// edge's id. Empty when fewer than two different edges have labels: nothing then needs the order.
+/// For each segment, the position of the first segment of its original edge, in the order the
+/// segments are introduced in.
 ///
-/// Source: `CompoundGraphPreprocessor.moveLabelsAndRemoveOriginalEdges`
-/// (`CompoundGraphPreprocessor.java`). ELK moves the labels of the original edges after all
-/// segments exist. It walks `crossHierarchyMap.keySet()`, a `HashMultimap`, which elkjs iterates
-/// in insertion order (see `crate::gwt::LinkedSet`). The first `put` of an original edge happens
-/// where its first segment is introduced, and the segments here are in that order already. An
+/// ELK puts a segment into `crossHierarchyMap` when it introduces it, so the first `put` of an
+/// original edge happens at its first segment. The segments here are in that order already. An
 /// edge's first segment can lie in another graph than the one a label lands in: the edge from
 /// `g1`'s child to `g2`'s child is put when `g1`'s segment is made, before the segment in `g2`.
-fn first_put_order_of_labelled_edges(
-    segments: &[ScopedHierarchySegment],
-) -> HashMap<String, usize> {
-    let mut order = HashMap::new();
-    // Labels of one original edge never merge with each other, so the order only matters when two
-    // different edges carry labels.
-    let mut labelled = segments
+fn first_put_positions(segments: &[ScopedHierarchySegment]) -> Vec<usize> {
+    let mut first = HashMap::with_capacity(segments.len());
+    segments
         .iter()
-        .filter(|scoped| !scoped.labels.is_empty())
-        .map(|scoped| &scoped.edge.id);
-    let two_edges = labelled
-        .next()
-        .is_some_and(|first| labelled.any(|id| id != first));
-    if !two_edges {
-        return order;
-    }
-    // Only the labelled edges are looked up later. Their first segment can have no label, so the
-    // positions come from all segments, but only a labelled edge is cloned into the map.
-    let labelled = segments
-        .iter()
-        .filter(|scoped| !scoped.labels.is_empty())
-        .map(|scoped| scoped.edge.id.as_str())
-        .collect::<HashSet<_>>();
-    for (position, scoped) in segments.iter().enumerate() {
-        if labelled.contains(scoped.edge.id.as_str()) && !order.contains_key(&scoped.edge.id) {
-            order.insert(scoped.edge.id.clone(), position);
-        }
-    }
-    order
+        .enumerate()
+        .map(|(position, scoped)| *first.entry(scoped.edge.id.as_str()).or_insert(position))
+        .collect()
 }
 
-/// Puts the labels of an edge that several original edges merged into in the order ELK moved
-/// them in: by `first_put_order`, and a label keeps its place among the labels of its own
-/// original edge. The segments are introduced in the order of the ports, but the labels follow the
-/// order of the keys of `crossHierarchyMap` (`moveLabelsAndRemoveOriginalEdges` in
-/// `CompoundGraphPreprocessor.java`).
-fn order_labels_of_merged_edges(
-    graph: &mut LGraph,
-    merged_label_edges: &[EdgeId],
-    first_put_order: &HashMap<String, usize>,
-) {
-    for &edge in merged_label_edges {
-        // The sort is stable, so labels of one original edge keep their order.
-        graph.edges[edge].labels.sort_by_cached_key(|label| {
-            // A label with no recorded original edge, which a caller of the scoped API may give,
-            // goes last.
-            label
-                .original_label_edge
-                .as_ref()
-                .and_then(|id| first_put_order.get(id))
-                .copied()
-                .unwrap_or(usize::MAX)
-        });
+/// The labels one segment takes from its original edge, once every segment exists.
+#[derive(Debug)]
+struct LabelMove {
+    /// The first-put position of the original edge, from [`first_put_positions`].
+    first_put: usize,
+    /// The graph the segment lies in.
+    graph: GraphId,
+    /// The segment's edge in that graph. Several original edges may share it after a merge.
+    edge: EdgeId,
+    /// The labels, in the order the original edge holds them.
+    labels: Vec<LLabel>,
+}
+
+/// Moves the labels of the original edges to their segments, after all segments exist.
+///
+/// Source: `CompoundGraphPreprocessor.moveLabelsAndRemoveOriginalEdges`
+/// (`CompoundGraphPreprocessor.java`). ELK walks `crossHierarchyMap.keySet()`, a `HashMultimap`,
+/// which elkjs iterates in insertion order (see `crate::gwt::LinkedSet`): the order of the first
+/// `put` of each original edge. It appends each label of an edge to the segment its placement
+/// picks. The segment for each label was picked in `materialize_hierarchy_edge_segments`.
+fn move_labels_to_segments(graphs: &mut GraphArena, mut moves: Vec<LabelMove>) {
+    // The sort is stable: the labels of one original edge keep their order. Where several
+    // original edges merged into one segment, their labels follow the order of the keys.
+    moves.sort_by_key(|label_move| label_move.first_put);
+    for label_move in moves {
+        let graph = &mut graphs[label_move.graph];
+        // ELK adds both properties for any label it moves, whatever its placement.
+        graph.graph_properties.end_labels = true;
+        graph.graph_properties.center_labels = true;
+        graph.edges[label_move.edge]
+            .labels
+            .extend(label_move.labels);
     }
 }
 
@@ -1211,7 +1196,6 @@ fn introduce_hierarchical_edge_segment(
     graph: &mut LGraph,
     edge: &HierarchyEdge,
     pending: &PendingCompoundSegment,
-    labels: Vec<LLabel>,
     state: &mut SegmentState,
     local_ports: &mut GraphPortIndex,
     parent_ports: &ParentPorts,
@@ -1250,8 +1234,6 @@ fn introduce_hierarchical_edge_segment(
             debug_assert_eq!(external_port.dummy_port.node, external_port.dummy_node);
             external_port.original_edges.push(edge.id.clone());
             debug_assert_eq!(external_port.original_edges.last(), Some(&edge.id));
-            apply_label_graph_properties(graph, &labels);
-            graph.edges[external_port.new_edge].labels.extend(labels);
             return external_port.new_edge;
         }
     }
@@ -1277,14 +1259,11 @@ fn introduce_hierarchical_edge_segment(
         graph.graph_properties.self_loops = true;
     }
 
-    apply_label_graph_properties(graph, &labels);
-
     let edge_index = graph
         .add_edge({
             let mut built_edge = LayeredEdge::new(edge.id.clone(), source, target);
             built_edge.source_node_id = edge.source_node_id.clone();
             built_edge.target_node_id = edge.target_node_id.clone();
-            built_edge.labels = labels;
             built_edge.minlen = edge.minlen;
             built_edge.model_order = edge.model_order;
             built_edge.priority_direction = edge.priority_direction;
@@ -1329,17 +1308,6 @@ fn introduce_hierarchical_edge_segment(
     }
 
     edge_index
-}
-
-fn apply_label_graph_properties(graph: &mut LGraph, labels: &[LLabel]) {
-    for label in labels {
-        match label.placement {
-            EdgeLabelPlacement::Center => graph.graph_properties.center_labels = true,
-            EdgeLabelPlacement::Head | EdgeLabelPlacement::Tail => {
-                graph.graph_properties.end_labels = true;
-            }
-        }
-    }
 }
 
 /// The net flow of each parent port that hierarchy edges end at, keyed by the parent node's id
