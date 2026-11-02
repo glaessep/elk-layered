@@ -1741,10 +1741,8 @@ fn the_port_sides_are_kept_by_port_position_for_nodes_with_a_graph_only() {
     assert!(sides[plain].is_empty());
 }
 
-/// A hierarchy edge from inside `group` to `other`, with one head label when `labelled`.
-fn hierarchy_edge_with_head_label(id: &str, labelled: bool) -> HierarchyEdge {
-    let mut label = LLabel::new(id, 12.0, 10.0);
-    label.placement = EdgeLabelPlacement::Head;
+/// A hierarchy edge without labels from inside `group` to `other`.
+fn hierarchy_edge_from_group(id: &str) -> HierarchyEdge {
     HierarchyEdge {
         id: id.into(),
         source_node_id: "A".into(),
@@ -1755,7 +1753,7 @@ fn hierarchy_edge_with_head_label(id: &str, labelled: bool) -> HierarchyEdge {
         target_port_named: false,
         source_path: steps(&["group"]),
         target_path: steps(&["other"]),
-        labels: if labelled { vec![label] } else { Vec::new() },
+        labels: Vec::new(),
         minlen: 1,
         model_order: None,
         priority_direction: 0,
@@ -1765,14 +1763,13 @@ fn hierarchy_edge_with_head_label(id: &str, labelled: bool) -> HierarchyEdge {
 }
 
 // Mutation: in `first_put_positions`, overwrite the position at each segment (`insert`) instead of
-// keeping the first one. Every segment then names the last segment of its edge.
+// keeping the first one. Every segment then names the last segment of its edge. Leave out `base`:
+// the positions then start at 0.
 #[test]
 fn every_segment_names_the_first_segment_of_its_original_edge() {
-    let segments = [("u", false), ("b", true), ("a", true)]
+    let segments = ["u", "b", "a"]
         .into_iter()
-        .flat_map(|(id, labelled)| {
-            materialize_hierarchy_edge_segments(&hierarchy_edge_with_head_label(id, labelled))
-        })
+        .flat_map(|id| materialize_hierarchy_edge_segments(&hierarchy_edge_from_group(id)))
         .collect::<Vec<_>>();
     let ids = segments
         .iter()
@@ -1781,7 +1778,10 @@ fn every_segment_names_the_first_segment_of_its_original_edge() {
     // Each edge has more than one segment, so the first and the last segment differ.
     assert_eq!(ids, ["u", "u", "u", "b", "b", "b", "a", "a", "a"]);
 
-    assert_eq!(first_put_positions(&segments), [0, 0, 0, 3, 3, 3, 6, 6, 6]);
+    assert_eq!(
+        first_put_positions(&segments, 10),
+        [10, 10, 10, 13, 13, 13, 16, 16, 16]
+    );
 }
 
 /// The tail labels `texts` that one original edge gives to `edge` in `graph`.
@@ -1855,11 +1855,11 @@ fn labels_of_merged_edges_follow_the_first_put_of_their_original_edge() {
     assert_eq!(texts, ["a1", "a2", "b1", "b2"]);
 }
 
-// Mutation: in `move_labels_to_segments`, set only the property the placement asks for, as the
-// importer does for an edge inside one graph. A tail label then leaves `center_labels` false.
-// Set them on every graph of the arena: the nested graph, which gets no label, then has both.
+// Mutation: in `move_labels_to_segments`, set both properties for every label, as ELK does (#73).
+// A tail label then sets `center_labels` too. Set them on every graph of the arena: the nested
+// graph, which gets no label, then has them.
 #[test]
-fn a_moved_label_sets_both_label_properties_of_its_graph_only() {
+fn a_moved_label_sets_the_property_of_its_placement_on_its_graph_only() {
     let (mut graphs, edge, nested) = arena_with_one_edge();
 
     move_labels_to_segments(
@@ -1868,7 +1868,7 @@ fn a_moved_label_sets_both_label_properties_of_its_graph_only() {
     );
 
     let root = &graphs.root().graph_properties;
-    assert!(root.end_labels && root.center_labels);
+    assert!(root.end_labels && !root.center_labels);
     let nested = &graphs[nested].graph_properties;
     assert!(!nested.end_labels && !nested.center_labels);
 }

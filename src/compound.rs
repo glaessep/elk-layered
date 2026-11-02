@@ -507,8 +507,10 @@ fn introduce_source_ported_hierarchy_edge_segments(graphs: &mut GraphArena) {
     // A hierarchy edge owns a traversal of its relative graph scope. Skipping empty owners is
     // essential on deep compound chains: otherwise every graph would rescan its remaining
     // subtree even though the official preprocessor has no segments to introduce.
-    // The labels move once, after the segments of every scope exist.
+    // The labels move once, after the segments of every scope exist. Each scope's first-put
+    // positions start after those of the scopes before it, so the keys of all moves compare.
     let mut label_moves = Vec::new();
+    let mut first_put_base = 0;
     for graph in graphs.breadth_first(GraphId::ROOT) {
         if graphs[graph].hierarchy_edges.is_empty() {
             continue;
@@ -518,7 +520,9 @@ fn introduce_source_ported_hierarchy_edge_segments(graphs: &mut GraphArena) {
         for edge in hierarchy_edges {
             segments.extend(materialize_hierarchy_edge_segments(&edge));
         }
-        introduce_segments_of_scope(graphs, graph, segments, &mut label_moves);
+        let count = segments.len();
+        introduce_segments_of_scope(graphs, graph, segments, first_put_base, &mut label_moves);
+        first_put_base += count;
     }
     move_labels_to_segments(graphs, label_moves);
 }
@@ -788,26 +792,33 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
     segments: Vec<ScopedHierarchySegment>,
 ) {
     let mut label_moves = Vec::new();
-    introduce_segments_of_scope(graphs, scope, segments, &mut label_moves);
+    introduce_segments_of_scope(graphs, scope, segments, 0, &mut label_moves);
     move_labels_to_segments(graphs, label_moves);
 }
 
 /// Introduces the segments in `scope` and the graphs below it, and adds what their labels need to
-/// `label_moves`.
-///
-/// The first-put positions count from 0 in each scope. That is enough: the merge state lives in
-/// one scope, so only segments of one scope ever share an edge, and only their order matters.
+/// `label_moves`. The first-put positions of this scope start at `first_put_base`.
 fn introduce_segments_of_scope(
     graphs: &mut GraphArena,
     scope: GraphId,
     segments: Vec<ScopedHierarchySegment>,
+    first_put_base: usize,
     label_moves: &mut Vec<LabelMove>,
 ) {
     if segments.is_empty() {
         return;
     }
     let publications = order_segments_by_publication(graphs, scope, segments);
-    let first_puts = first_put_positions(&publications.segments);
+    // Most compound graphs have no edge labels. Their segments need no positions.
+    let first_puts = if publications
+        .segments
+        .iter()
+        .any(|scoped| !scoped.labels.is_empty())
+    {
+        first_put_positions(&publications.segments, first_put_base)
+    } else {
+        vec![0; publications.segments.len()]
+    };
     let parent_port_flows = parent_port_net_flows(&publications.segments);
     let mut local_port_publications = publications.local_ports;
     // Each segment with the first-put position of its original edge.
@@ -916,19 +927,23 @@ fn introduce_segments_of_scope(
     );
 }
 
-/// For each segment, the position of the first segment of its original edge, in the order the
-/// segments are introduced in.
+/// For each segment, `base` plus the position of the first segment of its original edge in
+/// `segments`, which are in publication order (`order_segments_by_publication`).
 ///
 /// ELK puts a segment into `crossHierarchyMap` when it introduces it, so the first `put` of an
-/// original edge happens at its first segment. The segments here are in that order already. An
-/// edge's first segment can lie in another graph than the one a label lands in: the edge from
-/// `g1`'s child to `g2`'s child is put when `g1`'s segment is made, before the segment in `g2`.
-fn first_put_positions(segments: &[ScopedHierarchySegment]) -> Vec<usize> {
+/// original edge happens at its first segment. `transformHierarchyEdges` recurses into the
+/// children before it handles a graph's own edges, so ELK introduces the segments in publication
+/// order: children before the graph they lie in. The Rust port introduces them graph by graph in
+/// preorder instead, which gives the same graphs but not the same order of puts. So the positions
+/// come from publication order, not from the order of introduction here. An edge's first segment
+/// can lie in another graph than the one a label lands in: the edge from `g1`'s child to `g2`'s
+/// child is put when `g1`'s segment is made, before the segment in `g2`.
+fn first_put_positions(segments: &[ScopedHierarchySegment], base: usize) -> Vec<usize> {
     let mut first = HashMap::with_capacity(segments.len());
     segments
         .iter()
         .enumerate()
-        .map(|(position, scoped)| *first.entry(scoped.edge.id.as_str()).or_insert(position))
+        .map(|(position, scoped)| base + *first.entry(scoped.edge.id.as_str()).or_insert(position))
         .collect()
 }
 
@@ -958,9 +973,16 @@ fn move_labels_to_segments(graphs: &mut GraphArena, mut moves: Vec<LabelMove>) {
     moves.sort_by_key(|label_move| label_move.first_put);
     for label_move in moves {
         let graph = &mut graphs[label_move.graph];
-        // ELK adds both properties for any label it moves, whatever its placement.
-        graph.graph_properties.end_labels = true;
-        graph.graph_properties.center_labels = true;
+        // ELK adds both properties for every label it moves, whatever its placement (lines
+        // 284-287). The port keeps the one the placement asks for until #73 ports that.
+        for label in &label_move.labels {
+            match label.placement {
+                EdgeLabelPlacement::Center => graph.graph_properties.center_labels = true,
+                EdgeLabelPlacement::Head | EdgeLabelPlacement::Tail => {
+                    graph.graph_properties.end_labels = true;
+                }
+            }
+        }
         graph.edges[label_move.edge]
             .labels
             .extend(label_move.labels);
@@ -979,7 +1001,6 @@ struct SegmentState {
 
 #[derive(Debug, Clone)]
 struct ExternalPort {
-    original_edges: Vec<String>,
     new_edge: EdgeId,
     dummy_node: NodeId,
     dummy_port: PortRef,
@@ -1251,8 +1272,6 @@ fn introduce_hierarchical_edge_segment(
             debug_assert_eq!(external_port.port_type, port_type);
             debug_assert!(external_port.exported);
             debug_assert_eq!(external_port.dummy_port.node, external_port.dummy_node);
-            external_port.original_edges.push(edge.id.clone());
-            debug_assert_eq!(external_port.original_edges.last(), Some(&edge.id));
             return external_port.new_edge;
         }
     }
@@ -1307,7 +1326,6 @@ fn introduce_hierarchical_edge_segment(
         {
             let exported = !connects_parent_node;
             let external_port = ExternalPort {
-                original_edges: vec![edge.id.clone()],
                 new_edge: edge_index,
                 dummy_node: dummy_port.node,
                 dummy_port,

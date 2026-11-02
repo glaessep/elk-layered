@@ -483,8 +483,8 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    ports-head-labels-from-two-groups-at-one-port, ports-tail-labels-to-two-groups-from-one-port,
 //    ports-head-labels-from-three-groups-at-one-port and random-group-port-sizes/r013. Give each
 //    segment its own position in `first_put_positions` instead of its edge's first: the same 4.
-//    Set only the label property the placement asks for: no case fails. A unit test in
-//    src/compound/tests.rs holds it.
+//    Set both label properties for every moved label, as ELK does (#73): no case fails. A unit
+//    test in src/compound/tests.rs holds the property of each placement.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]
