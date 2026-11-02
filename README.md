@@ -15,18 +15,26 @@ crate sets `float_roundtrip` only for its own tests.
 
 ## Status
 
-Version 0.1.0 is the first release of the crate as a library of its own. It started as a building
-block of another project. Until 1.0, a change to the public API raises the minor version.
+Version 0.2.0 is the current release. Version 0.1.0 was the first release of the crate as a
+library of its own. It started as a building block of another project. Until 1.0, a change to the
+public API raises the minor version.
 
-### Changes in 0.1.0
+### Changes in 0.2.0
 
-- One entry point, `layout(graph)`, shaped like elkjs's JSON graph.
-- Ports in the input, including ports across the flow (north and south).
+- Port labels, and the placement of port labels as a set of flags (`PortLabelPlacement`).
+- Ports across the flow on groups, and the labels and size of a group's ports.
+- Self-loops laid out inside a node.
+- Labels of edges across the hierarchy move to their segments in the order elkjs gives them.
 - A model with typed ids and private fields.
 - One file per ELK class, with one crossing sweep for flat and nested graphs.
 - Every place where elkjs differs from Java on a JVM is listed in `gwt.rs`, each with a test.
 - A deep graph no longer overflows the stack.
 - The unit tests sit in `tests.rs` files next to the code they test, not inside the source files.
+
+### Changes in 0.1.0
+
+- One entry point, `layout(graph)`, shaped like elkjs's JSON graph.
+- Ports in the input, including ports across the flow (north and south).
 - A parity suite holds `layout()` to what elkjs 0.9.3 returns, number for number.
 
 ## Where the code comes from
