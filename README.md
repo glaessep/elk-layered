@@ -27,18 +27,14 @@ numbers it returns.
 New in what `layout()` accepts:
 
 - Ports with labels, placed by `elk.portLabels.placement` and `elk.portLabels.treatAsGroup`. This
-  holds for nodes with children too.
+  holds for nodes with children too. A labelled port of the root graph under inside port labels
+  is still refused.
 - `PORTS` and `PORT_LABELS` in `elk.nodeSize.constraints`, so a node, or a node with children,
   sizes itself to its ports and their labels.
 - Ports on the north and south side of a node with children.
 - Self loops routed inside their node, with `elk.insideSelfLoops.activate` and
-  `elk.insideSelfLoops.yo`.
-
-New refusals, where elkjs fails or the crate cannot match it yet:
-
-- An inside self loop at a port.
-- An inside self loop in a node that is laid out on its own.
-- A labelled port of the root graph under inside port labels.
+  `elk.insideSelfLoops.yo`. An inside self loop at a port, and one in a node that is laid out on
+  its own, are still refused.
 
 Layouts that now match elkjs 0.9.3, where 0.1.0 gave other numbers:
 
@@ -50,21 +46,18 @@ Layouts that now match elkjs 0.9.3, where 0.1.0 gave other numbers:
 - With direction `UP` or `DOWN`, an external port on the north or south side keeps its first or
   last layer.
 - Two end labels at one port, from edges that come from different groups, come in elkjs's order.
-- A label moved to a segment of an edge across the hierarchy turns on both label steps of its
-  graph, as elkjs does.
 - North and south port dummies name the first port of the node's list, as Java does.
-- A breaking point node gets its own spacing, not the spacing of a normal node.
 
 Errors and panics fixed:
 
-- A graph whose nested graphs reuse a node id or a name no longer mixes up their ports, their depth
-  or their offset.
-- An edge in a container without a graph is an error, not an edge of the root.
 - Some graphs with ports on the north or south side, which failed or panicked in 0.1.0, now lay out.
 - A long chain of nodes, such as 10,000 in a row, no longer overflows the stack.
 
 Inside the crate: typed ids and private fields, one file per ELK class, every elkjs quirk in
-`gwt.rs`, and the unit tests in `tests.rs` files.
+`gwt.rs`, and the unit tests in `tests.rs` files. Some internal lookups now go by graph id, not by
+node id or name. No graph that `layout()` accepts could reach the old lookups. A label moved to a
+segment of an edge across the hierarchy turns on both label steps of its graph, as elkjs does; no
+known graph lays out differently for it.
 
 ### Changes in 0.1.0
 

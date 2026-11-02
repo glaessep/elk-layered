@@ -47,14 +47,27 @@ use crate::pipeline::{self, PipelineError};
 ///
 /// Returns an [`Error`] for a graph elk-layered cannot lay out exactly as elkjs does:
 ///
-/// - a labelled port on the root under inside port labels;
-/// - an edge between a port of the root and a node inside it;
-/// - an inside self loop at a port, or in a node laid out on its own;
-/// - an edge with more than one source or target;
-/// - a node nested more than 256 levels below the root;
-/// - an option elk-layered does not support or cannot read;
-/// - an id used twice or not found;
-/// - a size that is no finite, non-negative number.
+/// - [`Error::Unsupported`] for a part of the graph that is not ported, or that elkjs fails on:
+///   - a layout algorithm other than layered, or a layered step that is not ported, such as
+///     polyline or splines routing;
+///   - a labelled port of the root under inside port labels;
+///   - an edge between a port of the root and a node inside it;
+///   - an edge with more than one source or target;
+///   - an inside self loop at a port, or in a node laid out on its own;
+///   - an edge into a part of the graph laid out on its own, or between a node and its own
+///     children laid out on their own;
+///   - an edge across the border of a node with children and fixed-ratio ports, or a
+///     fixed-ratio port of a node without size;
+///   - a node nested more than 256 levels below the root.
+/// - [`Error::DuplicateId`], [`Error::UnknownId`], [`Error::MissingEdgeEnd`] and
+///   [`Error::PortOfOtherNode`] for ids and edge ends that do not fit together.
+/// - [`Error::InvalidSize`] for a size or coordinate that is no finite number, or a negative
+///   size.
+/// - [`Error::UnknownOption`], [`Error::UnsupportedOption`], [`Error::InvalidOptionValue`] and
+///   [`Error::DuplicateOption`] for a layout option elk-layered cannot use.
+/// - [`Error::ZeroRandomSeed`] for a `randomSeed` of 0 on a graph that is laid out.
+/// - [`Error::Unsolvable`] for numbers outside what the layout can compute.
+/// - [`Error::Internal`] for a bug in elk-layered.
 ///
 /// Ports `RecursiveGraphLayoutEngine.layout` with the JSON round trip of elkjs's `JsonImporter`.
 pub fn layout(graph: &ElkNode) -> Result<ElkNode, Error> {
