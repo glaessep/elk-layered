@@ -45,10 +45,16 @@ use crate::pipeline::{self, PipelineError};
 ///
 /// # Errors
 ///
-/// Returns an [`Error`] for a graph elk-layered cannot lay out exactly as elkjs does: one
-/// with a labelled port on the root under inside port labels, an edge between a port of the root
-/// and a node inside it, an option elk-layered does not support or cannot read, an id used twice
-/// or not found, or a size that is no finite, non-negative number.
+/// Returns an [`Error`] for a graph elk-layered cannot lay out exactly as elkjs does:
+///
+/// - a labelled port on the root under inside port labels;
+/// - an edge between a port of the root and a node inside it;
+/// - an inside self loop at a port, or in a node laid out on its own;
+/// - an edge with more than one source or target;
+/// - a node nested more than 256 levels below the root;
+/// - an option elk-layered does not support or cannot read;
+/// - an id used twice or not found;
+/// - a size that is no finite, non-negative number.
 ///
 /// Ports `RecursiveGraphLayoutEngine.layout` with the JSON round trip of elkjs's `JsonImporter`.
 pub fn layout(graph: &ElkNode) -> Result<ElkNode, Error> {

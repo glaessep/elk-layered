@@ -15,18 +15,61 @@ crate sets `float_roundtrip` only for its own tests.
 
 ## Status
 
-Version 0.1.0 is the first release of the crate as a library of its own. It started as a building
-block of another project. Until 1.0, a change to the public API raises the minor version.
+Version 0.1.1 is the current release. Version 0.1.0 was the first release of the crate as a
+library of its own. It started as a building block of another project. Until 1.0, a change to the
+public API raises the minor version.
+
+### Changes in 0.1.1
+
+The public API is the same as in 0.1.0. What changed is which graphs `layout()` accepts and the
+numbers it returns.
+
+New in what `layout()` accepts:
+
+- Ports with labels, placed by `elk.portLabels.placement` and `elk.portLabels.treatAsGroup`. This
+  holds for nodes with children too.
+- `PORTS` and `PORT_LABELS` in `elk.nodeSize.constraints`, so a node, or a node with children,
+  sizes itself to its ports and their labels.
+- Ports on the north and south side of a node with children.
+- Self loops routed inside their node, with `elk.insideSelfLoops.activate` and
+  `elk.insideSelfLoops.yo`.
+
+New refusals, where elkjs fails or the crate cannot match it yet:
+
+- An inside self loop at a port.
+- An inside self loop in a node that is laid out on its own.
+- A labelled port of the root graph under inside port labels.
+
+Layouts that now match elkjs 0.9.3, where 0.1.0 gave other numbers:
+
+- The one-sided greedy crossing switch counts crossings as elkjs does, so it switches the same nodes.
+- The orthogonal router rates a free area as elkjs does, so a connecting segment can sit at another
+  height.
+- Packed components: the row width keeps `sqrt(area)` a double, as elkjs does, not an f32.
+- Ports are sorted with GWT's merge sort, and barycenters compare as doubles, as in elkjs.
+- With direction `UP` or `DOWN`, an external port on the north or south side keeps its first or
+  last layer.
+- Two end labels at one port, from edges that come from different groups, come in elkjs's order.
+- A label moved to a segment of an edge across the hierarchy turns on both label steps of its
+  graph, as elkjs does.
+- North and south port dummies name the first port of the node's list, as Java does.
+- A breaking point node gets its own spacing, not the spacing of a normal node.
+
+Errors and panics fixed:
+
+- A graph whose nested graphs reuse a node id or a name no longer mixes up their ports, their depth
+  or their offset.
+- An edge in a container without a graph is an error, not an edge of the root.
+- Some graphs with ports on the north or south side, which failed or panicked in 0.1.0, now lay out.
+- A long chain of nodes, such as 10,000 in a row, no longer overflows the stack.
+
+Inside the crate: typed ids and private fields, one file per ELK class, every elkjs quirk in
+`gwt.rs`, and the unit tests in `tests.rs` files.
 
 ### Changes in 0.1.0
 
 - One entry point, `layout(graph)`, shaped like elkjs's JSON graph.
 - Ports in the input, including ports across the flow (north and south).
-- A model with typed ids and private fields.
-- One file per ELK class, with one crossing sweep for flat and nested graphs.
-- Every place where elkjs differs from Java on a JVM is listed in `gwt.rs`, each with a test.
-- A deep graph no longer overflows the stack.
-- The unit tests sit in `tests.rs` files next to the code they test, not inside the source files.
 - A parity suite holds `layout()` to what elkjs 0.9.3 returns, number for number.
 
 ## Where the code comes from
