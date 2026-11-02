@@ -973,16 +973,15 @@ fn move_labels_to_segments(graphs: &mut GraphArena, mut moves: Vec<LabelMove>) {
     moves.sort_by_key(|label_move| label_move.first_put);
     for label_move in moves {
         let graph = &mut graphs[label_move.graph];
-        // ELK adds both properties for every label it moves, whatever its placement (lines
-        // 284-287). The port keeps the one the placement asks for until #73 ports that.
-        for label in &label_move.labels {
-            match label.placement {
-                EdgeLabelPlacement::Center => graph.graph_properties.center_labels = true,
-                EdgeLabelPlacement::Head | EdgeLabelPlacement::Tail => {
-                    graph.graph_properties.end_labels = true;
-                }
-            }
-        }
+        // ELK adds both properties for every label it moves, whatever its placement
+        // (`moveLabelsAndRemoveOriginalEdges`, lines 284-287):
+        //   targetSegment.getEdge().getSource().getNode().getGraph().getProperty(
+        //       InternalProperties.GRAPH_PROPERTIES).add(GraphProperties.END_LABELS);
+        //   ... .add(GraphProperties.CENTER_LABELS);
+        // The importer sets only the one the placement asks for, but that is for an edge that
+        // stays in one graph.
+        graph.graph_properties.end_labels = true;
+        graph.graph_properties.center_labels = true;
         graph.edges[label_move.edge]
             .labels
             .extend(label_move.labels);

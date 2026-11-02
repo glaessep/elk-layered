@@ -1855,11 +1855,11 @@ fn labels_of_merged_edges_follow_the_first_put_of_their_original_edge() {
     assert_eq!(texts, ["a1", "a2", "b1", "b2"]);
 }
 
-// Mutation: in `move_labels_to_segments`, set both properties for every label, as ELK does (#73).
-// A tail label then sets `center_labels` too. Set them on every graph of the arena: the nested
-// graph, which gets no label, then has them.
+// Mutation: in `move_labels_to_segments`, set only the property the placement asks for, as the
+// importer does for an edge inside one graph. A tail label then leaves `center_labels` false. Set
+// them on every graph of the arena: the nested graph, which gets no label, then has them.
 #[test]
-fn a_moved_label_sets_the_property_of_its_placement_on_its_graph_only() {
+fn a_moved_label_sets_both_label_properties_of_its_graph_only() {
     let (mut graphs, edge, nested) = arena_with_one_edge();
 
     move_labels_to_segments(
@@ -1868,7 +1868,45 @@ fn a_moved_label_sets_the_property_of_its_placement_on_its_graph_only() {
     );
 
     let root = &graphs.root().graph_properties;
-    assert!(root.end_labels && !root.center_labels);
+    assert!(root.end_labels && root.center_labels);
     let nested = &graphs[nested].graph_properties;
     assert!(!nested.end_labels && !nested.center_labels);
+}
+
+// Mutation: in `introduce_segments_of_scope`, push a move for a segment without labels too. Every
+// graph that takes a hierarchy segment then gets both label properties.
+#[test]
+fn a_hierarchy_edge_without_labels_sets_no_label_property() {
+    let options = LayeredOptions::default();
+    let mut graphs = GraphArena::new(LGraph::new("root", options.clone()));
+    for (position, holder) in ["p0", "p1"].into_iter().enumerate() {
+        graphs
+            .root_mut()
+            .layerless_nodes
+            .push(LNode::new(holder, 10.0, 10.0, None));
+        let mut nested = LGraph::new(holder, options.clone());
+        nested
+            .layerless_nodes
+            .push(LNode::new(format!("{holder}-child"), 1.0, 1.0, None));
+        graphs.nest(GraphId::ROOT, NodeId::new(position), nested);
+    }
+    let mut edge = hierarchy_edge_from_group("e");
+    edge.source_node_id = "p0-child".into();
+    edge.target_node_id = "p1-child".into();
+    edge.source_path = vec![HierarchyStep {
+        node_id: "p0".into(),
+        graph: GraphId::new(1),
+    }];
+    edge.target_path = vec![HierarchyStep {
+        node_id: "p1".into(),
+        graph: GraphId::new(2),
+    }];
+    let segments = materialize_hierarchy_edge_segments(&edge);
+
+    introduce_source_ported_scoped_edge_segments(&mut graphs, GraphId::ROOT, segments);
+
+    assert!(graphs.root().edges.len() + graphs[GraphId::new(1)].edges.len() > 0);
+    for graph in graphs.iter() {
+        assert!(!graph.graph_properties.end_labels && !graph.graph_properties.center_labels);
+    }
 }
