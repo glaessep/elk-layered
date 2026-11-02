@@ -7,7 +7,8 @@
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The graph uses something elk-layered does not support yet, such as a port with a label.
+    /// The graph uses something elk-layered does not support yet, such as an inside self loop at
+    /// a port.
     #[error("{element}: {feature} is not supported")]
     Unsupported {
         /// Where the graph uses it.
