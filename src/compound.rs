@@ -507,6 +507,8 @@ fn introduce_source_ported_hierarchy_edge_segments(graphs: &mut GraphArena) {
     // A hierarchy edge owns a traversal of its relative graph scope. Skipping empty owners is
     // essential on deep compound chains: otherwise every graph would rescan its remaining
     // subtree even though the official preprocessor has no segments to introduce.
+    // The labels move once, after the segments of every scope exist.
+    let mut label_moves = Vec::new();
     for graph in graphs.breadth_first(GraphId::ROOT) {
         if graphs[graph].hierarchy_edges.is_empty() {
             continue;
@@ -516,8 +518,9 @@ fn introduce_source_ported_hierarchy_edge_segments(graphs: &mut GraphArena) {
         for edge in hierarchy_edges {
             segments.extend(materialize_hierarchy_edge_segments(&edge));
         }
-        introduce_source_ported_scoped_edge_segments(graphs, graph, segments);
+        introduce_segments_of_scope(graphs, graph, segments, &mut label_moves);
     }
+    move_labels_to_segments(graphs, label_moves);
 }
 
 fn hierarchy_has_pending_edges(graphs: &GraphArena) -> bool {
@@ -777,10 +780,28 @@ struct ParentPorts<'a> {
 
 /// Introduces the segments in `scope` and the graphs below it. A segment names the graph it lands
 /// in by that graph's `GraphId`, or by `None` for `scope` itself.
+///
+/// The labels of the segments move to them at the end, once all segments exist.
 pub(crate) fn introduce_source_ported_scoped_edge_segments(
     graphs: &mut GraphArena,
     scope: GraphId,
     segments: Vec<ScopedHierarchySegment>,
+) {
+    let mut label_moves = Vec::new();
+    introduce_segments_of_scope(graphs, scope, segments, &mut label_moves);
+    move_labels_to_segments(graphs, label_moves);
+}
+
+/// Introduces the segments in `scope` and the graphs below it, and adds what their labels need to
+/// `label_moves`.
+///
+/// The first-put positions count from 0 in each scope. That is enough: the merge state lives in
+/// one scope, so only segments of one scope ever share an edge, and only their order matters.
+fn introduce_segments_of_scope(
+    graphs: &mut GraphArena,
+    scope: GraphId,
+    segments: Vec<ScopedHierarchySegment>,
+    label_moves: &mut Vec<LabelMove>,
 ) {
     if segments.is_empty() {
         return;
@@ -808,7 +829,6 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
             .or_default()
             .push((first_put, scoped));
     }
-    let mut label_moves = Vec::new();
     let mut first_graph = true;
     for graph_id in graphs.preorder(scope) {
         let graph = &mut graphs[graph_id];
@@ -894,7 +914,6 @@ pub(crate) fn introduce_source_ported_scoped_edge_segments(
         segments_by_parent.is_empty(),
         "scoped hierarchy segment owners were validated before graph mutation"
     );
-    move_labels_to_segments(graphs, label_moves);
 }
 
 /// For each segment, the position of the first segment of its original edge, in the order the
