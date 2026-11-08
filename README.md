@@ -15,9 +15,40 @@ crate sets `float_roundtrip` only for its own tests.
 
 ## Status
 
-Version 0.1.1 is the current release. Version 0.1.0 was the first release of the crate as a
+Version 0.2.0 is the current release. Version 0.1.0 was the first release of the crate as a
 library of its own. It started as a building block of another project. Until 1.0, a change to the
 public API raises the minor version.
+
+### Changes in 0.2.0
+
+The public API grows by three fields, so the release raises the minor version. A caller that
+builds these structs with a literal must name the new field:
+
+- `ElkInputNode::partition`, a node's `partitioning.partition`;
+- `LayeredOptions::partitioning_activate`, a graph's `partitioning.activate`;
+- `GraphProperties::partitions`, set on the graph a run starts from when it activates
+  partitioning.
+
+New in what `layout()` accepts:
+
+- Partitioning, ported from ELK's `PartitionPreprocessor`, `PartitionMidprocessor` and
+  `PartitionPostprocessor` (#77). With `partitioning.activate` on the graph a run starts from,
+  every node of a lower partition sits in an earlier layer than every node of a higher one. An
+  edge against that order is reversed, as in ELK. Partitions in a graph inside a node that its
+  parent's run lays out are ignored, as in elkjs 0.9.3. A node with `SEPARATE_CHILDREN` starts a
+  run of its own, so its children's partitions apply. With the default
+  `separateConnectedComponents`, each unconnected node is a component of its own, and the
+  partitions do not order the components.
+
+Layouts that now match elkjs 0.9.3, where 0.1.1 failed:
+
+- A direction priority near the `int` limit no longer panics in the greedy cycle breaker. The
+  priority sums wrap around as Java's `int` does.
+
+New refusals:
+
+- A `partitioning.partition` that is not an integer, or a `partitioning.activate` that is not a
+  boolean, is `Error::InvalidOptionValue`. elkjs ignores such a value.
 
 ### Changes in 0.1.1
 
