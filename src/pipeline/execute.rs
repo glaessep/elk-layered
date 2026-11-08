@@ -132,7 +132,7 @@ fn execute_intermediate(
         P::InteractiveExternalPortPositioner => position_interactive_external_ports(graph),
         P::PartitionPreprocessor => preprocess_partitions(graph),
         P::PartitionMidprocessor => midprocess_partitions(graph),
-        P::PartitionPostprocessor => postprocess_partitions(graph),
+        P::PartitionPostprocessor => postprocess_partitions(graph)?,
         P::SelfLoopPreProcessor => preprocess_self_loops(graph, others),
         P::LayerConstraintPreprocessor => preprocess_layer_constraints(graph)?,
         P::LabelDummyInserter => insert_label_dummies(graph),

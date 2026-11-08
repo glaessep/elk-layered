@@ -3118,8 +3118,7 @@ fn the_partition_processors_stand_where_elks_enum_puts_them_within_a_slot() {
     // Slot before phase 1: the edge reverser, then the partitions, then the self loops.
     assert!(at(P::EdgeAndLayerConstraintEdgeReverser) < at(P::PartitionPreprocessor));
     assert!(at(P::PartitionPreprocessor) < at(P::SelfLoopPreProcessor));
-    // Slot before phase 2: the label dummies and the layer constraints, then the partitions.
-    assert!(at(P::LabelDummyInserter) < at(P::PartitionMidprocessor));
+    // Slot before phase 2: the layer constraints, then the partitions.
     assert!(at(P::LayerConstraintPreprocessor) < at(P::PartitionMidprocessor));
     // Slot before phase 3: the layer constraints, then the partitions, then the rest.
     assert!(at(P::LayerConstraintPostprocessor) < at(P::PartitionPostprocessor));

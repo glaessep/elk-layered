@@ -987,6 +987,13 @@ impl LPort {
         self.node
     }
 
+    /// Forgets every edge of the port, at both ends. Only for a port that leaves the graph
+    /// together with all of its edges, so that no other port still names one of them.
+    pub(crate) fn forget_edges(&mut self) {
+        self.incoming_edges.clear();
+        self.outgoing_edges.clear();
+    }
+
     /// The edges that enter the port, in the port's order.
     pub fn incoming_edges(&self) -> &[EdgeId] {
         &self.incoming_edges

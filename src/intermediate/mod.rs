@@ -99,6 +99,11 @@ pub enum IntermediateError {
     FirstIncomingEdge { node_id: String, edge_id: String },
     #[error("node `{node_id}` has layer constraint LAST but has outgoing edge `{edge_id}`")]
     LastOutgoingEdge { node_id: String, edge_id: String },
+    /// A step between `PartitionMidprocessor` and `PartitionPostprocessor` added an edge. The
+    /// postprocessor cuts the partition edges off the end of the edge list, which would drop it.
+    /// Reaching this is a bug in the pipeline, never caller input.
+    #[error("edge `{edge_id}` was added after the partition edges, before they were removed")]
+    EdgeAfterPartitionEdges { edge_id: String },
 }
 
 pub type IntermediateResult<T> = Result<T, IntermediateError>;

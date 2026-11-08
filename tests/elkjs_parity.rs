@@ -516,6 +516,10 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    partition-edge-reversed-cycle and partition-edge-reversed-user-priority. Add the postprocessor
 //    before phase 4: 4 cases, such as partition-two-down.
 // 108. In `split` (src/components.rs), skip the split when `partitions` is set: partition-default-components.
+// 109. In `positive_priority_weight` or `non_negative_priority_weight`
+//    (src/phase/cycles/greedy_cycle_breaker.rs), or in the degree sums there, add with `+`
+//    instead of wrapping: partition-priority-overflow and partition-priority-sum-overflow panic in
+//    a debug build, as Java's and elkjs's `int` sums wrap around.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

@@ -90,9 +90,9 @@ impl<I: VecId, T> IdVec<I, T> {
         id
     }
 
-    /// Removes the last item and returns it. The ids of the other items stay as they are.
-    pub fn pop(&mut self) -> Option<T> {
-        self.items.pop()
+    /// Keeps the first `len` items and drops the rest. The ids of the kept items stay as they are.
+    pub fn truncate(&mut self, len: usize) {
+        self.items.truncate(len);
     }
 
     /// The id the next pushed item gets.

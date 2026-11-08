@@ -2,7 +2,9 @@
 
 use crate::graph::{EdgeId, GraphArena, LayeredEdge, PortId, PortSide, PortType};
 use crate::importer::{ElkInputEdge, ElkInputGraph, ElkInputNode, import_graph};
-use crate::intermediate::{midprocess_partitions, postprocess_partitions, preprocess_partitions};
+use crate::intermediate::{
+    IntermediateError, midprocess_partitions, postprocess_partitions, preprocess_partitions,
+};
 use crate::options::{ElkDirection, LayeredOptions};
 
 fn node(id: &str, partition: Option<i32>) -> ElkInputNode {
@@ -343,7 +345,7 @@ fn the_postprocessor_takes_back_what_the_midprocessor_added() {
 
     midprocess_partitions(&mut graph);
     assert!(graph.edges.len() > real_edges);
-    postprocess_partitions(&mut graph);
+    postprocess_partitions(&mut graph).unwrap();
 
     assert_eq!(graph.edges, before.edges);
     for (id, node) in graph.nodes_with_ids() {
@@ -359,7 +361,7 @@ fn a_removed_port_holds_no_edge() {
     let mut graph = graph(vec![node("a", Some(0)), node("b", Some(1))], vec![]);
     midprocess_partitions(&mut graph);
 
-    postprocess_partitions(&mut graph);
+    postprocess_partitions(&mut graph).unwrap();
 
     for node in graph.layerless_nodes.iter() {
         assert!(node.ports.is_empty());
@@ -382,7 +384,7 @@ fn the_postprocessor_keeps_the_real_ports_of_a_node() {
     let real_port = graph.layerless_nodes[a].ports.id_at(0).unwrap();
     midprocess_partitions(&mut graph);
 
-    postprocess_partitions(&mut graph);
+    postprocess_partitions(&mut graph).unwrap();
 
     assert_eq!(
         graph.layerless_nodes[a].ports.ids().collect::<Vec<_>>(),
@@ -406,15 +408,16 @@ fn only_the_marked_edges_leave_the_edge_list() {
     midprocess_partitions(&mut graph);
     assert_eq!(graph.edges.len(), 3);
 
-    postprocess_partitions(&mut graph);
+    postprocess_partitions(&mut graph).unwrap();
 
     let ids: Vec<&str> = graph.edges.iter().map(|edge| edge.id.as_str()).collect();
     assert_eq!(ids, ["e1", "e2"]);
 }
 
-// Mutation: in `postprocess_partitions`, pop edges while any edge is marked, not while the last one is.
+// Mutation: in `postprocess_partitions`, cut the edge list at the first marked edge without
+// checking what follows it.
 #[test]
-fn a_marked_edge_that_is_not_last_is_detached_and_kept() {
+fn an_edge_added_after_the_partition_edges_is_an_error() {
     let mut graph = graph(vec![node("a", Some(0)), node("b", Some(1))], vec![]);
     midprocess_partitions(&mut graph);
     // A later step added an edge after the marked one.
@@ -427,11 +430,16 @@ fn a_marked_edge_that_is_not_last_is_detached_and_kept() {
         .add_port(b, PortType::Input, PortSide::West, Default::default())
         .unwrap();
     graph.add_edge(LayeredEdge::new("later", source, target));
+    let before = graph.clone();
 
-    postprocess_partitions(&mut graph);
+    let error = postprocess_partitions(&mut graph).unwrap_err();
 
-    let ids: Vec<&str> = graph.edges.iter().map(|edge| edge.id.as_str()).collect();
-    assert_eq!(ids.len(), 2);
-    assert_eq!(ids[1], "later");
-    assert!(!graph.edge_source_attached(EdgeId::new(0)));
+    assert_eq!(
+        error,
+        IntermediateError::EdgeAfterPartitionEdges {
+            edge_id: "later".to_string()
+        }
+    );
+    // A failure changes nothing.
+    assert_eq!(graph.edges, before.edges);
 }

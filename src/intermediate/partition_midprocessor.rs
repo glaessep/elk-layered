@@ -28,9 +28,8 @@ pub fn midprocess_partitions(graph: &mut LGraph) {
         }
     }
 
-    let ordered: Vec<&Vec<NodeId>> = partitions.values().collect();
-    for pair in ordered.windows(2) {
-        connect_nodes(graph, pair[0], pair[1]);
+    for (first, second) in partitions.values().zip(partitions.values().skip(1)) {
+        connect_nodes(graph, first, second);
     }
 }
 
