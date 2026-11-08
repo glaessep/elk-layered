@@ -587,6 +587,9 @@ pub(crate) struct NodeSettings {
     pub(crate) direction: Option<ElkDirection>,
     pub(crate) hierarchy_handling: Option<HierarchyHandling>,
     pub(crate) layer_constraint: Option<LayerConstraint>,
+    /// `partitioning.partition`, when set. ELK asks whether the node has the property, so an
+    /// unset partition is no partition, not partition 0.
+    pub(crate) partition: Option<i32>,
     pub(crate) port_constraints: Option<PortConstraints>,
     pub(crate) port_alignment: Option<PortAlignment>,
     pub(crate) node_label_placement: NodeLabelPlacement,
@@ -653,6 +656,7 @@ pub(crate) fn node_settings(
         direction: None,
         hierarchy_handling: None,
         layer_constraint: None,
+        partition: None,
         port_constraints: None,
         port_alignment: None,
         node_label_placement: NodeLabelPlacement::FIXED,
@@ -879,6 +883,12 @@ fn apply_node_option(s: &mut NodeSettings, id: &str, value: &str) -> Result<(), 
         }
         "org.eclipse.elk.separateConnectedComponents" => {
             o.separate_connected_components = parse_bool(value)?;
+        }
+        "org.eclipse.elk.partitioning.activate" => {
+            o.partitioning_activate = parse_bool(value)?;
+        }
+        "org.eclipse.elk.partitioning.partition" => {
+            s.partition = Some(parse_int(value)?);
         }
         "org.eclipse.elk.aspectRatio" => o.aspect_ratio = parse_double(value)?,
         "org.eclipse.elk.portLabels.nextToPortIfPossible" => {

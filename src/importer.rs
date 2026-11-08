@@ -74,6 +74,8 @@ pub struct ElkInputNode {
     pub port_label_placement: crate::options::PortLabelPlacement,
     /// The node's own `portLabels.treatAsGroup`.
     pub port_labels_treat_as_group: bool,
+    /// The node's own `partitioning.partition`, when it sets one.
+    pub partition: Option<i32>,
 }
 
 /// A port of a node, as `ElkGraphImporter.transformPort` reads it.
@@ -368,6 +370,10 @@ fn import_scope_with(
     // `importGraph` makes the dummies of the external ports before it imports any child, so
     // they come first in the graph.
     index.scope_dummies = import_external_ports(&mut root, &scope, input.id.as_str());
+    // `importGraph` sets `PARTITIONS` for the top-level graph only, from that graph's own
+    // `partitioning.activate`. A graph inside a node never gets it, so a run that lays out a
+    // group together with its parent ignores the partitions inside the group.
+    root.graph_properties.partitions = root.options.partitioning_activate;
     let mut port_index = ImportPortIndex::new();
 
     let (mut graphs, nested_graphs) =
@@ -1415,6 +1421,7 @@ fn transform_node(node: &ElkInputNode, graph: &mut LGraph, model_order: Option<u
     lnode.port_label_placement = node.port_label_placement;
     lnode.port_labels_treat_as_group = node.port_labels_treat_as_group;
     lnode.compound_node = node.compound_node;
+    lnode.partition = node.partition;
     let node_size = lnode.size;
     let node_index = graph.push_node_with(|_| lnode);
     if let Some(alignment) = node.port_alignment {

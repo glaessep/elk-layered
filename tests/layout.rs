@@ -2763,3 +2763,184 @@ fn an_inside_self_loop_never_takes_a_port_the_caller_named_after_it() {
         vec![(90.0, 12.0), (90.0, 104.0)]
     );
 }
+
+fn partitioned(mut node: ElkNode, partition: &str) -> ElkNode {
+    node.layout_options.insert(
+        "org.eclipse.elk.partitioning.partition".into(),
+        partition.into(),
+    );
+    node
+}
+
+/// Seven nodes in three partitions. The edges run forward, backward and inside a partition, so
+/// the layering alone would not keep the partitions apart.
+fn partitioned_graph(direction: &str) -> ElkNode {
+    let nodes = vec![
+        partitioned(node("a", 40.0, 30.0), "2"),
+        partitioned(node("b", 40.0, 30.0), "0"),
+        partitioned(node("c", 40.0, 30.0), "1"),
+        partitioned(node("d", 40.0, 30.0), "0"),
+        partitioned(node("e", 40.0, 30.0), "2"),
+        partitioned(node("f", 40.0, 30.0), "1"),
+        // A node without a partition may sit anywhere.
+        node("x", 40.0, 30.0),
+    ];
+    let edges = vec![
+        edge("e1", "a", "b"),
+        edge("e2", "c", "d"),
+        edge("e3", "b", "e"),
+        edge("e4", "f", "c"),
+        edge("e5", "x", "a"),
+        edge("e6", "d", "f"),
+    ];
+    let mut graph = root(nodes, edges);
+    graph.layout_options = options(&[
+        ("elk.direction", direction),
+        ("org.eclipse.elk.partitioning.activate", "true"),
+        ("elk.separateConnectedComponents", "false"),
+    ]);
+    graph
+}
+
+// Mutation: in `import_scope_with` (src/importer.rs), never set `GraphProperties::partitions`.
+#[test]
+fn every_node_of_a_partition_sits_before_every_node_of_the_next_one() {
+    let partition_of = |id: &str| match id {
+        "b" | "d" => 0,
+        "c" | "f" => 1,
+        _ => 2,
+    };
+    for direction in ["DOWN", "RIGHT", "UP", "LEFT"] {
+        let laid = layout(&partitioned_graph(direction)).unwrap();
+        // The span of each partition along the flow, as (first edge, last edge) of its nodes.
+        // UP and LEFT run the other way, so their coordinates change sign.
+        let span = |partition: i32| {
+            let boxes: Vec<(f64, f64)> = ["a", "b", "c", "d", "e", "f"]
+                .iter()
+                .filter(|id| partition_of(id) == partition)
+                .map(|id| {
+                    let (x, y) = at(&laid, id);
+                    let (width, height) = size(&laid, id);
+                    match direction {
+                        "DOWN" => (y, y + height),
+                        "UP" => (-(y + height), -y),
+                        "RIGHT" => (x, x + width),
+                        _ => (-(x + width), -x),
+                    }
+                })
+                .collect();
+            (
+                boxes.iter().map(|b| b.0).fold(f64::INFINITY, f64::min),
+                boxes.iter().map(|b| b.1).fold(f64::NEG_INFINITY, f64::max),
+            )
+        };
+        for partition in 0..2 {
+            assert!(
+                span(partition).1 <= span(partition + 1).0,
+                "{direction}: partition {partition} ends at {}, partition {} starts at {}",
+                span(partition).1,
+                partition + 1,
+                span(partition + 1).0
+            );
+        }
+    }
+}
+
+// Mutation: in `postprocess_partitions` (src/intermediate/partition_postprocessor.rs), unlist
+// every port of a node that has a dummy port.
+#[test]
+fn a_partitioned_graph_comes_back_with_the_ports_and_edges_it_went_in_with() {
+    let mut graph = partitioned_graph("DOWN");
+    for child in &mut graph.children {
+        let id = child.id.clone();
+        child.ports = vec![
+            port(&format!("{id}-in"), 6.0, 4.0, "WEST"),
+            port(&format!("{id}-out"), 6.0, 4.0, "EAST"),
+        ];
+        child
+            .layout_options
+            .insert("elk.portConstraints".into(), "FIXED_SIDE".into());
+    }
+    graph.edges = vec![
+        edge("e1", "a-out", "b-in"),
+        edge("e2", "c-out", "d-in"),
+        edge("e3", "b-out", "e-in"),
+        edge("e4", "f-out", "c-in"),
+    ];
+
+    let laid = layout(&graph).unwrap();
+
+    assert_eq!(laid.children.len(), graph.children.len());
+    for (before, after) in graph.children.iter().zip(&laid.children) {
+        let ids = |node: &ElkNode| -> Vec<String> {
+            node.ports.iter().map(|port| port.id.clone()).collect()
+        };
+        assert_eq!(ids(after), ids(before), "ports of {}", before.id);
+    }
+    let edge_ids: Vec<&str> = laid.edges.iter().map(|edge| edge.id.as_str()).collect();
+    assert_eq!(edge_ids, ["e1", "e2", "e3", "e4"]);
+    for edge in &laid.edges {
+        assert_eq!(edge.sections.len(), 1, "{}", edge.id);
+    }
+}
+
+// Mutation: in `apply_node_option` (src/layout_options.rs), ignore a partition that is no
+// integer, as elkjs does.
+#[test]
+fn a_partition_that_is_no_integer_is_an_error() {
+    for value in ["first", "1.5", ""] {
+        let mut graph = partitioned_graph("DOWN");
+        graph.children[0] = partitioned(node("a", 40.0, 30.0), value);
+        assert_eq!(
+            error_of(&graph),
+            Error::InvalidOptionValue {
+                element: "node \"a\"".into(),
+                key: "org.eclipse.elk.partitioning.partition".into(),
+                value: value.into(),
+            },
+            "{value:?}"
+        );
+    }
+}
+
+// Mutation: in `apply_node_option` (src/layout_options.rs), ignore a value of
+// `partitioning.activate` that is no boolean.
+#[test]
+fn an_activate_value_that_is_no_boolean_is_an_error() {
+    let mut graph = partitioned_graph("DOWN");
+    graph
+        .layout_options
+        .insert("org.eclipse.elk.partitioning.activate".into(), "yes".into());
+    assert_eq!(
+        error_of(&graph),
+        Error::InvalidOptionValue {
+            element: "node \"root\"".into(),
+            key: "org.eclipse.elk.partitioning.activate".into(),
+            value: "yes".into(),
+        }
+    );
+}
+
+// Mutation: in `import_scope_with` (src/importer.rs), set `GraphProperties::partitions` when any
+// node has a partition, without reading `partitioning.activate`.
+#[test]
+fn partitions_do_nothing_while_activate_is_off() {
+    let mut graph = partitioned_graph("DOWN");
+    graph
+        .layout_options
+        .remove("org.eclipse.elk.partitioning.activate");
+    let mut plain = graph.clone();
+    for child in &mut plain.children {
+        child.layout_options.clear();
+    }
+
+    let places = |graph: &ElkNode| -> Vec<(String, f64, f64)> {
+        layout(graph)
+            .unwrap()
+            .children
+            .iter()
+            .map(|child| (child.id.clone(), child.x, child.y))
+            .collect()
+    };
+    assert_eq!(places(&graph), places(&plain));
+}

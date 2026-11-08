@@ -485,6 +485,37 @@ fn difference(want: &Value, got: Result<Value, LayOutError>) -> Option<String> {
 //    segment its own position in `first_put_positions` instead of its edge's first: the same 4.
 //    Set only the label property the placement asks for, not both as ELK does: no case fails.
 //    Unit tests in src/compound/tests.rs hold both properties.
+// 100. In `must_be_reversed` (src/intermediate/partition_preprocessor.rs), answer `false`: 7 cases,
+//    such as partition-edge-reversed, partition-several-per-partition and
+//    partition-root-include-children. Answer `source >= target` instead: 2 cases,
+//    partition-order-two-partitions and partition-several-per-partition.
+// 101. In `reverse` (same file), leave out the user's priority (`PARTITION_CONSTRAINT_EDGE_PRIORITY`
+//    alone), or keep the user's priority when it is not 0 instead of adding to it: 1 case each,
+//    partition-edge-reversed-user-priority. Leave the base priority out (the user's alone): also
+//    partition-edge-reversed-cycle.
+// 102. In `midprocess_partitions` (src/intermediate/partition_midprocessor.rs), put each node at the
+//    front of its partition instead of the back: partition-order-two-partitions and
+//    partition-order-three-partitions. The same two cases fail when only the source nodes or only
+//    the target nodes of `connect_nodes` run in the reverse order. They hold the order in which
+//    elkjs's `HashMultimap` hands out the nodes of one partition.
+// 103. In the same function, connect only the first pair of partitions (`.take(1)`): 3 cases, such
+//    as partition-left-unconnected and partition-separate-run-right.
+// 104. In the same function, give a node with no partition the partition 0: 3 cases,
+//    partition-node-without-partition, partition-edge-reversed-cycle and
+//    partition-edge-reversed-user-priority.
+// 105. In `postprocess_partitions` (src/intermediate/partition_postprocessor.rs), leave the ports
+//    listed: 12 cases, such as partition-two-down, partition-three-right and
+//    partition-root-include-children.
+// 106. In `import_scope_with` (src/importer.rs), never set `GraphProperties::partitions`: 13 cases,
+//    such as partition-two-down, partition-separate-run-down (the run of a group on its own) and
+//    partition-root-include-children.
+//    Set it for each graph inside a node too, from that graph's own `partitioning.activate`:
+//    partition-in-include-children-group.
+// 107. In `partition_configuration` (src/pipeline/assembler.rs), add the midprocessor before phase 1
+//    instead of phase 2: partition-cycle-through-unpartitioned. Add the preprocessor before phase 2:
+//    partition-edge-reversed-cycle and partition-edge-reversed-user-priority. Add the postprocessor
+//    before phase 4: 4 cases, such as partition-two-down.
+// 108. In `split` (src/components.rs), skip the split when `partitions` is set: partition-default-components.
 // The refusals of graphs that ELK itself fails on have their tests in tests/layout.rs, with
 // their mutations: no case can hold such a graph, as the recording of elkjs fails on it.
 #[test]

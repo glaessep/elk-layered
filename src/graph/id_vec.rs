@@ -90,6 +90,11 @@ impl<I: VecId, T> IdVec<I, T> {
         id
     }
 
+    /// Removes the last item and returns it. The ids of the other items stay as they are.
+    pub fn pop(&mut self) -> Option<T> {
+        self.items.pop()
+    }
+
     /// The id the next pushed item gets.
     pub fn next_id(&self) -> I {
         I::from_index(self.items.len())

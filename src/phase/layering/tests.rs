@@ -41,6 +41,7 @@ pub(super) fn node(id: &str) -> ElkInputNode {
         self_loop_ordering: Default::default(),
         port_label_placement: Default::default(),
         port_labels_treat_as_group: true,
+        partition: None,
     }
 }
 

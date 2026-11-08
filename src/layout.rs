@@ -1061,6 +1061,7 @@ impl<'a, 't> Work<'a, 't> {
             parent_settings,
             port_label_placement: info.settings.options.port_label_placement,
             port_labels_treat_as_group: info.settings.options.port_labels_treat_as_group,
+            partition: info.settings.partition,
         }
     }
 

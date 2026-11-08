@@ -844,6 +844,9 @@ pub struct LayeredOptions {
     pub direction_congruency: DirectionCongruency,
     pub hierarchy_handling: HierarchyHandling,
     pub separate_connected_components: bool,
+    /// `partitioning.activate`: the children of this graph keep their partitions in order. Only
+    /// the graph a run starts from reads it: see `GraphProperties::partitions`.
+    pub partitioning_activate: bool,
     pub aspect_ratio: f64,
     /// `portLabels.placement`, with the deprecated options folded in.
     pub port_label_placement: PortLabelPlacement,
@@ -1145,6 +1148,7 @@ impl Default for LayeredOptions {
             direction_congruency: DirectionCongruency::ReadingDirection,
             hierarchy_handling: HierarchyHandling::SeparateChildren,
             separate_connected_components: true,
+            partitioning_activate: false,
             aspect_ratio: f64::from(1.6_f32),
             port_label_placement: PortLabelPlacement::OUTSIDE,
             port_labels_treat_as_group: true,

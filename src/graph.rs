@@ -339,6 +339,11 @@ pub struct LNode {
     /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
     /// it.
     pub(crate) model_order: Option<usize>,
+    /// ELK's `PARTITIONING_PARTITION` property: `Some` when the input node sets one, as
+    /// `hasProperty` answers in ELK. The partition processors read it.
+    ///
+    /// Crate-visible: Plain data: the importer sets it, and the partition processors read it.
+    pub(crate) partition: Option<i32>,
     /// The layer the node sits in. Private: `LGraph` sets it together with the layer's list.
     layer_index: Option<usize>,
     /// ELK's `LAYERING_LAYER_CONSTRAINT` property: `Some` once something sets it, even to `NONE`,
@@ -752,6 +757,7 @@ impl LNode {
             nested_graph: None,
             compound_node: false,
             model_order,
+            partition: None,
             layer_index: None,
             layer_constraint: None,
             node_alignment: Alignment::Automatic,
@@ -878,6 +884,11 @@ pub struct LPort {
     /// Crate-visible: the two end label steps and the end label sorter move them. The list is
     /// empty again before the components are combined, so the combine leaves it alone.
     pub(crate) end_labels: Vec<LLabel>,
+    /// ELK's `PARTITION_DUMMY` property on a port: `PartitionMidprocessor` made the port, and
+    /// `PartitionPostprocessor` removes it.
+    ///
+    /// Crate-visible: Plain data: only the two partition processors read or write it.
+    pub(crate) partition_dummy: bool,
     /// The edges that enter the port. Private: it must match each edge's `target`, so
     /// `LGraph` changes it together with the edge.
     incoming_edges: Vec<EdgeId>,
@@ -914,6 +925,7 @@ impl LPort {
             collector_type: None,
             end_label_cell: None,
             end_labels: Vec::new(),
+            partition_dummy: false,
             incoming_edges: Vec::new(),
             outgoing_edges: Vec::new(),
         }
@@ -1052,6 +1064,11 @@ pub struct LayeredEdge {
     /// Crate-visible: Plain data: no other field depends on it, and several phases read or write
     /// it.
     pub(crate) inside_self_loop: bool,
+    /// ELK's `PARTITION_DUMMY` property on an edge: `PartitionMidprocessor` made the edge, and
+    /// `PartitionPostprocessor` drops it.
+    ///
+    /// Crate-visible: Plain data: only the two partition processors read or write it.
+    pub(crate) partition_dummy: bool,
 }
 
 impl LayeredEdge {
@@ -1078,6 +1095,7 @@ impl LayeredEdge {
             original_opposite_port: None,
             compound_segment: None,
             inside_self_loop: false,
+            partition_dummy: false,
         }
     }
 
@@ -1455,6 +1473,10 @@ pub struct GraphProperties {
     pub hyperedges: bool,
     pub external_ports: bool,
     pub hypernodes: bool,
+    /// `GraphProperties.PARTITIONS`: the graph a run starts from has `partitioning.activate`.
+    /// The importer sets it for that graph only, never for a graph inside a node, so a
+    /// partition below the top of a run has no effect.
+    pub partitions: bool,
 }
 
 impl GraphProperties {

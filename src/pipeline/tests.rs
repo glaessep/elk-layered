@@ -74,6 +74,7 @@ fn node(id: &str) -> ElkInputNode {
         self_loop_ordering: Default::default(),
         port_label_placement: Default::default(),
         port_labels_treat_as_group: true,
+        partition: None,
     }
 }
 
@@ -842,6 +843,7 @@ fn graph_properties_insert_label_self_loop_and_external_port_processors() {
                 self_loop_ordering: Default::default(),
                 port_label_placement: Default::default(),
                 port_labels_treat_as_group: true,
+                partition: None,
             },
             ElkInputNode {
                 ports: Vec::new(),
@@ -866,6 +868,7 @@ fn graph_properties_insert_label_self_loop_and_external_port_processors() {
                 self_loop_ordering: Default::default(),
                 port_label_placement: Default::default(),
                 port_labels_treat_as_group: true,
+                partition: None,
             },
         ],
         edges: vec![
@@ -967,6 +970,7 @@ fn inside_self_loops_enable_self_loop_processors_on_nested_graphs() {
             self_loop_ordering: Default::default(),
             port_label_placement: Default::default(),
             port_labels_treat_as_group: true,
+            partition: None,
         }],
         edges: vec![ElkInputEdge {
             source_port: None,
@@ -2968,6 +2972,7 @@ fn intermediate_processors_run_in_the_order_of_elks_enum() {
         hyperedges: true,
         external_ports: true,
         hypernodes: false,
+        partitions: false,
     };
 
     let intermediates: Vec<IntermediateProcessor> = graph_kinds(&graph)
@@ -3038,4 +3043,86 @@ fn a_layer_sweep_outside_the_arena_is_an_error_not_a_panic() {
             "{processor:?}"
         );
     }
+}
+
+// Mutation: in `partition_configuration`, add the postprocessor before phase 4 instead of phase 3.
+#[test]
+fn a_graph_with_partitions_gets_the_three_partition_processors_around_the_layering() {
+    use IntermediateProcessor as P;
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    graph.graph_properties.partitions = true;
+
+    let list = graph_kinds(&graph);
+
+    let at = |processor| {
+        list.iter()
+            .position(|candidate| *candidate == Processor::Intermediate(processor))
+            .unwrap_or_else(|| panic!("{processor:?} is missing"))
+    };
+    let phase = |phase| {
+        list.iter()
+            .position(|candidate| candidate.phase() == Some(phase))
+            .unwrap()
+    };
+    assert!(at(P::PartitionPreprocessor) < phase(LayeredPhase::P1CycleBreaking));
+    assert!(phase(LayeredPhase::P1CycleBreaking) < at(P::PartitionMidprocessor));
+    assert!(at(P::PartitionMidprocessor) < phase(LayeredPhase::P2Layering));
+    assert!(phase(LayeredPhase::P2Layering) < at(P::PartitionPostprocessor));
+    assert!(at(P::PartitionPostprocessor) < phase(LayeredPhase::P3NodeOrdering));
+}
+
+// Mutation: in `partition_configuration`, test `properties.self_loops` instead of
+// `properties.partitions`.
+#[test]
+fn a_graph_without_partitions_gets_no_partition_processor() {
+    use IntermediateProcessor as P;
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    // The option alone does not add them: the importer turns it into the graph property.
+    graph.options.partitioning_activate = true;
+    graph.graph_properties.self_loops = true;
+
+    let list = graph_kinds(&graph);
+
+    for processor in [
+        P::PartitionPreprocessor,
+        P::PartitionMidprocessor,
+        P::PartitionPostprocessor,
+    ] {
+        assert!(
+            !list.contains(&Processor::Intermediate(processor)),
+            "{processor:?}"
+        );
+    }
+}
+
+// Mutation: swap `PartitionPreprocessor` and `SelfLoopPreProcessor` in the declaration of
+// `IntermediateProcessor`, or move `PartitionMidprocessor` in front of `LayerConstraintPreprocessor`,
+// or `PartitionPostprocessor` in front of `LayerConstraintPostprocessor`. The enum's order is the
+// order the processors run in within one slot.
+#[test]
+fn the_partition_processors_stand_where_elks_enum_puts_them_within_a_slot() {
+    use IntermediateProcessor as P;
+    let mut graph = LGraph::new("root", LayeredOptions::default());
+    graph.graph_properties.partitions = true;
+    graph.graph_properties.self_loops = true;
+    graph.graph_properties.center_labels = true;
+    graph.graph_properties.external_ports = true;
+
+    let list = graph_kinds(&graph);
+
+    let at = |processor| {
+        list.iter()
+            .position(|candidate| *candidate == Processor::Intermediate(processor))
+            .unwrap_or_else(|| panic!("{processor:?} is missing"))
+    };
+    // Slot before phase 1: the edge reverser, then the partitions, then the self loops.
+    assert!(at(P::EdgeAndLayerConstraintEdgeReverser) < at(P::PartitionPreprocessor));
+    assert!(at(P::PartitionPreprocessor) < at(P::SelfLoopPreProcessor));
+    // Slot before phase 2: the label dummies and the layer constraints, then the partitions.
+    assert!(at(P::LabelDummyInserter) < at(P::PartitionMidprocessor));
+    assert!(at(P::LayerConstraintPreprocessor) < at(P::PartitionMidprocessor));
+    // Slot before phase 3: the layer constraints, then the partitions, then the rest.
+    assert!(at(P::LayerConstraintPostprocessor) < at(P::PartitionPostprocessor));
+    assert!(at(P::PartitionPostprocessor) < at(P::HierarchicalPortConstraintProcessor));
+    assert!(at(P::PartitionPostprocessor) < at(P::LongEdgeSplitter));
 }

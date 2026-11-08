@@ -502,3 +502,60 @@ fn inside_self_loops_yo_refuses_a_value_that_is_no_boolean() {
     let error = edge_settings(&map(&[("elk.insideSelfLoops.yo", "maybe")])).unwrap_err();
     assert_eq!(error.problem, OptionProblem::InvalidValue);
 }
+
+// Mutation: drop the `partitioning.partition` arm of `apply_node_option`.
+#[test]
+fn a_partition_is_an_integer_that_a_node_may_set() {
+    let partition = |value: &str| {
+        node(&[("org.eclipse.elk.partitioning.partition", value)])
+            .map(|settings| settings.partition)
+    };
+    assert_eq!(partition("0"), Ok(Some(0)));
+    assert_eq!(
+        node(&[("elk.partitioning.partition", "3")]).map(|settings| settings.partition),
+        Ok(Some(3))
+    );
+    assert_eq!(partition("+2"), Ok(Some(2)));
+    assert_eq!(partition("-7"), Ok(Some(-7)));
+    assert_eq!(partition("2147483647"), Ok(Some(i32::MAX)));
+    assert_eq!(partition("-2147483648"), Ok(Some(i32::MIN)));
+    // A node that sets none has none, not partition 0.
+    assert_eq!(node(&[]).map(|settings| settings.partition), Ok(None));
+    // elkjs 0.9.3 ignores a partition it cannot read and lays the node out without one.
+    // elk-layered refuses it, as it does for every other option value it cannot read.
+    for value in ["", "abc", "1.5", " 1", "2147483648", "true", "0x1"] {
+        assert_eq!(
+            partition(value),
+            Err(OptionProblem::InvalidValue),
+            "{value}"
+        );
+    }
+}
+
+// Mutation: in `apply_node_option`, read `partitioning.activate` into
+// `separate_connected_components`.
+#[test]
+fn activate_is_a_boolean_that_a_graph_may_set() {
+    let activate = |value: &str| {
+        node(&[("org.eclipse.elk.partitioning.activate", value)])
+            .map(|settings| settings.options.partitioning_activate)
+    };
+    assert_eq!(activate("true"), Ok(true));
+    assert_eq!(activate("FALSE"), Ok(false));
+    assert_eq!(activate("yes"), Err(OptionProblem::InvalidValue));
+    assert_eq!(activate(""), Err(OptionProblem::InvalidValue));
+    // Left out, it is off.
+    let settings = node(&[]).unwrap();
+    assert!(!settings.options.partitioning_activate);
+    assert!(settings.options.separate_connected_components);
+}
+
+// Mutation: add EDGES and PORTS to the targets of `partitioning.partition` in `KNOWN_OPTIONS`.
+#[test]
+fn a_partition_belongs_to_a_node_not_to_an_edge_or_a_port() {
+    let wrong = Some(OptionProblem::Unsupported(WRONG_TARGET));
+    let options = map(&[("org.eclipse.elk.partitioning.partition", "1")]);
+    assert_eq!(edge_settings(&options).map_err(|e| e.problem).err(), wrong);
+    assert_eq!(port_settings(&options).map_err(|e| e.problem).err(), wrong);
+    assert_eq!(label_settings(&options).map_err(|e| e.problem).err(), wrong);
+}

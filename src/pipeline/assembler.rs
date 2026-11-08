@@ -104,10 +104,13 @@ pub(crate) enum IntermediateProcessor {
     DirectionPreprocessor,
     EdgeAndLayerConstraintEdgeReverser,
     InteractiveExternalPortPositioner,
+    PartitionPreprocessor,
     LabelDummyInserter,
     SelfLoopPreProcessor,
     LayerConstraintPreprocessor,
+    PartitionMidprocessor,
     LayerConstraintPostprocessor,
+    PartitionPostprocessor,
     HierarchicalPortConstraintProcessor,
     LongEdgeSplitter,
     PortSideProcessor,
@@ -533,6 +536,7 @@ pub(crate) fn assemble(
     config.merge(cycle_breaking_configuration(strategies.cycle_breaker));
     config.merge(layering_configuration(strategies.layerer));
     config.merge(crossing_minimization_configuration());
+    config.merge(partition_configuration(properties));
     config.merge(edge_routing_configuration(properties, options));
     config.into_processors(strategies)
 }
@@ -699,6 +703,27 @@ fn crossing_minimization_configuration() -> Config {
         LayeredPhase::P5EdgeRouting,
         IntermediateProcessor::LongEdgeJoiner,
     );
+    config
+}
+
+/// The partition part of `GraphConfigurator.getPhaseIndependentLayoutProcessorConfiguration`: a
+/// graph with the `PARTITIONS` property keeps its partitions in order through the layering.
+fn partition_configuration(properties: &GraphProperties) -> Config {
+    let mut config = Config::default();
+    if properties.partitions {
+        config.add_before(
+            LayeredPhase::P1CycleBreaking,
+            IntermediateProcessor::PartitionPreprocessor,
+        );
+        config.add_before(
+            LayeredPhase::P2Layering,
+            IntermediateProcessor::PartitionMidprocessor,
+        );
+        config.add_before(
+            LayeredPhase::P3NodeOrdering,
+            IntermediateProcessor::PartitionPostprocessor,
+        );
+    }
     config
 }
 
