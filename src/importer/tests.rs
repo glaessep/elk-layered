@@ -28,6 +28,7 @@ fn node(id: &str) -> ElkInputNode {
         self_loop_ordering: Default::default(),
         port_label_placement: Default::default(),
         port_labels_treat_as_group: true,
+        partition: None,
     }
 }
 
@@ -2508,4 +2509,100 @@ mod compound_flag_and_port_labels {
         assert_eq!(labels[0].text, "a");
         assert_eq!((labels[0].position.x, labels[0].position.y), (3.0, -4.0));
     }
+}
+
+fn partitioned(mut node: ElkInputNode, partition: i32) -> ElkInputNode {
+    node.partition = Some(partition);
+    node
+}
+
+fn group_with_options(id: &str, options: LayeredOptions) -> ElkInputNode {
+    ElkInputNode {
+        compound_node: true,
+        nested_options: Some(Box::new(options)),
+        ..node(id)
+    }
+}
+
+// Mutation: in `import_scope_with`, set `partitions` for every graph from its own
+// `partitioning.activate`, as `import_hierarchical_graph` would for a graph inside a node.
+#[test]
+fn partitions_is_set_for_the_top_level_graph_only() {
+    let mut input = graph(vec![], vec![]);
+    input.options.partitioning_activate = true;
+    let mut inner = input.options.clone();
+    inner.partitioning_activate = true;
+    let mut child = partitioned(node("c"), 1);
+    child.parent = Some("g".to_string());
+    input.nodes = vec![
+        group_with_options("g", inner),
+        partitioned(node("d"), 0),
+        child,
+    ];
+
+    let lgraph = import_graph(&input).unwrap();
+
+    assert!(lgraph.graph_properties.partitions);
+    let group = lgraph.node_named("g");
+    let nested = &lgraph[lgraph.layerless_nodes[group].nested_graph.unwrap()];
+    assert!(nested.options.partitioning_activate);
+    assert!(!nested.graph_properties.partitions);
+}
+
+// Mutation: in `import_scope_with`, set `partitions` when any node has a partition, without
+// reading `partitioning.activate`.
+#[test]
+fn partitions_needs_the_option_not_just_a_partition_on_a_node() {
+    let mut input = graph(
+        vec![partitioned(node("a"), 0), partitioned(node("b"), 1)],
+        vec![],
+    );
+    input.options.partitioning_activate = false;
+
+    let lgraph = import_graph(&input).unwrap();
+
+    assert!(!lgraph.graph_properties.partitions);
+}
+
+// Mutation: in `import_scope_with`, read `partitioning.activate` from a node's graph instead of the
+// scope's own: the scope's option is off, so `partitions` stays off even when a node's graph asks.
+#[test]
+fn partitions_follows_the_option_of_the_scope_not_of_a_group_inside_it() {
+    let mut input = graph(vec![], vec![]);
+    input.options.partitioning_activate = false;
+    let mut inner = input.options.clone();
+    inner.partitioning_activate = true;
+    let mut child = partitioned(node("c"), 1);
+    child.parent = Some("g".to_string());
+    input.nodes = vec![group_with_options("g", inner), child];
+
+    let lgraph = import_graph(&input).unwrap();
+
+    assert!(!lgraph.graph_properties.partitions);
+    let group = lgraph.node_named("g");
+    assert!(
+        !lgraph[lgraph.layerless_nodes[group].nested_graph.unwrap()]
+            .graph_properties
+            .partitions
+    );
+}
+
+// Mutation: in `transform_node`, drop `lnode.partition = node.partition`.
+#[test]
+fn a_node_keeps_its_partition_and_a_node_without_one_has_none() {
+    let input = graph(
+        vec![
+            partitioned(node("zero"), 0),
+            partitioned(node("negative"), -4),
+            node("none"),
+        ],
+        vec![],
+    );
+
+    let lgraph = import_graph(&input).unwrap();
+
+    let partition = |id: &str| lgraph.layerless_nodes[lgraph.node_named(id)].partition;
+    assert_eq!(partition("zero"), Some(0));
+    assert_eq!(partition("negative"), Some(-4));
+    assert_eq!(partition("none"), None);
 }

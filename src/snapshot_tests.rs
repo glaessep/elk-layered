@@ -46,6 +46,7 @@ pub(crate) fn node(id: &str, width: f64, height: f64, parent: Option<&str>) -> E
         self_loop_ordering: Default::default(),
         port_label_placement: Default::default(),
         port_labels_treat_as_group: true,
+        partition: None,
     }
 }
 

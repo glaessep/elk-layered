@@ -34,6 +34,11 @@ pub(crate) mod north_south_port_postprocessor;
 pub(crate) mod north_south_port_preprocessor;
 #[cfg(test)]
 mod north_south_port_tests;
+pub(crate) mod partition_midprocessor;
+pub(crate) mod partition_postprocessor;
+pub(crate) mod partition_preprocessor;
+#[cfg(test)]
+mod partition_tests;
 pub(crate) mod port_list_sorter;
 #[cfg(test)]
 mod port_order_tests;
@@ -70,6 +75,9 @@ pub use long_edge_joiner::join_long_edges;
 pub use long_edge_splitter::split_long_edges;
 pub use north_south_port_postprocessor::postprocess_north_south_ports;
 pub use north_south_port_preprocessor::preprocess_north_south_ports;
+pub use partition_midprocessor::midprocess_partitions;
+pub use partition_postprocessor::postprocess_partitions;
+pub use partition_preprocessor::preprocess_partitions;
 pub use port_list_sorter::sort_port_lists;
 pub use port_side_processor::process_port_sides;
 pub use reversed_edge_restorer::restore_reversed_edges;
@@ -91,6 +99,11 @@ pub enum IntermediateError {
     FirstIncomingEdge { node_id: String, edge_id: String },
     #[error("node `{node_id}` has layer constraint LAST but has outgoing edge `{edge_id}`")]
     LastOutgoingEdge { node_id: String, edge_id: String },
+    /// A step between `PartitionMidprocessor` and `PartitionPostprocessor` added an edge. The
+    /// postprocessor cuts the partition edges off the end of the edge list, which would drop it.
+    /// Reaching this is a bug in the pipeline, never caller input.
+    #[error("edge `{edge_id}` was added after the partition edges, before they were removed")]
+    EdgeAfterPartitionEdges { edge_id: String },
 }
 
 pub type IntermediateResult<T> = Result<T, IntermediateError>;

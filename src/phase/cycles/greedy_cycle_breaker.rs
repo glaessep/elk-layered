@@ -31,7 +31,8 @@ pub(crate) fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: Greedy
                 if edge.source().node == node_index {
                     continue;
                 }
-                indeg[node_index] += positive_priority_weight(edge.priority_direction);
+                indeg[node_index] = indeg[node_index]
+                    .wrapping_add(positive_priority_weight(edge.priority_direction));
             }
 
             for edge_index in port.outgoing_edges() {
@@ -39,7 +40,8 @@ pub(crate) fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: Greedy
                 if edge.target().node == node_index {
                     continue;
                 }
-                outdeg[node_index] += positive_priority_weight(edge.priority_direction);
+                outdeg[node_index] = outdeg[node_index]
+                    .wrapping_add(positive_priority_weight(edge.priority_direction));
             }
         }
 
@@ -91,7 +93,7 @@ pub(crate) fn break_cycles_greedy_with_choice(graph: &mut LGraph, choice: Greedy
 
             for node_index in graph.node_ids() {
                 if mark[node_index] == 0 {
-                    let outflow = outdeg[node_index] - indeg[node_index];
+                    let outflow = outdeg[node_index].wrapping_sub(indeg[node_index]);
                     if outflow >= max_outflow {
                         if outflow > max_outflow {
                             max_nodes.clear();
@@ -209,12 +211,12 @@ fn update_neighbors(
             if mark[endpoint_index] == 0 {
                 let weight = non_negative_priority_weight(edge.priority_direction);
                 if edge.target() == connected_port {
-                    indeg[endpoint_index] -= weight;
+                    indeg[endpoint_index] = indeg[endpoint_index].wrapping_sub(weight);
                     if indeg[endpoint_index] <= 0 && outdeg[endpoint_index] > 0 {
                         sources.push_back(endpoint_index);
                     }
                 } else {
-                    outdeg[endpoint_index] -= weight;
+                    outdeg[endpoint_index] = outdeg[endpoint_index].wrapping_sub(weight);
                     if outdeg[endpoint_index] <= 0 && indeg[endpoint_index] > 0 {
                         sinks.push_back(endpoint_index);
                     }
@@ -224,10 +226,17 @@ fn update_neighbors(
     }
 }
 
+// Java adds and subtracts these as `int`s, which wrap on overflow, and elkjs does the same. A
+// partition's reversed edge carries a priority of 1000 or more on top of the input's, so the sums
+// can reach the limit.
 fn positive_priority_weight(priority: i32) -> i32 {
-    if priority > 0 { priority + 1 } else { 1 }
+    if priority > 0 {
+        priority.wrapping_add(1)
+    } else {
+        1
+    }
 }
 
 fn non_negative_priority_weight(priority: i32) -> i32 {
-    priority.max(0) + 1
+    priority.max(0).wrapping_add(1)
 }

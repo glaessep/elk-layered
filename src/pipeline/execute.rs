@@ -21,7 +21,10 @@ use crate::intermediate::{
     restore_reversed_edges, reverse_edges_for_edge_and_layer_constraints, select_label_sides,
     sort_end_labels, split_long_edges, switch_label_dummies,
 };
-use crate::intermediate::{postprocess_north_south_ports, preprocess_north_south_ports};
+use crate::intermediate::{
+    midprocess_partitions, postprocess_north_south_ports, postprocess_partitions,
+    preprocess_north_south_ports, preprocess_partitions,
+};
 use crate::intermediate::{process_port_sides, sort_by_input_model, sort_port_lists};
 use crate::options::{LayeringStrategy, PortConstraints};
 use crate::phase::cycles::{
@@ -127,6 +130,9 @@ fn execute_intermediate(
             reverse_edges_for_edge_and_layer_constraints(graph);
         }
         P::InteractiveExternalPortPositioner => position_interactive_external_ports(graph),
+        P::PartitionPreprocessor => preprocess_partitions(graph),
+        P::PartitionMidprocessor => midprocess_partitions(graph),
+        P::PartitionPostprocessor => postprocess_partitions(graph)?,
         P::SelfLoopPreProcessor => preprocess_self_loops(graph, others),
         P::LayerConstraintPreprocessor => preprocess_layer_constraints(graph)?,
         P::LabelDummyInserter => insert_label_dummies(graph),

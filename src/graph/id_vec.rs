@@ -90,6 +90,11 @@ impl<I: VecId, T> IdVec<I, T> {
         id
     }
 
+    /// Keeps the first `len` items and drops the rest. The ids of the kept items stay as they are.
+    pub fn truncate(&mut self, len: usize) {
+        self.items.truncate(len);
+    }
+
     /// The id the next pushed item gets.
     pub fn next_id(&self) -> I {
         I::from_index(self.items.len())

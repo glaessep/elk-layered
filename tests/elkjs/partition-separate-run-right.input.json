@@ -1,0 +1,204 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "DOWN",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "x",
+      "width": 40,
+      "height": 30
+    },
+    {
+      "id": "comp",
+      "layoutOptions": {
+        "elk.hierarchyHandling": "SEPARATE_CHILDREN",
+        "org.eclipse.elk.partitioning.activate": "true",
+        "elk.separateConnectedComponents": "false",
+        "elk.direction": "RIGHT"
+      },
+      "children": [
+        {
+          "id": "r0",
+          "layoutOptions": {
+            "org.eclipse.elk.partitioning.partition": "0",
+            "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+            "elk.direction": "DOWN"
+          },
+          "children": [
+            {
+              "id": "r0a",
+              "width": 40,
+              "height": 30
+            },
+            {
+              "id": "r0K",
+              "children": [
+                {
+                  "id": "r0k1",
+                  "width": 40,
+                  "height": 30
+                },
+                {
+                  "id": "r0k2",
+                  "width": 40,
+                  "height": 30
+                }
+              ],
+              "edges": [
+                {
+                  "id": "r0ek",
+                  "sources": [
+                    "r0k1"
+                  ],
+                  "targets": [
+                    "r0k2"
+                  ]
+                }
+              ]
+            }
+          ],
+          "edges": [
+            {
+              "id": "r0e",
+              "sources": [
+                "r0a"
+              ],
+              "targets": [
+                "r0k1"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "r1",
+          "layoutOptions": {
+            "org.eclipse.elk.partitioning.partition": "1",
+            "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+            "elk.direction": "DOWN"
+          },
+          "children": [
+            {
+              "id": "r1a",
+              "width": 40,
+              "height": 30
+            },
+            {
+              "id": "r1K",
+              "children": [
+                {
+                  "id": "r1k1",
+                  "width": 40,
+                  "height": 30
+                },
+                {
+                  "id": "r1k2",
+                  "width": 40,
+                  "height": 30
+                }
+              ],
+              "edges": [
+                {
+                  "id": "r1ek",
+                  "sources": [
+                    "r1k1"
+                  ],
+                  "targets": [
+                    "r1k2"
+                  ]
+                }
+              ]
+            }
+          ],
+          "edges": [
+            {
+              "id": "r1e",
+              "sources": [
+                "r1a"
+              ],
+              "targets": [
+                "r1k1"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "r2",
+          "layoutOptions": {
+            "org.eclipse.elk.partitioning.partition": "2",
+            "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+            "elk.direction": "DOWN"
+          },
+          "children": [
+            {
+              "id": "r2a",
+              "width": 40,
+              "height": 30
+            },
+            {
+              "id": "r2K",
+              "children": [
+                {
+                  "id": "r2k1",
+                  "width": 40,
+                  "height": 30
+                },
+                {
+                  "id": "r2k2",
+                  "width": 40,
+                  "height": 30
+                }
+              ],
+              "edges": [
+                {
+                  "id": "r2ek",
+                  "sources": [
+                    "r2k1"
+                  ],
+                  "targets": [
+                    "r2k2"
+                  ]
+                }
+              ]
+            }
+          ],
+          "edges": [
+            {
+              "id": "r2e",
+              "sources": [
+                "r2a"
+              ],
+              "targets": [
+                "r2k1"
+              ]
+            }
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "id": "c1",
+          "sources": [
+            "r2"
+          ],
+          "targets": [
+            "r0"
+          ]
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "ex",
+      "sources": [
+        "x"
+      ],
+      "targets": [
+        "comp"
+      ]
+    }
+  ]
+}

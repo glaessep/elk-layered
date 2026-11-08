@@ -1,0 +1,77 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "DOWN",
+    "org.eclipse.elk.partitioning.activate": "true",
+    "elk.separateConnectedComponents": "false",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "a",
+      "width": 40,
+      "height": 30,
+      "layoutOptions": {
+        "org.eclipse.elk.partitioning.partition": "1"
+      }
+    },
+    {
+      "id": "cmp",
+      "layoutOptions": {
+        "org.eclipse.elk.partitioning.partition": "0"
+      },
+      "children": [
+        {
+          "id": "m",
+          "width": 40,
+          "height": 30
+        },
+        {
+          "id": "n",
+          "width": 40,
+          "height": 30
+        }
+      ],
+      "edges": [
+        {
+          "id": "ce",
+          "sources": [
+            "m"
+          ],
+          "targets": [
+            "n"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "b",
+      "width": 40,
+      "height": 30,
+      "layoutOptions": {
+        "org.eclipse.elk.partitioning.partition": "2"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "sources": [
+        "a"
+      ],
+      "targets": [
+        "cmp"
+      ]
+    },
+    {
+      "id": "e2",
+      "sources": [
+        "b"
+      ],
+      "targets": [
+        "a"
+      ]
+    }
+  ]
+}

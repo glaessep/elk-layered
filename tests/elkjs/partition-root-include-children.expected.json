@@ -1,0 +1,147 @@
+{
+  "id": "root",
+  "layoutOptions": {
+    "elk.algorithm": "layered",
+    "elk.direction": "DOWN",
+    "org.eclipse.elk.partitioning.activate": "true",
+    "elk.separateConnectedComponents": "false",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN"
+  },
+  "children": [
+    {
+      "id": "a",
+      "width": 40,
+      "height": 30,
+      "layoutOptions": {
+        "org.eclipse.elk.partitioning.partition": "1"
+      },
+      "$H": 277,
+      "x": 24,
+      "y": 136
+    },
+    {
+      "id": "cmp",
+      "layoutOptions": {
+        "org.eclipse.elk.partitioning.partition": "0"
+      },
+      "children": [
+        {
+          "id": "m",
+          "width": 40,
+          "height": 30,
+          "$H": 281,
+          "x": 12,
+          "y": 12
+        },
+        {
+          "id": "n",
+          "width": 40,
+          "height": 30,
+          "$H": 283,
+          "x": 12,
+          "y": 62
+        }
+      ],
+      "edges": [
+        {
+          "id": "ce",
+          "sources": [
+            "m"
+          ],
+          "targets": [
+            "n"
+          ],
+          "sections": [
+            {
+              "id": "ce_s0",
+              "startPoint": {
+                "x": 32,
+                "y": 42
+              },
+              "endPoint": {
+                "x": 32,
+                "y": 62
+              },
+              "incomingShape": "m",
+              "outgoingShape": "n"
+            }
+          ],
+          "container": "cmp"
+        }
+      ],
+      "$H": 279,
+      "x": 12,
+      "y": 12,
+      "width": 64,
+      "height": 104
+    },
+    {
+      "id": "b",
+      "width": 40,
+      "height": 30,
+      "layoutOptions": {
+        "org.eclipse.elk.partitioning.partition": "2"
+      },
+      "$H": 285,
+      "x": 24,
+      "y": 186
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "sources": [
+        "a"
+      ],
+      "targets": [
+        "cmp"
+      ],
+      "sections": [
+        {
+          "id": "e1_s0",
+          "startPoint": {
+            "x": 44,
+            "y": 136
+          },
+          "endPoint": {
+            "x": 44,
+            "y": 116
+          },
+          "incomingShape": "a",
+          "outgoingShape": "cmp"
+        }
+      ],
+      "container": "root"
+    },
+    {
+      "id": "e2",
+      "sources": [
+        "b"
+      ],
+      "targets": [
+        "a"
+      ],
+      "sections": [
+        {
+          "id": "e2_s0",
+          "startPoint": {
+            "x": 44,
+            "y": 186
+          },
+          "endPoint": {
+            "x": 44,
+            "y": 166
+          },
+          "incomingShape": "b",
+          "outgoingShape": "a"
+        }
+      ],
+      "container": "root"
+    }
+  ],
+  "$H": 13,
+  "x": 0,
+  "y": 0,
+  "width": 88,
+  "height": 228
+}
