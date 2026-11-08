@@ -15,9 +15,38 @@ crate sets `float_roundtrip` only for its own tests.
 
 ## Status
 
-Version 0.1.1 is the current release. Version 0.1.0 was the first release of the crate as a
+Version 0.1.2 is the current release. Version 0.1.0 was the first release of the crate as a
 library of its own. It started as a building block of another project. Until 1.0, a change to the
 public API raises the minor version.
+
+### Changes in 0.1.2
+
+The public API is the same as in 0.1.1. What changed is which graphs `layout()` accepts and the
+numbers it returns.
+
+New in what `layout()` accepts:
+
+- Partitioning, ported from ELK's `PartitionPreprocessor`, `PartitionMidprocessor` and
+  `PartitionPostprocessor` (#77). 0.1.1 refused every `partitioning.*` option as
+  `Error::UnsupportedOption`. Partitioning needs `partitioning.activate` on the graph a run
+  starts from, and `separateConnectedComponents` set to false: by default each unconnected node
+  is a component of its own, and the partitions do not order the components. Within one
+  component, every node of a lower partition then sits in an earlier layer than every node of a
+  higher one. An edge against that order is reversed, as in ELK. Partitions in a graph inside a
+  node that its parent's run lays out are ignored, as in elkjs 0.9.3. A node with
+  `SEPARATE_CHILDREN` starts a run of its own, so its children's partitions apply.
+
+Errors fixed:
+
+- A direction priority near the `int` limit no longer panics in the greedy cycle breaker in a
+  debug build. A release build already wrapped around, as Java's `int` does.
+
+Refusals that changed:
+
+- A `partitioning.partition` that is not a 32-bit integer (Java's `int`), or a
+  `partitioning.activate` that is not a boolean, is now `Error::InvalidOptionValue`. 0.1.1
+  refused it, like any partitioning option, as `Error::UnsupportedOption`. elkjs ignores such a
+  value.
 
 ### Changes in 0.1.1
 
